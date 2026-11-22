@@ -16,6 +16,7 @@
 //! runtime handle.
 
 pub mod child_exit;
+pub mod child_signal;
 pub mod clone_env;
 pub mod clone_run;
 pub mod git_progress;

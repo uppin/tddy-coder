@@ -67,3 +67,5 @@ tempfile = "3"
 tddy-remote-shell = { path = "../tddy-remote-shell", features = ["test-support"] }
 # `gh_cli::a_gh_cli`: the `gh` stub a Local gh identity is resolved against. Workspace-internal.
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The `ToolHost` a test declares, over the real filesystem.
+tddy-test-hosts = { path = "../tddy-test-hosts" }

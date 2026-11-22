@@ -16,9 +16,9 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::{
     load_agent_registry, routed_agent, CodingAgentSpec, CODEX_ACP_SPEC_YAML, CODEX_SPEC_YAML,
@@ -42,29 +42,6 @@ const STUB_MODEL: &str = "stub-model";
 /// Where the launch's tool server resolves `tddy-tools` to.
 const TDDY_TOOLS_PATH: &str = "/opt/tddy/bin/tddy-tools";
 const MINTED_TOKEN: &str = "minted-agent-token";
-
-/// A host with nothing of the real machine: the env it is given, and executable files.
-struct AFixtureHost {
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
 
 /// `tddy-acp-stub` in the target directory cargo builds into: `CARGO_TARGET_DIR` when set (a
 /// relative one read from the workspace root), else the workspace's `target/`.
@@ -223,7 +200,7 @@ fn a_launcher_resolving_routes_by(
     let registry = load_agent_registry(tools_dir).expect("the agent registry loads");
     let agents = Arc::new(HostCodingAgents::new(
         registry,
-        Arc::new(AFixtureHost { env }),
+        Arc::new(a_tool_host().with_envs(env).build()),
     ));
     let launcher = DaemonCodingAgentLauncher::with_identity(
         the_daemons_own_identity(),

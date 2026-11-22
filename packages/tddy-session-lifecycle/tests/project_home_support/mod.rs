@@ -400,9 +400,9 @@ fn write_argv_and_env_script(dir: &Path) -> PathBuf {
         )
     };
     let dump_env = |key: &str| format!("echo \"ENVDUMPENV {key}=[${key}]\"\n");
-    std::fs::write(
+    tddy_testing_commons::remote_target::write_executable(
         &script_path,
-        [
+        &[
             "#!/bin/sh\n".to_string(),
             "echo \"ARGV: $@\"\n".to_string(),
             "cfg=\"\"; prev=\"\"\n".to_string(),
@@ -419,9 +419,6 @@ fn write_argv_and_env_script(dir: &Path) -> PathBuf {
             "exec cat >/dev/null\n".to_string(),
         ]
         .concat(),
-    )
-    .unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     script_path
 }

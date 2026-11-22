@@ -16,10 +16,10 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_test_hosts::a_tool_host;
 
 use futures_util::StreamExt;
 use tddy_accounts::{endpoints_for, preset, ProviderAccount};
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::{builtin_specs, load_agent_registry};
 use tddy_core::session_metadata::read_session_metadata;
@@ -164,30 +164,6 @@ impl Drop for AJailGuard {
     }
 }
 
-/// A host with a declared `PATH` over the real filesystem — nothing of the real machine's `PATH`
-/// or `TDDY_*_BINARY` variables reaches resolution.
-struct AFixtureHost {
-    path: Vec<PathBuf>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, _name: &str) -> Option<String> {
-        None
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        self.path.clone()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// How a [`AJailedClaudeDaemon`] is built.
 pub struct ADaemonSpec {
     /// Give the host its coding agents (the agent registry from `<tddyhome>/tools`, resolved
@@ -270,9 +246,7 @@ pub fn a_jailed_claude_daemon(spec: ADaemonSpec) -> AJailedClaudeDaemon {
             load_agent_registry(&tddy_home.join("tools")).expect("the agent registry loads");
         host = host.with_coding_agents(Arc::new(HostCodingAgents::new(
             registry,
-            Arc::new(AFixtureHost {
-                path: vec![stub_bin.clone()],
-            }),
+            Arc::new(a_tool_host().with_path(vec![stub_bin.clone()]).build()),
         )));
     }
     let service = Arc::new(host);

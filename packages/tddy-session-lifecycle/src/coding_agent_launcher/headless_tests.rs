@@ -9,10 +9,10 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::OnceLock;
+use tddy_test_hosts::a_tool_host;
 
 use super::*;
 use crate::coding_agent_launcher::headless::sweep_headless_files_left_by_this_daemon;
-use tddy_actions::tool::ToolHost;
 use tddy_coding_agent_specs::load_agent_registry;
 use tddy_coding_subagent::CodingAgentDef;
 use tddy_core::provider_route::{RouteFile, RouteSecret};
@@ -71,29 +71,6 @@ fn a_headless_launch(harness: &str, worktree: &Path) -> CodingAgentLaunch {
     }
 }
 
-/// A host with nothing of the real machine: the env it is given, and executable files.
-struct AFixtureHost {
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// The directory of stub CLIs every launcher here resolves its agents against, made once.
 fn the_stub_clis() -> &'static Path {
     static STUBS: OnceLock<tempfile::TempDir> = OnceLock::new();
@@ -121,15 +98,15 @@ fn the_coding_agents() -> Arc<HostCodingAgents> {
             .to_string_lossy()
             .into_owned()
     };
-    let host = AFixtureHost {
-        env: BTreeMap::from([
+    let host = a_tool_host()
+        .with_envs(BTreeMap::from([
             ("TDDY_CLAUDE_BINARY".to_string(), stub("claude")),
             ("TDDY_CURSOR_AGENT".to_string(), stub("agent")),
             ("TDDY_CODEX_CLI".to_string(), stub("codex")),
             ("TDDY_OZ_CLI".to_string(), stub("oz")),
             ("TDDY_TOOLS_BINARY".to_string(), stub("tddy-tools")),
-        ]),
-    };
+        ]))
+        .build();
     Arc::new(HostCodingAgents::new(registry, Arc::new(host)))
 }
 

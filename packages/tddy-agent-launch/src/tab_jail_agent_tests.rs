@@ -2,12 +2,12 @@
 //! session main's jail is for the same agent, with every file and tool link its own, its exec plan
 //! in the tab's conversation, and none of the session's records written.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::{assert_eq, assert_ne};
-use tddy_actions::tool::{ResolvedTool, ToolHost};
+use tddy_actions::tool::ResolvedTool;
 use tddy_daemon_sandbox::tab_jails::{TabJailAgent, TabJailLaunch, TabJailPaths};
 use tddy_daemon_sandbox::tool_jail::{lower_tool_jail, ToolJailGrants, ToolJailInputs};
 use tddy_rpc::Code;
@@ -35,29 +35,6 @@ struct ASandboxedSession {
     _dirs: Vec<tempfile::TempDir>,
 }
 
-/// A host whose environment is the stubs' binary variables and whose `PATH` is empty.
-struct AHostOfStubs {
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AHostOfStubs {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        tddy_actions::tool::ToolHost::is_executable_file(&tddy_actions::tool::ProcessToolHost, path)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// The built-in coding agents, with `claude` and `tddy-tools` answered by stubs in `dir`.
 fn coding_agents_with_stubs(dir: &Path) -> HostCodingAgents {
     let registry = tddy_coding_agent_specs::load_agent_registry(Path::new("/nonexistent/tools"))
@@ -72,8 +49,8 @@ fn coding_agents_with_stubs(dir: &Path) -> HostCodingAgents {
             let stub = a_stub_agent_script(dir, &format!("{id}.sh")).build();
             (var, stub.to_string_lossy().into_owned())
         })
-        .collect();
-    HostCodingAgents::new(registry, Arc::new(AHostOfStubs { env }))
+        .collect::<Vec<(String, String)>>();
+    HostCodingAgents::new(registry, Arc::new(a_tool_host().with_envs(env).build()))
 }
 
 fn a_sandboxed_claude_session() -> ASandboxedSession {

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ReattachOutcome, ReattachSkip};
-use tddy_cli_sessions::tmux::{agent_tmux_session_name, kill_tmux_session, tmux_session_alive};
+use tddy_cli_sessions::tmux::{agent_tmux_session_name, tmux_session_alive};
 use tddy_rpc::Status;
 
 /// A CLI agent running in tmux, and the main terminal attached to it.
@@ -33,28 +33,6 @@ where
     tokio::task::spawn_blocking(operation)
         .await
         .map_err(|e| Status::internal(format!("tmux task did not finish: {e}")))
-}
-
-/// Kill the tmux session of a start that failed after it began. The start's own error is what the
-/// caller is told, so a kill that fails is logged rather than returned.
-pub(crate) async fn stop_tmux_session_of_failed_start(os_user: &str, name: &str) {
-    let (os_user, name) = (os_user.to_string(), name.to_string());
-    let outcome = tokio::task::spawn_blocking({
-        let name = name.clone();
-        move || kill_tmux_session(&os_user, &name)
-    })
-    .await;
-    match outcome {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => log::warn!(
-            target: "tddy_daemon::claude_cli_session",
-            "could not stop tmux session {name:?} of a start that failed: {error}"
-        ),
-        Err(error) => log::warn!(
-            target: "tddy_daemon::claude_cli_session",
-            "the stop of tmux session {name:?} of a start that failed did not finish: {error}"
-        ),
-    }
 }
 
 /// Whether the tmux session of `session_id`'s agent is alive for `os_user`, probed on the blocking

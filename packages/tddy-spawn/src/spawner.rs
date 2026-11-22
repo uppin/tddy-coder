@@ -1067,12 +1067,12 @@ pub fn spawn_as_user(
         child_log_format,
         coder_log_config_yaml,
         startup,
-        None,
+        crate::child_exit::ChildEnd::unobserved(),
     )
 }
 
-/// [`spawn_as_user`], handing the child's end to `on_exit` from the wait thread that reaps it —
-/// see [`crate::child_exit`].
+/// [`spawn_as_user`], handing the child's end to `end`'s report from the wait thread that reaps it —
+/// see [`crate::child_exit`] — and marking it ended under `end`'s gate before its pid is freed.
 #[cfg(unix)]
 #[allow(clippy::too_many_arguments)] // Mirrors `spawn_as_user`, plus the exit report.
 pub(crate) fn spawn_as_user_reporting(
@@ -1086,7 +1086,7 @@ pub(crate) fn spawn_as_user_reporting(
     child_log_format: &str,
     coder_log_config_yaml: Option<&str>,
     startup: StartupWatch,
-    on_exit: Option<crate::child_exit::OnExit>,
+    end: crate::child_exit::ChildEnd,
 ) -> anyhow::Result<SpawnResult> {
     let SessionChildPlan {
         program: resolved_tool_path,
@@ -1246,7 +1246,7 @@ pub(crate) fn spawn_as_user_reporting(
         ));
     }
 
-    crate::child_exit::reap_in_background(child, session_id.clone(), pid, on_exit);
+    crate::child_exit::reap_in_background(child, session_id.clone(), pid, end);
 
     Ok(SpawnResult {
         session_id: session_id.clone(),
@@ -1288,7 +1288,7 @@ pub(crate) fn spawn_as_user_reporting(
     _child_log_format: &str,
     _coder_log_config_yaml: Option<&str>,
     _startup: StartupWatch,
-    _on_exit: Option<crate::child_exit::OnExit>,
+    _end: crate::child_exit::ChildEnd,
 ) -> anyhow::Result<SpawnResult> {
     anyhow::bail!("spawn_as_user is only supported on Unix")
 }

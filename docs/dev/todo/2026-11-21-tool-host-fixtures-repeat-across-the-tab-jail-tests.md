@@ -18,3 +18,12 @@ Choosing between those is a dependency decision, not a cleanup; it was tried ins
 **What would close it:** move `test_util`'s fixture builders behind a `test-util` feature (or into a test-support
 crate) so they may use `tddy-testing-commons`, add one `ToolHost` fixture and the session-record helpers there, and
 have the seven copies import it with their assertions unchanged.
+
+**Narrowed 2026-11-21 (`#tab-hardening` 2/4, #990):** the new `tddy-test-hosts` crate (`a_tool_host()`, no sandbox
+dependencies, so `tddy-session-lifecycle::test_util` may depend on it) replaced `AHostOfStubs`, `AHostOfBinaries`,
+`AStubPathHost`, `AHostWithoutAnyAgent` and every `AFixtureHost` / `AHostOf` in `tddy-session-lifecycle` and
+`tddy-agent-launch`. What remains: `EveryBinaryAt` (`tab_jail_launch_tests.rs`: it answers every `*_BINARY` variable,
+which `a_tool_host()` would have to enumerate), the `ToolHost` copies in other crates (`tddy-coder`,
+`tddy-actions` tests, `tddy-build`, `tddy-daemon-sandbox`, `tddy-sandbox-*`, `tddy-coding-agent-specs`,
+`tddy-telegram-control`; `tddy-actions` is below the new crate, so its own copies would close a cycle), and the
+`has_a_main_usage_context` / `session_records` pair of the tab-jail tests.

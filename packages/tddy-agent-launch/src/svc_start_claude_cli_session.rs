@@ -211,7 +211,7 @@ impl LaunchSessions {
                 TDDY_CODER_KIND,
                 pid,
                 exit,
-                backend.holder(pid, Arc::clone(&ended)),
+                backend.holder(pid, Arc::clone(&ended), tool.signal),
             )
             .await
             .map_err(|error| Status::internal(format!("could not hold the session: {error}")))?;

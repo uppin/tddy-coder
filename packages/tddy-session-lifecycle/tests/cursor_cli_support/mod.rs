@@ -20,9 +20,9 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tddy_test_hosts::a_tool_host;
 
 use futures_util::StreamExt;
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::spec_launch::HostCodingAgents;
 use tddy_coding_agent_specs::{load_agent_registry, CURSOR_SPEC_YAML};
 use tddy_core::session_metadata::{read_session_metadata, write_session_metadata, SessionMetadata};
@@ -190,31 +190,6 @@ impl Drop for AJailGuard {
     }
 }
 
-/// A host with a declared `PATH` and `$HOME` over the real filesystem — nothing of the real
-/// machine's `PATH`, `$HOME` or `TDDY_*` variables reaches resolution.
-struct AFixtureHost {
-    path: Vec<PathBuf>,
-    home: PathBuf,
-}
-
-impl ToolHost for AFixtureHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        (name == "HOME").then(|| self.home.to_string_lossy().into_owned())
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        self.path.clone()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// The coding agents a daemon keeping its state in `tddy_home` launches from, as the daemon runtime
 /// binds them: the agent registry loaded from `<tddyhome>/tools`, resolved against a host whose
 /// `PATH` holds the real `tddy-tools` and whose `$HOME` is a directory of the test's. The `agent`
@@ -231,10 +206,12 @@ pub fn coding_agents_over(tddy_home: &Path) -> Arc<HostCodingAgents> {
     std::fs::create_dir_all(&home).unwrap();
     Arc::new(HostCodingAgents::new(
         registry,
-        Arc::new(AFixtureHost {
-            path: vec![tool_bin],
-            home,
-        }),
+        Arc::new(
+            a_tool_host()
+                .with_path(vec![tool_bin])
+                .with_home(home)
+                .build(),
+        ),
     ))
 }
 
@@ -315,10 +292,12 @@ pub fn a_cursor_daemon(spec: ADaemonSpec) -> ACursorDaemon {
     let host = a_session_host(config, tddy_home.clone()).with_coding_agents(Arc::new(
         HostCodingAgents::new(
             registry,
-            Arc::new(AFixtureHost {
-                path: vec![stub_bin.clone()],
-                home: host_home.clone(),
-            }),
+            Arc::new(
+                a_tool_host()
+                    .with_path(vec![stub_bin.clone()])
+                    .with_home(host_home.clone())
+                    .build(),
+            ),
         ),
     ));
     let host = if spec.embedded {

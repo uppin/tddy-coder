@@ -10,7 +10,7 @@ a file the successors also modify is recorded, not split. Production lines are c
 
 | File | Before → after | Record |
 |---|---|---|
-| `packages/tddy-session-lifecycle/src/test_util.rs` | 484 → 578 (crossed 500) | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-test-util.md` |
+| `packages/tddy-session-lifecycle/src/test_util.rs` | 484 → 578 (crossed 500); 578 → 556 in #990, which moved its tool hosts out (still over; #991 and #992 also edit it) | `packages/tddy-session-lifecycle/docs/code-issues/oversized-file-test-util.md` |
 | `packages/tddy-daemon-sandbox/src/sandbox_session.rs` | 885 → 924 | `…/oversized-file-sandbox-session.md` (row added) |
 | `packages/tddy-daemon-rpc/src/pr_stack/ports.rs` | 878 → 880 | `…/oversized-file-pr-stack-ports.md` (row added) |
 | `packages/tddy-telegram-control/src/telegram_session_control/chaining_and_listing.rs` | 521 → 527 | `…/oversized-file-telegram-session-control-chaining-and-listing.md` (row added) |
@@ -26,16 +26,12 @@ longer on this list. #961 does not edit it, so #960's wrap split it — the sign
 `svc_signal_session.rs` (538 → 384 and 159 production lines), `signal_held_session` kept its old
 path through a `pub use`, and its record was deleted on that measurement.
 
-## Also left for after the stack: the new-tab menu's repeated groups (#965, `#session-liveness` 6/8)
+## Closed in #990 (`#tab-hardening` 2/4): the new-tab menu's repeated groups
 
-`packages/tddy-session-web/src/NewTerminalMenu.tsx` (464 production lines, under the budget) renders the
-"In sandbox" / "On host" group pair (#964) and, since #965, an "On target" / "On this host" pair that repeats
-its markup with other labels, test ids and wrapper kinds. `sandbox-agent-tab` (7/8) and `target-agent-tab`
-(8/8) each edit one of the two blocks again (they list the agents in them), so folding both into one
-`WrappedKindGroups` component inside node 6 would turn each successor into a conflict in the very lines it
-changes. **What closes it:** once #967 has merged, extract one component taking the group label, the wrapper
-kind, the test-id prefixes and the two group names; the menu's Cypress specs
-(`NewTerminalMenuSandboxAcceptance`, `NewTerminalMenuTargetAcceptance`) stay as they are.
+The "In sandbox" / "On host" and "On target" / "On this host" group pairs of
+`packages/tddy-session-web/src/NewTerminalMenu.tsx` are one `WrappedKindGroups` component now (items are
+`MenuKindItem`; the test ids are unchanged and the two menu specs are untouched). `NewTerminalMenu.tsx` went
+473 → 424 production lines.
 
 ## Closed in #967 (`#session-liveness` 8/8): `restore_tabs/roster.rs`
 
@@ -45,4 +41,3 @@ per-kind restores of a jailed or target tab (`restore_jailed_shell`, `restore_ja
 `restore_target_agent`) moved, unchanged, into the child module `restore_tabs/roster/wrapped_tabs.rs` (a child of
 `roster.rs`, so it reads the private helpers without widening them); `roster.rs` is now 408 production lines
 `restore_tabs/plan.rs` (263 → 339) and `jailed_tabs.rs` stay far under the budget.
-`NewTerminalMenu.tsx` (473 production lines) is still under budget; the group-pair dedupe above covers both blocks.

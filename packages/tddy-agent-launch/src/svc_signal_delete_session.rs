@@ -1,4 +1,4 @@
-use tddy_cli_sessions::tmux::{agent_tmux_session_name, kill_tmux_session};
+use tddy_cli_sessions::tmux::agent_tmux_session_name;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 use tddy_session_activity::session_deletion;
 
@@ -294,8 +294,10 @@ pub(crate) async fn remove_recorded_session_pointer_through(session_dir: &Path, 
 }
 
 /// Kill the tmux session that a tmux-run session's agent runs in, as the OS user the session runs as,
-/// before the session is deleted. A session that records no tmux session has nothing to kill, and
-/// killing a tmux session that is already gone is not an error.
+/// before the session is deleted, and end the agent its pane ran — which a tmux kill alone leaves
+/// running when it ignores SIGHUP ([`crate::tmux_agent_end::end_tmux_run_agent`], checked against
+/// the agent's start its tab roster recorded). A session that records no tmux session has nothing
+/// to kill, and killing a tmux session that is already gone is not an error.
 ///
 /// When `.session.yaml` cannot be read the recorded name is not available, but the name is derived
 /// from the session id ([`agent_tmux_session_name`]), so that name is killed: the session may have
@@ -324,10 +326,20 @@ async fn kill_recorded_tmux_session(
             (agent_tmux_session_name(session_id), false)
         }
     };
-    let os_user = os_user.to_string();
-    let killed = tokio::task::spawn_blocking(move || kill_tmux_session(&os_user, &name))
-        .await
-        .map_err(|e| Status::internal(format!("the tmux kill did not finish: {e}")))?;
+    let recorded_start = crate::tmux_main_roster::recorded_tmux_main_start(session_dir)
+        .unwrap_or_else(|error| {
+            log::warn!(
+                "DeleteSession: the agent start of {session_id} is unreadable, so the start read before the kill is used: {error:#}"
+            );
+            None
+        });
+    let killed = crate::tmux_agent_end::end_tmux_run_agent(
+        os_user,
+        &name,
+        recorded_start,
+        crate::tmux_agent_end::AGENT_END_GRACE,
+    )
+    .await;
     match killed {
         Ok(()) => Ok(()),
         Err(error) if recorded => Err(Status::internal(format!(

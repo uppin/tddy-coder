@@ -4,11 +4,11 @@
 //! ([`restore_plan`]): planned on the target, resuming its conversation where its harness can, fresh
 //! where it cannot; dropped naming what it is missing.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
+use tddy_test_hosts::a_tool_host;
 
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
 use tddy_core::tab_roster::{LaunchNode, TabEntry, CONVERSATION_ID_PROPERTY, HARNESS_PROPERTY};
 use tddy_rpc::Code;
 
@@ -23,32 +23,11 @@ const CHAT: &str = "c0ffee00-e154-41d0-ae72-0000000a7a26";
 // What a target agent tab runs
 // ---------------------------------------------------------------------------
 
-/// A host on which no agent resolves: its environment and `PATH` are empty.
-struct AHostWithoutAnyAgent;
-
-impl ToolHost for AHostWithoutAnyAgent {
-    fn env_var(&self, _name: &str) -> Option<String> {
-        None
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, _path: &Path) -> bool {
-        false
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        Ok(path.to_path_buf())
-    }
-}
-
 /// The built-in coding agents on a daemon host that has none of them installed.
 fn the_builtin_agents_on_a_host_without_any() -> HostCodingAgents {
     let registry = tddy_coding_agent_specs::load_agent_registry(Path::new("/nonexistent/tools"))
         .expect("the built-in coding agents load");
-    HostCodingAgents::new(registry, Arc::new(AHostWithoutAnyAgent))
+    HostCodingAgents::new(registry, Arc::new(a_tool_host().build()))
 }
 
 fn strings(argv: &[&str]) -> Vec<String> {

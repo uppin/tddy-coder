@@ -64,6 +64,7 @@ fn serve_line(line: &str, out: &Arc<Mutex<File>>) {
             |pid| write_event(out, id, WorkerEvent::Started { pid }),
             |progress| write_event(out, id, WorkerEvent::CloneProgress(progress)),
         ),
+        WorkerRequest::Signal { pid, signal } => signal_child(pid, signal),
     };
     write_line(out, &WorkerLine::Result { id, response });
 }
@@ -92,6 +93,28 @@ fn run_clone(
         Err(e) => WorkerResponse::Error {
             message: e.to_string(),
         },
+    }
+}
+
+/// Send `signal` to `pid`, a child this worker spawned, under the gate its reaper holds: answered
+/// [`crate::child_signal::Signalled::ChildEnded`] once the reaper has marked it ended, and an error
+/// for a pid this worker never spawned.
+fn signal_child(pid: u32, signal: i32) -> WorkerResponse {
+    #[cfg(unix)]
+    {
+        match crate::child_signal::ToolSignal::send_from_worker(pid, signal) {
+            Ok(outcome) => WorkerResponse::Signalled { outcome },
+            Err(e) => WorkerResponse::Error {
+                message: e.to_string(),
+            },
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, signal);
+        WorkerResponse::Error {
+            message: "signalling a child is not supported here".to_string(),
+        }
     }
 }
 

@@ -59,6 +59,11 @@ pub const SESSION_PROPERTY: &str = "session";
 /// A [`TMUX_KIND`] or [`TMUX_ATTACH_KIND`] node's OS user: tmux servers are per uid, and the session
 /// records no user.
 pub const OS_USER_PROPERTY: &str = "os_user";
+/// A [`TMUX_KIND`] node's agent start: when the process its pane runs started, in whole seconds
+/// since the Unix epoch — what tells that process from whatever later holds its pid, so a delete
+/// signals the agent and nothing else (`#tab-hardening` 2/4). Absent for a node recorded before it
+/// existed, and for a tab's tmux node.
+pub const START_PROPERTY: &str = "start";
 
 /// Every tab a session opened, in the order they were recorded.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

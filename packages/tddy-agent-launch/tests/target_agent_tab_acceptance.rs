@@ -20,10 +20,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
+use tddy_test_hosts::a_tool_host;
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
-use tddy_actions::tool::ToolHost;
 use tddy_agent_launch::remote_agent_launch::{
     launch_agent_tab_on_target, tab_launch_status, RemoteLaunchError, TargetTab,
 };
@@ -62,30 +62,6 @@ static ONE_SSH_MACHINE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::c
 // The daemon's host
 // ---------------------------------------------------------------------------
 
-/// A host whose environment is exactly `env` and whose `PATH` is empty: an agent resolves on it
-/// only through its spec's binary variable.
-struct AHostOf {
-    env: BTreeMap<String, String>,
-}
-
-impl ToolHost for AHostOf {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        tddy_actions::tool::ProcessToolHost.is_executable_file(path)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
-
 /// The built-in coding agents, with no `<tddyhome>/tools` overrides.
 fn builtin_registry() -> tddy_actions::tool::ToolRegistry {
     tddy_coding_agent_specs::load_agent_registry(Path::new("/nonexistent/tools"))
@@ -93,7 +69,7 @@ fn builtin_registry() -> tddy_actions::tool::ToolRegistry {
 }
 
 /// The built-in coding agents on `host`.
-fn the_builtin_agents_on(host: AHostOf) -> HostCodingAgents {
+fn the_builtin_agents_on(host: tddy_test_hosts::AToolHost) -> HostCodingAgents {
     HostCodingAgents::new(builtin_registry(), Arc::new(host))
 }
 
@@ -154,25 +130,25 @@ fn binary_variable_of(id: &str) -> String {
 /// A daemon whose host holds `agent` as the binary of the coding agent `id`, and its `tddy-tools`:
 /// the agent resolves on this host.
 fn a_host_holding(id: &str, agent: &AnAgentOnThisHost) -> HostCodingAgents {
-    the_builtin_agents_on(AHostOf {
-        env: BTreeMap::from([
-            (
-                binary_variable_of(id),
-                agent.binary.to_string_lossy().into_owned(),
-            ),
-            (
-                binary_variable_of("tddy-tools"),
-                agent.tddy_tools.to_string_lossy().into_owned(),
-            ),
-        ]),
-    })
+    the_builtin_agents_on(
+        a_tool_host()
+            .with_envs(BTreeMap::from([
+                (
+                    binary_variable_of(id),
+                    agent.binary.to_string_lossy().into_owned(),
+                ),
+                (
+                    binary_variable_of("tddy-tools"),
+                    agent.tddy_tools.to_string_lossy().into_owned(),
+                ),
+            ]))
+            .build(),
+    )
 }
 
 /// A daemon whose host holds no coding agent at all.
 fn a_host_without_any_agent() -> HostCodingAgents {
-    the_builtin_agents_on(AHostOf {
-        env: BTreeMap::new(),
-    })
+    the_builtin_agents_on(a_tool_host().build())
 }
 
 // ---------------------------------------------------------------------------

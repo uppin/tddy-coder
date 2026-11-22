@@ -121,35 +121,13 @@ pub fn coding_agents_with_binaries_over(
                 .unwrap_or_else(|| panic!("{id}'s spec names its binary's variable"));
             (var, binary.to_string_lossy().into_owned())
         })
-        .collect();
+        .collect::<Vec<(String, String)>>();
     Arc::new(tddy_agent_launch::spec_launch::HostCodingAgents::new(
         registry,
-        tddy_agent_launch::host_coding_agents::daemon_tool_host(Arc::new(AHostOfBinaries { env })),
+        tddy_agent_launch::host_coding_agents::daemon_tool_host(Arc::new(
+            tddy_test_hosts::a_tool_host().with_envs(env).build(),
+        )),
     ))
-}
-
-/// [`coding_agents_with_binaries`]' host: its environment is the binaries' variables, its `PATH`
-/// is empty, its filesystem is the real one.
-struct AHostOfBinaries {
-    env: std::collections::BTreeMap<String, String>,
-}
-
-impl tddy_actions::tool::ToolHost for AHostOfBinaries {
-    fn env_var(&self, name: &str) -> Option<String> {
-        self.env.get(name).cloned()
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        Vec::new()
-    }
-
-    fn is_executable_file(&self, path: &std::path::Path) -> bool {
-        tddy_actions::tool::ToolHost::is_executable_file(&tddy_actions::tool::ProcessToolHost, path)
-    }
-
-    fn canonicalize(&self, path: &std::path::Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
 }
 
 /// The host [`test_service`] wraps,/// The host [`test_service`] wraps, before it goes behind its `Arc` — for a suite above this crate

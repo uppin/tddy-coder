@@ -12279,6 +12279,7 @@ dependencies = [
  "tddy-subagent-worktree",
  "tddy-task",
  "tddy-terminal-rpc",
+ "tddy-test-hosts",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-usage",
@@ -12467,6 +12468,7 @@ dependencies = [
  "portable-pty 0.9.0",
  "pretty_assertions",
  "prost 0.13.5",
+ "sysinfo",
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
@@ -14228,6 +14230,7 @@ dependencies = [
  "tddy-supervisor",
  "tddy-task",
  "tddy-terminal-rpc",
+ "tddy-test-hosts",
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-usage",
@@ -14565,6 +14568,15 @@ dependencies = [
  "tonic 0.12.3",
  "tonic-build",
  "vt100",
+]
+
+[[package]]
+name = "tddy-test-hosts"
+version = "0.1.0"
+dependencies = [
+ "pretty_assertions",
+ "tddy-actions",
+ "tempfile",
 ]
 
 [[package]]

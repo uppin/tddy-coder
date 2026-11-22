@@ -11,6 +11,8 @@ bytes = "1"
 libc = "0.2"
 log = "0.4"
 portable-pty = "0.9"
+# When a process started (`process_start`): the same reading on macOS and Linux.
+sysinfo = { workspace = true }
 prost = "0.13"
 uuid = { version = "1", features = ["v4", "v7"] }
 tddy-core = { path = "../tddy-core" }

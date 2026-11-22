@@ -22,21 +22,42 @@ use tddy_supervisor::request::{SessionState, SessionStatus};
 
 pub use tddy_task::child_exit::{exit_channel, ChildExit, ExitReceiver, ExitSender, HolderGone};
 
+use crate::child_signal::{ReapGate, ToolSignal};
 use crate::spawn_worker::{SpawnClient, SpawnRequest, WorkerRequest, WorkerResponse};
 use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult, StartupWatch};
 
 /// How often the daemon asks the supervisor whether a tool child it holds has ended.
 const SUPERVISOR_EXIT_POLL: Duration = Duration::from_millis(500);
 
-/// A tool child that outlived its startup watch, and the report of its end.
+/// A tool child that outlived its startup watch, the report of its end, and — when the daemon or
+/// its forked worker is the child's parent — how to signal it without reaching a recycled pid
+/// ([`crate::child_signal`]). `None` for a child the supervisor holds: it signals its own children.
 #[derive(Debug)]
 pub struct SpawnedTool {
     pub result: SpawnResult,
     pub exit: ExitReceiver,
+    pub signal: Option<ToolSignal>,
 }
 
 /// What a spawn's wait thread calls, once, with the child's pid and how it ended.
 pub(crate) type OnExit = Box<dyn FnOnce(u32, ChildExit) + Send>;
+
+/// What a spawn does when its child ends: the [`ReapGate`] it marks ended under before the pid is
+/// freed ([`crate::child_signal`]), and the report it hands the end to.
+pub(crate) struct ChildEnd {
+    pub(crate) gate: ReapGate,
+    pub(crate) on_exit: Option<OnExit>,
+}
+
+impl ChildEnd {
+    /// An end nobody signals through or listens for.
+    pub(crate) fn unobserved() -> Self {
+        Self {
+            gate: ReapGate::new(),
+            on_exit: None,
+        }
+    }
+}
 
 /// Hand `on_exit`, if there is one, the end `waited` reports. A wait that failed leaves the holder
 /// knowing only that the child is gone, which is reported as an end with neither code nor signal.
@@ -56,16 +77,34 @@ fn report_wait(
     on_exit(pid, exit);
 }
 
+/// Wait for `child` without reaping it, then mark it ended and reap it under `gate`'s lock, so a
+/// signal either went out while the pid was still the child's or is refused ([`crate::child_signal`]).
+/// A wait that failed marks it ended all the same: a pid nobody can wait for is not one to signal.
+fn reap_after_marking_ended(
+    child: &mut std::process::Child,
+    pid: u32,
+    gate: &ReapGate,
+) -> std::io::Result<std::process::ExitStatus> {
+    #[cfg(unix)]
+    if let Err(e) = crate::child_signal::wait_without_reaping(pid) {
+        log::warn!("waiting for pid={pid} without reaping it failed: {e}");
+    }
+    #[cfg(not(unix))]
+    let _ = pid;
+    gate.mark_ended_then_reap(|| child.wait())
+}
+
 /// Reap `child` on a thread of its own, log how it ended, and hand that end to `on_exit`. The
 /// thread is the child's only waiter, so its wait is what makes the end exact.
 pub(crate) fn reap_in_background(
     mut child: std::process::Child,
     session_id: String,
     pid: u32,
-    on_exit: Option<OnExit>,
+    end: ChildEnd,
 ) {
     std::thread::spawn(move || {
-        let waited = child.wait();
+        let ChildEnd { gate, on_exit } = end;
+        let waited = reap_after_marking_ended(&mut child, pid, &gate);
         match &waited {
             Ok(status) => {
                 log::info!("child exited session_id={session_id} pid={pid} status={status}")
@@ -113,6 +152,7 @@ pub fn spawn_tool_as_user(
     startup: StartupWatch,
 ) -> anyhow::Result<SpawnedTool> {
     let (holder, exit) = exit_channel();
+    let gate = ReapGate::new();
     let result = spawner::spawn_as_user_reporting(
         os_user,
         tool_path,
@@ -124,9 +164,20 @@ pub fn spawn_tool_as_user(
         child_log_format,
         coder_log_config_yaml,
         startup,
-        Some(Box::new(move |_pid, end| holder.send(end))),
+        ChildEnd {
+            gate: gate.clone(),
+            on_exit: Some(Box::new(move |_pid, end| holder.send(end))),
+        },
     )?;
-    Ok(SpawnedTool { result, exit })
+    let signal = Some(ToolSignal::Direct {
+        pid: result.pid,
+        gate,
+    });
+    Ok(SpawnedTool {
+        result,
+        exit,
+        signal,
+    })
 }
 
 impl SpawnClient {
@@ -135,9 +186,22 @@ impl SpawnClient {
     pub fn spawn_tool(&self, req: SpawnRequest) -> anyhow::Result<SpawnedTool> {
         let (holder, exit) = exit_channel();
         match self.request(WorkerRequest::Spawn(Box::new(req)), |_| {}, Some(holder))? {
-            WorkerResponse::SpawnOk { result } => Ok(SpawnedTool { result, exit }),
+            WorkerResponse::SpawnOk { result } => {
+                let signal = Some(ToolSignal::Worker {
+                    pid: result.pid,
+                    client: self.clone(),
+                });
+                Ok(SpawnedTool {
+                    result,
+                    exit,
+                    signal,
+                })
+            }
             WorkerResponse::Error { message } => Err(anyhow::anyhow!("{}", message)),
             WorkerResponse::CloneOk => Err(anyhow::anyhow!("unexpected clone_ok for spawn")),
+            WorkerResponse::Signalled { .. } => {
+                Err(anyhow::anyhow!("unexpected signalled for spawn"))
+            }
         }
     }
 }
@@ -151,7 +215,11 @@ pub async fn spawn_tool_via_supervisor(
 ) -> anyhow::Result<SpawnedTool> {
     let result = crate::supervisor_spawn::spawn_session_via_supervisor(socket_path, req).await?;
     let exit = watch_supervised_exit(socket_path.to_path_buf(), result.pid, SUPERVISOR_EXIT_POLL);
-    Ok(SpawnedTool { result, exit })
+    Ok(SpawnedTool {
+        result,
+        exit,
+        signal: None,
+    })
 }
 
 /// Poll the supervisor's `SessionStatus` for `pid` every `interval` until it reports the session

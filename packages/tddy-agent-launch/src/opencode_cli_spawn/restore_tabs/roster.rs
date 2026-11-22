@@ -11,7 +11,7 @@ use tddy_cli_sessions::cli_session_manager::{
 };
 use tddy_cli_sessions::tab_roster_store::TabRosterStore;
 use tddy_cli_sessions::tmux::{
-    ensure_reachable, kill_tmux_session, start_agent_tmux_session, tmux_session_alive,
+    ensure_reachable, kill_tmux_session_logged, start_agent_tmux_session, tmux_session_alive,
 };
 use tddy_core::tab_roster::{
     read_tab_roster, TabEntry, AGENT_KIND, CONVERSATION_ID_PROPERTY, HARNESS_PROPERTY,
@@ -357,12 +357,7 @@ async fn relaunch_in_tmux(
         )
         .await;
     if let Err(error) = attached {
-        let (user, name) = (os_user.to_string(), session.to_string());
-        if let Ok(Err(kill)) =
-            tokio::task::spawn_blocking(move || kill_tmux_session(&user, &name)).await
-        {
-            log::warn!("could not end tmux session {session:?} of {os_user}: {kill}");
-        }
+        kill_tmux_session_logged(os_user, session, "a restore that failed").await;
         return Err(anyhow::anyhow!(
             "failed to attach to tmux session {session:?}: {error}"
         ));

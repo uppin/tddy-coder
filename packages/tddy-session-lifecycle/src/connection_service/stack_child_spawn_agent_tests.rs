@@ -13,10 +13,10 @@
 //! `DaemonSessionHost::launch_sessions`, which is `pub(crate)`.
 
 use std::os::unix::fs::PermissionsExt as _;
+use tddy_test_hosts::a_tool_host;
 
 use super::session_acting_identity::SessionAccountAccess;
 use super::*;
-use tddy_actions::tool::ToolHost;
 use tddy_core::toolcall::{ChildSpawnHandler, ConversationSpawnHandler};
 use tddy_core::{Stack, StackNode};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
@@ -36,29 +36,6 @@ const MINTED_CHAT: &str = "child-chat-0001";
 const AGENT_SPAWN: Duration = Duration::from_secs(10);
 
 // ── The orchestrator ─────────────────────────────────────────────────────────────────────
-
-/// A host with a declared `PATH` over the real filesystem: the stubs, and nothing of this machine's.
-struct AStubPathHost {
-    dir: PathBuf,
-}
-
-impl ToolHost for AStubPathHost {
-    fn env_var(&self, name: &str) -> Option<String> {
-        (name == "HOME").then(|| self.dir.to_string_lossy().into_owned())
-    }
-
-    fn path_dirs(&self) -> Vec<PathBuf> {
-        vec![self.dir.clone()]
-    }
-
-    fn is_executable_file(&self, path: &Path) -> bool {
-        std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-    }
-
-    fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
-    }
-}
 
 /// An orchestrator session of `session_type` on a daemon that can really start its child.
 struct AnOrchestrator {
@@ -154,7 +131,12 @@ fn an_orchestrator_of(session_type: &str, recipe: &str, agents: HostAgents) -> A
                 tddy_agent_launch::spec_launch::HostCodingAgents::new(
                     tddy_coding_agent_specs::load_agent_registry(no_overrides.path())
                         .expect("the built-in coding agents load"),
-                    Arc::new(AStubPathHost { dir: stubs.clone() }),
+                    Arc::new(
+                        a_tool_host()
+                            .with_home(stubs.clone())
+                            .with_path([stubs.clone()])
+                            .build(),
+                    ),
                 ),
             ))
         }
