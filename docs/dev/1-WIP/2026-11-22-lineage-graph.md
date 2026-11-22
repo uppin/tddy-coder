@@ -36,12 +36,6 @@ refusal; both drawn and returned to agents.
 Exploration 3 §4A.4 (`parents` is the only edge; `topo_order` ignores dangling parents) and §3 (no
 `gh stack` call anywhere). Exploration 2 §4A: PR base branches are in `PrDetail.base_branch`.
 
-## Stack note (temporary)
-
-This branch skips n7 and n8: it is cut from n6's green (`472d1947b`), because n9's real dependency is n6.
-In the line it sits on n8 and n7, whose implementations are not done; their contract commits are not
-carried here. The branch is rebased onto n8 before n9's [W]. Remove this note then.
-
 ## Responsibility
 
 - `DependencyEdge`, `WorkItem.needs` (the stored dependency edges, one list per item), `set_dependencies`, `detect_cycle`.
