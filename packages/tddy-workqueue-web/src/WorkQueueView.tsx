@@ -9,6 +9,7 @@ import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { Button } from "tddy-ui-web";
 import { WorkItemList } from "./WorkItemList";
+import { WorkQueueGraphPanel } from "./WorkQueueGraphPanel";
 import { AddWorkItemForm, type AddWorkItemFormSubmission } from "./AddWorkItemForm";
 import { parseWorkQueue, type WorkItem } from "./workQueue";
 import { hydrateWorkItems } from "./hydrateWorkItems";
@@ -439,6 +440,13 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         branchQueries={branchQueries}
       />
       </WorkItemLinksContext.Provider>
+      <WorkQueueGraphPanel
+        workQueueClient={workQueueClient}
+        sessionToken={sessionToken}
+        address={address}
+        items={nodes.map((node) => ({ itemId: node.itemId, title: node.title }))}
+        refreshKey={workQueueJson}
+      />
       <DirtyWorktreeDialog
         prompt={dirtyWorktreePrompt}
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}

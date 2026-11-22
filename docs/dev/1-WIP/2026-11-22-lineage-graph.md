@@ -122,10 +122,10 @@ The new field and validation go in a new module, not into the item file.
 
 ## Scope
 
-- [ ] Stored dependency edges with cycle refusal
-- [ ] Line edges from PR bases; planned base for PR-less items; optional `gh stack` membership
-- [ ] Two tools + RPCs
-- [ ] Graph view
+- [x] Stored dependency edges with cycle refusal
+- [x] Line edges from PR bases; planned base for PR-less items; optional `gh stack` membership
+- [x] Two tools + RPCs
+- [x] Graph view
 - [ ] Docs updated through the wrap
 
 ## Technical Changes
@@ -148,10 +148,10 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Edge model + validation + cycle detection
-- [ ] Lineage read over the inbox; `gh stack` probe
-- [ ] Tools + RPCs
-- [ ] Graph view
+- [x] Edge model + validation + cycle detection
+- [x] Lineage read over the inbox; `gh stack` probe
+- [x] Tools + RPCs
+- [x] Graph view
 
 ## Testing Plan
 
@@ -189,12 +189,24 @@ binary (with and without the extension); Cypress component spec for the graph.
   tddy, not in a GitHub issue).
 - **`gh stack` membership is optional**: no code reads it today and `gh stack view` reads local
   tracking only (premise 9, accepted); base refs are complete without it.
+- **Dependency edges live on the item** (`WorkItem.needs`, omitted when empty), not in a queue-level
+  list: a queue is a list of items, every existing literal `WorkQueue { version, nodes }` stays valid, and
+  an item's deletion takes its edges with it. `dependencies_of` flattens them (`from` needs → `to` item),
+  `detect_cycle` is exposed for n10's waves.
+- **A line edge is read, never guessed**: an item whose PR the inbox cannot read keeps its planned base;
+  the RPC and the tool say so (`unavailable_reason`) when the whole site is unreadable.
+- **The `gh stack` probe reads `gh stack view --json` in the owner's checkout** — local tracking only —
+  so membership is the stack of the checked-out branch; any miss is an empty list.
+- **Both lineage tools are the owner's** (an addressed session reads status and a PR only, as before).
 - **`parents` is not migrated into dependencies**: it carries a git meaning (where to cut and rebase).
   A planned item's base and its dependencies are different facts, set separately.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- `WorkQueueGraphPanel` hides itself until the daemon answers, and when the client lacks the call.
+- The status stream is not extended with line edges: the graph is read on mount and after each queue edit
+  (`refreshKey`); a retarget on GitHub shows on the next read, not live. TODO(n10+): feed it from the
+  inbox's PR events as the check counts are.
 
 ## Refactoring Needed
 
