@@ -149,6 +149,77 @@ pub(super) async fn read_noting_the_marker(
     }
 }
 
+/// When a one-shot's `coder` client exited and when each of its pipes reached its end, logged at
+/// debug level once the call is over.
+///
+/// A call ends only when all three have: a pipe whose write end some other process still holds
+/// keeps it open after the client is gone, and the call then waits out its deadline. These
+/// timings are what tell that apart from a command that is slow.
+pub(super) struct OneShotTimings {
+    pid: Option<u32>,
+    started: tokio::time::Instant,
+    exited: std::sync::Mutex<Option<std::time::Duration>>,
+    stdout_ended: std::sync::Mutex<Option<std::time::Duration>>,
+    stderr_ended: std::sync::Mutex<Option<std::time::Duration>>,
+}
+
+impl OneShotTimings {
+    pub(super) fn started(pid: Option<u32>) -> Self {
+        Self {
+            pid,
+            started: tokio::time::Instant::now(),
+            exited: std::sync::Mutex::new(None),
+            stdout_ended: std::sync::Mutex::new(None),
+            stderr_ended: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The client's exit and both pipes' ends, awaited together, each one's time recorded.
+    pub(super) async fn await_all<S, O, E>(
+        &self,
+        exited: impl std::future::Future<Output = S>,
+        stdout: impl std::future::Future<Output = O>,
+        stderr: impl std::future::Future<Output = E>,
+    ) -> (S, O, E) {
+        tokio::join!(
+            self.note(&self.exited, exited),
+            self.note(&self.stdout_ended, stdout),
+            self.note(&self.stderr_ended, stderr),
+        )
+    }
+
+    /// `work`, recording in `slot` how long after the start it finished.
+    async fn note<T>(
+        &self,
+        slot: &std::sync::Mutex<Option<std::time::Duration>>,
+        work: impl std::future::Future<Output = T>,
+    ) -> T {
+        let output = work.await;
+        *slot.lock().expect("one-shot timings") = Some(self.started.elapsed());
+        output
+    }
+
+    pub(super) fn log(&self, command_head: &str, finished: bool) {
+        let at = |slot: &std::sync::Mutex<Option<std::time::Duration>>| match *slot
+            .lock()
+            .expect("one-shot timings")
+        {
+            Some(after) => format!("{after:?}"),
+            None => "never".to_string(),
+        };
+        log::debug!(
+            target: "tddy_remote_shell::coder",
+            "one-shot {command_head:?} (coder pid {:?}) {} after {:?}: client exited {}, stdout ended {}, stderr ended {}",
+            self.pid,
+            if finished { "finished" } else { "timed out" },
+            self.started.elapsed(),
+            at(&self.exited),
+            at(&self.stdout_ended),
+            at(&self.stderr_ended),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -179,6 +250,7 @@ mod tests {
     fn a_watchdog_that_outlives_the_command_holds_none_of_its_output() {
         use std::io::Read as _;
 
+        // Given a one-shot of a command that ends at once, started where TERM cannot end its watchdog
         let deadline = Duration::from_secs(6);
         let wrapped = bounded("true", deadline);
         let mut wrapper = std::process::Command::new("/bin/sh")
@@ -189,6 +261,8 @@ mod tests {
             .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("the wrapper starts");
+
+        // When the caller reads the command's output to its end
         let started = std::time::Instant::now();
         let mut stdout = wrapper.stdout.take().expect("stdout");
         let mut stderr = wrapper.stderr.take().expect("stderr");
@@ -203,6 +277,7 @@ mod tests {
         let ended_after = started.elapsed();
         let _ = wrapper.wait();
 
+        // Then the output ended with the command, not with the watchdog's sleep
         assert!(
             ended_after < Duration::from_secs(3),
             "the command's output stayed open {ended_after:?} — held by the watchdog until its \

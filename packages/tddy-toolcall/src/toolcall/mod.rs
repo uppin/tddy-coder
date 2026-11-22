@@ -32,8 +32,7 @@ pub use github_token_client::{
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
     start_toolcall_listener_with_conversation_handler, start_toolcall_listener_with_handlers,
-    ConversationSpawnHandler, GithubCredentialHandler, ListenerHandlers,
-    ToolcallRpcService,
+    ConversationSpawnHandler, GithubCredentialHandler, ListenerHandlers, ToolcallRpcService,
 };
 pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
 pub use restructure::{register_restructure_executor, restructure_executor, RestructureExecutor};

@@ -19,7 +19,8 @@ use tddy_rpc::Status;
 use crate::session_acting_identity::SessionAccountAccess;
 
 /// A managed session's conversation spawner, present only for a recipe that enables it.
-pub(crate) type ManagedSpawnHandler = Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>;
+pub(crate) type ManagedSpawnHandler =
+    Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>;
 
 impl LaunchSessions {
     /// The spawn handler a managed session's toolcall listener is bound to: for a grill-me session,

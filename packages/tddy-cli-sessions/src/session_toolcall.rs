@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::backend::CodingBackend;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::toolcall::{
-    ConversationSpawnHandler, GithubCredentialHandler, ToolCallRequest,
-    ToolcallRpcService, TransitionHandler,
+    ConversationSpawnHandler, GithubCredentialHandler, ToolCallRequest, ToolcallRpcService,
+    TransitionHandler,
 };
 use tddy_core::workflow::controller::WorkflowController;
 use tddy_core::workflow::ids::GoalId;
