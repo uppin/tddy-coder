@@ -8,7 +8,11 @@ use tddy_daemon_sandbox::tab_jails::{TabJailAgent, TabJailLaunch, TabJailOwner};
 
 use super::super::new_target_tab::target_agent_tab;
 use super::{recorded_conversation, reopened_fresh_reason, Restored, RosterRestore};
-use crate::remote_agent_launch::{launch_agent_tab_on_target, launch_tab_on_target, TargetTab};
+use crate::remote_agent_launch::{
+    launch_agent_tab_on_target, launch_tab_on_target, launch_tmux_tab_on_target,
+    target_tmux_session_lives, TargetTab,
+};
+use crate::tab_target_shell::TabTarget;
 
 /// Start the session user's login shell under the tab's recorded id, in a new jail of its own over
 /// the session's worktree and grants. A jail that cannot start fails the tab with the reason.
@@ -138,6 +142,87 @@ pub(super) async fn restore_target_agent(
     )
     .await?;
     Ok(if resumed {
+        Restored::AsRecorded
+    } else {
+        Restored::Fresh(reopened_fresh_reason(&harness))
+    })
+}
+
+/// The session's target, resolved as `restore.subject`; a refusal fails the tab with its reason.
+fn target_of(restore: &RosterRestore<'_>) -> anyhow::Result<TabTarget> {
+    restore
+        .tab_target_shell
+        .target_of(restore.session_dir, restore.subject)
+        .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))
+}
+
+/// Why a target tab whose tmux session was gone came back fresh.
+fn remade_reason(session: &str) -> String {
+    format!("its tmux session {session:?} was gone on the target and was made again")
+}
+
+/// Bring back a tab attached to the tmux session `session` on the session's target
+/// (`#target-tmux` 2/2): re-attached when it lives there — [`Restored::AsRecorded`] — and made again
+/// in the worktree there when it is gone — [`Restored::Fresh`] naming it. A target that cannot be
+/// resolved or reached fails the tab with the reason.
+pub(super) async fn restore_target_tmux(
+    restore: &RosterRestore<'_>,
+    tab: &TabEntry,
+    session: &str,
+) -> anyhow::Result<Restored> {
+    let target = target_of(restore)?;
+    let lived = target_tmux_session_lives(target.shell.as_ref(), session).await?;
+    launch_tmux_tab_on_target(
+        restore.cli_manager,
+        restore.session_id,
+        &tab.terminal_id,
+        TargetTab {
+            shell: target.shell,
+            worktree: &target.worktree,
+            session_dir: restore.session_dir,
+        },
+        session,
+    )
+    .await?;
+    Ok(if lived {
+        Restored::AsRecorded
+    } else {
+        Restored::Fresh(remade_reason(session))
+    })
+}
+
+/// Bring back an agent tab run in the tmux session `session` on the session's target
+/// (`#target-tmux` 2/2): re-attached when it lives there; when it is gone, the agent of `harness`
+/// started in it again, resuming `resume_conversation` when there is one — [`Restored::AsRecorded`]
+/// — and fresh otherwise — [`Restored::Fresh`] with the reason. A target that cannot be resolved or
+/// reached fails the tab with the reason.
+pub(super) async fn restore_target_tmux_agent(
+    restore: &RosterRestore<'_>,
+    tab: &TabEntry,
+    session: String,
+    harness: String,
+    resume_conversation: Option<String>,
+) -> anyhow::Result<Restored> {
+    let target = target_of(restore)?;
+    let lived = target_tmux_session_lives(target.shell.as_ref(), &session).await?;
+    let resumed = resume_conversation.is_some();
+    let conversation = resume_conversation.unwrap_or_else(|| recorded_conversation(tab));
+    let mut agent = target_agent_tab(restore.coding_agents, &harness, &conversation, resumed)
+        .map_err(|status| anyhow::anyhow!(status.message().to_string()))?;
+    agent.tmux_session = Some(session);
+    launch_agent_tab_on_target(
+        restore.cli_manager,
+        restore.session_id,
+        &tab.terminal_id,
+        TargetTab {
+            shell: target.shell,
+            worktree: &target.worktree,
+            session_dir: restore.session_dir,
+        },
+        &agent,
+    )
+    .await?;
+    Ok(if lived || resumed {
         Restored::AsRecorded
     } else {
         Restored::Fresh(reopened_fresh_reason(&harness))

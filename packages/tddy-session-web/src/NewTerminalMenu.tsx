@@ -156,6 +156,8 @@ export function NewTerminalMenu({
     ? []
     : cliSessionTypeOptions(knownSessionTypes()).map(({ id }) => id);
   const menuKinds = [BASH_KIND, ...agentKinds];
+  // A target session's tmux is its target's: every tmux item opens there (`#target-tmux` 2/2).
+  const tmuxWrappers: readonly string[] = offersTarget ? [TARGET_WRAPPER_KIND] : [];
   const chooseKind = (kind: string, wrappers?: readonly string[]) => {
     setMenuOpen(false);
     onOpen(kind, undefined, wrappers);
@@ -246,7 +248,8 @@ export function NewTerminalMenu({
                         data-testid={`sessions-terminal-tab-new-in-tmux-${kind}`}
                         onClick={() => {
                           setMenuOpen(false);
-                          onOpen(kind, undefined, [TMUX_WRAPPER_KIND]);
+                          // On a target session the agent runs in tmux there (`#target-tmux` 2/2).
+                          onOpen(kind, undefined, [...tmuxWrappers, TMUX_WRAPPER_KIND]);
                         }}
                         className="block w-full px-3 py-2 text-left text-sm hover:bg-muted"
                       >
@@ -261,7 +264,7 @@ export function NewTerminalMenu({
                   tmux={tmux}
                   onChoose={(name) => {
                     setMenuOpen(false);
-                    onOpen(TMUX_KIND, name);
+                    onOpen(TMUX_KIND, name, tmuxWrappers);
                   }}
                   naming={tmuxNaming}
                   onStartNaming={() =>
@@ -275,7 +278,7 @@ export function NewTerminalMenu({
                   onNameChange={setTmuxNaming}
                   onSubmitName={(name) => {
                     setMenuOpen(false);
-                    onOpen(TMUX_NEW_KIND, name);
+                    onOpen(TMUX_NEW_KIND, name, tmuxWrappers);
                   }}
                   onCancelName={() => setTmuxNaming(null)}
                 />

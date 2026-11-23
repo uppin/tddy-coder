@@ -15,7 +15,7 @@ use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_core::tab_roster::{
     read_tab_roster, TabEntry, AGENT_KIND, HARNESS_PROPERTY, OS_USER_PROPERTY, SESSION_PROPERTY,
-    TMUX_KIND,
+    TARGET_KIND, TMUX_KIND,
 };
 
 use super::svc_terminal_ports::TmuxMainReattach;
@@ -136,6 +136,16 @@ impl Reattach<'_> {
                 continue;
             };
             main_in_roster |= tab.terminal_id == MAIN_TERMINAL_ID;
+            // A tab on a target keeps its tmux there, which only a caller's credentials reach: never
+            // looked for in this host's tmux, it is left for Resume (`#target-tmux` 2/2).
+            if tab.launch.first().map(|node| node.kind.as_str()) == Some(TARGET_KIND) {
+                report.leave(
+                    session_id,
+                    &tab.terminal_id,
+                    "it runs in tmux on its target, which Resume re-attaches",
+                );
+                continue;
+            }
             let (Some(os_user), Some(name)) = (
                 tmux.property(OS_USER_PROPERTY),
                 tmux.property(SESSION_PROPERTY),

@@ -49,8 +49,10 @@ pub fn write_executable(path: &Path, script: &str) {
 ///
 /// `$SHELL -l` -- a person's login shell, as a shell tab on the target runs it -- records the
 /// directory it started in beside itself ([`LOGIN_SHELL_STARTED_IN`]) and becomes an interactive
-/// `/bin/sh` on its terminal.
+/// `/bin/sh` on its terminal. Run with no arguments -- as tmux runs a new session's shell -- it is an
+/// interactive `/bin/sh` too.
 const A_TARGET_LOGIN_SHELL: &str = "#!/bin/sh\n\
+     [ $# -eq 0 ] && exec /bin/sh\n\
      if [ \"$1\" = -l ]; then here=\"$(dirname \"$0\")\"; /bin/pwd -P > \"$here/login-shell-started-in.part\" && mv \"$here/login-shell-started-in.part\" \"$here/login-shell-started-in\"; exec /bin/sh; fi\n\
      [ \"$1\" = -lc ] || { [ -n \"$TMUX\" ] && [ \"$1\" = -c ]; } || exit 64\nexec /bin/sh -c \"$2\"\n";
 

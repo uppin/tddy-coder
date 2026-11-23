@@ -138,5 +138,17 @@ private `TMUX_TMPDIR`):
   holds tmux)
 - [x] Unit tests (failing) — guards already passing by construction:
   `a_tmux_attach_on_the_target_without_a_session_is_refused`, `a_tmux_on_a_target_wrapping_no_agent_is_dropped`
-- [ ] Implementation
-- [ ] TDD green
+- [x] Implementation
+- [x] TDD green — `remote_target_session_acceptance` 27/27 (10 new); new web spec 2/2 plus the
+  neighbouring tmux / target menu specs; `./test -p` terminal-rpc, agent-launch, testing-commons all green (48 targets); session-lifecycle lib + 8 tab suites green; clippy clean on the five touched crates
+
+## Implementation notes
+
+- `TerminalRoster::stop_as(session, terminal, subject)` (default: `stop`): closing a
+  `[target, tmux, agent]` tab needs the caller's credentials to reach the target. A close with no
+  caller logs and leaves the target tmux session.
+- `SessionTmux` replaces `HostTmux`: host listing as before, a target session lists the target.
+- Target restores run `has-session` first only to report the outcome (restored vs fresh).
+- `live_tabs` and the startup re-attach skip `target` chains: this host's tmux is never asked.
+- The stand-in target login shell (testing-commons) runs `/bin/sh` when started with no arguments,
+  as tmux starts a new session's shell.

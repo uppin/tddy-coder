@@ -20,7 +20,7 @@ const PROBE_OF_TMUX: &str = r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHEL
 /// What the listing of the target login's tmux sessions runs there.
 fn listing_of_tmux() -> String {
     format!(
-        r#"cd '/home/dev/repo/.worktrees/s1' && exec "${{SHELL:-/bin/sh}}" -lc 'exec tmux list-sessions -F '\''{LIST_SESSIONS_FORMAT}'\'''"#
+        r#"cd '/home/dev/repo/.worktrees/s1' && exec "${{SHELL:-/bin/sh}}" -lc 'exec tmux list-sessions -F '"'"'{LIST_SESSIONS_FORMAT}'"'"''"#
     )
 }
 
@@ -107,7 +107,7 @@ fn a_tmux_tab_runs_new_session_attaching_or_making_it_in_the_worktree_through_th
     // Then
     assert_eq!(
         command,
-        r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '\''work'\'''"#
+        r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '"'"'work'"'"''"#
     );
 }
 
@@ -119,6 +119,6 @@ fn a_tmux_tab_running_a_command_passes_it_as_the_new_sessions_command() {
     // Then
     assert_eq!(
         command,
-        r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '\''tddy-s1-t1'\'' '\'''\''\'\'''\''claude'\''\'\'''\'''\'''"#
+        r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '"'"'tddy-s1-t1'"'"' '"'"''"'"'"'"'"'"'"'"'claude'"'"'"'"'"'"'"'"''"'"''"#
     );
 }

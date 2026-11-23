@@ -323,6 +323,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
     ) -> Result<Response<StopTerminalSessionResponse>, Status> {
         let req = request.into_inner();
         self.os_user(&req.session_token)?;
+        let subject = self.github_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
         let terminal_id = req.terminal_id.trim();
 
@@ -335,7 +336,12 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
             ));
         }
 
-        if self.ports.roster.stop(&session_id, terminal_id).await {
+        if self
+            .ports
+            .roster
+            .stop_as(&session_id, terminal_id, &subject)
+            .await
+        {
             Ok(Response::new(StopTerminalSessionResponse {
                 ok: true,
                 message: String::new(),

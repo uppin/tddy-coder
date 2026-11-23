@@ -204,8 +204,15 @@ impl TerminalKind {
             return Self::sandboxed(kind, tmux_session, inner);
         }
         if wrapper.kind == TARGET_WRAPPER_KIND {
-            // An agent on a target is `target-agent-tab`'s (`#session-liveness` 8/8).
+            // An agent on a target is `target-agent-tab`'s (`#session-liveness` 8/8); in tmux there,
+            // `#target-tmux` 2/2's.
             if let Ok(TerminalKind::Agent(agent)) = Self::from_request(kind, tmux_session) {
+                if let Some((_, rest)) = inner
+                    .split_first()
+                    .filter(|(tmux, _)| tmux.kind == TMUX_WRAPPER_KIND)
+                {
+                    return Self::on_target_in_tmux(agent, rest);
+                }
                 return Self::on_target_agent(agent, inner);
             }
             return Self::on_target(kind, tmux_session, inner);
@@ -284,17 +291,36 @@ impl TerminalKind {
         if let Some(refused) = inner.first() {
             return Err(Status::invalid_argument(format!(
                 "a terminal cannot be wrapped in {:?} inside {TARGET_WRAPPER_KIND:?}: a target \
-                 wraps the login shell alone",
+                 wraps the login shell or tmux alone",
                 refused.kind
             )));
         }
         match Self::from_request(kind, tmux_session)? {
             TerminalKind::Bash => Ok(TerminalKind::TargetShell),
+            TerminalKind::Tmux { session } => Ok(TerminalKind::TargetTmux { session }),
+            TerminalKind::TmuxNew { session } => Ok(TerminalKind::TargetTmuxNew { session }),
             _ => Err(Status::invalid_argument(format!(
-                "only the login shell can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}",
+                "only the login shell or tmux can be wrapped in {TARGET_WRAPPER_KIND:?} here, not {:?}",
                 kind.trim()
             ))),
         }
+    }
+
+    /// What the agent kind `agent` wrapped in `[target, tmux]` (with `inner` wrappers inside the
+    /// tmux) runs: the agent in a tmux session of its own on the session's target
+    /// (`#target-tmux` 2/2). A wrapper inside the tmux is `INVALID_ARGUMENT` naming it.
+    fn on_target_in_tmux(
+        agent: String,
+        inner: &[crate::proto::terminal_session::LaunchNode],
+    ) -> Result<TerminalKind, Status> {
+        if let Some(refused) = inner.first() {
+            return Err(Status::invalid_argument(format!(
+                "a terminal cannot be wrapped in {:?} inside {TARGET_WRAPPER_KIND:?} and \
+                 {TMUX_WRAPPER_KIND:?}: tmux on a target wraps an agent alone",
+                refused.kind
+            )));
+        }
+        Ok(TerminalKind::TargetTmuxAgent { agent })
     }
 
     /// What the agent kind `agent` wrapped in a [`TARGET_WRAPPER_KIND`] wrapper (with `inner`
@@ -395,6 +421,14 @@ pub trait TerminalRoster: Send + Sync {
     /// Stop a started terminal. `false` when the session has no such terminal. The caller has
     /// already refused [`MAIN_TERMINAL_ID`], which is not stoppable through this surface.
     async fn stop(&self, session_id: &str, terminal_id: &str) -> bool;
+
+    /// Stop a started terminal on behalf of `subject`, the GitHub user the request's token resolves
+    /// to: whose credentials reach a target, where a tab's tmux session is ended with it
+    /// (`#target-tmux` 2/2). By default, [`Self::stop`].
+    async fn stop_as(&self, session_id: &str, terminal_id: &str, subject: &str) -> bool {
+        let _ = subject;
+        self.stop(session_id, terminal_id).await
+    }
 
     /// Every running terminal of `session_id`, including [`MAIN_TERMINAL_ID`].
     async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor>;

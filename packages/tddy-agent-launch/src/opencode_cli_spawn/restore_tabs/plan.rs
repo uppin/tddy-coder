@@ -129,6 +129,9 @@ impl LiveTabs {
 /// - `target` → `shell` → [`TabRestore::TargetShell`]; `target` → `agent` →
 ///   [`TabRestore::TargetAgent`]; a `target` around anything else is [`TabRestore::Drop`] naming
 ///   why;
+/// - `target` → `tmux-attach` → [`TabRestore::TargetTmux`]; `target` → `tmux` → `agent` →
+///   [`TabRestore::TargetTmuxAgent`] — whether or not the tmux session lives on the target, so no
+///   tmux of this host is consulted (`#target-tmux` 2/2);
 /// - `tmux-attach` → [`TabRestore::ReattachTmuxAttach`] when the user's tmux session exists,
 ///   otherwise [`TabRestore::Drop`] naming it;
 /// - an empty chain, an unknown kind, or a node missing what it needs → [`TabRestore::Drop`]
@@ -155,6 +158,8 @@ pub fn restore_plan(entry: &TabEntry, live: &LiveTabs) -> TabRestore {
         TMUX_KIND => tmux_wrapped_plan(entry, outermost, live),
         SANDBOX_KIND if wraps_an_agent(entry) => jailed_agent_plan(entry),
         SANDBOX_KIND => sandbox_plan(entry),
+        TARGET_KIND if wraps(entry, TMUX_ATTACH_KIND) => target_tmux_plan(entry),
+        TARGET_KIND if wraps(entry, TMUX_KIND) => target_tmux_agent_plan(entry),
         TARGET_KIND if wraps_an_agent(entry) => target_agent_plan(entry),
         TARGET_KIND => target_plan(entry),
         other => drop_because(format!(
@@ -269,6 +274,60 @@ fn sandbox_plan(entry: &TabEntry) -> TabRestore {
             "a {:?} run in a sandbox is not one this daemon can restore",
             inner.kind
         )),
+    }
+}
+
+/// Whether `entry`'s outermost wrapper wraps a node of `kind`.
+fn wraps(entry: &TabEntry, kind: &str) -> bool {
+    entry.launch.get(1).is_some_and(|node| node.kind == kind)
+}
+
+/// A tab attached to a tmux session on the session's target (`#target-tmux` 2/2): brought back on
+/// the target, re-attached or the session made again there — so no tmux of this host is consulted.
+fn target_tmux_plan(entry: &TabEntry) -> TabRestore {
+    if entry.launch.len() > 2 {
+        return drop_because(
+            "a tmux attach on a target wrapping anything more is not one this daemon can restore",
+        );
+    }
+    match required(&entry.launch[1], SESSION_PROPERTY) {
+        Ok(session) => TabRestore::TargetTmux {
+            session: session.to_string(),
+        },
+        Err(dropped) => dropped,
+    }
+}
+
+/// An agent in a tmux session on the session's target (`#target-tmux` 2/2): brought back on the
+/// target, resuming its conversation when its harness can, fresh otherwise.
+fn target_tmux_agent_plan(entry: &TabEntry) -> TabRestore {
+    let session = match required(&entry.launch[1], SESSION_PROPERTY) {
+        Ok(session) => session.to_string(),
+        Err(dropped) => return dropped,
+    };
+    let (Some(agent), 3) = (
+        entry.launch.get(2).filter(|node| node.kind == AGENT_KIND),
+        entry.launch.len(),
+    ) else {
+        return drop_because(
+            "a tmux on a target is restored only around an agent, and nothing more",
+        );
+    };
+    match agent_plan(agent) {
+        TabRestore::ResumeAgent {
+            harness,
+            conversation_id,
+        } => TabRestore::TargetTmuxAgent {
+            session,
+            harness,
+            resume_conversation: Some(conversation_id),
+        },
+        TabRestore::FreshAgent { harness } => TabRestore::TargetTmuxAgent {
+            session,
+            harness,
+            resume_conversation: None,
+        },
+        dropped => dropped,
     }
 }
 

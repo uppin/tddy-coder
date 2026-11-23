@@ -153,7 +153,7 @@ impl ADaemonWithATarget {
             "-p",
             "-t",
             &format!("={name}:"),
-            "#{pane_start_path}",
+            "#{pane_current_path}",
         ]);
         String::from_utf8_lossy(&shown.stdout).trim().to_string()
     }
@@ -299,7 +299,7 @@ async fn attaching_a_tab_to_a_tmux_session_the_target_lacks_is_refused_not_found
             daemon.target.has_tmux_session(THEIR_TMUX_SESSION),
             daemon.roster_of(&session_id).tabs.len(),
         ),
-        (Code::NotFound, true, false, 1),
+        (Code::NotFound, true, false, 0),
         "the refusal: {refusal:?}"
     );
 }
@@ -403,6 +403,9 @@ async fn a_resume_recreates_a_target_tmux_tab_whose_tmux_session_is_gone() {
         .opens_a_tab(&session_id, TMUX_NEW, "scratch", &[TARGET])
         .await
         .expect("a new tmux session tab starts on the target");
+    daemon
+        .the_target_tmux_session_has_clients("scratch", 1)
+        .await;
     daemon.every_client_is_gone(&session_id, &[&tab]).await;
     daemon.the_tmux_session_ends_on_the_target("scratch");
 
