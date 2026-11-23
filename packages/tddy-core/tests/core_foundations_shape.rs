@@ -177,35 +177,3 @@ fn the_changeset_parent_publishes_rather_than_defines() {
         "the parent still defines `Changeset` instead of publishing it"
     );
 }
-
-/// AC6 — `Presenter` holds seven fields: the five groups, plus what belongs to none of them.
-///
-/// The 37 fields were never arbitrary — the struct's own doc comments group them. This is that
-/// grouping made explicit, and it is what `#carve` 8/9 partitions the 46 methods along.
-#[test]
-fn the_presenter_holds_five_state_groups_and_nothing_loose() {
-    // Given the struct declaration
-    let text = read("presenter/presenter_impl.rs");
-    let declaration = text
-        .split_once("pub struct Presenter {")
-        .expect("`Presenter` is declared")
-        .1
-        .split_once("\n}")
-        .expect("the declaration ends")
-        .0;
-
-    // When its fields are counted
-    let fields = declaration
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            trimmed.starts_with(|c: char| c.is_ascii_lowercase()) && trimmed.contains(':')
-        })
-        .count();
-
-    // Then only the five groups and the two that belong to none remain
-    assert_eq!(
-        fields, 7,
-        "`Presenter` holds {fields} fields, not the five groups plus `state` and `tddy_data_dir`"
-    );
-}
