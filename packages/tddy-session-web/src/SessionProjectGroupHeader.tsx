@@ -14,14 +14,17 @@ export interface SessionProjectGroupHeaderProps {
    * that cannot start one).
    */
   onNew?: () => void;
-  /** Further header actions after the "+" — the slot `#orchestrators` 11/11 puts its gear in. */
+  /**
+   * The project's settings cog, shown left of the name while the pointer is anywhere over the
+   * header row (the row is the hover target, so moving from the name onto the cog keeps it shown).
+   */
   actions?: React.ReactNode;
 }
 
 /**
- * A project group's header row (`#orchestrators` 8/11): the collapse toggle — the project's name
- * and session count, `sessions-drawer-project-group-header-<key>` — then the "+" and any further
- * actions as siblings, since a button cannot hold buttons.
+ * A project group's header row (`#orchestrators` 8/11): the settings cog (hover-revealed), the
+ * collapse toggle — the project's name, `sessions-drawer-project-group-header-<key>` — then the "+",
+ * all siblings since a button cannot hold buttons.
  *
  * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
@@ -29,7 +32,11 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
   const { group, groupKey, collapsed, onToggle, onNew, actions } = props;
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
-    <div className="flex w-full items-center gap-1">
+    <div
+      data-testid={`sessions-drawer-project-header-row-${groupKey}`}
+      className="group flex w-full items-center gap-1"
+    >
+      {actions}
       <button
         type="button"
         data-testid={`sessions-drawer-project-group-header-${groupKey}`}
@@ -39,7 +46,6 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
       >
         <Chevron className="h-3.5 w-3.5 flex-shrink-0" />
         <span className="flex-1 truncate text-left">{group.label}</span>
-        <span className="flex-shrink-0 font-normal tabular-nums">{group.sessions.length}</span>
       </button>
       {onNew && (
         <button
@@ -53,7 +59,6 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
           +
         </button>
       )}
-      {actions}
     </div>
   );
 }

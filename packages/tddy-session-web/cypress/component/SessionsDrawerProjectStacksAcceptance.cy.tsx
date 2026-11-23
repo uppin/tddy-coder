@@ -1,6 +1,6 @@
 /**
- * Acceptance: a project's PR stacks in the sessions drawer (`#orchestrators` 9/11). Under each project
- * header a **Stacks** row lists the project's work queues on every host (`ListProjectWorkQueues`);
+ * Acceptance: a project's PR stacks in the sessions drawer (`#orchestrators` 9/11). The **Stacks** box
+ * above the Select bar opens a panel whose per-project section lists the project's work queues on every host (`ListProjectWorkQueues`);
  * opening one opens its owning session's inspector on the Work queue tab (`#workqueue` 5/14 — a queue's
  * id is its session's), read by the queue's address from the host that holds it.
  *
@@ -84,7 +84,7 @@ beforeEach(() => {
   window.location.hash = "#/sessions";
 });
 
-it("a project's stacks are listed under its header and open in the stack view", () => {
+it("a project's stacks are listed in the Stacks panel and open in the stack view", () => {
   // Given
   const backend = theSessionsScreenWithBetasStacks();
   projectStacksPage.assertStacksListedFor(backend, BETA);

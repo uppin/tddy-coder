@@ -96,9 +96,11 @@ per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by
 ## Project Groups
 
 The open drawer groups its sessions per project. Each group is a collapsible header showing the
-project's name and the number of sessions in it, followed by the group's body.
+project's name (no session count), followed by the group's body.
 
-- **Order**: groups are ordered by project name, case-insensitive. Project names come from the
+- **Order**: projects with at least one active session (green or yellow dot) are pinned to the top;
+  the rest follow. Within each of the two runs, groups are ordered by project name, case-insensitive
+  (`pinProjectsWithActiveSessions` in `SessionDrawerGroups.tsx`). Project names come from the
   `ListProjects` rows the screen already loads (`SessionsDrawerScreen` passes them as `projects`).
 - **Other**: sessions with no project, or whose project the drawer does not know, form a trailing
   **Other** group. It is absent when it would be empty.
@@ -115,9 +117,9 @@ project's name and the number of sessions in it, followed by the group's body.
 The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
 by grouping.
 
-### Stacks row
+### Stacks box
 
-Each project group's body carries a **Stacks** row (`sessions-drawer-project-queues-<projectId>`, `ProjectWorkQueuesRow` in `packages/tddy-session-web/src/`) listing the project's work queues from `ListProjectWorkQueues` — one entry per queue, that is one per session that owns a queue (`sessions-drawer-project-queue-<queueId>`, where the queue id is the owning session's id), across hosts. A host that did not answer is named in the row's unreachable list rather than silently dropped. Selecting a queue selects its **owning session** and opens that session's inspector on the [Work queue tab](#work-queue-tab) (`#/sessions/<sessionId>?inspector=work-queue`). See [PR stacking § Opening a session's work queue](../coder/pr-stacking.md#opening-a-sessions-work-queue).
+Stacks are not listed inside project groups. One **Stacks** box (`sessions-drawer-stacks-box`, `SessionDrawerStacksBox` in `packages/tddy-session-web/src/ProjectWorkQueuesRow.tsx`) sits directly above the Select bar, showing the total; it is absent when no project has a stack. Clicking it opens a panel **upward** over the list (`sessions-drawer-stacks-panel`) with one section per project (`sessions-drawer-project-queues-<projectId>`, headed by the project's name) listing the project's work queues from `ListProjectWorkQueues` — one entry per queue, that is one per session that owns a queue (`sessions-drawer-project-queue-<queueId>`, where the queue id is the owning session's id), across hosts. An entry is named by the queue's title, else by the owning session's drawer label, and only as a last resort by the raw queue id. A project whose listing did not answer shows no section. Selecting a queue selects its **owning session** and opens that session's inspector on the [Work queue tab](#work-queue-tab) (`#/sessions/<sessionId>?inspector=work-queue`). See [PR stacking § Opening a session's work queue](../coder/pr-stacking.md#opening-a-sessions-work-queue).
 
 ### Orchestrator composer
 
@@ -148,7 +150,7 @@ Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/s
 
 ### Project settings pane
 
-Each project group's header carries a **gear** (`sessions-drawer-project-settings-<projectId>`, in the header's actions slot beside the "+") that opens the project's **session settings** in the detail area at `#/sessions/project/<projectId>/settings` (`sessionsProjectSettingsPath` / `parseSessionsProjectSettings` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web/src/routing/appRoutes.ts`). The pane (`ProjectSettingsPane` in `packages/tddy-session-create-web/src/`) holds the project's name, two sections, and **Delete project**:
+Each project group's header carries a **gear** (`sessions-drawer-project-settings-<projectId>`, left of the project's name, shown while the pointer is anywhere over the header row `sessions-drawer-project-header-row-<projectId>` — the row is the hover target, so moving from the name onto the gear keeps it shown; keyboard focus also shows it) that opens the project's **session settings** in the detail area at `#/sessions/project/<projectId>/settings` (`sessionsProjectSettingsPath` / `parseSessionsProjectSettings` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web/src/routing/appRoutes.ts`). The pane (`ProjectSettingsPane` in `packages/tddy-session-create-web/src/`) holds the project's name, two sections, and **Delete project**:
 
 - **Name** — the project's name with **Save**, which sends `UpdateProject`: the daemon renames the project on every host owning it, so the request names no host (`sessions-project-settings-name-<projectId>`). A refusal is shown under the field and the typed name is kept.
 - **Main** — the [setup form](#pinned-main-entry) (*Set up main*), or, when main is set up, its model and status and **Replace main**. Replace main lives only here; the pinned entry carries no Replace action.
@@ -328,7 +330,7 @@ agent half recorded one at start. A split row with no recorded branch, and every
 row, shows no branch slot.
 
 **Row overflow** *(2026-11-15)* — whatever sits on the right of a drawer row stays in view however
-long the label and however narrow the drawer: the project header's count, "+" and gear; a row's
+long the label and however narrow the drawer: the project header's "+" and gear; a row's
 mark, host, codebase-host and orchestrator badges; the main entry's model. The label truncates with
 an ellipsis instead. The host and codebase-host badges are capped and truncate too (full name on
 hover), since a host name has no length limit. The pinned **main** entry uses the session rows' box,

@@ -238,6 +238,20 @@ export function SessionGroupBody({
   );
 }
 
+/**
+ * Projects with at least one active session first, then the rest — a stable partition, so each side
+ * keeps the order it came in. The trailing **Other** group is not a project and stays last.
+ */
+export function pinProjectsWithActiveSessions(groups: ProjectSessionGroup[]): ProjectSessionGroup[] {
+  const hasActive = (g: ProjectSessionGroup) => partitionSessionsByActivity(g.sessions).activeCount > 0;
+  const projectGroups = groups.filter((g) => g.projectId !== null);
+  return [
+    ...projectGroups.filter(hasActive),
+    ...projectGroups.filter((g) => !hasActive(g)),
+    ...groups.filter((g) => g.projectId === null),
+  ];
+}
+
 /** The key of the project group that holds `sessionId`, or `null` when no group does. */
 export function projectGroupKeyContaining(
   groups: ProjectSessionGroup[],

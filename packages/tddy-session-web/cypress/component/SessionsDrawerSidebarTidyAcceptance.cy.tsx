@@ -7,6 +7,7 @@
  */
 
 import React from "react";
+import "tddy-ui-web/theme.css";
 import { create } from "@bufbuild/protobuf";
 import type { Client } from "@connectrpc/connect";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";

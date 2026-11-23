@@ -82,10 +82,10 @@ it("the drawer shows one collapsible group per project", () => {
     aConnectedSession("orphan", ""),
   ]).mount();
 
-  // Then — ordered by name, Other last, each header naming its project and count
+  // Then — ordered by name, Other last, each header naming its project
   drawer.groupOrder().should("deep.equal", [ALPHA.projectId, BETA.projectId, "other"]);
-  drawer.header(ALPHA.projectId).should("contain", "alpha").and("contain", "2");
-  drawer.header("other").should("contain", "Other").and("contain", "1");
+  drawer.header(ALPHA.projectId).should("contain", "alpha");
+  drawer.header("other").should("contain", "Other");
   drawer.group(ALPHA.projectId).within(() => {
     byTestId(sessionsDrawerItem("a1")).should("exist");
     byTestId(sessionsDrawerItem("a2")).should("exist");

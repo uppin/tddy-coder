@@ -8,7 +8,7 @@ export function projectGroupKey(group: ProjectSessionGroup): string {
 }
 
 /**
- * One project group in the expanded drawer: a header with the project's name and session count
+ * One project group in the expanded drawer: a header with the project's name
  * that collapses or expands the group, and the group's body (`children`) — today's active/remaining
  * partition and stack nesting, over this group's sessions only.
  *
@@ -23,7 +23,7 @@ export function SessionProjectGroup(props: {
   onToggle: () => void;
   /** Opens the orchestrator composer for this group's project — the header's "+". */
   onNew?: () => void;
-  /** Further header actions after the "+" — the settings gear (`#orchestrators` 11/11). */
+  /** The settings gear, shown left of the name on hovering the header row (`#orchestrators` 11/11). */
   actions?: React.ReactNode;
   children: React.ReactNode;
 }): React.ReactElement | null {

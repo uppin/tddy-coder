@@ -265,6 +265,9 @@ export const TEST_IDS = {
   sessionsInspectorTabActivity: "sessions-inspector-tab-activity",
   /** "Select" button that activates selection mode (reveals per-row checkboxes). */
   sessionsDrawerSelectMode: "sessions-drawer-select-mode",
+  /** The single Stacks box above the Select bar, and the panel it opens upward. */
+  sessionsDrawerStacksBox: "sessions-drawer-stacks-box",
+  sessionsDrawerStacksPanel: "sessions-drawer-stacks-panel",
   /** "Select all" / "Deselect all" toggle, shown while in selection mode. */
   sessionsDrawerSelectAll: "sessions-drawer-select-all",
   /** Single "delete selected" action button, enabled once ≥1 row checkbox is ticked. */

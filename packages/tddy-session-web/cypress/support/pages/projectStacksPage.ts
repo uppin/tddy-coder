@@ -1,7 +1,7 @@
 /**
- * Page object for a project's PR stacks in the drawer (`#orchestrators` 9/11): the **Stacks** row
- * under a project's header, the stack view an entry opens, and which stack the daemon double was
- * asked about.
+ * Page object for a project's PR stacks in the drawer (`#orchestrators` 9/11): the **Stacks** box
+ * above the Select bar and its per-project panel, the stack view an entry opens, and which stack
+ * the daemon double was asked about.
  *
  * All raw selectors and wire inspection live here; test bodies call named methods.
  *
@@ -13,7 +13,6 @@ import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import {
   TEST_IDS,
   byTestId,
-  sessionsDrawerProjectGroup,
   sessionsDrawerProjectStack,
   sessionsDrawerProjectStacks,
 } from "../testIds";
@@ -39,11 +38,11 @@ export const projectStacksPage = {
   // Drawer
   // ---------------------------------------------------------------------------
 
-  /** The Stacks row of `projectId`, inside that project's group. */
-  stacksRow: (projectId: string) =>
-    byTestId(sessionsDrawerProjectGroup(projectId), RENDER_WAIT).find(
-      `[data-testid='${sessionsDrawerProjectStacks(projectId)}']`,
-    ),
+  /** `projectId`'s section of the Stacks panel, opened from the box above the Select bar. */
+  stacksRow: (projectId: string) => {
+    byTestId(TEST_IDS.sessionsDrawerStacksBox, RENDER_WAIT).click();
+    return byTestId(sessionsDrawerProjectStacks(projectId), RENDER_WAIT);
+  },
 
   /** One stack's entry in a Stacks row. */
   stackEntry: (queueId: string) => byTestId(sessionsDrawerProjectStack(queueId), RENDER_WAIT),

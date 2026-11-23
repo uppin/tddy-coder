@@ -10,7 +10,7 @@ import {
   type ProjectHomeInfo,
 } from "./utils/projectHomeGroups";
 import { SessionProjectGroup, projectGroupKey } from "./SessionProjectGroup";
-import { ProjectWorkQueuesRow } from "./ProjectWorkQueuesRow";
+import { SessionDrawerStacksBox, useProjectStacks } from "./ProjectWorkQueuesRow";
 import type { Client } from "@connectrpc/connect";
 import type { WorkQueueService, WorkQueueSummary } from "tddy-client-web/gen/work_queue_pb";
 import { ProjectHomeEntry } from "./ProjectHomeEntry";
@@ -20,6 +20,7 @@ import { SESSION_INDICATOR_DOT_STYLES } from "./sessionIndicatorDotStyles";
 import {
   CollapsedSessionDot,
   SessionGroupBody,
+  pinProjectsWithActiveSessions,
   projectGroupKeyContaining,
   type OwningHostInfo,
 } from "./SessionDrawerGroups";
@@ -88,7 +89,7 @@ interface SessionDrawerProps {
    * with no main and no session; absent, no header shows a "+".
    */
   onNewOrchestrator?: (projectId: string) => void;
-  /** `work_queue.WorkQueueService` on the selected daemon — each project group's Stacks row lists through it. */
+  /** `work_queue.WorkQueueService` on the selected daemon — the Stacks box lists every project's stacks through it. */
   workQueueClient?: Client<typeof WorkQueueService> | null;
   sessionToken?: string;
   /** Open one of a project's stacks in the stack view, by the address its listing carried. */
@@ -145,8 +146,14 @@ export function SessionDrawer({
     projects,
     onEnsureProjectHome ? projectHomes : [],
   );
-  const projectGroups =
-    onNewOrchestrator || onOpenProjectSettings ? withEveryProjectGroup(homeGroups, projects) : homeGroups;
+  const projectGroups = pinProjectsWithActiveSessions(
+    onNewOrchestrator || onOpenProjectSettings ? withEveryProjectGroup(homeGroups, projects) : homeGroups,
+  );
+  const projectStacks = useProjectStacks(
+    onOpenProjectStack ? projects : [],
+    workQueueClient,
+    sessionToken,
+  );
   const selectedGroupKey = projectGroupKeyContaining(projectGroups, selectedSessionId);
 
   // Selecting a session expands its project group; the viewer can still collapse it afterwards.
@@ -287,7 +294,7 @@ export function SessionDrawer({
                       type="button"
                       data-testid={`sessions-drawer-project-settings-${group.projectId}`}
                       onClick={() => onOpenProjectSettings(group.projectId as string)}
-                      className="flex-shrink-0 px-1 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      className="flex-shrink-0 px-0.5 py-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                       title={`Settings for ${group.label}`}
                       aria-label={`Settings for ${group.label}`}
                     >
@@ -303,14 +310,6 @@ export function SessionDrawer({
                     selected={homeSession !== null && homeSession.sessionId === selectedSessionId}
                     onEnsure={onEnsureProjectHome}
                     onSetUpProjectHome={onSetUpProjectHome}
-                  />
-                )}
-                {group.projectId !== null && onOpenProjectStack && (
-                  <ProjectWorkQueuesRow
-                    projectId={group.projectId}
-                    workQueueClient={workQueueClient}
-                    sessionToken={sessionToken}
-                    onOpenStack={onOpenProjectStack}
                   />
                 )}
                 <SessionGroupBody
@@ -338,6 +337,13 @@ export function SessionDrawer({
           )}
         </div>
       </ScrollArea>
+      {onOpenProjectStack && (
+        <SessionDrawerStacksBox
+          projectStacks={projectStacks}
+          sessions={sessions}
+          onOpenStack={onOpenProjectStack}
+        />
+      )}
       {sessions.length > 0 && (
         <div
           data-testid="sessions-drawer-select-bar"
