@@ -2,7 +2,7 @@
 
 **Date**: 2026-11-23
 **Status**: 🚧 In Progress — n1 wrapped (#1019: [terminal-sessions.md § tmux terminals](../terminal-sessions.md#tmux-terminals)); this PRD wraps with n2, which owns requirements 7–12
-**Stack**: `#target-tmux` — n1 (agent run in tmux on the target), n2 (tmux tabs on the target)
+**Stack**: `#target-tmux` — n1 (agent run in tmux on the target, #1019), n2 (tmux tabs on the target)
 
 ## Summary
 
@@ -50,12 +50,32 @@ rather than the daemon host's.
 
 ### n2 — tmux tabs on the target
 
-7. Restored tabs (`ResumeSession` / daemon restart) that are tmux-run on a target re-attach to
-   their tmux session on the target. (n1 re-attaches the **main** on resume; tab restore of
-   tmux-run tabs on targets is n2.)
-8. On a target session, the **+** menu lists the target login's tmux sessions, and attach / new tmux
-   session tabs run `tmux attach` / `tmux new-session` on the target over the remote shell. A target
-   without tmux shows the reason, as a host without tmux does.
+Decisions (developer, 2026-11-23): a target session's **+** menu lists the **target's** tmux only;
+"<agent> in tmux" runs in tmux **on the target**; a restored tab whose tmux session is gone is
+**recreated**, never dropped.
+
+7. **Listing.** `ListTmuxSessions` for a target session lists the tmux sessions of the target login
+   (through its login shell, as the caller's subject resolves the target). No tmux server is an empty
+   list; a target whose login shell finds no `tmux` is `FAILED_PRECONDITION` naming tmux, shown in the
+   menu as a host without tmux is; an unreachable target is `UNAVAILABLE`. The host's tmux is never
+   listed for a target session.
+8. **Attach / new tmux session tabs.** On a target session the menu opens them with
+   `wrappers: [target]`. Both run `tmux new-session -A -s <name>` through the target's login shell in
+   the session's worktree there, as a local tab terminal; attach first checks the target lists
+   `<name>` (`NOT_FOUND` otherwise). Recorded `[target, tmux-attach{session}]`.
+9. **Agent in tmux tabs.** "<agent> in tmux" on a target session opens with `wrappers: [target, tmux]`:
+   the agent (found by its bare command on the target) runs inside
+   `tmux new-session -A -s tddy-<session>-<terminal>` on the target. Recorded
+   `[target, tmux{session}, agent{harness, conversation}]`. Closing the tab kills that tmux session on
+   the target, as closing a host agent-in-tmux tab kills its host tmux session.
+10. **Restore.** `ResumeSession` restores `[target, tmux-attach]` and `[target, tmux, agent]` tabs by
+    running the same `new-session -A` command: re-attached when the tmux session lives, recreated
+    when it is gone (the agent resuming its conversation when its harness can). An unreachable
+    target fails that tab with the reason; the resume goes on.
+11. **Daemon restart.** The startup re-attach never looks for a target tab's tmux on the daemon host;
+    it leaves target tabs for `ResumeSession` (it has no caller whose credentials reach the target).
+12. Host tmux paths — the close-tab kill and the startup re-attach — never act on a `target`-wrapped
+    chain.
 
 ## Out of scope
 

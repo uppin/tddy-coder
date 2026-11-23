@@ -60,6 +60,18 @@ pub enum TabRestore {
     },
     /// A tab attached to the user's own tmux session, which still exists: re-attached under its id.
     ReattachTmuxAttach { session: String, os_user: String },
+    /// A tab attached to a tmux session on the session's target (`target` → `tmux-attach`,
+    /// `#target-tmux` 2/2): re-attached when the tmux session lives there, the session made again in
+    /// the worktree there when it is gone.
+    TargetTmux { session: String },
+    /// An agent tab run in a tmux session on the session's target (`target` → `tmux` → `agent`,
+    /// `#target-tmux` 2/2): re-attached when the tmux session lives there; when it is gone, the agent
+    /// started in it again, resuming `resume_conversation` when its harness can, fresh when `None`.
+    TargetTmuxAgent {
+        session: String,
+        harness: String,
+        resume_conversation: Option<String>,
+    },
     /// Not restorable: dropped from the roster and reported with `reason`.
     Drop { reason: String },
 }

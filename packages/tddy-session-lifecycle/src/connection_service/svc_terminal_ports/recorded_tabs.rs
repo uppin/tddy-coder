@@ -73,6 +73,12 @@ impl CliManagerTerminalRoster {
             TerminalKind::TargetAgent { .. } => Err(Status::internal(
                 "an agent on a target starts on the session's target, not in a worktree on this host",
             )),
+            // A tmux tab on a target runs there too (`#target-tmux` 2/2).
+            TerminalKind::TargetTmux { .. }
+            | TerminalKind::TargetTmuxNew { .. }
+            | TerminalKind::TargetTmuxAgent { .. } => Err(Status::internal(
+                "a tmux tab on a target starts on the session's target, not in a worktree on this host",
+            )),
         }
     }
 

@@ -16,6 +16,7 @@ mod tab_launch_status;
 mod target;
 mod target_agent_tab;
 mod target_tab;
+mod target_tmux_tab;
 
 use std::fmt;
 use std::path::Path;
@@ -59,6 +60,10 @@ pub use crate::remote_agent_launch::target_agent_tab::{
 };
 pub use crate::remote_agent_launch::target_tab::{
     launch_tab_on_target, target_shell_tab_command, TargetTab,
+};
+pub use crate::remote_agent_launch::target_tmux_tab::{
+    end_target_tmux_session_named, launch_tmux_tab_on_target, list_target_tmux_sessions,
+    target_tmux_session_lives, target_tmux_tab_command,
 };
 
 /// The base set of the agent's environment on a target, expanded by the target's own login shell:

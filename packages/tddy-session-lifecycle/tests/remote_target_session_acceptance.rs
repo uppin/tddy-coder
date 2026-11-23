@@ -872,3 +872,6 @@ async fn deleting_a_tmux_run_kills_its_tmux_session_and_agent_on_the_target() {
         .target
         .has_tmux_session(&tmux_session_of(&session_id)));
 }
+
+#[path = "remote_target_tmux_tabs/mod.rs"]
+mod tmux_tabs;

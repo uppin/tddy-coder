@@ -233,6 +233,10 @@ async fn carry_out(
             )
             .await
         }
+        // FIXME(#target-tmux 2/2): restore a target tmux tab.
+        TabRestore::TargetTmux { .. } | TabRestore::TargetTmuxAgent { .. } => Err(anyhow::anyhow!(
+            "a tmux tab on a target is not restored yet"
+        )),
         TabRestore::Drop { reason } => Err(anyhow::anyhow!(reason)),
     }
 }

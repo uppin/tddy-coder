@@ -39,17 +39,6 @@ fn an_empty_kind_wrapped_in_target_is_a_target_shell() {
 }
 
 #[test]
-fn a_tmux_attach_wrapped_in_target_is_refused() {
-    // When
-    let refusal =
-        TerminalKind::from_wrapped_request("tmux", "work", &[a_wrapper(TARGET_WRAPPER_KIND)])
-            .unwrap_err();
-
-    // Then
-    assert_eq!(refusal.code(), Code::InvalidArgument);
-}
-
-#[test]
 fn a_target_wrapping_a_tmux_wrapper_is_refused_naming_it() {
     // When
     let refusal = TerminalKind::from_wrapped_request(

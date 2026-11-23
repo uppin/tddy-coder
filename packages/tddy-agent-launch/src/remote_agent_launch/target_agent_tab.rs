@@ -35,6 +35,10 @@ pub struct TargetAgentTab {
     /// none: the spec's `run.env`, and the `pass_env` values the daemon holds. The base set (`HOME`,
     /// `PATH`, `TMPDIR`) is the target's own.
     pub env: Vec<(String, String)>,
+    /// The tmux session the agent runs in on the target (`#target-tmux` 2/2): the tab attaches to it
+    /// when it lives, and starts the agent in it when it does not. `None` runs the agent straight
+    /// under the tab's transport client.
+    pub tmux_session: Option<String>,
 }
 
 /// Open the agent tab `terminal_id` of `session_id` on the target `tab.shell` reaches, running

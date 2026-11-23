@@ -75,6 +75,7 @@ pub fn target_agent_tab(
         kind: harness.to_string(),
         argv,
         env,
+        tmux_session: None,
     })
 }
 

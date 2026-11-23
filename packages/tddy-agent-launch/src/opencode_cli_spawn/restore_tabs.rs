@@ -41,3 +41,7 @@ mod target_tests;
 #[cfg(test)]
 #[path = "restore_tabs_target_agent_tests.rs"]
 mod target_agent_tests;
+
+#[cfg(test)]
+#[path = "restore_tabs_target_tmux_tests.rs"]
+mod target_tmux_tests;

@@ -115,6 +115,18 @@ pub enum TerminalKind {
     /// no copy of the agent, and nothing of the session's main is written on the target
     /// (`#session-liveness` 8/8).
     TargetAgent { agent: String },
+    /// A tmux client attached to `session` on the session's **target**, through the target login's
+    /// own tmux, in the session's worktree there — kind `"tmux"` with `wrappers: [target]`
+    /// (`#target-tmux` 2/2).
+    TargetTmux { session: String },
+    /// A tmux client on a new tmux session `session` on the session's **target**, started in the
+    /// session's worktree there (or attached, if one of that name is there) — kind `"tmux-new"` with
+    /// `wrappers: [target]` (`#target-tmux` 2/2).
+    TargetTmuxNew { session: String },
+    /// A CLI harness, by its session type, run in a tmux session of its own on the session's
+    /// **target**, the tab being a client of it — an agent kind with `wrappers: [target, tmux]`
+    /// (`#target-tmux` 2/2). Closing the tab kills that tmux session there.
+    TargetTmuxAgent { agent: String },
 }
 
 /// The wrapper kind `StartTerminalSessionRequest.wrappers` names for a tmux-wrapped agent.
@@ -328,12 +340,32 @@ pub struct TmuxSession {
     pub attached: u32,
 }
 
+/// Who asks for a session's tmux listing, and for which session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TmuxListing<'a> {
+    /// The OS user the request's token maps to: whose tmux server a host listing reads.
+    pub os_user: &'a str,
+    /// The GitHub user the request's token resolves to: whose credentials reach a target.
+    pub subject: &'a str,
+    /// The session whose "+" menu asks.
+    pub session_id: &'a str,
+}
+
 /// The tmux sessions a host can attach a terminal to.
 #[async_trait]
 pub trait TmuxHost: Send + Sync {
     /// The sessions on `os_user`'s tmux server: empty when no server runs, `FAILED_PRECONDITION`
     /// when the host has no tmux.
     async fn list(&self, os_user: &str) -> Result<Vec<TmuxSession>, Status>;
+
+    /// The sessions a tmux tab of `listing.session_id` can attach to: the host's, by default; a
+    /// daemon whose session runs on a target lists the target's (`#target-tmux` 2/2).
+    async fn list_for_session(
+        &self,
+        listing: &TmuxListing<'_>,
+    ) -> Result<Vec<TmuxSession>, Status> {
+        self.list(listing.os_user).await
+    }
 }
 
 /// A host that offers no tmux: every listing is refused.
