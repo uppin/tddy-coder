@@ -25,6 +25,11 @@ pub fn parse_created_chat_id(stdout: &str) -> Result<String, String> {
     if chat_id.is_empty() {
         return Err("printed no chat id on stdout".to_string());
     }
+    if chat_id.chars().any(char::is_control) {
+        return Err(format!(
+            "printed {chat_id:?} on stdout, which holds terminal control characters, not a chat id"
+        ));
+    }
     if chat_id.split_whitespace().count() > 1 {
         return Err(format!(
             "printed {chat_id:?} on stdout, which is not a bare chat id"
@@ -136,15 +141,26 @@ impl ConversationIdAdapter for CursorCreateChat {
                 run.stderr.trim()
             )));
         }
-        // A login shell may print its own banner before the agent runs: the id is the last line.
-        let last_line = run
-            .stdout
+        // A target shell may run the agent under a terminal (`coder ssh` always does), so its
+        // stdout carries terminal escapes — queries before the id, a show-cursor on a line after
+        // it — and a login shell may print its own banner first: the id is the last line left
+        // once the escapes are gone, and Cursor accepts only a UUID.
+        let printed = without_terminal_escapes(&run.stdout);
+        let last_line = printed
             .lines()
             .map(str::trim)
             .rfind(|line| !line.is_empty())
             .unwrap_or("");
-        parse_created_chat_id(last_line)
-            .map_err(|e| ConversationMintError::Failed(format!("{command} {e}")))
+        let chat_id = parse_created_chat_id(last_line)
+            .map_err(|e| ConversationMintError::Failed(format!("{command} {e}")))?;
+        if !is_uuid(&chat_id) {
+            return Err(ConversationMintError::Failed(format!(
+                "{command} printed {chat_id:?} as its last line, which is not a chat id (a UUID); \
+                 its whole stdout was {:?}",
+                run.stdout
+            )));
+        }
+        Ok(chat_id)
     }
 
     async fn mint(&self, mint: ConversationMint<'_>) -> Result<String, ConversationMintError> {
@@ -181,4 +197,49 @@ impl ConversationIdAdapter for CursorCreateChat {
         parse_created_chat_id(&String::from_utf8_lossy(&output.stdout))
             .map_err(|e| ConversationMintError::Failed(format!("{command} {e}")))
     }
+}
+
+/// `text` with its terminal escape sequences and carriage returns removed: CSI (`ESC [ … final`),
+/// OSC (`ESC ] … BEL` or `ESC ] … ESC \\`), and two-byte `ESC x` sequences.
+fn without_terminal_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{1b}' => match chars.next() {
+                Some('[') => {
+                    for c in chars.by_ref() {
+                        if ('\u{40}'..='\u{7e}').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    while let Some(c) = chars.next() {
+                        if c == '\u{07}' {
+                            break;
+                        }
+                        if c == '\u{1b}' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            '\r' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Whether `id` is a hyphenated UUID (`8-4-4-4-12` hex digits), the only chat id Cursor accepts.
+fn is_uuid(id: &str) -> bool {
+    let groups: Vec<&str> = id.split('-').collect();
+    groups.len() == 5
+        && groups
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(group, len)| group.len() == len && group.chars().all(|c| c.is_ascii_hexdigit()))
 }

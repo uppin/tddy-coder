@@ -177,10 +177,9 @@ async fn a_minted_conversation_on_a_target_is_minted_through_its_shell() {
     // resolved binary is a path of this host that does not exist there
     let target = tddy_remote_shell::InMemoryShell::new("devbox");
     target.answers_when(|request| {
-        request
-            .command
-            .contains("create-chat")
-            .then(|| tddy_remote_shell::ExecOutput::succeeded("chat-on-the-target\n"))
+        request.command.contains("create-chat").then(|| {
+            tddy_remote_shell::ExecOutput::succeeded("0b9e7c1a-2d4f-4a6b-8c3e-5f7a9b1d2e4c\n")
+        })
     });
     let shell: std::sync::Arc<dyn tddy_remote_shell::RemoteShell> =
         std::sync::Arc::new(target.clone());
@@ -206,7 +205,9 @@ async fn a_minted_conversation_on_a_target_is_minted_through_its_shell() {
     // Then — the chat is the one the target minted
     assert_eq!(
         conversation,
-        Ok(LaunchConversation::Minted("chat-on-the-target".to_string()))
+        Ok(LaunchConversation::Minted(
+            "0b9e7c1a-2d4f-4a6b-8c3e-5f7a9b1d2e4c".to_string()
+        ))
     );
 
     // And it was minted by one command on the target: in the worktree there, by the agent's bare

@@ -225,7 +225,7 @@ pub(crate) fn resumed_conversation(
                 .to_string(),
         ),
         ConversationSlot::Minted { adapter, .. } => match meta.cursor_chat_id.as_deref() {
-            Some(chat) if !chat.trim().is_empty() => LaunchConversation::Minted(chat.to_string()),
+            Some(chat) if is_recorded_chat(chat) => LaunchConversation::Minted(chat.to_string()),
             _ => {
                 return Err(Status::failed_precondition(format!(
                     "{} recorded no conversation minted by {adapter}: it cannot be resumed",
@@ -240,6 +240,13 @@ pub(crate) fn resumed_conversation(
     })
 }
 
+/// Whether `chat` is a minted id worth resuming: not blank, and free of the terminal control
+/// characters a target's terminal once leaked into it (a session that recorded `"\e[?25h"` from
+/// `coder ssh` mints a fresh chat on resume instead of handing Cursor that).
+fn is_recorded_chat(chat: &str) -> bool {
+    !chat.trim().is_empty() && !chat.chars().any(char::is_control)
+}
+
 /// [`resumed_conversation`], but a session recorded without the conversation its spec mints — one
 /// started before the conversation was minted at start — adopts a fresh one now, which the resume
 /// records: every later resume then continues it instead of starting over again.
@@ -251,7 +258,7 @@ pub(crate) async fn resumed_or_adopted_conversation(
         ConversationSlot::Minted { .. } => meta
             .cursor_chat_id
             .as_deref()
-            .is_none_or(|chat| chat.trim().is_empty()),
+            .is_none_or(|chat| !is_recorded_chat(chat)),
         _ => false,
     };
     if !recorded_nothing {

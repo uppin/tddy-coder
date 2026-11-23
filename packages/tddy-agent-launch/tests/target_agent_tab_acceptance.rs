@@ -46,7 +46,12 @@ const TAB_ID: &str = "019d2c7e-51aa-7c40-8f0e-2b1d6a9c3e71";
 /// The ssh `Host` alias the session's target is known by.
 const TARGET_ALIAS: &str = "buildbox";
 /// The chat Cursor's `create-chat` prints on the target.
-const CHAT_MINTED_ON_THE_TARGET: &str = "chat-minted-on-the-target";
+/// Cursor's chat ids are UUIDs: its persistent session refuses any other.
+const CHAT_MINTED_ON_THE_TARGET: &str = "6f1c2a9e-3b7d-4e58-9a0c-1d2e3f4a5b6c";
+/// What `create-chat` writes when the target runs it under a terminal, as `coder ssh` does: the
+/// terminal queries Cursor's TUI library sends on start (OSC 11 background colour, DSR cursor
+/// position), the chat id with the terminal's `\r\n`, then the show-cursor it sends on exit.
+const CREATE_CHAT_UNDER_A_TERMINAL: &str = "\\033]11;?\\033\\\\\\033[6n%s\\r\\n\\033[?25h\\r\\n";
 
 /// What OpenSSH says of a host it cannot resolve.
 const SSH_COMPLAINT: &str =
@@ -216,11 +221,17 @@ impl ATarget {
     /// it prints [`CHAT_MINTED_ON_THE_TARGET`] (Cursor's mint); otherwise it records the directory
     /// it started in and its arguments, and stays up on its terminal.
     fn installs_the_agent(&self, command: &str) -> &Self {
+        self.installs_the_agent_printing_its_chat_as(command, "%s\\n")
+    }
+
+    /// [`Self::installs_the_agent`], its `create-chat` printing [`CHAT_MINTED_ON_THE_TARGET`]
+    /// through the `printf` format `chat_format`.
+    fn installs_the_agent_printing_its_chat_as(&self, command: &str, chat_format: &str) -> &Self {
         write_executable(
             &self.machine.agents_dir().join(command),
             &format!(
                 "#!/bin/sh\n\
-                 if [ \"$1\" = create-chat ]; then echo '{CHAT_MINTED_ON_THE_TARGET}'; exit 0; fi\n\
+                 if [ \"$1\" = create-chat ]; then printf '{chat_format}' '{CHAT_MINTED_ON_THE_TARGET}'; exit 0; fi\n\
                  {{ /bin/pwd -P; printf '%s\\n' \"$@\"; }} > '{record}.part'\n\
                  /bin/mv '{record}.part' '{record}'\n\
                  exec /bin/sh\n",
@@ -532,6 +543,36 @@ async fn a_target_agent_tabs_chat_is_minted_on_the_target() {
     );
 }
 
+/// Over `coder ssh` the target runs `create-chat` under a terminal, so its stdout carries terminal
+/// escapes around the chat id and a show-cursor (`\e[?25h`) on a line of its own after it. The
+/// daemon took that last line as the chat, recorded `"\e[?25h"`, and Cursor refused to start
+/// ("Persistent-session chat ID must be a UUID") — on start and on every resume.
+#[tokio::test]
+async fn a_target_agent_tabs_chat_minted_under_a_terminal_is_the_bare_chat_id() {
+    // Given a target whose Cursor prints its chat the way it does under `coder ssh`'s terminal
+    let _turn = ONE_SSH_MACHINE_AT_A_TIME.lock().await;
+    let target = a_target_holding_the_worktree();
+    target.installs_the_agent_printing_its_chat_as("agent", CREATE_CHAT_UNDER_A_TERMINAL);
+    let daemon = a_daemon_with(a_host_without_any_agent());
+
+    // When a Cursor tab is opened on the target
+    let tab = daemon
+        .opens_an_agent_tab_on("cursor-cli", target.the_recording_shell(), &target.worktree)
+        .await
+        .expect("the agent tab starts on the target");
+
+    // Then its conversation is the chat id alone, and the target's Cursor resumes exactly that chat
+    assert_eq!(tab.settled.conversation_id, CHAT_MINTED_ON_THE_TARGET);
+    let (_, args) = target.agent_run("agent").await;
+    assert_eq!(
+        args[..2].to_vec(),
+        vec![
+            "--resume".to_string(),
+            CHAT_MINTED_ON_THE_TARGET.to_string()
+        ]
+    );
+}
+
 #[tokio::test]
 async fn a_target_agent_tab_hands_the_target_no_host_path() {
     // Given a target whose machine has Claude Code installed, and a daemon host holding its own copy
@@ -643,4 +684,56 @@ async fn an_agent_tab_on_an_unreachable_target_fails_unavailable() {
     );
     assert_eq!(shell.interactive_commands(), Vec::<String>::new());
     assert!(!daemon.has_the_tab().await, "no tab is registered");
+}
+
+/// A live Coder workspace, named by the environment: `CODER_URL`, `CODER_SESSION_TOKEN` (e.g. from
+/// `coder login token`), `TDDY_LIVE_CODER_WORKSPACE` (`<owner>/<name>`) and
+/// `TDDY_LIVE_CODER_WORKTREE` (a directory on it). Run with `--ignored`.
+fn a_live_coder_workspace() -> (Arc<dyn RemoteShell>, PathBuf) {
+    let var = |name: &str| {
+        std::env::var(name).unwrap_or_else(|_| panic!("{name} names the live workspace"))
+    };
+    let workspace = var("TDDY_LIVE_CODER_WORKSPACE");
+    let (owner, name) = workspace
+        .split_once('/')
+        .expect("TDDY_LIVE_CODER_WORKSPACE is <owner>/<name>");
+    let shell = tddy_remote_shell::CoderShell::new(
+        tddy_remote_shell::CoderCredentials::new(
+            var("CODER_URL"),
+            tddy_credentials::SecretString::new(var("CODER_SESSION_TOKEN")),
+        ),
+        tddy_remote_shell::CoderWorkspaceRef::new(owner, name),
+    );
+    (
+        Arc::new(shell),
+        PathBuf::from(var("TDDY_LIVE_CODER_WORKTREE")),
+    )
+}
+
+/// The live counterpart of [`a_target_agent_tabs_chat_minted_under_a_terminal_is_the_bare_chat_id`]:
+/// a real `coder ssh` runs `create-chat` under its terminal, and the chat the daemon settles on is
+/// a bare UUID Cursor accepts.
+#[tokio::test]
+#[ignore = "needs a live Coder workspace with Cursor installed; see a_live_coder_workspace"]
+async fn a_cursor_tab_on_a_live_coder_workspace_settles_a_uuid_chat() {
+    // Given a live Coder workspace with Cursor on its login PATH, and a daemon host without it
+    let (shell, worktree) = a_live_coder_workspace();
+    let daemon = a_daemon_with(a_host_without_any_agent());
+
+    // When a Cursor tab's conversation is settled on it
+    let settled = new_target_agent_tab(
+        &daemon.coding_agents,
+        "cursor-cli",
+        &TabTarget { shell, worktree },
+    )
+    .await
+    .map_err(|status| status.message().to_string())
+    .expect("the chat is minted on the workspace");
+
+    // Then the chat is a UUID, with nothing of the terminal left in it
+    assert!(
+        uuid::Uuid::parse_str(&settled.conversation_id).is_ok(),
+        "settled {:?}, which Cursor refuses",
+        settled.conversation_id
+    );
 }
