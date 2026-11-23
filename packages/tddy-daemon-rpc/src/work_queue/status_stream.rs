@@ -82,8 +82,9 @@ impl WorkQueueRpcHandler {
                 };
                 let mut view = work_queue_status_view(&site.inbox, &site.repo, &record.stack).await;
                 if let Some(trunk) = &trunk {
-                    let line = line_edges_through_inbox(&site.inbox, &site.repo, &record.stack, trunk)
-                        .await;
+                    let line =
+                        line_edges_through_inbox(&site.inbox, &site.repo, &record.stack, trunk)
+                            .await;
                     let health = queue_chain_health(
                         &site.inbox,
                         &site.repo,
