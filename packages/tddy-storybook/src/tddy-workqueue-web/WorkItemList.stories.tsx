@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { WorkItemList } from "tddy-workqueue-web";
+import { WorkItemChainHealthContext, WorkItemList } from "tddy-workqueue-web";
 import type { WorkItem } from "tddy-workqueue-web";
 
 /**
@@ -80,3 +80,62 @@ function Draggable() {
 }
 
 export const StackWithAFreeTask: Story = { render: () => <Draggable /> };
+
+/** Every lineage state a row and the gutter can show, one task each. */
+const LINEAGE_NODES: WorkItem[] = [
+  item("l1", "Linear: on its base", { branch: "feat/a", displayOrder: 0 }),
+  item("l2", "Behind its base by 3", { branch: "feat/b", parents: ["l1"], displayOrder: 1 }),
+  item("l3", "Conflicting with its base", { branch: "feat/c", parents: ["l2"], displayOrder: 2 }),
+  item("l4", "Leaked commits from two ancestors", { branch: "feat/d", parents: ["l3"], displayOrder: 3 }),
+  item("l5", "Line unknown (base unreadable)", { branch: "feat/e", displayOrder: 4 }),
+  item("l6", "Needs l1 (dependency, not a line)", { branch: "feat/f", displayOrder: 5 }),
+  item("l7", "Free: no branch, no line", { displayOrder: 6 }),
+];
+
+const LINEAGE_HEALTH = new Map([
+  ["l1", { leaks: [], line: { state: "linear" as const } }],
+  ["l2", { leaks: [], line: { state: "behind" as const, by: 3 } }],
+  ["l3", { leaks: [], line: { state: "conflicting" as const, by: 2 } }],
+  [
+    "l4",
+    {
+      leaks: [
+        { sha: "a1b2c3d4e5f6", ancestor: "feat/b" },
+        { sha: "0f9e8d7c6b5a", ancestor: "feat/a" },
+      ],
+      line: { state: "linear" as const },
+    },
+  ],
+  ["l5", { leaks: [], line: { state: "unknown" as const } }],
+]);
+
+/**
+ * Lineage states: solid brackets for PR-stack line edges (l1 → l2 → l3 → l4), a dashed bracket for a
+ * stored dependency (l1 → l6), the linearity chip per task (linear, behind, conflicting, unknown), a
+ * leak chip naming the ancestors commits leaked from, and a free task with no lineage at all.
+ */
+export const LineageStates: Story = {
+  render: () => (
+    <WorkItemChainHealthContext.Provider value={LINEAGE_HEALTH}>
+      <WorkItemList
+        nodes={LINEAGE_NODES}
+        onStartSession={() => undefined}
+        startingNodeId={null}
+        connectors={[
+          { kind: "line", from: "l1", to: "l2" },
+          { kind: "line", from: "l2", to: "l3" },
+          { kind: "line", from: "l3", to: "l4" },
+          { kind: "dependency", from: "l1", to: "l6" },
+        ]}
+        onMove={() => undefined}
+      />
+    </WorkItemChainHealthContext.Provider>
+  ),
+  decorators: [
+    (Story) => (
+      <div style={{ width: 640 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
