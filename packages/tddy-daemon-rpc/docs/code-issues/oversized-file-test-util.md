@@ -22,6 +22,7 @@ nine lines with every RPC the family gains.
 | 2026-11-22 | 552 → 582 | **Grew by 30** in #1008 (`#workqueue` 7/14): forwarders for `SetWorkItemLabels`, `SetWorkItemBadge` and `ClearWorkItemBadge`. Not split: stack-shared with every later `#workqueue` node, so the stack-branch rule defers the split to the post-stack sweep |
 | 2026-11-23 | 582 → 602 | **Regressed by 20** in #1010 (`#workqueue` 9/14): forwarders for `SetWorkQueueDependencies` and `GetWorkQueueGraph`. Not split: stack-shared, deferred to the post-stack sweep |
 | 2026-11-23 | 602 → 612 | **Regressed by 10** in #1011 (`#workqueue` 10/14): the `GetWorkQueueWaves` forwarder. Not split: stack-shared, deferred to the post-stack sweep |
+| 2026-11-23 | 612 → 643 | **Regressed by 31** in #1012 (`#workqueue` 11/14): forwarders for `GetWorkItemInbox`, `GetWorkItemOutbox` and `GetWorkQueueCommitCounts`. Not split: stack-shared, deferred to the post-stack sweep |
 
 ## What would close it — candidate seam (not proven)
 

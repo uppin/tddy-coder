@@ -113,6 +113,16 @@ Pure over the queue's items (in order) and its dependency edges: `waves` (cycle 
 `merged_items` names the items the stored record says have landed; the status stream adds the inbox's live
 merged PRs before calling `queue_waves`.
 
+### `commit_flow.rs` — own commits, inbox and outbox *(added 2026-11-23)*
+
+`CommitFlow` reads one clone (the queue owner's worktree) after `fetch` (remote-tracking refs only):
+`own_commits`, `inbox` (one `git log` range per line ancestor plus the base; first-seen attribution,
+nearest ancestor first; `merge-tree --write-tree --merge-base=<c>^` per commit for the prediction),
+`outbox` (successors' inbox entries sourced from the item) and `counts`. The inbox cache holds one entry
+per item, keyed by the remote tips of its whole chain, and replaces it when they move. `shared_for` keeps
+one `CommitFlow` per clone so the cache outlives a request; `item_branches` joins the queue with n9's line
+edges.
+
 ### `rpc.rs` — the PR-stack RPC family
 
 The one transport-facing module: family P's handler trait, its service adapter and its transport

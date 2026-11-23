@@ -3,7 +3,7 @@
  * offers Inbox and Outbox beside the pull request, each read through the queue's RPCs; a session no
  * queue links shows the pull request alone.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-commit-inbox-outbox.md
+ * Feature: docs/ft/coder/pr-stacking.md § Commit inbox and outbox
  */
 
 import React from "react";

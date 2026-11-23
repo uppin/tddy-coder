@@ -321,6 +321,27 @@ From a queue's dependency edges tddy derives — and never stores — three thin
 Work queue tab draws the items in wave lanes with their readiness text and a banner naming the first item
 out of place (`WaveLanes`). Nothing here reorders a branch or a PR.
 
+### Commit inbox and outbox *(added 2026-11-23)*
+
+For every item on a branch tddy reads three commit lists from the remote tips, after a fetch, without
+touching any checkout, index or working tree:
+
+- **Commits** — the item's own: what its branch has beyond its line parent.
+- **Inbox** — what its line ancestors have that it lacks, such as commits pushed to an ancestor after the
+  item was cut. Each commit is attributed to the nearest line ancestor that carries it, or to the trunk or
+  external base; base sources are listed first. Each commit carries a **conflict prediction** made for
+  *this* item (`git merge-tree` onto its tip), because the same commit can apply cleanly on one item and
+  conflict on the next. A predicted conflict names the files.
+- **Outbox** — the mirror: per successor, what this item has that the successor lacks. An item's outbox is
+  always its successors' inbox entries sourced from it.
+
+Line parents come from each PR's base through the GitHub inbox. When that cannot be read, the planned
+bases stand in and the answer says why (`unavailable_reason`). Answers are cached per item by the remote
+tips they were read at. The PR view (from a work item, or a session on an item's branch) shows **Inbox**
+and **Outbox** tabs next to Commits, and each queue row shows its inbox/outbox counts and a conflict
+marker. Agents use `work_item_inbox` and `work_item_outbox`; the RPCs are `GetWorkItemInbox`,
+`GetWorkItemOutbox` and `GetWorkQueueCommitCounts`. Nothing here pushes or merges.
+
 ### GitHub API surface
 
 `GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.

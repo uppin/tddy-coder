@@ -2,7 +2,7 @@
  * Acceptance (`#workqueue` 11/14): the PR view of a work item shows its Inbox (sources and conflict
  * markers, trunk first) and its Outbox (per successor).
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-commit-inbox-outbox.md
+ * Feature: docs/ft/coder/pr-stacking.md § Commit inbox and outbox
  */
 
 import React from "react";

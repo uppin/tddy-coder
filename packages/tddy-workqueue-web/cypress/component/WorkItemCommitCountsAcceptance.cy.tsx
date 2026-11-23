@@ -2,7 +2,7 @@
  * Acceptance (`#workqueue` 11/14): a queue row shows what its item is missing and owes, with a
  * conflict marker, and nothing for an item with neither.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-commit-inbox-outbox.md
+ * Feature: docs/ft/coder/pr-stacking.md § Commit inbox and outbox
  */
 
 import React from "react";
