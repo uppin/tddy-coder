@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { WorkItemChainHealthContext, WorkItemLinkControls, WorkItemLinksContext, WorkItemList } from "tddy-workqueue-web";
+import { WorkItemChainHealthContext, WorkItemLinksContext, WorkItemList } from "tddy-workqueue-web";
 import type { WorkItemLinks } from "tddy-workqueue-web";
 import type { WorkItem } from "tddy-workqueue-web";
 
@@ -170,25 +170,96 @@ const PR_LINKS: WorkItemLinks = {
 };
 
 /**
- * PR data on work items: each task's PR and its checks — running, failed and completed — as the
- * queue's status stream reports them. "Show checks" expands each run.
+ * PR data on work items: a PR'ed task is the same box with more data — its PR number just before the
+ * Start control, then its checks as coloured numbers (red failed, green succeeded) and a spinner with
+ * the running count while any are in flight. Expand a row to list each run.
  */
 export const PullRequestChecks: Story = {
   render: () => (
     <WorkItemLinksContext.Provider value={PR_LINKS}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>
-        {PR_NODES.map((node) => (
-          <div key={node.itemId} className="rounded-md border border-border px-3 py-2">
-            <p className="text-sm font-medium">{node.title}</p>
-            <WorkItemLinkControls node={node} />
-          </div>
-        ))}
-      </div>
+      <WorkItemList
+        nodes={PR_NODES}
+        onStartSession={() => undefined}
+        startingNodeId={null}
+        connectors={[]}
+        onMove={() => undefined}
+      />
     </WorkItemLinksContext.Provider>
   ),
   decorators: [
     (Story) => (
       <div style={{ width: 480 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+const PR_BY_LINEAGE_ID: Record<string, number> = { l1: 201, l2: 202, l3: 203, l4: 204, l5: 205, l6: 206 };
+/** Attached sessions: l1's is working, l3's is idle; the rest have none yet. */
+const ATTACHED: Record<string, { sessionId: string; isActive: boolean }> = {
+  l1: { sessionId: "sess-l1", isActive: true },
+  l3: { sessionId: "sess-l3", isActive: false },
+};
+const COMBINED_NODES = LINEAGE_NODES.map((node) => ({
+  ...node,
+  ...(PR_BY_LINEAGE_ID[node.itemId] ? { pr: pr(PR_BY_LINEAGE_ID[node.itemId], node.branch ?? "") } : {}),
+  ...(ATTACHED[node.itemId] ? { sessionId: ATTACHED[node.itemId].sessionId, childState: ATTACHED[node.itemId].isActive ? "Implementing" : "Idle" } : {}),
+}));
+/** PR state per branch: ready for review (green) or draft (grey), plus merged and closed. */
+const PR_STATE: Record<string, string> = { "feat/a": "open", "feat/b": "draft", "feat/c": "open", "feat/d": "draft", "feat/e": "merged", "feat/f": "closed" };
+const COMBINED_RESOLUTIONS = Object.fromEntries(
+  COMBINED_NODES.filter((n) => n.branch).map((n) => [
+    n.branch!,
+    {
+      branch: n.branch!,
+      pr: { exists: true, number: BigInt(n.pr?.number ?? 0), url: n.pr?.url ?? "", state: PR_STATE[n.branch!] ?? "open" },
+      session: ATTACHED[n.itemId]
+        ? { exists: true, sessionId: ATTACHED[n.itemId].sessionId, isActive: ATTACHED[n.itemId].isActive }
+        : { exists: false },
+    },
+  ]),
+) as never;
+const COMBINED_LINKS: WorkItemLinks = {
+  ...PR_LINKS,
+  checksByItemId: {
+    l1: { running: 0, failed: 0, succeeded: 5, runs: [] },
+    l2: { running: 3, failed: 0, succeeded: 2, runs: [] },
+    l3: { running: 0, failed: 2, succeeded: 3, runs: [] },
+    l4: { running: 1, failed: 1, succeeded: 6, runs: [] },
+    l6: { running: 0, failed: 0, succeeded: 4, runs: [] },
+  },
+};
+
+/**
+ * Lineage on the lines and PR data in the boxes, together: the full queue as the sidebar shows it. The
+ * PR number is green when ready for review, grey when a draft (purple merged, red closed); its checks
+ * are a pill wedged into the box's top edge; a task with an attached session shows a session icon in
+ * place of Play — green while the session works, grey while idle.
+ */
+export const LineageWithPullRequests: Story = {
+  render: () => (
+    <WorkItemLinksContext.Provider value={COMBINED_LINKS}>
+      <WorkItemChainHealthContext.Provider value={LINEAGE_HEALTH}>
+        <WorkItemList
+          nodes={COMBINED_NODES}
+          branchResolutionByBranch={COMBINED_RESOLUTIONS}
+          onStartSession={() => undefined}
+          startingNodeId={null}
+          connectors={[
+            { kind: "line", from: "l1", to: "l2" },
+            { kind: "line", from: "l2", to: "l3" },
+            { kind: "line", from: "l3", to: "l4" },
+            { kind: "dependency", from: "l1", to: "l6" },
+          ]}
+          onMove={() => undefined}
+        />
+      </WorkItemChainHealthContext.Provider>
+    </WorkItemLinksContext.Provider>
+  ),
+  decorators: [
+    (Story) => (
+      <div style={{ width: 520 }}>
         <Story />
       </div>
     ),

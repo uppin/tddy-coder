@@ -1,6 +1,6 @@
 import React from "react";
 import { PropagateControl } from "./landPropagate";
-import { ChevronDown, ChevronRight, Play, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, MonitorPlay, Play, TriangleAlert } from "lucide-react";
 import { Button } from "tddy-ui-web";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
@@ -8,6 +8,7 @@ import { isNodeOrphaned } from "./isNodeOrphaned";
 import type { StackChildSession } from "./workItemSessions";
 import { WorkItemBehindBadge } from "./WorkItemChainHealth";
 import { WorkItemCommitCounts } from "./workItemCommitCounts";
+import { WorkItemPrBadge } from "./WorkItemPrBadge";
 import { WorkItemRowBadges } from "./WorkItemRowBadges";
 import { WorkItemRowDetails } from "./WorkItemRowDetails";
 import type { StartBlocker } from "./startBlockers";
@@ -185,6 +186,8 @@ export function WorkItemRow({
 }: WorkItemRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
+  // The PR the row states: the one found for its branch, else for its planned name.
+  const foundPr = resolution?.pr?.exists ? resolution.pr : workItem?.exists ? workItem : undefined;
   const isSpawned = Boolean(node.sessionId) && !isNodeOrphaned(node, resolution, identityChildSession);
   // A session is in progress when any source says so: `QueryBranch` resolves it server-side by branch
   // on one host, `inProgress` comes from the session list the caller already holds, and
@@ -215,12 +218,22 @@ export function WorkItemRow({
   // than leaving a screen reader to infer the relationship from document order.
   const detailsId = `work-item-details-${node.itemId}`;
 
+  // The attached session as an icon, green while it is working and grey otherwise; the phase is its
+  // tooltip and its accessible text.
+  const phaseText = node.prStatus?.phase || node.childState || "spawned";
   const statusChip = (
     <span
       data-testid={`work-item-status-chip-${node.itemId}`}
-      className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+      data-active={inProgressEffective || undefined}
+      title={`Session attached — ${phaseText}`}
+      className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
+        inProgressEffective
+          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
+          : "bg-muted text-muted-foreground"
+      }`}
     >
-      {node.prStatus?.phase || node.childState || "spawned"}
+      <MonitorPlay className="h-4 w-4" />
+      <span className="sr-only">{phaseText}</span>
     </span>
   );
 
@@ -272,6 +285,10 @@ export function WorkItemRow({
             {repointTarget ? `Repoint to ${repointTarget}` : "Repoint to default branch"}
           </Button>
         )}
+        <WorkItemPrBadge
+          node={node}
+          pr={foundPr ? { number: foundPr.number, url: foundPr.url, state: foundPr.state } : undefined}
+        />
         {/* One CTA slot, two occupants: the live child's status chip, or the Start-session button —
             marked when blocked rather than replaced or disabled, since it is the control that
             recovers a node the blockers may only *believe* is unstartable. */}
