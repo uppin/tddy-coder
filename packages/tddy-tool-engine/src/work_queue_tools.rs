@@ -82,6 +82,7 @@ pub fn is_stack_tool(name: &str) -> bool {
         || crate::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES.contains(&name)
         || crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.contains(&name)
         || crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.contains(&name)
+        || crate::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.contains(&name)
 }
 
 /// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
@@ -231,6 +232,15 @@ pub enum WorkQueueOp {
     Graph,
     /// `work_queue_waves` (`#workqueue` 10/14): waves, derived line, readiness, line check.
     Waves,
+    /// `work_item_inbox` (`#workqueue` 11/14): the commits the item is missing, with sources and conflict
+    /// predictions.
+    Inbox {
+        item_id: String,
+    },
+    /// `work_item_outbox` (`#workqueue` 11/14): per successor, what it lacks of this item.
+    Outbox {
+        item_id: String,
+    },
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.
@@ -409,6 +419,12 @@ fn work_queue_op_of(tool_name: &str, args: StackToolArgs) -> Result<WorkQueueOp,
         },
         WORK_QUEUE_GRAPH => WorkQueueOp::Graph,
         WORK_QUEUE_WAVES => WorkQueueOp::Waves,
+        crate::work_item_commit_flow_tools::WORK_ITEM_INBOX => WorkQueueOp::Inbox {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+        },
+        crate::work_item_commit_flow_tools::WORK_ITEM_OUTBOX => WorkQueueOp::Outbox {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+        },
         other => return Err(format!("unknown stack tool: {other}")),
     })
 }

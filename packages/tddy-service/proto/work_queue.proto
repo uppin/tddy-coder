@@ -91,6 +91,12 @@ service WorkQueueService {
   // `#workqueue` 10/14: the queue's waves, derived line and each item's readiness — computed from the
   // stored dependency edges; nothing is stored. A cycle is refused (`failed_precondition`, naming it).
   rpc GetWorkQueueWaves(GetWorkQueueWavesRequest) returns (WorkQueueWavesResponse);
+  // `#workqueue` 11/14: what an item is missing (its inbox, each commit with its source and a conflict
+  // prediction), what it owes its successors (its outbox), and every item's counts for the queue rows.
+  // Read from remote tips after a fetch; no local branch, index or worktree is touched.
+  rpc GetWorkItemInbox(GetWorkItemCommitFlowRequest) returns (WorkItemInboxResponse);
+  rpc GetWorkItemOutbox(GetWorkItemCommitFlowRequest) returns (WorkItemOutboxResponse);
+  rpc GetWorkQueueCommitCounts(GetWorkQueueGraphRequest) returns (WorkQueueCommitCountsResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -627,4 +633,59 @@ message WorkQueueWavesResponse {
   repeated ItemReadinessView readiness = 3;
   // The first item that steps back a wave in the queue's current order; empty when in order.
   string out_of_order_at = 4;
+}
+
+// `#workqueue` 11/14 — commit inbox and outbox.
+message GetWorkItemCommitFlowRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+}
+
+// One commit an item is missing.
+message InboxCommitView {
+  string sha = 1;
+  string subject = 2;
+  // "item" (`source` is an item id), "trunk" or "external" (`source` is a branch name).
+  string source_kind = 3;
+  string source = 4;
+  // The files bringing this commit into the item would conflict in; empty when it replays cleanly.
+  repeated string conflict_files = 5;
+}
+
+message WorkItemInboxResponse {
+  // Trunk and outside sources first, then items nearest first; oldest first within a source.
+  repeated InboxCommitView commits = 1;
+  // Non-empty when the line edges could not be read from GitHub (the planned bases stood in).
+  string unavailable_reason = 2;
+}
+
+message OutboxCommitView {
+  string sha = 1;
+  string subject = 2;
+}
+
+// What one successor lacks of the item.
+message OutboxSuccessorView {
+  string successor = 1;
+  repeated OutboxCommitView commits = 2;
+}
+
+message WorkItemOutboxResponse {
+  repeated OutboxSuccessorView successors = 1;
+  string unavailable_reason = 2;
+}
+
+// One item's counts, for its queue row. An item without a branch has no entry.
+message ItemCommitCountsView {
+  string item_id = 1;
+  uint32 inbox_count = 2;
+  uint32 outbox_count = 3;
+  // Inbox commits predicted to conflict.
+  uint32 conflict_count = 4;
+}
+
+message WorkQueueCommitCountsResponse {
+  repeated ItemCommitCountsView items = 1;
+  string unavailable_reason = 2;
 }

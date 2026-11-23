@@ -228,6 +228,8 @@ mod tests {
                 "work_queue_set_dependencies",
                 "work_queue_graph",
                 "work_queue_waves",
+                "work_item_inbox",
+                "work_item_outbox",
                 "work_item_merge",
                 "work_item_close",
                 "work_item_repoint",

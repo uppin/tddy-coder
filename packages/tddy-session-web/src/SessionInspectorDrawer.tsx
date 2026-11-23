@@ -22,7 +22,7 @@ import { useAppLocation } from "tddy-client-web";
 import { SessionAgentRosterPane } from "./SessionAgentRosterPane";
 import { SessionToolsTab } from "./SessionToolsTab";
 import { SessionUsageTab } from "./SessionUsageTab";
-import { SessionPullRequestTab, SessionWorktreeTab } from "tddy-workspace-web";
+import { SessionPullRequestFlowTabs, SessionWorktreeTab } from "tddy-workspace-web";
 import { defaultInspectorTab } from "./defaultInspectorTab";
 import { SessionFilesTab } from "./SessionFilesTab";
 import { SessionInspectorActivityTab } from "./SessionInspectorActivityTab";
@@ -133,6 +133,8 @@ export function SessionInspectorDrawer({
   onSwitchPeer,
   ...workQueueTabInputs
 }: SessionInspectorDrawerProps) {
+  // The Work queue tab takes the whole input set by spread; the PR tab reads the client by name.
+  const { workQueueClient } = workQueueTabInputs;
   const [pendingDelete, setPendingDelete] = useState(false);
   // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
   // An unresolvable value degrades to Details rather than rendering a blank panel; the screen
@@ -325,7 +327,8 @@ export function SessionInspectorDrawer({
           </ScrollArea>
         ) : tab === "pr" ? (
           <ScrollArea className="flex-1 min-h-0">
-            <SessionPullRequestTab
+            <SessionPullRequestFlowTabs
+              workQueueClient={workQueueClient}
               client={worktreeClient ?? null}
               sessionToken={sessionToken ?? ""}
               projectId={session.projectId}

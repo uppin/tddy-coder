@@ -276,6 +276,54 @@ impl DaemonStackTools {
         })
     }
 
+    /// `work_item_inbox` / `work_item_outbox`: the commit flow of one item, over line edges read through
+    /// the inbox (else the planned bases, named in `unavailable_reason`), in the owner's checkout.
+    async fn commit_flow_through_inbox(
+        &self,
+        env: OpEnv,
+        github: GithubSource,
+        op: WorkQueueOp,
+    ) -> Result<Value, String> {
+        use crate::work_queue::commit_flow as flow;
+        let project_id = env.project_id.clone();
+        let queue_id = env.queue_id.clone();
+        let sessions_base = env.sessions_base.clone();
+        let (queue, trunk_ref) = tokio::task::spawn_blocking(move || {
+            Ok::<_, String>((env.stack()?, github.default_branch()?))
+        })
+        .await
+        .map_err(|e| format!("the commit flow read failed to finish: {e}"))??;
+        let trunk = tddy_work_queue::lineage::trunk_branch_of(&trunk_ref);
+        let site = flow::flow_site(flow::FlowInputs {
+            pull_requests: self.pull_requests.as_ref(),
+            os_user: &self.os_user,
+            sessions_base: &sessions_base,
+            queue_id: queue_id.as_deref().unwrap_or(&self.caller_session_id),
+            caller_session_id: &self.caller_session_id,
+            project_id: &project_id,
+            session_token: &self.session_token,
+            queue: &queue,
+            trunk,
+        })
+        .await?;
+        let reason = site.unavailable_reason.clone();
+        match op {
+            WorkQueueOp::Inbox { item_id } => {
+                flow::check_item(&queue, &site, &item_id)?;
+                let entries =
+                    flow::read_flow(&site, move |f, items| f.inbox(items, &item_id)).await?;
+                Ok(flow::json::inbox(entries, &reason))
+            }
+            WorkQueueOp::Outbox { item_id } => {
+                flow::check_item(&queue, &site, &item_id)?;
+                let entries =
+                    flow::read_flow(&site, move |f, items| f.outbox(items, &item_id)).await?;
+                Ok(flow::json::outbox(entries, &reason))
+            }
+            _ => Err("not a commit flow operation".to_string()),
+        }
+    }
+
     async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {
         let read_env = env.clone();
         let inputs = tokio::task::spawn_blocking(move || ops::refresh_inputs(&read_env, &github))
@@ -351,6 +399,9 @@ impl WorkQueueToolPort for DaemonStackTools {
         }
         if matches!(op, WorkQueueOp::Graph) {
             return self.graph_through_inbox(env, github).await;
+        }
+        if let WorkQueueOp::Inbox { .. } | WorkQueueOp::Outbox { .. } = &op {
+            return self.commit_flow_through_inbox(env, github, op).await;
         }
         // The store's locks, git and GitHub are all blocking.
         tokio::task::spawn_blocking(move || ops::run(&env, &github, op))

@@ -137,6 +137,8 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
     defs.extend(crate::work_queue_lineage_tools::work_queue_lineage_tool_defs());
     // `#workqueue` 10/14: the waves tool follows the lineage tools; read-only.
     defs.push(crate::work_queue_waves_tools::work_queue_waves_tool_def());
+    // `#workqueue` 11/14: the commit-flow reads follow the lineage tools; the owner has them.
+    defs.extend(crate::work_item_commit_flow_tools::work_item_commit_flow_tool_defs());
     defs
 }
 

@@ -609,4 +609,35 @@ impl WorkQueueService for TestDaemon {
             .get_work_queue_waves(request)
             .await
     }
+
+    async fn get_work_item_inbox(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemInboxResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .get_work_item_inbox(request)
+            .await
+    }
+
+    async fn get_work_item_outbox(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkItemCommitFlowRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemOutboxResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .get_work_item_outbox(request)
+            .await
+    }
+
+    async fn get_work_queue_commit_counts(
+        &self,
+        request: Request<tddy_service::proto::work_queue::GetWorkQueueGraphRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkQueueCommitCountsResponse>, Status>
+    {
+        self.handlers
+            .work_queue_service()
+            .get_work_queue_commit_counts(request)
+            .await
+    }
 }
