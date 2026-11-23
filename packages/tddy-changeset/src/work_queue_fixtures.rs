@@ -1,19 +1,20 @@
 //! Test fixtures for code that reads or writes a session's PR stack.
 //!
-//! A stack lives in the project's store, so a test needs the layout the daemon lays out — a
-//! session directory at `<base>/sessions/<id>` with a `.session.yaml` naming its project, beside
-//! `<base>/projects` — not a bare temp directory. Compiled only for this crate's own tests and for
+//! A work queue lives in its owning session's directory, so a test needs the layout the daemon lays
+//! out — a session directory at `<base>/sessions/<id>` with a `.session.yaml` naming its project —
+//! not a bare temp directory. Compiled only for this crate's own tests and for
 //! crates that ask for the `test-support` feature in their `[dev-dependencies]`.
 
 use std::path::{Path, PathBuf};
 
 use crate::changeset::{
-    read_changeset, read_session_stack, update_stack_atomic, write_changeset, Changeset, WorkQueue,
+    read_session_stack, update_stack_atomic, write_changeset, Changeset, WorkQueue,
 };
 use crate::session_lifecycle::unified_session_dir_path;
 use crate::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
 };
+use crate::session_work_queue::SessionWorkQueues;
 use crate::work_queue_store::WorkQueueStore;
 
 /// The project every fixture session belongs to.
@@ -44,12 +45,12 @@ impl AStackHost {
 
     /// The host's stack store.
     pub fn store(&self) -> WorkQueueStore {
-        WorkQueueStore::new(self.projects_dir())
+        WorkQueueStore::new(self.base())
     }
 
     /// The directory of session `session_id`, with `.session.yaml` naming [`A_PROJECT`] and
-    /// `changeset` as its manifest. Any `stack` on `changeset` is written as given — a legacy
-    /// copy; use [`Self::orchestrator`] for a stack the store holds.
+    /// `changeset` as its manifest. The session owns no queue; use [`Self::orchestrator`] for one
+    /// that does.
     pub fn session(&self, session_id: &str, changeset: Changeset) -> PathBuf {
         self.session_of_project(session_id, A_PROJECT, changeset)
     }
@@ -75,7 +76,7 @@ impl AStackHost {
         dir
     }
 
-    /// A `pr-stack` session whose project holds `stack`, named by the session's `queue_id`.
+    /// A session that owns `stack` as its work queue.
     pub fn orchestrator(&self, session_id: &str, stack: WorkQueue) -> PathBuf {
         let dir = self.session(
             session_id,
@@ -89,24 +90,43 @@ impl AStackHost {
     }
 }
 
-/// Make `stack` the stack of the session at `session_dir` (created in the project's store when the
-/// session has none yet).
+/// Make `stack` the work queue of the session at `session_dir`, giving the session a queue first
+/// when it owns none (as its start would have).
 pub fn seed_session_stack(session_dir: &Path, stack: WorkQueue) {
+    let sessions_dir = session_dir.parent().expect("a session directory");
+    let session_id = session_dir
+        .file_name()
+        .expect("a session directory")
+        .to_string_lossy()
+        .into_owned();
+    let queues = SessionWorkQueues::new(sessions_dir);
+    if queues.read(&session_id).expect("read the queue").is_none() {
+        queues
+            .create_for_session(&session_id, A_PROJECT, 0)
+            .expect("create the session's queue");
+    }
     update_stack_atomic(session_dir, |s| *s = stack).expect("seed the session's stack");
 }
 
-/// The stack of the session at `session_dir`, read from the project's store.
+/// The work queue of the session at `session_dir`.
 pub fn stack_on_disk(session_dir: &Path) -> WorkQueue {
     read_session_stack(session_dir)
         .expect("read the session's stack")
         .expect("the session names a stack")
 }
 
-/// The id of the stack the session at `session_dir` names.
+/// The id of the queue the session at `session_dir` owns — its own session id — or `None` when it
+/// owns none.
 pub fn queue_id_of(session_dir: &Path) -> Option<String> {
-    read_changeset(session_dir)
-        .expect("read changeset")
-        .work_queue_id
+    read_session_stack(session_dir)
+        .expect("read the session's queue")
+        .map(|_| {
+            session_dir
+                .file_name()
+                .expect("a session directory")
+                .to_string_lossy()
+                .into_owned()
+        })
 }
 
 /// A host with one session directory in it (`orch`, of [`A_PROJECT`], no changeset yet) — the
@@ -146,10 +166,13 @@ impl ASessionDir {
 }
 
 /// Write `changeset` as the manifest of the session at `session_dir` — creating the directory and
-/// a `.session.yaml` naming [`A_PROJECT`] when it has none — with any `stack` it carries moved into
-/// the project's store, so a test that spelled its orchestrator as one `Changeset { stack, .. }`
-/// literal keeps that spelling.
-pub fn write_changeset_with_stack(session_dir: &Path, mut changeset: Changeset) {
+/// a `.session.yaml` naming [`A_PROJECT`] when it has none — and, when `stack` is given, make the
+/// session the owner of a work queue holding it.
+pub fn write_changeset_with_stack(
+    session_dir: &Path,
+    changeset: Changeset,
+    stack: Option<WorkQueue>,
+) {
     std::fs::create_dir_all(session_dir).expect("session dir");
     if !session_dir
         .join(crate::session_metadata::SESSION_METADATA_FILENAME)
@@ -164,7 +187,6 @@ pub fn write_changeset_with_stack(session_dir: &Path, mut changeset: Changeset) 
         )
         .expect("write .session.yaml");
     }
-    let stack = changeset.stack.take();
     write_changeset(session_dir, &changeset).expect("write changeset.yaml");
     if let Some(stack) = stack {
         seed_session_stack(session_dir, stack);

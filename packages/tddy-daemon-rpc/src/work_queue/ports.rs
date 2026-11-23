@@ -13,13 +13,12 @@ use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::types::BranchSession;
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, CreateWorkQueueRequest, CreateWorkQueueResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
-    LinkWorkItemRequest, LinkWorkItemResponse, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse,
+    AddWorkItemRequest, AddWorkItemResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
 };
 use tddy_session_lifecycle::connection_service::{
     local_gh_github_token, project_github_token, resolve_os_user, spawn_blocking_with_timeout,
@@ -98,7 +97,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
         // enrichment so the response's `work_queue_json` is byte-for-byte the same wire shape
         // `PrStackScreen`'s `parseWorkQueue` already knows how to read.
-        let work_queue_json = work_queue_json_of(&session_dir)?;
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
 
         log::info!(
             "AddWorkItem: success session_id={} node_id={} title={:?}",
@@ -467,7 +466,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // `ReorderWorkItem` answer with, so a caller that renders the plan reuses `parseWorkQueue`
         // and does not re-read what this call already knows.
         Ok(Response::new(LinkWorkItemResponse {
-            work_queue_json: work_queue_json_of(&session_dir)?,
+            work_queue_json: session_list_enrichment::work_queue_json_of(&session_dir),
         }))
     }
 
@@ -609,7 +608,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // Re-read the just-updated changeset and reuse the same serializer as `ListSessions`
         // enrichment so the response's `work_queue_json` is the exact wire shape `PrStackScreen`
         // already knows how to parse.
-        let work_queue_json = work_queue_json_of(&session_dir)?;
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
         Ok(Response::new(RepointWorkItemResponse { work_queue_json }))
     }
 
@@ -662,7 +661,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
 
         // The same serializer `ListSessions` enrichment uses, so the response's `work_queue_json` is
         // the exact wire shape `PrStackScreen`'s `parseWorkQueue` already reads.
-        let work_queue_json = work_queue_json_of(&session_dir)?;
+        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
         Ok(Response::new(ReorderWorkItemResponse { work_queue_json }))
     }
 
@@ -858,19 +857,4 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
     ) -> Result<Response<GetWorkQueueResponse>, Status> {
         self.get_work_queue_rpc(request).await
     }
-
-    async fn create_work_queue(
-        &self,
-        request: Request<CreateWorkQueueRequest>,
-    ) -> Result<Response<CreateWorkQueueResponse>, Status> {
-        self.create_work_queue_rpc(request).await
-    }
-}
-
-/// The session's stack as `work_queue_json`, through the serializer `ListSessions` enrichment uses.
-fn work_queue_json_of(dir: &std::path::Path) -> Result<String, Status> {
-    let changeset = tddy_core::read_changeset(dir).map_err(|e| Status::internal(e.to_string()))?;
-    Ok(session_list_enrichment::work_queue_json_for_changeset(
-        dir, &changeset,
-    ))
 }

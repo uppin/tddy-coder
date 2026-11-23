@@ -24,12 +24,15 @@ fn sweep_headless_files(
 }
 
 /// What earlier runs left that this one must not serve: headless conversation files (their MCP
-/// configs carry agent credentials), and PR stacks still in a `changeset.yaml`, moved into their
-/// projects' store — idempotent, self-logging; a session it cannot move lists no stack plan.
+/// configs carry agent credentials), and the project stack records a work queue replaced
+/// (`#workqueue` 5/14) — deleted, not migrated; idempotent, self-logging.
 pub(super) fn sweep_what_the_last_run_left(config: &DaemonConfig, tddy_data_dir: &std::path::Path) {
     sweep_headless_files(config, tddy_data_dir);
-    tddy_work_queue::queue_migration::migrate_session_stacks(
-        tddy_data_dir,
+    match tddy_core::session_work_queue::drop_old_project_stack_records(
         &tddy_data_dir.join("projects"),
-    );
+    ) {
+        Ok(0) => {}
+        Ok(dropped) => log::info!("dropped the old stack records of {dropped} project(s)"),
+        Err(e) => log::error!("could not drop the old project stack records: {e}"),
+    }
 }

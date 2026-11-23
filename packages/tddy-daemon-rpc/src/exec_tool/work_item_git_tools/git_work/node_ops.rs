@@ -37,7 +37,7 @@ pub(crate) fn merge_node(env: &GitEnv, node_id: &str) -> Result<Value, String> {
     journal.merge_phase = MergePhase::PrMerged { sha: sha.clone() };
     write_journal(env, &journal)?;
     env.set_phase(node_id, "merged")?;
-    let _ = std::fs::remove_file(journal_path(env));
+    let _ = std::fs::remove_file(journal_path(env)?);
     Ok(json!({ "merged": true, "sha": sha }))
 }
 

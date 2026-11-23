@@ -98,18 +98,18 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
         Changeset {
             recipe: Some("pr-stack".to_string()),
             repo_path: Some(root.to_string_lossy().into_owned()),
-            stack: Some(WorkQueue {
-                version: 1,
-                nodes: vec![WorkItem {
-                    node_id: NODE.to_string(),
-                    title: "n1 title".to_string(),
-                    branch: Some(NODE_BRANCH.to_string()),
-                    session_id: Some("session-for-n1".to_string()),
-                    ..WorkItem::default()
-                }],
-            }),
             ..Changeset::default()
         },
+        Some(WorkQueue {
+            version: 1,
+            nodes: vec![WorkItem {
+                node_id: NODE.to_string(),
+                title: "n1 title".to_string(),
+                branch: Some(NODE_BRANCH.to_string()),
+                session_id: Some("session-for-n1".to_string()),
+                ..WorkItem::default()
+            }],
+        }),
     );
 
     let projects_dir = world.data_dir().join("projects");

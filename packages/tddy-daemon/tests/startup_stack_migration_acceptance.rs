@@ -1,24 +1,15 @@
-//! The daemon moves every session-held PR stack into its project while it starts
-//! (`#orchestrators` 2/11).
+//! The daemon drops every pre-queue project stack record while it starts (`#workqueue` 5/14): a
+//! work queue now belongs to its session, and the old records are deleted, not migrated.
 //!
-//! `tddy-work-queue`'s `queue_migration_sweep_acceptance` proves what the sweep does to a sessions
+//! `tddy-changeset`'s `session_work_queue_acceptance` proves what the drop does to a projects
 //! directory. This suite proves the daemon runs it: `runtime::build`, over a data directory left by
-//! an older daemon, must leave that directory migrated before anything is served.
+//! an older daemon, must leave no `stacks/` directory before anything is served.
 
 use std::path::Path;
 
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset, WorkItem, WorkQueue};
-use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::session_metadata::{
-    write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
-};
-use tddy_core::work_queue_store::WorkQueueStore;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{self, RuntimeOptions};
 use tokio::net::TcpListener;
-
-const A_PROJECT: &str = "proj-legacy";
-const A_LEGACY_ORCHESTRATOR: &str = "orch-legacy";
 
 async fn a_free_tcp_port() -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0))
@@ -47,54 +38,16 @@ github:
     serde_yaml::from_str(&yaml).expect("the config fixture did not parse")
 }
 
-fn a_two_node_stack() -> WorkQueue {
-    WorkQueue {
-        version: 1,
-        nodes: vec![
-            WorkItem {
-                node_id: "n1".to_string(),
-                title: "Add token store".to_string(),
-                ..WorkItem::default()
-            },
-            WorkItem {
-                node_id: "n2".to_string(),
-                title: "Rotate tokens".to_string(),
-                parents: vec!["n1".to_string()],
-                ..WorkItem::default()
-            },
-        ],
-    }
-}
-
-/// A pr-stack session as an older daemon left it: the stack inside its `changeset.yaml`.
-fn a_legacy_orchestrator_in(data_dir: &Path, stack: WorkQueue) -> std::path::PathBuf {
-    let dir = unified_session_dir_path(data_dir, A_LEGACY_ORCHESTRATOR);
-    std::fs::create_dir_all(&dir).expect("session dir");
-    write_initial_tool_session_metadata(
-        &dir,
-        InitialToolSessionMetadataOpts {
-            project_id: A_PROJECT.to_string(),
-            ..InitialToolSessionMetadataOpts::default()
-        },
-    )
-    .expect("write .session.yaml");
-    write_changeset(
-        &dir,
-        &Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(stack),
-            ..Changeset::default()
-        },
-    )
-    .expect("write the legacy changeset.yaml");
-    dir
-}
-
 #[tokio::test]
-async fn building_the_daemon_moves_a_session_held_stack_into_its_project() {
-    // Given — a data directory holding one pr-stack session with its stack in its changeset
+async fn building_the_daemon_drops_the_old_project_stack_records() {
+    // Given — a data directory holding a project's old stack record and its journal, beside other
+    // project data
     let data_dir = tempfile::tempdir().expect("a data directory");
-    let session_dir = a_legacy_orchestrator_in(data_dir.path(), a_two_node_stack());
+    let project = data_dir.path().join("projects/proj-legacy");
+    std::fs::create_dir_all(project.join("stacks")).unwrap();
+    std::fs::write(project.join("stacks/0190.yaml"), "stack_id: '0190'\n").unwrap();
+    std::fs::write(project.join("stacks/0190.op.json"), "{}").unwrap();
+    std::fs::write(project.join("session-watches.json"), "{}").unwrap();
 
     // When — the daemon is built over it
     let _runtime = runtime::build(
@@ -104,17 +57,10 @@ async fn building_the_daemon_moves_a_session_held_stack_into_its_project() {
     .await
     .expect("the binary runtime did not build");
 
-    // Then — the changeset names a project record holding that stack, and carries no copy
-    let migrated = read_changeset(&session_dir).expect("read the migrated changeset");
-    assert_eq!(migrated.stack, None, "the legacy copy must be dropped");
-    let queue_id = migrated
-        .work_queue_id
-        .expect("the changeset must name its project stack");
-    let record = WorkQueueStore::new(data_dir.path().join("projects"))
-        .read(A_PROJECT, &queue_id)
-        .expect("the project must hold the named stack");
-    assert_eq!(
-        (record.created_by_session_id.as_str(), record.stack),
-        (A_LEGACY_ORCHESTRATOR, a_two_node_stack())
+    // Then — the old records are gone and nothing else is
+    assert!(
+        !project.join("stacks").exists(),
+        "the old records are dropped"
     );
+    assert!(project.join("session-watches.json").exists());
 }

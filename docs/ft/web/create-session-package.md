@@ -20,6 +20,10 @@ shown while a start clones over SSH.
   [tool-session-model-selection.md](tool-session-model-selection.md),
   [web-workspace-setup.md](web-workspace-setup.md)).
 - A start that asks for a key passphrase shows the Hosts screen's dialog over the form, as before.
+- A **"With work queue"** checkbox (`create-session-with-work-queue`, unchecked by default) starts
+  the session owning an empty work queue (`StartSessionRequest.with_work_queue`). A queue is created
+  only at start, so a session started without it has none — and no Work queue tab
+  ([session-drawer.md § Work queue tab](session-drawer.md#work-queue-tab)).
 - The Host field groups the hosts a daemon reaches through a remote shell (its SSH config aliases
   and its Coder workspaces) under that daemon. Choosing one starts the session on the parent daemon with the derived host as
   its target, and the form says that permission prompts are answered in the terminal.
@@ -43,5 +47,6 @@ shown while a start clones over SSH.
       cannot be chosen (`CreateSessionCoderHostAcceptance`).
 - [x] A parent's listing failure is shown beside the Host field and the daemon stays offered
       (`CreateSessionDerivedHostAcceptance`).
+- [x] Checking "With work queue" starts the session with a queue (`CreateSessionWorkQueueOptionAcceptance`).
 
 Technical reference: [packages/tddy-session-create-web/docs/README.md](../../../packages/tddy-session-create-web/docs/README.md).

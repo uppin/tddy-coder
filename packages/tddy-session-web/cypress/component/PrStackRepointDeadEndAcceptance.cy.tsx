@@ -31,7 +31,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
@@ -205,7 +205,7 @@ it("sends the named target branch when Repoint is clicked", () => {
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(WorkQueueService.method.repointWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
+    expect(calls[0].stack?.queueId).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].itemId).to.equal("n2");
     expect(calls[0].targetBaseBranch).to.equal(DEFAULT_BRANCH);
   });

@@ -69,6 +69,9 @@ pub struct StartSessionArgs {
     /// The session's name, as the web's rename sets it: trimmed, empty for none, at most 80
     /// characters on one line.
     pub display_name: String,
+    /// Start the session with an empty work queue it owns (`#workqueue` 5/14). An orchestrator start
+    /// gets one without asking.
+    pub with_work_queue: bool,
 }
 
 /// A document on a connected host to attach to the new session — the form's host-document
@@ -282,6 +285,7 @@ impl StartSessionArgs {
             session_role: self.session_role,
             effort: self.effort,
             display_name: self.display_name,
+            with_work_queue: self.with_work_queue,
             ..Default::default()
         }
     }

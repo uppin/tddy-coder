@@ -150,10 +150,10 @@ fn a_planned_node(node_id: &str, parents: &[&str]) -> WorkItem {
 
 fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
-        stack: Some(WorkQueue { version: 1, nodes }),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs);
+    let cs_stack = Some(WorkQueue { version: 1, nodes });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs, cs_stack.clone());
 }
 
 fn parents_of(dir: &Path, node_id: &str) -> Vec<String> {

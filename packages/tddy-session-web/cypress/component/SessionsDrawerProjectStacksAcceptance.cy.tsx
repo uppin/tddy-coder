@@ -1,8 +1,8 @@
 /**
  * Acceptance: a project's PR stacks in the sessions drawer (`#orchestrators` 9/11). Under each project
- * header a **Stacks** row lists the project's stacks on every host (`ListProjectWorkQueues`); opening one
- * shows the stack view at `#/sessions/project/<projectId>/queue/<queueId>`, read by the stack's
- * address from the host that holds it.
+ * header a **Stacks** row lists the project's work queues on every host (`ListProjectWorkQueues`);
+ * opening one opens its owning session's inspector on the Work queue tab (`#workqueue` 5/14 — a queue's
+ * id is its session's), read by the queue's address from the host that holds it.
  *
  * The whole Sessions screen over the in-memory ConnectRPC backend (`mountWithRpc`), so the
  * assertions read the typed requests the screen sent.
@@ -45,7 +45,17 @@ function aStackSummary(address: typeof AUTH_STACK, title: string, total: number)
 /** The Sessions screen over a daemon listing beta, whose stacks are `AUTH_STACK` and `BILLING_STACK`. */
 function theSessionsScreenWithBetasStacks() {
   const backend = aSessionServiceBackend({
-    sessions: [{ sessionId: "b1", projectId: BETA }],
+    sessions: [
+      { sessionId: "b1", projectId: BETA },
+      // The sessions that own the two queues
+      { sessionId: AUTH_STACK.queueId, projectId: BETA, ownsWorkQueue: true },
+      {
+        sessionId: BILLING_STACK.queueId,
+        projectId: BETA,
+        ownsWorkQueue: true,
+        daemonInstanceId: BILLING_STACK.daemonInstanceId,
+      },
+    ],
     projectsOverride: [aListedProject(BETA, "beta")],
   })
     .onUnary(WorkQueueService.method.listProjectWorkQueues, (req) =>

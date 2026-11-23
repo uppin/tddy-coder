@@ -80,25 +80,29 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
             current: WorkflowState::new("StackPlanned"),
             ..Changeset::default().state
         },
-        stack: Some(WorkQueue {
-            version: 1,
-            nodes: vec![WorkItem {
-                node_id: "n1".into(),
-                title: "Child PR".into(),
-                description: String::new(),
-                branch_suggestion: Some("feature/child-n1".into()),
-                branch: None,
-                session_id: None,
-                parents: vec![],
-                pr_status: None,
-                child_state: None,
-                internal_status: None,
-                display_order: None,
-            }],
-        }),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, orch_cs);
+    let orch_cs_stack = Some(WorkQueue {
+        version: 1,
+        nodes: vec![WorkItem {
+            node_id: "n1".into(),
+            title: "Child PR".into(),
+            description: String::new(),
+            branch_suggestion: Some("feature/child-n1".into()),
+            branch: None,
+            session_id: None,
+            parents: vec![],
+            pr_status: None,
+            child_state: None,
+            internal_status: None,
+            display_order: None,
+        }],
+    });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+        &orch_dir,
+        orch_cs,
+        orch_cs_stack.clone(),
+    );
 
     let child_id = "018fbbbb-0002-7000-bbbb-000000000002";
     let child_dir = unified_session_dir_path(&sessions_home, child_id);
@@ -136,25 +140,29 @@ fn link_work_item_sets_session_id_and_branch() {
 
     let cs = Changeset {
         name: Some("orch".into()),
-        stack: Some(WorkQueue {
-            version: 1,
-            nodes: vec![WorkItem {
-                node_id: "n1".into(),
-                title: "Task 1".into(),
-                description: String::new(),
-                branch_suggestion: Some("feature/task-1".into()),
-                branch: None,
-                session_id: None,
-                parents: vec![],
-                pr_status: None,
-                child_state: None,
-                internal_status: None,
-                display_order: None,
-            }],
-        }),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orch_dir, cs);
+    let cs_stack = Some(WorkQueue {
+        version: 1,
+        nodes: vec![WorkItem {
+            node_id: "n1".into(),
+            title: "Task 1".into(),
+            description: String::new(),
+            branch_suggestion: Some("feature/task-1".into()),
+            branch: None,
+            session_id: None,
+            parents: vec![],
+            pr_status: None,
+            child_state: None,
+            internal_status: None,
+            display_order: None,
+        }],
+    });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+        &orch_dir,
+        cs,
+        cs_stack.clone(),
+    );
 
     // When
     link_work_item_to_session(

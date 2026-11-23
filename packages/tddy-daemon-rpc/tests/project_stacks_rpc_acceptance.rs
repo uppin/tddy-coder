@@ -23,12 +23,8 @@ use support::{
     a_host, Host, InProcessPeers, HOST_A, HOST_B, OTHER_PROJECT, SILENT_HOST, THIS_PROJECT,
     WORK_QUEUE_SERVICE,
 };
-use tddy_core::changeset::{write_changeset, Changeset, WorkItem, WorkQueue};
-use tddy_core::session_lifecycle::unified_session_dir_path;
-use tddy_core::session_metadata::{
-    read_session_metadata, write_initial_tool_session_metadata, write_session_metadata,
-    InitialToolSessionMetadataOpts,
-};
+use tddy_core::changeset::{WorkItem, WorkQueue};
+use tddy_core::session_work_queue::SessionWorkQueues;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore, WorkQueueStoreError};
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::work_queue::{
@@ -78,45 +74,46 @@ trait HostStacks {
     fn stack_store(&self) -> WorkQueueStore;
     /// A stack of `project_id` in this host's store, planned by a session nobody lists.
     fn holding_a_stack(&self, project_id: &str, titles: &[&str]) -> WorkQueueRecord;
-    /// An orchestrator-role session of `record`'s project whose changeset names `record` — and no
-    /// `pr-stack` recipe, since nothing keys on a recipe any more.
-    fn with_an_orchestrator_naming(&self, session_id: &str, record: &WorkQueueRecord);
+    /// The same, owned by the session `owner` (a queue's id is its owner's).
+    fn holding_a_stack_owned_by(
+        &self,
+        project_id: &str,
+        owner: &str,
+        titles: &[&str],
+    ) -> WorkQueueRecord;
     fn titles_of(&self, project_id: &str, queue_id: &str) -> Vec<String>;
 }
 
 impl HostStacks for Host {
     fn stack_store(&self) -> WorkQueueStore {
-        WorkQueueStore::new(self.sessions.path().join("projects"))
+        WorkQueueStore::new(self.sessions.path())
     }
 
     fn holding_a_stack(&self, project_id: &str, titles: &[&str]) -> WorkQueueRecord {
-        self.stack_store()
-            .create(project_id, "a-planner-nobody-lists", a_stack_of(titles))
-            .expect("seed a stack in the host's store")
+        static NEXT_OWNER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let owner = format!(
+            "queue-owner-{}",
+            NEXT_OWNER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        self.holding_a_stack_owned_by(project_id, &owner, titles)
     }
 
-    fn with_an_orchestrator_naming(&self, session_id: &str, record: &WorkQueueRecord) {
-        let dir = unified_session_dir_path(self.sessions.path(), session_id);
-        std::fs::create_dir_all(&dir).expect("session dir");
-        write_initial_tool_session_metadata(
-            &dir,
-            InitialToolSessionMetadataOpts {
-                project_id: record.project_id.clone(),
-                ..InitialToolSessionMetadataOpts::default()
-            },
-        )
-        .expect("write .session.yaml");
-        let mut meta = read_session_metadata(&dir).expect("read .session.yaml");
-        meta.session_role = Some("orchestrator".to_string());
-        write_session_metadata(&dir, &meta).expect("write the orchestrator role");
-        write_changeset(
-            &dir,
-            &Changeset {
-                work_queue_id: Some(record.queue_id.clone()),
-                ..Changeset::default()
-            },
-        )
-        .expect("write changeset.yaml");
+    fn holding_a_stack_owned_by(
+        &self,
+        project_id: &str,
+        owner: &str,
+        titles: &[&str],
+    ) -> WorkQueueRecord {
+        let queues = SessionWorkQueues::new(self.sessions.path().join("sessions"));
+        queues
+            .create_for_session(owner, project_id, 0)
+            .expect("the owner gets its queue");
+        queues
+            .update(owner, |queue| *queue = a_stack_of(titles))
+            .expect("the queue is filled");
+        self.stack_store()
+            .read(project_id, owner)
+            .expect("seed a queue in the host's store")
     }
 
     fn titles_of(&self, project_id: &str, queue_id: &str) -> Vec<String> {
@@ -261,14 +258,13 @@ async fn list_project_work_queues_lists_every_stack_of_the_project_on_every_host
     // Given — a stack of the project on each host, an orchestrator on A naming A's, and a stack of
     // another project on A that must not be listed
     let world = two_hosts_in_one_common_room();
-    let on_a = world
-        .a
-        .holding_a_stack(THIS_PROJECT, &["Add token store", "Add auth middleware"]);
+    let on_a = world.a.holding_a_stack_owned_by(
+        THIS_PROJECT,
+        ORCHESTRATOR_ON_A,
+        &["Add token store", "Add auth middleware"],
+    );
     let on_b = world.b.holding_a_stack(THIS_PROJECT, &["Add login screen"]);
     world.a.holding_a_stack(OTHER_PROJECT, &["Unrelated work"]);
-    world
-        .a
-        .with_an_orchestrator_naming(ORCHESTRATOR_ON_A, &on_a);
 
     // When
     let listing = list_project_work_queues(&world.a, THIS_PROJECT)
@@ -387,13 +383,13 @@ async fn a_stack_address_naming_another_host_is_served_there() {
 }
 
 #[tokio::test]
-async fn a_session_id_address_still_resolves_through_its_stack_id() {
-    // Given — an orchestrator-role session, not a `pr-stack` recipe, whose changeset names a stack
+async fn a_session_id_address_resolves_to_the_queue_that_session_owns() {
+    // Given — a session that owns a work queue
     let world = two_hosts_in_one_common_room();
-    let on_a = world.a.holding_a_stack(THIS_PROJECT, &["Add token store"]);
-    world
-        .a
-        .with_an_orchestrator_naming(ORCHESTRATOR_ON_A, &on_a);
+    let on_a =
+        world
+            .a
+            .holding_a_stack_owned_by(THIS_PROJECT, ORCHESTRATOR_ON_A, &["Add token store"]);
 
     // When
     add_work_item_by_session(&world.a, ORCHESTRATOR_ON_A, "Add auth middleware")
@@ -404,85 +400,5 @@ async fn a_session_id_address_still_resolves_through_its_stack_id() {
     assert_eq!(
         world.a.titles_of(THIS_PROJECT, &on_a.queue_id),
         vec!["Add token store", "Add auth middleware"]
-    );
-}
-
-#[tokio::test]
-async fn create_work_queue_answers_an_address_that_then_takes_planned_prs() {
-    // Given — two hosts in one room
-    let world = two_hosts_in_one_common_room();
-
-    // When — a stack is created by address (the web's "New stack"), with a title
-    let created = world
-        .a
-        .daemon
-        .create_work_queue(Request::direct(
-            tddy_service::proto::work_queue::CreateWorkQueueRequest {
-                session_token: TEST_TOKEN.to_string(),
-                project_id: THIS_PROJECT.to_string(),
-                title: "Auth stack".to_string(),
-                daemon_instance_id: String::new(),
-            },
-        ))
-        .await
-        .expect("CreateWorkQueue on the owning host")
-        .into_inner();
-    let address = created.stack.expect("the answer names the new stack");
-
-    // Then — the record is in A's store, titled, empty, and addressable
-    let record = world
-        .a
-        .stack_store()
-        .read(THIS_PROJECT, &address.queue_id)
-        .expect("the created stack is in the creating host's store");
-    assert_eq!(record.title.as_deref(), Some("Auth stack"));
-    assert!(record.stack.nodes.is_empty());
-    add_work_item_by_address(&world.a, address, "Add token store")
-        .await
-        .expect("a planned PR can be added to the created stack by address");
-    assert_eq!(
-        world.a.titles_of(THIS_PROJECT, &record.queue_id),
-        vec!["Add token store"]
-    );
-}
-
-#[tokio::test]
-async fn create_work_queue_naming_another_host_is_created_there() {
-    // Given — two hosts in one room
-    let world = two_hosts_in_one_common_room();
-
-    // When — A is asked to create a stack owned by B
-    let created = world
-        .a
-        .daemon
-        .create_work_queue(Request::direct(
-            tddy_service::proto::work_queue::CreateWorkQueueRequest {
-                session_token: TEST_TOKEN.to_string(),
-                project_id: THIS_PROJECT.to_string(),
-                title: String::new(),
-                daemon_instance_id: HOST_B.to_string(),
-            },
-        ))
-        .await
-        .expect("CreateWorkQueue forwarded to the owning host")
-        .into_inner();
-    let address = created.stack.expect("the answer names the new stack");
-
-    // Then — the record is in B's store, not A's
-    assert!(
-        world
-            .b
-            .stack_store()
-            .read(THIS_PROJECT, &address.queue_id)
-            .is_ok(),
-        "the created stack lives on the host the request named"
-    );
-    assert!(
-        world
-            .a
-            .stack_store()
-            .read(THIS_PROJECT, &address.queue_id)
-            .is_err(),
-        "the created stack does not also live on the asking host"
     );
 }

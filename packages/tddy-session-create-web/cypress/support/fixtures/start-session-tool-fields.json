@@ -37,6 +37,7 @@
     "ssh_config_host",
     "target",
     "tool_path",
+    "with_work_queue",
     "work_item_id",
     "work_queue_parent",
     "work_queue_parent_daemon_instance_id"

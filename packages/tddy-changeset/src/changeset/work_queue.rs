@@ -3,11 +3,10 @@
 //! A data model of its own, unrelated to [`super::model::Changeset`] beyond being stored
 //! alongside it — which is why it was the first seam the 964-line file offered.
 
-use super::io::{read_changeset, write_changeset_atomic};
-use super::model::{Changeset, GithubPrStatus, PrInternalStatus};
+use super::io::read_changeset;
+use super::model::{GithubPrStatus, PrInternalStatus};
 use crate::error::WorkflowError;
-use crate::session_metadata::{read_session_metadata, SESSION_METADATA_FILENAME};
-use crate::work_queue_store::{WorkQueueStore, WorkQueueStoreError};
+use crate::session_work_queue::{SessionWorkQueueError, SessionWorkQueues};
 use std::collections::BTreeMap;
 use std::path::Path;
 use tddy_workflow::ids::WorkflowState;
@@ -247,18 +246,30 @@ impl WorkQueue {
     }
 }
 
-/// Where a session's PR stack lives: the project's stack store, the session's project, and the
-/// session's own id (the `created_by_session_id` of a stack it plans).
+/// The work queue a session owns, read from its own directory (`<session_dir>/work-queue.yaml`).
 ///
-/// The projects directory follows the sessions layout every daemon uses — `<base>/sessions/<id>`
-/// sits beside `<base>/projects` — and the project id comes from the session's `.session.yaml`.
-struct SessionWorkQueueHome {
-    store: WorkQueueStore,
-    project_id: String,
-    session_id: String,
+/// `Ok(None)` when the session owns none — a queue is created only when a session is started with
+/// one (`#workqueue` 5/14).
+pub fn read_session_stack(session_dir: &Path) -> Result<Option<WorkQueue>, WorkflowError> {
+    let (queues, session_id) = queues_of(session_dir)?;
+    queues
+        .read(&session_id)
+        .map(|record| record.map(|record| record.queue))
+        .map_err(queue_error)
 }
 
-fn session_work_queue_home(session_dir: &Path) -> Result<SessionWorkQueueHome, WorkflowError> {
+/// Atomically update the work queue a session owns, under the record's lock. A session that owns
+/// none is refused with [`NO_WORK_QUEUE_HINT`](crate::session_work_queue::NO_WORK_QUEUE_HINT): no write
+/// creates a queue.
+pub fn update_stack_atomic(
+    orchestrator_session_dir: &Path,
+    f: impl FnOnce(&mut WorkQueue),
+) -> Result<(), WorkflowError> {
+    let (queues, session_id) = queues_of(orchestrator_session_dir)?;
+    queues.update(&session_id, f).map(drop).map_err(queue_error)
+}
+
+fn queues_of(session_dir: &Path) -> Result<(SessionWorkQueues, String), WorkflowError> {
     let not_a_session_dir = || {
         WorkflowError::PlanDirInvalid(format!(
             "{} is not a session directory under <base>/sessions/",
@@ -269,110 +280,15 @@ fn session_work_queue_home(session_dir: &Path) -> Result<SessionWorkQueueHome, W
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or_else(not_a_session_dir)?;
-    let base = session_dir
+    let sessions_dir = session_dir
         .parent()
         .filter(|p| p.ends_with("sessions"))
-        .and_then(Path::parent)
         .ok_or_else(not_a_session_dir)?;
-    let project_id = read_session_metadata(session_dir)?.project_id;
-    if project_id.trim().is_empty() {
-        return Err(WorkflowError::SessionMissing(format!(
-            "{} records no project, so its PR stack has no project to live in",
-            session_dir.join(SESSION_METADATA_FILENAME).display()
-        )));
-    }
-    Ok(SessionWorkQueueHome {
-        store: WorkQueueStore::new(base.join("projects")),
-        project_id,
-        session_id,
-    })
+    Ok((SessionWorkQueues::new(sessions_dir), session_id))
 }
 
-fn store_error(e: WorkQueueStoreError) -> WorkflowError {
+fn queue_error(e: SessionWorkQueueError) -> WorkflowError {
     WorkflowError::ChangesetInvalid(e.to_string())
-}
-
-/// The stack an orchestrator session planned, read from the project's store.
-///
-/// `Ok(None)` when the session has planned none (an ordinary session). A changeset still carrying
-/// the pre-store `stack` field is refused, not read: the daemon's startup sweep moves it, and a
-/// reader that quietly honoured both would hide a sweep that did not run.
-pub fn read_session_stack(session_dir: &Path) -> Result<Option<WorkQueue>, WorkflowError> {
-    let changeset = read_changeset(session_dir)?;
-    read_stack_of(session_dir, &changeset)
-}
-
-/// [`read_session_stack`] over a changeset already read.
-pub fn read_stack_of(
-    session_dir: &Path,
-    changeset: &Changeset,
-) -> Result<Option<WorkQueue>, WorkflowError> {
-    let Some(queue_id) = changeset.work_queue_id.as_deref() else {
-        refuse_unmigrated_stack(session_dir, changeset)?;
-        return Ok(None);
-    };
-    let home = session_work_queue_home(session_dir)?;
-    home.store
-        .read(&home.project_id, queue_id)
-        .map(|record| Some(record.stack))
-        .map_err(store_error)
-}
-
-fn refuse_unmigrated_stack(session_dir: &Path, changeset: &Changeset) -> Result<(), WorkflowError> {
-    if changeset.stack.is_some() {
-        return Err(WorkflowError::ChangesetInvalid(format!(
-            "{} still carries its PR stack in changeset.yaml; the startup migration has not moved it into the project",
-            session_dir.display()
-        )));
-    }
-    Ok(())
-}
-
-/// Serializes the first-write path of [`update_stack_atomic`] (no stack id yet), so two writers
-/// of one session cannot each create a stack record. A session that already names its stack takes
-/// only the store's per-stack lock.
-static FIRST_STACK_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Atomically update the stack of an orchestrator session: the project's stack record it names,
-/// created (and named in the changeset) by the first write.
-pub fn update_stack_atomic(
-    orchestrator_session_dir: &Path,
-    f: impl FnOnce(&mut WorkQueue),
-) -> Result<(), WorkflowError> {
-    let home = session_work_queue_home(orchestrator_session_dir)?;
-    if let Some(queue_id) = read_changeset(orchestrator_session_dir)?.work_queue_id {
-        return update_named_stack(&home, &queue_id, f);
-    }
-    let _first_write = FIRST_STACK_WRITE
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    // Re-read under the lock: another writer may have created the record since.
-    let mut changeset = read_changeset(orchestrator_session_dir)?;
-    if let Some(queue_id) = changeset.work_queue_id.as_deref() {
-        return update_named_stack(&home, queue_id, f);
-    }
-    refuse_unmigrated_stack(orchestrator_session_dir, &changeset)?;
-    let mut stack = WorkQueue::default();
-    f(&mut stack);
-    // The record is written before the changeset names it, so a failure between the two leaves an
-    // unreferenced record rather than a dangling id.
-    let record = home
-        .store
-        .create(&home.project_id, &home.session_id, stack)
-        .map_err(store_error)?;
-    changeset.work_queue_id = Some(record.queue_id);
-    write_changeset_atomic(orchestrator_session_dir, &changeset)
-}
-
-fn update_named_stack(
-    home: &SessionWorkQueueHome,
-    queue_id: &str,
-    f: impl FnOnce(&mut WorkQueue),
-) -> Result<(), WorkflowError> {
-    home.store
-        .update(&home.project_id, queue_id, f)
-        .map(drop)
-        .map_err(store_error)
 }
 
 /// Link a stack node to its materialized child session (set session_id + branch).
@@ -853,51 +769,44 @@ mod stack_tests {
     }
 
     #[test]
-    fn the_first_update_of_a_session_with_no_stack_creates_its_project_record() {
+    fn updating_a_session_that_owns_no_queue_is_refused_and_creates_none() {
         // Given
         let host = a_stack_host();
         let dir = host.session("orch", Changeset::default());
 
         // When
-        update_stack_atomic(&dir, |stack| stack.nodes.push(a_plain_node("n1"))).unwrap();
+        let written = update_stack_atomic(&dir, |stack| stack.nodes.push(a_plain_node("n1")));
 
-        // Then — the changeset names the record, which holds the node and the planning session
-        let queue_id = queue_id_of(&dir).expect("the changeset names its stack");
-        let record = host
-            .store()
-            .read(crate::work_queue_fixtures::A_PROJECT, &queue_id)
-            .unwrap();
-        assert_eq!(
-            (
-                record.created_by_session_id.as_str(),
-                record.stack.nodes.len()
-            ),
-            ("orch", 1)
-        );
+        // Then
+        assert!(written.is_err(), "no write creates a queue");
+        assert_eq!(read_session_stack(&dir).unwrap(), None);
+        assert_eq!(queue_id_of(&dir), None);
     }
 
     #[test]
-    fn a_session_still_carrying_its_stack_in_the_changeset_is_refused_not_read() {
-        // Given — a changeset the startup sweep has not reached
+    fn a_session_that_owns_a_queue_reads_it_from_its_own_directory() {
+        // Given
         let host = a_stack_host();
-        let dir = host.session(
+        let dir = host.orchestrator(
             "orch",
-            Changeset {
-                stack: Some(WorkQueue {
-                    version: 1,
-                    nodes: vec![a_plain_node("n1")],
-                }),
-                ..Changeset::default()
+            WorkQueue {
+                version: 1,
+                nodes: vec![a_plain_node("n1")],
             },
         );
 
         // When
-        let read = read_session_stack(&dir);
-        let written = update_stack_atomic(&dir, |stack| stack.version = 2);
+        let record = host
+            .store()
+            .read(crate::work_queue_fixtures::A_PROJECT, "orch")
+            .unwrap();
 
         // Then
-        assert!(read.is_err(), "a read must not honour the legacy field");
-        assert!(written.is_err(), "a write must not shadow the legacy field");
+        assert_eq!(queue_id_of(&dir).as_deref(), Some("orch"));
+        assert_eq!(
+            (record.owner_session_id(), record.stack.nodes.len()),
+            ("orch", 1)
+        );
     }
 
     #[test]
@@ -979,10 +888,6 @@ discovery: ~
 "#;
         let cs: Changeset =
             serde_yaml::from_str(yaml).expect("legacy changeset should deserialize");
-        assert!(
-            cs.stack.is_none(),
-            "stack should be None for legacy changeset"
-        );
         assert!(
             cs.orchestrator_session_id.is_none(),
             "orchestrator_session_id should be None for legacy changeset"

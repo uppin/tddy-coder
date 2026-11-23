@@ -74,7 +74,7 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
 - **Manage sessions and worktrees** with `ResumeSession`, `TerminateSession`, `SetSessionMark`, `RenameSession` and
   `DeleteSession`; and worktrees with `ListWorktrees`, `GetWorktree`, `ClearWorktree`, `DeleteWorktree`, `RestoreWorktree` and
   `RefreshWorktreeDiskUsage`. Terminate and delete only what you started and are finished with.
-- **Work the project's PR stacks** with `work_queue_list`, `work_queue_create`, `work_queue_status`, `work_pr_read`, `work_pr_search`
+- **Work the project's PR stacks** with `work_queue_list`, `work_queue_status`, `work_pr_read`, `work_pr_search`
   and `work_pr_comments`; plan with `work_item_add`, `work_item_update`, `work_item_delete`; move them along with
   `work_item_set_status`, `work_item_adopt`, `work_item_merge`, `work_item_close`, `work_item_repoint`, `work_item_set_parents` and `work_item_resolve_conflicts`; and
   start a child session on a node with `work_item_spawn_session`.

@@ -202,7 +202,10 @@ it("shows the GitHub PR state reported for the node branch", () => {
 
 it("updates the PR status on the polling interval without user action", () => {
   // Given — the PR is open on the first poll and merged on every subsequent poll
-  cy.clock();
+  // Only the poll's interval is faked: the queue opens in its session's inspector, whose terminal
+  // (xterm) schedules idle work through requestIdleCallback, and a faked one is called without
+  // the deadline xterm reads (`timeRemaining`).
+  cy.clock(Date.now(), ["setInterval", "clearInterval"]);
   const plan = aWorkQueueJson(1, [
     aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);

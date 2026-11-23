@@ -115,18 +115,6 @@ trait for session start's stack-base and stack-link paths, and re-exports the tr
 entry builder from `work_queue_rpc` and its crate root; `tddy-workflow-recipes` re-exports
 `WORK_QUEUE_SERVICE`.
 
-### `queue_migration.rs` — the startup sweep
-
-`migrate_session_stacks(sessions_base, projects_dir) -> MigrationReport` moves every stack still
-carried in a session's `changeset.yaml` (`Changeset.stack`, the pre-store field) into its project's
-stack store, then names the record in `Changeset.queue_id` and drops the copy. It is the only reader
-of that field. Record before id, so a rerun after an interruption finds the record by
-`created_by_session_id`; a second run changes nothing. `MigrationReport { migrated_session_ids,
-sessions_without_project, failures: Vec<MigrationFailure { session_id, message }> }`, each list
-sorted; the sweep logs a summary and each session it left alone or could not move. `tddy-daemon`
-calls it at startup (`runtime/mount_host.rs`) over its data directory; the body lives here because
-the daemon crate is wiring only. See [pr-stacking.md § Where a stack lives](../../../docs/ft/coder/pr-stacking.md#where-a-stack-lives).
-
 ### `internal_status.rs`, `op_journal.rs`, `merge_repoint.rs`
 
 `internal_status`: `derive_internal_status` / `reconcile_internal_status` — a node's action-needed

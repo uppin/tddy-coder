@@ -130,39 +130,6 @@ export function parseSessionsProjectSettings(location: {
   return { projectId, host: location.params[PROJECT_SETTINGS_HOST_PARAM] ?? null };
 }
 
-/**
- * The segment before a stack id in the **stack view**'s path, `/sessions/project/:projectId/queue/:queueId`
- * — a project's PR stack opened from the drawer's Stacks row (`#orchestrators` 9/11). Four segments,
- * so it can never be read as a session id or as the composer.
- */
-export const PROJECT_QUEUE_SEGMENT = "queue";
-
-/** Builds the `/sessions/project/:projectId/queue/:queueId` path that opens one of a project's stacks. */
-export function sessionsProjectQueuePath(projectId: string, queueId: string): string {
-  return `${SESSIONS_PROJECT_ROUTE}/${encodeURIComponent(projectId)}/${PROJECT_QUEUE_SEGMENT}/${encodeURIComponent(queueId)}`;
-}
-
-/** Which project stack the stack view is open on. */
-export interface SessionsProjectStackRoute {
-  projectId: string;
-  queueId: string;
-}
-
-/**
- * Which project stack the stack view is open on — read from
- * `/sessions/project/:projectId/queue/:queueId`; `null` for any other path.
- */
-export function parseSessionsProjectStack(pathname: string): SessionsProjectStackRoute | null {
-  const prefix = `${SESSIONS_PROJECT_ROUTE}/`;
-  if (!pathname.startsWith(prefix)) return null;
-  const segments = pathname.slice(prefix.length).split("/");
-  if (segments.length !== 3 || segments[1] !== PROJECT_QUEUE_SEGMENT) return null;
-  const projectId = decodeSegment(segments[0] === "" ? null : segments[0]);
-  const queueId = decodeSegment(segments[2] === "" ? null : segments[2]);
-  if (projectId === null || queueId === null) return null;
-  return { projectId, queueId };
-}
-
 /** Builds a `/sessions/:id` deep-link path for the given session id. */
 export function sessionsDrawerPathForSession(sessionId: string): string {
   return `${SESSIONS_DRAWER_ROUTE}/${encodeURIComponent(sessionId)}`;
@@ -215,8 +182,7 @@ export function isSessionsDrawerPath(pathname: string): boolean {
     singleSegmentAfter(pathname, SESSIONS_DRAWER_ROUTE) !== null ||
     parseSessionsProjectHomeSetupProjectId(pathname) !== null ||
     parseSessionsProjectNew(pathname) !== null ||
-    parseSessionsProjectSettings({ path: pathname, params: {} }) !== null ||
-    parseSessionsProjectStack(pathname) !== null
+    parseSessionsProjectSettings({ path: pathname, params: {} }) !== null
   );
 }
 
@@ -242,6 +208,7 @@ export const INSPECTOR_TAB_NAMES = [
   "tools",
   "agents",
   "usage",
+  "work-queue",
   "pr",
   "worktree",
   "files",

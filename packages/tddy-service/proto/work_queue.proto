@@ -58,48 +58,25 @@ service WorkQueueService {
   // stays unspawnable because `Stack::base_ref_for_spawn` gates on a parent owning a branch. See
   // docs/ft/coder/pr-stack-live-status.md (D35).
   rpc LinkWorkItem(LinkWorkItemRequest) returns (LinkWorkItemResponse);
-  // A project's PR stacks on every host that holds the project (`#orchestrators` 9/11). The daemon
-  // the call arrives on answers from its own project stack store and asks each eligible peer for
-  // its own; a peer that does not answer is named in `unreachable_hosts`, never silently dropped.
+  // A project's work queues on every host that holds the project — one per owning session
+  // (`#workqueue` 5/14). The daemon the call arrives on answers from its own sessions' queues and
+  // asks each eligible peer for its own; a peer that does not answer is named in `unreachable_hosts`, never silently dropped.
   // See docs/ft/coder/pr-stacking.md.
   rpc ListProjectWorkQueues(ListProjectWorkQueuesRequest) returns (ListProjectWorkQueuesResponse);
-  // One project stack by its address, served by the daemon whose store holds it — forwarded there
-  // when the address names another host (`#orchestrators` 9/11).
+  // One work queue by its address, served by the daemon that holds its owning session — forwarded
+  // there when the address names another host.
   rpc GetWorkQueue(GetWorkQueueRequest) returns (GetWorkQueueResponse);
-  // Create a new, empty project stack in the store of the daemon that owns the project
-  // (`#orchestrators` 12/12, B9). The web's "New stack" action: a stack is made here, by address,
-  // never as a side effect of a session's first planned-PR write. Forwarded to
-  // `daemon_instance_id` when that names a peer. Answers the new stack's address.
-  rpc CreateWorkQueue(CreateWorkQueueRequest) returns (CreateWorkQueueResponse);
 }
 
-message CreateWorkQueueRequest {
-  string session_token = 1;
-  // The logical project the new stack belongs to.
-  string project_id = 2;
-  // Optional title for the stack; empty = untitled.
-  string title = 3;
-  // The daemon whose store holds the project. Empty or this daemon's own id = the daemon the
-  // call arrived on; a peer's id = the call is forwarded there.
-  string daemon_instance_id = 4;
-}
-
-message CreateWorkQueueResponse {
-  // Where the new stack lives — the address every later request about it carries.
-  WorkQueueAddress stack = 1;
-}
-
-// Where a PR stack lives (`#orchestrators` 9/11): the project that holds it, its id in that
-// project's stack store, and the daemon whose store holds it.
+// Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
+// (`#workqueue` 5/14) — and the daemon that holds that session.
 //
-// Carried by every request that reads or edits one stack, beside the orchestrator `session_id` those
-// requests were addressed by before stacks became project records. One of the two is required, and
-// the address wins when both are set: a `session_id` is resolved through the stack its changeset
-// names (`Changeset.queue_id`), which is a lookup a caller holding the address does not need.
+// Carried by every request that reads or edits one queue, beside the owning `session_id` those
+// requests may name instead. One of the two is required, and the address wins when both are set.
 message WorkQueueAddress {
   // The logical project id — the same on every host that holds the project.
   string project_id = 1;
-  // The stack's id in that project's store (`WorkQueueStore`), a UUIDv7.
+  // The owning session's id: a queue belongs to the session it was started with.
   string queue_id = 2;
   // The daemon whose store holds the stack. Empty or this daemon's own id = the daemon the call
   // arrived on; a peer's id = the call is forwarded there.
@@ -108,7 +85,7 @@ message WorkQueueAddress {
 
 message AddWorkItemRequest {
   string session_token = 1;
-  // The "pr-stack" orchestrator session whose Changeset.stack the new node is appended to.
+  // The session whose work queue the new item is appended to. A session that owns no queue is refused.
   string session_id = 2;
   string title = 3;
   string description = 4;
@@ -423,14 +400,14 @@ message WorkItemCounts {
 
 // One stack of a project, as the drawer lists it.
 message WorkQueueSummary {
-  // Where the stack lives — the address every other request about it carries.
+  // Where the queue lives — the address every other request about it carries.
   WorkQueueAddress address = 1;
-  // What the stack is for, as it was created with; empty for a stack created without a title.
+  // What the queue is for; empty for a queue that was never titled.
   string title = 2;
   WorkItemCounts node_counts = 3;
-  // The sessions on the owning host whose changeset names this stack.
+  // The session on the owning host that owns this queue (its `queue_id`).
   repeated string referencing_session_ids = 4;
-  // The session that planned the stack (or, for a migrated one, the session that carried it).
+  // The session that owns the queue — the same id as its `queue_id` (`#workqueue` 5/14).
   string created_by_session_id = 5;
   uint64 created_at_unix_ms = 6;
 }

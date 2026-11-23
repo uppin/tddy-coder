@@ -1,10 +1,12 @@
 /**
- * Open a project's stack view in the sessions drawer by its route, over an in-memory backend.
+ * Open a work queue in the sessions drawer, over an in-memory backend: the inspector's **Work queue**
+ * tab of the session that owns it (`#workqueue` 5/14 — a queue is its session's, there is no route of
+ * its own).
  *
- * The planned-PR rows are the stack view's (`WorkQueueView`): the daemon answers `GetWorkQueue`
- * with the stack's plan, and the view acts on the stack by its address. A spec states the plan it
- * wants shown and the sessions the drawer lists (the children a planned node resolves to); there is
- * no orchestrator session behind the stack.
+ * The planned-PR rows are the queue view's (`WorkQueueView`): the daemon answers `GetWorkQueue`
+ * with the queue's plan, and the view acts on the queue by its address (its owning session's id). A
+ * spec states the plan it wants shown and the sessions the drawer lists (the children a planned node
+ * resolves to).
  */
 
 import React from "react";
@@ -16,7 +18,7 @@ import { sessionsServedBy } from "./vncBackend";
 import { mountWithRpc } from "./inMemory";
 import { withSelectedDaemon } from "./withSelectedDaemon";
 
-/** The stack every spec opens. */
+/** The queue every spec opens: owned by the session `createdBySessionId` names in its call. */
 export const THE_STACK = {
   projectId: "proj-pr-stack",
   queueId: "0190b000-0000-7000-8000-0000000000dd",
@@ -33,7 +35,19 @@ export function serveProjectStack(
   plan: string,
   createdBySessionId: string,
 ): InMemoryRpcBackend {
-  window.location.hash = `#/sessions/project/${THE_STACK.projectId}/queue/${THE_STACK.queueId}`;
+  // The session that owns the queue is among the drawer's sessions, owning it.
+  const served = sessionsServedBy(backend);
+  const owner = served.find((session) => session.sessionId === createdBySessionId);
+  if (owner === undefined) {
+    served.push({
+      sessionId: createdBySessionId,
+      projectId: THE_STACK.projectId,
+      ownsWorkQueue: true,
+    });
+  } else {
+    owner.ownsWorkQueue = true;
+  }
+  window.location.hash = `#/sessions/${createdBySessionId}?inspector=work-queue`;
   return backend
     .onUnary(WorkQueueService.method.listProjectWorkQueues, () =>
       create(WorkQueueService.method.listProjectWorkQueues.output, { stacks: [] }),
@@ -71,5 +85,7 @@ export function openProjectStackViewOf(
   if (orchestrator === undefined) {
     throw new Error(`no session ${orchestratorSessionId} among the drawer's sessions`);
   }
+  // The session owns the queue the spec describes.
+  orchestrator.ownsWorkQueue = true;
   return openProjectStackView(backend, orchestrator.workQueueJson ?? "", orchestratorSessionId);
 }

@@ -492,14 +492,17 @@ fn sorted_names(names: &[&str]) -> Vec<String> {
 
 #[tokio::test]
 async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_home_tools() {
-    // Given
+    // Given — the project's home session, which owns the work queue it was started with
     let world = a_project_home_world().await;
+    tddy_core::session_work_queue::SessionWorkQueues::new(world.sessions.path().join("sessions"))
+        .create_for_session(&world.home, THIS_PROJECT, 0)
+        .expect("the home session owns a queue");
 
     // When
     let offered = offered_tool_names(&world, &world.home).await;
 
-    // Then exactly the read-only tools, the project-home tools, the seven git tools, the eleven
-    // stack tools, the six stack git tools and the two message tools
+    // Then exactly the read-only tools, the project-home tools, the seven git tools, the ten
+    // work tools, the six stack git tools and the two message tools
     assert_eq!(
         offered,
         sorted_names(&[
@@ -551,7 +554,6 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "RefreshWorktreeDiskUsage",
             "NotifyOperator",
             "work_queue_list",
-            "work_queue_create",
             "work_queue_status",
             "work_pr_read",
             "work_pr_search",

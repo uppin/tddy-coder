@@ -1,5 +1,7 @@
 mod orchestrator_link;
 mod started_session_name;
+mod started_session_queue;
+pub(crate) use started_session_queue::give_the_session_its_queue;
 
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
@@ -128,10 +130,13 @@ impl LaunchSessions {
         refuse_an_orchestrated_tool_start(&req, &self.coding_agents)?;
         refuse_a_named_tool_start(&req, &self.coding_agents)?;
         let display_name = requested_display_name(&req)?;
+        let with_work_queue = req.with_work_queue;
         let started = self
             .start_here(req, os_user, agent_def, placement, progress, cancel)
             .await?;
         self.record_the_started_sessions_name(os_user, &started, display_name)
+            .await?;
+        self.create_the_started_sessions_queue(os_user, &started, with_work_queue)
             .await?;
         Ok(started)
     }

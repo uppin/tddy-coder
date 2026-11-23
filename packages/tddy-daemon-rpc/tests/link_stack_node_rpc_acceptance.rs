@@ -70,9 +70,17 @@ fn a_service(sessions_base: PathBuf) -> TestDaemon {
     ))
 }
 
-fn write_changeset(sessions_base: &Path, session_id: &str, changeset: &Changeset) {
+fn write_changeset(
+    sessions_base: &Path,
+    session_id: &str,
+    (changeset, stack): &(Changeset, Option<WorkQueue>),
+) {
     let dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&dir, changeset.clone());
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+        &dir,
+        changeset.clone(),
+        stack.clone(),
+    );
 }
 
 fn a_planned_node(node_id: &str) -> WorkItem {
@@ -96,14 +104,16 @@ fn an_orchestrator_with_an_unlinked_node(sessions_base: &Path) {
     write_changeset(
         sessions_base,
         ORCHESTRATOR,
-        &Changeset {
-            recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
+        &(
+            Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+            Some(WorkQueue {
                 version: 1,
                 nodes: vec![a_planned_node("n1")],
             }),
-            ..Changeset::default()
-        },
+        ),
     );
 }
 
@@ -237,10 +247,13 @@ async fn refuses_a_session_that_names_no_stack() {
     write_changeset(
         &sessions_base,
         ORCHESTRATOR,
-        &Changeset {
-            recipe: Some("tdd".to_string()),
-            ..Changeset::default()
-        },
+        &(
+            Changeset {
+                recipe: Some("tdd".to_string()),
+                ..Changeset::default()
+            },
+            None,
+        ),
     );
     let service = a_service(sessions_base);
 
@@ -260,8 +273,8 @@ async fn refuses_a_session_that_names_no_stack() {
         err.message
     );
     assert!(
-        err.message.contains("work_queue_create"),
-        "the refusal must name work_queue_create, got: {}",
+        err.message.contains("has no work queue"),
+        "the refusal must say the session has no work queue, got: {}",
         err.message
     );
 }

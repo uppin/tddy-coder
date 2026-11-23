@@ -7,14 +7,13 @@ use crate::work_queue_tools::PR_DELETE_PLANNED;
 use crate::work_queue_tools::PR_READ;
 use crate::work_queue_tools::PR_SEARCH;
 use crate::work_queue_tools::PR_SET_STATUS;
-use crate::work_queue_tools::PR_STACK_CREATE;
 use crate::work_queue_tools::PR_STACK_LIST;
 use crate::work_queue_tools::PR_STACK_STATUS;
 use crate::work_queue_tools::PR_UPDATE_PLANNED;
 use crate::work_queue_tools::STACK_ID;
 use serde_json::{json, Value};
 
-/// The eleven tools' definitions. Every one takes [`TARGET_DAEMON_INSTANCE_ID`]; every one but the
+/// The ten tools' definitions. Every one takes [`TARGET_DAEMON_INSTANCE_ID`]; every one but the
 /// two project-level tools takes [`STACK_ID`].
 pub fn stack_tool_defs() -> Vec<ToolDef> {
     let node_id = |what: &str| json!({ "type": "string", "description": what });
@@ -26,16 +25,8 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             PR_STACK_LIST,
-            "List the PR stacks of this project on a host — this one unless daemon_instance_id names another — each with its queue_id, title, the host that holds it, the session that created it and its node count. Name a stack by its queue_id (and daemon_instance_id) in the other pr_ tools.",
+            "List the PR stacks of this project on a host — this one unless daemon_instance_id names another — each with its queue_id (the id of the session that owns it), title, the host that holds it and its node count. Name a queue by its queue_id (and daemon_instance_id) in the other work_ tools.",
             object(json!({}), &[]),
-        ),
-        tool_def(
-            PR_STACK_CREATE,
-            "Create a new, empty PR stack in this project, on this host or the one daemon_instance_id names, with an optional title saying what it is for. Answers its queue_id; add planned PRs to it with work_item_add.",
-            object(
-                json!({ "title": { "type": "string", "description": "What the stack is for; work_queue_list shows it." } }),
-                &[],
-            ),
         ),
         tool_def(
             PR_STACK_STATUS,
@@ -155,7 +146,7 @@ pub(super) fn stack_object(properties: Value, required: &[&str]) -> Value {
     let mut properties = properties;
     properties[STACK_ID] = json!({
         "type": "string",
-        "description": "The stack, as work_queue_list or work_queue_create answers its queue_id. The calling session's own stack (the one its changeset names) when omitted."
+        "description": "The work queue, as work_queue_list answers its queue_id — the id of the session that owns it. The calling session's own queue when omitted."
     });
     object(properties, required)
 }

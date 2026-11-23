@@ -232,10 +232,14 @@ fn write_orchestrator_with_materialized_parent(
 
     let cs = Changeset {
         recipe: Some("pr-stack".to_string()),
-        stack: Some(stack),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
+    let cs_stack = Some(stack);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+        &orchestrator_dir,
+        cs,
+        cs_stack.clone(),
+    );
 }
 
 fn start_session_request(
@@ -472,10 +476,14 @@ fn write_orchestrator_with_externally_merged_parent(
 
     let cs = Changeset {
         recipe: Some("pr-stack".to_string()),
-        stack: Some(stack),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(&orchestrator_dir, cs);
+    let cs_stack = Some(stack);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
+        &orchestrator_dir,
+        cs,
+        cs_stack.clone(),
+    );
 }
 
 /// **explicit_base_override_bypasses_the_gate_for_an_externally_merged_parent** — When the

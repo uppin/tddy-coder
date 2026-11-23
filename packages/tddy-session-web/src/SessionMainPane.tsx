@@ -59,6 +59,9 @@ export function SessionMainPane({
   onSwitchPeer,
   traffic,
   projects = [],
+  sessionMetadataBySessionId,
+  onChildSessionStarted,
+  workQueueClient,
   runtimes = [],
   sessions = [],
   focusedRuntimeId = null,
@@ -422,6 +425,13 @@ export function SessionMainPane({
                   execToolClient={execToolClient}
                   worktreeClient={worktreeClient}
                   sessionFilesClient={sessionFilesClient}
+                  projectClient={projectClient}
+                  catalogClient={catalogClient}
+                  taskClient={taskClient}
+                  projects={projects}
+                  sessionMetadataBySessionId={sessionMetadataBySessionId}
+                  onChildSessionStarted={onChildSessionStarted}
+                  workQueueClient={workQueueClient}
                   sessionToken={sessionToken}
                   /* The media tabs are gated on the connection to the host that owns this session —
                      `host`, the same connection the screen already resolved for every other

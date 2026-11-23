@@ -408,18 +408,18 @@ pub(crate) fn run_git_work(env: &GitEnv, work: GitWork) -> Result<Value, String>
     }
 }
 
-fn journal_path(env: &GitEnv) -> PathBuf {
-    env.projects_dir
-        .join(&env.project_id)
-        .join("stacks")
-        .join(format!("{}.op.json", env.queue_id))
+/// Beside the queue, in its owning session's directory (`#workqueue` 5/14).
+fn journal_path(env: &GitEnv) -> Result<PathBuf, String> {
+    env.store
+        .op_journal_path(&env.queue_id)
+        .map_err(|e| e.to_string())
 }
 
 fn write_journal(
     env: &GitEnv,
     journal: &tddy_work_queue::op_journal::WorkQueueOpJournal,
 ) -> Result<(), String> {
-    let path = journal_path(env);
+    let path = journal_path(env)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

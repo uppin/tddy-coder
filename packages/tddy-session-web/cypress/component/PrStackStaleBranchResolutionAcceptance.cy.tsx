@@ -189,7 +189,10 @@ function aQueryBranchWhoseSecondRoundIsWithheld(rounds: {
 
 it("keeps a completed pull's result when the poll it overtook finally answers", () => {
   // Given — the second poll round is issued while the branch is still behind, then withheld
-  cy.clock();
+  // Only the poll's interval is faked: the queue opens in its session's inspector, whose terminal
+  // (xterm) schedules idle work through requestIdleCallback, and a faked one is called without
+  // the deadline xterm reads (`timeRemaining`).
+  cy.clock(Date.now(), ["setInterval", "clearInterval"]);
   const polls = aQueryBranchWhoseSecondRoundIsWithheld({
     first: { [CHILD_BRANCH]: CHILD_BEHIND_ITS_BASE },
     // What that round was answered from: the refs as they stood before the pull ran, plus one

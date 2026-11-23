@@ -28,15 +28,15 @@ fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> Pat
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
-                version: 1,
-                nodes: vec![
-                    a_planned_node("bottom", "feature/bottom", &[]),
-                    a_planned_node("top", "feature/top", &["bottom"]),
-                ],
-            }),
             ..Changeset::default()
         },
+        Some(WorkQueue {
+            version: 1,
+            nodes: vec![
+                a_planned_node("bottom", "feature/bottom", &[]),
+                a_planned_node("top", "feature/top", &["bottom"]),
+            ],
+        }),
     );
     dir
 }
@@ -49,18 +49,18 @@ fn an_orchestrator_with_a_renamed_bottom_branch(sessions_base: &std::path::Path)
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
-                version: 1,
-                nodes: vec![
-                    WorkItem {
-                        branch: Some("feature/bottom-renamed".to_string()),
-                        ..a_planned_node("bottom", "feature/bottom", &[])
-                    },
-                    a_planned_node("top", "feature/top", &["bottom"]),
-                ],
-            }),
             ..Changeset::default()
         },
+        Some(WorkQueue {
+            version: 1,
+            nodes: vec![
+                WorkItem {
+                    branch: Some("feature/bottom-renamed".to_string()),
+                    ..a_planned_node("bottom", "feature/bottom", &[])
+                },
+                a_planned_node("top", "feature/top", &["bottom"]),
+            ],
+        }),
     );
     dir
 }
@@ -77,19 +77,19 @@ fn an_orchestrator_whose_bottom_node_lost_its_child_session(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
-                version: 1,
-                nodes: vec![
-                    WorkItem {
-                        branch: Some("feature/bottom".to_string()),
-                        session_id: Some("deleted-child".to_string()),
-                        ..a_planned_node("bottom", "feature/bottom", &[])
-                    },
-                    a_planned_node("top", "feature/top", &["bottom"]),
-                ],
-            }),
             ..Changeset::default()
         },
+        Some(WorkQueue {
+            version: 1,
+            nodes: vec![
+                WorkItem {
+                    branch: Some("feature/bottom".to_string()),
+                    session_id: Some("deleted-child".to_string()),
+                    ..a_planned_node("bottom", "feature/bottom", &[])
+                },
+                a_planned_node("top", "feature/top", &["bottom"]),
+            ],
+        }),
     );
     dir
 }
@@ -116,18 +116,18 @@ fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(WorkQueue {
-                version: 1,
-                nodes: vec![
-                    WorkItem {
-                        session_id: Some("child-1".to_string()),
-                        ..a_planned_node("bottom", "feature/bottom", &[])
-                    },
-                    a_planned_node("top", "feature/top", &["bottom"]),
-                ],
-            }),
             ..Changeset::default()
         },
+        Some(WorkQueue {
+            version: 1,
+            nodes: vec![
+                WorkItem {
+                    session_id: Some("child-1".to_string()),
+                    ..a_planned_node("bottom", "feature/bottom", &[])
+                },
+                a_planned_node("top", "feature/top", &["bottom"]),
+            ],
+        }),
     );
     dir
 }

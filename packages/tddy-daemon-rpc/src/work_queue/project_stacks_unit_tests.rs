@@ -63,7 +63,6 @@ fn a_record(title: Option<&str>, stack: WorkQueue) -> WorkQueueRecord {
     WorkQueueRecord {
         queue_id: STACK.to_string(),
         project_id: PROJECT.to_string(),
-        created_by_session_id: "planner-1".to_string(),
         created_at_unix_ms: 1_762_000_000_000,
         title: title.map(str::to_string),
         stack,
@@ -205,7 +204,7 @@ fn a_summary_carries_the_records_address_title_counts_creator_and_referencing_se
                 merged: 1,
             }),
             referencing_session_ids: vec!["orchestrator-1".to_string()],
-            created_by_session_id: "planner-1".to_string(),
+            created_by_session_id: STACK.to_string(),
             created_at_unix_ms: 1_762_000_000_000,
         }
     );

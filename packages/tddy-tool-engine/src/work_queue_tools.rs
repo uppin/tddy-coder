@@ -9,20 +9,18 @@
 //! | Tool | WorkQueue | Writes |
 //! |---|---|---|
 //! | `work_queue_list` | — (the project's stacks on the host) | — |
-//! | `work_queue_create` | — (answers the new `queue_id`) | the store |
 //! | `work_queue_status` | required | derived statuses |
 //! | `work_pr_read`, `work_pr_comments` | required for `node_id`, optional for `pull_number` | — |
 //! | `work_pr_search` | optional (the project's repository) | — |
 //! | `work_item_add`, `work_item_update`, `work_item_delete`, `work_item_set_status`, `work_item_adopt` | required | the store; `work_item_update` with `sync_pr` also the PR's title and body |
 //!
-//! **Who is offered them** ([`WorkQueueCallerRole`]) is decided by role alone, never by recipe
-//! (developer, 2026-11-14): an orchestrator-role session (main and every orchestrator) every one,
-//! for any stack of its project — its **own stack** (the one its changeset names in `queue_id`)
-//! being the default when it names none; a session bound to a node of a stack only `work_queue_status`
-//! and `work_pr_read`, for that stack alone. Every other session is offered none — a session with no
-//! orchestrator role is offered none even when its changeset names a stack — and the daemon refuses
-//! its call. A read-only session may call all of them: they write only the
-//! project's stack store and, for a synced update, the PR on GitHub.
+//! **Who is offered them** follows the queue, never a role (`#workqueue` 5/14,
+//! [`crate::work_queue_access`]): the session that owns a queue (its `queue_id` is that session's id)
+//! has every tool on it; a session one of its items links to is *addressed* and may read it
+//! (`work_queue_status`, `work_pr_read`); everyone else has nothing, and the daemon refuses its call.
+//! A session addressing a session that owns no queue is refused with a hint naming how a queue
+//! comes to exist. A read-only session may call all of them: they write only the queue and, for a
+//! synced update, the PR on GitHub.
 //!
 //! GitHub is reached as the **project's account**, not the calling session's: a read-only session
 //! holds no credential of its own.
@@ -36,14 +34,12 @@ mod defs;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tddy_core::session_metadata::is_orchestrator_role;
 use tddy_core::work_queue_store::WorkQueueRecord;
 
-use crate::catalog::ToolDef;
+use crate::work_queue_access::WorkQueueAccess;
 use crate::ToolOutcome;
 
 pub const PR_STACK_LIST: &str = "work_queue_list";
-pub const PR_STACK_CREATE: &str = "work_queue_create";
 pub const PR_STACK_STATUS: &str = "work_queue_status";
 pub const PR_READ: &str = "work_pr_read";
 pub const PR_SEARCH: &str = "work_pr_search";
@@ -57,10 +53,9 @@ pub const PR_ADOPT: &str = "work_item_adopt";
 /// The argument naming the stack a tool acts on.
 pub const STACK_ID: &str = "queue_id";
 
-/// The eleven tools, in the order they are advertised.
-pub const WORK_QUEUE_TOOL_NAMES: [&str; 11] = [
+/// The ten tools, in the order they are advertised.
+pub const WORK_QUEUE_TOOL_NAMES: [&str; 10] = [
     PR_STACK_LIST,
-    PR_STACK_CREATE,
     PR_STACK_STATUS,
     PR_READ,
     PR_SEARCH,
@@ -83,124 +78,40 @@ pub fn is_stack_read_tool(name: &str) -> bool {
     matches!(name, PR_STACK_STATUS | PR_READ)
 }
 
-/// What a session is entitled to among the stack tools. A session with none of these roles is
-/// offered no stack tool.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorkQueueCallerRole {
-    /// An orchestrator-role session (`is_orchestrator_role`: main or an orchestrator): every stack
-    /// tool, for any stack of its project. `own_stack_id` — the stack its changeset names — is the
-    /// default when a call names none; `None` when it names no stack, and then every
-    /// stack-requiring call must name one.
-    Orchestrator { own_stack_id: Option<String> },
-    /// A session bound to a node of `queue_id`: [`is_stack_read_tool`]'s two, for that stack alone.
-    WorkItem { queue_id: String },
-}
-
-/// The session calling a stack tool, as the daemon classified it from its own records.
+/// The session calling a work tool, as the daemon read it from its own records. What it may do is
+/// decided per queue, from the queue ([`WorkQueueAccess`]), not from the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkQueueCaller {
     pub session_id: String,
     pub project_id: String,
-    pub role: WorkQueueCallerRole,
 }
 
-/// The stack a node session's orchestrator planned, as the daemon read it for
-/// [`work_queue_caller_role`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParentStack<'a> {
-    pub queue_id: &'a str,
-    /// Whether a node of that stack records the calling session as its `session_id`.
-    pub binds_this_session: bool,
-}
-
-/// What the daemon read about a session to classify it: its `.session.yaml` role, the stack its
-/// changeset names (`Changeset.queue_id`), and its orchestrator's stack when it names an
-/// orchestrator. No recipe: the pr-stack recipe is deprecated and never decides a role.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct WorkQueueCallerFacts<'a> {
-    pub session_role: Option<&'a str>,
-    pub own_stack_id: Option<&'a str>,
-    pub parent_stack: Option<ParentStack<'a>>,
-}
-
-/// The role `facts` entitle a session to, or `None` for a session offered no stack tool. An
-/// orchestrator role wins over a node binding; a stack the changeset names gives no role by itself.
-pub fn work_queue_caller_role(facts: &WorkQueueCallerFacts<'_>) -> Option<WorkQueueCallerRole> {
-    if facts.session_role.is_some_and(is_orchestrator_role) {
-        return Some(WorkQueueCallerRole::Orchestrator {
-            own_stack_id: facts.own_stack_id.map(str::to_string),
-        });
-    }
-    facts
-        .parent_stack
-        .filter(|parent| parent.binds_this_session)
-        .map(|parent| WorkQueueCallerRole::WorkItem {
-            queue_id: parent.queue_id.to_string(),
-        })
-}
-
-/// Whether `role` is offered (and served) `tool_name`.
-pub fn is_stack_tool_offered_to(role: &WorkQueueCallerRole, tool_name: &str) -> bool {
-    match role {
-        WorkQueueCallerRole::Orchestrator { .. } => is_stack_tool(tool_name),
-        WorkQueueCallerRole::WorkItem { .. } => {
-            is_stack_tool(tool_name) && is_stack_read_tool(tool_name)
+/// Whether a session with `access` is offered (and served) the stack tool `tool_name`: the owner
+/// every one, an addressed session the two reads.
+pub fn is_stack_tool_offered_to(access: WorkQueueAccess, tool_name: &str) -> bool {
+    is_stack_tool(tool_name)
+        && match access {
+            WorkQueueAccess::Owner => true,
+            WorkQueueAccess::Addressed => is_stack_read_tool(tool_name),
         }
-    }
 }
 
-/// The stack tools `role` is offered, in [`WORK_QUEUE_TOOL_NAMES`] order; none for a session with no
-/// stack role.
-pub fn work_queue_tools_offered_to(role: Option<&WorkQueueCallerRole>) -> Vec<ToolDef> {
-    let Some(role) = role else {
-        return Vec::new();
-    };
-    stack_tool_defs()
-        .into_iter()
-        .filter(|tool| is_stack_tool_offered_to(role, &tool.name))
-        .collect()
-}
-
-/// The stack `caller`'s call of `tool_name` acts on, given the `queue_id` it `named` (if any):
-/// `Ok(None)` for a tool that acts on no stack (`work_queue_list`, `work_queue_create`, and `work_pr_search`
-/// or a `pull_number` read with none named or defaulted). An orchestrator's own stack is its
-/// default and a stack it names wins over it; a node may name only its own stack; a stack-requiring tool with none named nor
-/// defaulted is refused naming `queue_id` and `work_queue_list`.
+/// The queue `caller`'s call of `tool_name` acts on, given the `queue_id` it `named` (if any): the
+/// named one, else the caller's own (a queue's id is its owning session's id). `Ok(None)` for
+/// `work_queue_list`, which acts on no queue. Whether the caller may touch that queue is decided by
+/// [`WorkQueueToolPort::access_to`], not here.
 pub fn addressed_stack_id(
     caller: &WorkQueueCaller,
     tool_name: &str,
     named: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let named = named.map(str::trim).filter(|id| !id.is_empty());
-    if matches!(tool_name, PR_STACK_LIST | PR_STACK_CREATE) {
+    if tool_name == PR_STACK_LIST {
         return Ok(None);
     }
-    match &caller.role {
-        WorkQueueCallerRole::WorkItem { queue_id } => match named {
-            Some(other) if other != queue_id => Err(format!(
-                "{tool_name}: stack {other} is not this session's: a session bound to a node of a \
-                 stack reads only that stack ({queue_id})"
-            )),
-            _ => Ok(Some(queue_id.clone())),
-        },
-        WorkQueueCallerRole::Orchestrator { own_stack_id } => {
-            let addressed = named.or(own_stack_id.as_deref());
-            match addressed {
-                Some(queue_id) => Ok(Some(queue_id.to_string())),
-                // These three need a stack only for a node address, which the arguments decide.
-                None if matches!(tool_name, PR_SEARCH | PR_READ | PR_COMMENTS) => Ok(None),
-                None => Err(no_stack_named(tool_name)),
-            }
-        }
-    }
-}
-
-/// The refusal of a call that needs a stack and was given none to act on.
-fn no_stack_named(tool_name: &str) -> String {
-    format!(
-        "{tool_name}: name the stack with queue_id — this session owns no stack to default to; \
-         work_queue_list lists the project's stacks"
-    )
+    let named = named.map(str::trim).filter(|id| !id.is_empty());
+    Ok(Some(
+        named.map_or_else(|| caller.session_id.clone(), str::to_string),
+    ))
 }
 
 /// Which pull request a read names: the one a node of the stack records, or one by number.
@@ -276,13 +187,14 @@ pub trait WorkQueueToolPort: Send + Sync {
     /// Every stack of `project_id` on this host.
     async fn list_stacks(&self, project_id: &str) -> Result<Vec<WorkQueueRecord>, String>;
 
-    /// A new, empty stack of `caller`'s project, created by `caller` and titled `title`. Creating a
-    /// stack never makes it the caller's own stack.
-    async fn create_stack(
+    /// What `caller` may do with the queue `queue_id` (a session id) on this host: its access, or the
+    /// refusal naming why it has none — the queue's session owns no queue (with the hint naming how
+    /// one comes to exist), or the queue is not the caller's.
+    async fn access_to(
         &self,
         caller: &WorkQueueCaller,
-        title: Option<&str>,
-    ) -> Result<WorkQueueRecord, String>;
+        queue_id: &str,
+    ) -> Result<WorkQueueAccess, String>;
 
     /// Run `op` in `scope`, answering the tool's JSON. An unknown stack, an unknown node and a
     /// GitHub refusal are the error.
@@ -291,11 +203,12 @@ pub trait WorkQueueToolPort: Send + Sync {
 
 pub use crate::work_queue_tools::defs::*;
 
-/// Run one of the eleven stack tools for `caller`.
+/// Run one of the ten work tools for `caller`.
 ///
-/// The daemon has already refused a caller with no stack role and a tool its role is not offered;
-/// bad arguments, an addressing refusal and a refusal of the port come back as an `is_error`
-/// outcome naming what was refused.
+/// Access is checked here against the addressed queue ([`WorkQueueToolPort::access_to`]) for a call that
+/// acts on one; bad
+/// arguments, a refusal of access and a refusal of the port come back as an `is_error` outcome
+/// naming what was refused.
 pub async fn execute_stack_tool(
     port: &dyn WorkQueueToolPort,
     caller: &WorkQueueCaller,
@@ -425,15 +338,10 @@ async fn run(
                 "queue_id": record.queue_id,
                 "title": record.title,
                 "daemon_instance_id": host,
-                "created_by_session_id": record.created_by_session_id,
+                "owner_session_id": record.owner_session_id(),
                 "created_at_unix_ms": record.created_at_unix_ms,
                 "node_count": record.stack.nodes.len(),
             })).collect::<Vec<_>>() }))
-        }
-        PR_STACK_CREATE => {
-            let title = args.title.as_deref().filter(|t| !t.trim().is_empty());
-            let record = port.create_stack(caller, title).await.map_err(refused)?;
-            Ok(json!({ "queue_id": record.queue_id }))
         }
         _ => {
             let named = args.queue_id.clone();
@@ -448,12 +356,24 @@ async fn run(
                     pr: PrAddress::Node(_)
                 }
             );
-            if queue_id.is_none() && reads_a_node {
-                return Err(no_stack_named(tool_name));
+            // A search or a read by pull number needs no queue; it is served to a session that owns one.
+            let acts_on_no_queue = !reads_a_node
+                && named.as_deref().is_none_or(|id| id.trim().is_empty())
+                && matches!(tool_name, PR_SEARCH | PR_READ | PR_COMMENTS);
+            // A call that acts on no queue was gated by the caller's own host, on what its own
+            // records offer it; one that acts on a queue is gated here, by the queue.
+            if !acts_on_no_queue {
+                let queue = queue_id.as_deref().unwrap_or(&caller.session_id);
+                let access = port.access_to(caller, queue).await.map_err(refused)?;
+                if !is_stack_tool_offered_to(access, tool_name) {
+                    return Err(refused(format!(
+                        "not offered to a session that is only addressed by work queue {queue}: it may read its status and its pull requests only"
+                    )));
+                }
             }
             let scope = WorkQueueScope {
                 project_id: caller.project_id.clone(),
-                queue_id,
+                queue_id: if acts_on_no_queue { None } else { queue_id },
             };
             port.run_stack_op(&scope, op).await.map_err(refused)
         }
@@ -469,311 +389,93 @@ mod tests {
 
     use super::*;
 
-    const OWN_STACK: &str = "stack-own";
-    const OTHER_STACK: &str = "stack-other";
+    const OWN_QUEUE: &str = "caller";
+    const OTHER_QUEUE: &str = "someone-else";
 
-    // ── classification ────────────────────────────────────────────────────────────────────────
-
-    #[test]
-    fn main_and_an_orchestrator_naming_no_stack_are_orchestrators_owning_none() {
-        // Given main's role and an orchestrator's, neither changeset naming a stack
-        let roles = ["project-home", "orchestrator"].map(|role| {
-            work_queue_caller_role(&WorkQueueCallerFacts {
-                session_role: Some(role),
-                ..WorkQueueCallerFacts::default()
-            })
-        });
-
-        // Then both are orchestrators with no own stack
-        assert_eq!(
-            roles,
-            [
-                Some(WorkQueueCallerRole::Orchestrator { own_stack_id: None }),
-                Some(WorkQueueCallerRole::Orchestrator { own_stack_id: None })
-            ]
-        );
-    }
-
-    #[test]
-    fn an_orchestrator_whose_changeset_names_a_stack_owns_it() {
-        // Given an orchestrator whose changeset names its stack
-        let facts = WorkQueueCallerFacts {
-            session_role: Some("orchestrator"),
-            own_stack_id: Some(OWN_STACK),
-            ..WorkQueueCallerFacts::default()
-        };
-
-        // Then that stack is its own
-        assert_eq!(
-            work_queue_caller_role(&facts),
-            Some(WorkQueueCallerRole::Orchestrator {
-                own_stack_id: Some(OWN_STACK.to_string())
-            })
-        );
-    }
-
-    #[test]
-    fn a_session_with_no_orchestrator_role_is_offered_nothing_for_the_stack_it_names() {
-        // Given a session with no role whose changeset names a stack
-        let facts = WorkQueueCallerFacts {
-            own_stack_id: Some(OWN_STACK),
-            ..WorkQueueCallerFacts::default()
-        };
-
-        // Then naming a stack gives it no stack role
-        assert_eq!(work_queue_caller_role(&facts), None);
-    }
-
-    #[test]
-    fn a_session_bound_to_a_node_of_its_orchestrators_stack_is_a_node_of_that_stack() {
-        // Given a session whose orchestrator's stack binds a node to it
-        let facts = WorkQueueCallerFacts {
-            parent_stack: Some(ParentStack {
-                queue_id: OWN_STACK,
-                binds_this_session: true,
-            }),
-            ..WorkQueueCallerFacts::default()
-        };
-
-        // Then it is a node of that stack
-        assert_eq!(
-            work_queue_caller_role(&facts),
-            Some(WorkQueueCallerRole::WorkItem {
-                queue_id: OWN_STACK.to_string()
-            })
-        );
-    }
-
-    #[test]
-    fn a_session_its_orchestrators_stack_binds_no_node_to_has_no_stack_role() {
-        // Given a session started by an orchestrator whose stack binds no node to it
-        let facts = WorkQueueCallerFacts {
-            parent_stack: Some(ParentStack {
-                queue_id: OWN_STACK,
-                binds_this_session: false,
-            }),
-            ..WorkQueueCallerFacts::default()
-        };
-
-        // Then it is offered no stack tool
-        assert_eq!(work_queue_caller_role(&facts), None);
-    }
-
-    #[test]
-    fn an_orchestrator_role_wins_over_a_node_binding() {
-        // Given an orchestrator-role session owning a stack and bound to a node of another
-        let facts = WorkQueueCallerFacts {
-            session_role: Some("orchestrator"),
-            own_stack_id: Some(OWN_STACK),
-            parent_stack: Some(ParentStack {
-                queue_id: OTHER_STACK,
-                binds_this_session: true,
-            }),
-        };
-
-        // Then its role is what decides
-        assert_eq!(
-            work_queue_caller_role(&facts),
-            Some(WorkQueueCallerRole::Orchestrator {
-                own_stack_id: Some(OWN_STACK.to_string())
-            })
-        );
-    }
-
-    #[test]
-    fn an_ordinary_session_has_no_stack_role() {
-        // Given a session with no role, no stack and no orchestrator
-        let facts = WorkQueueCallerFacts::default();
-
-        // Then it is offered no stack tool
-        assert_eq!(work_queue_caller_role(&facts), None);
-    }
-
-    // ── offering ──────────────────────────────────────────────────────────────────────────────
-
-    #[test]
-    fn a_node_is_served_the_two_reads_and_no_writer() {
-        // Given a node of a stack
-        let node = WorkQueueCallerRole::WorkItem {
-            queue_id: OWN_STACK.to_string(),
-        };
-
-        // When each tool is checked
-        let served: Vec<&str> = WORK_QUEUE_TOOL_NAMES
-            .into_iter()
-            .filter(|tool| is_stack_tool_offered_to(&node, tool))
-            .collect();
-
-        // Then only status and read are served
-        assert_eq!(served, vec![PR_STACK_STATUS, PR_READ]);
-    }
-
-    #[test]
-    fn a_tool_outside_the_family_is_offered_to_no_caller() {
-        // Given an orchestrator, who is offered every stack tool
-        // Then a project-home tool and a git tool n10 moves are not stack tools it is offered here
-        assert!(!is_stack_tool_offered_to(
-            &WorkQueueCallerRole::Orchestrator { own_stack_id: None },
-            "ListProjectSessions"
-        ));
-        assert!(!is_stack_tool_offered_to(
-            &WorkQueueCallerRole::Orchestrator { own_stack_id: None },
-            "work_item_merge"
-        ));
+    fn a_caller() -> WorkQueueCaller {
+        WorkQueueCaller {
+            session_id: OWN_QUEUE.to_string(),
+            project_id: "proj".to_string(),
+        }
     }
 
     // ── addressing ────────────────────────────────────────────────────────────────────────────
 
-    fn a_caller(role: WorkQueueCallerRole) -> WorkQueueCaller {
-        WorkQueueCaller {
-            session_id: "caller".to_string(),
-            project_id: "proj".to_string(),
-            role,
-        }
-    }
-
-    fn an_orchestrator_owning_a_stack() -> WorkQueueCaller {
-        a_caller(WorkQueueCallerRole::Orchestrator {
-            own_stack_id: Some(OWN_STACK.to_string()),
-        })
-    }
-
-    fn an_orchestrator_owning_none() -> WorkQueueCaller {
-        a_caller(WorkQueueCallerRole::Orchestrator { own_stack_id: None })
-    }
-
-    fn a_node() -> WorkQueueCaller {
-        a_caller(WorkQueueCallerRole::WorkItem {
-            queue_id: OWN_STACK.to_string(),
-        })
-    }
-
     #[test]
-    fn an_orchestrator_acts_on_the_stack_it_names() {
-        // Given an orchestrator naming a stack
-        let caller = an_orchestrator_owning_none();
-
-        // When a planning tool is addressed
-        let addressed = addressed_stack_id(&caller, PR_ADD_PLANNED, Some(OTHER_STACK));
-
-        // Then it is that stack
-        assert_eq!(addressed, Ok(Some(OTHER_STACK.to_string())));
-    }
-
-    #[test]
-    fn an_orchestrator_naming_no_stack_is_refused_a_stack_tool_and_told_how_to_find_one() {
-        // Given an orchestrator owning no stack, naming none
-        let caller = an_orchestrator_owning_none();
-
-        // When a stack-requiring tool is addressed
-        let refusal = addressed_stack_id(&caller, PR_STACK_STATUS, None)
-            .expect_err("an orchestrator has no default stack");
-
-        // Then the refusal names the argument and the tool that lists the stacks
-        assert!(refusal.contains("queue_id"), "{refusal}");
-        assert!(refusal.contains("work_queue_list"), "{refusal}");
-    }
-
-    #[test]
-    fn an_orchestrator_naming_no_stack_acts_on_its_own() {
-        // Given an orchestrator owning a stack, naming none
-        let caller = an_orchestrator_owning_a_stack();
-
-        // When a planning tool is addressed
-        let addressed = addressed_stack_id(&caller, PR_ADD_PLANNED, None);
-
-        // Then it is its own stack
-        assert_eq!(addressed, Ok(Some(OWN_STACK.to_string())));
-    }
-
-    #[test]
-    fn an_orchestrator_owning_a_stack_may_name_another_of_its_project() {
-        // Given an orchestrator owning a stack, naming another
-        let caller = an_orchestrator_owning_a_stack();
-
-        // When a read is addressed
-        let addressed = addressed_stack_id(&caller, PR_STACK_STATUS, Some(OTHER_STACK));
-
-        // Then the named stack wins over its default
-        assert_eq!(addressed, Ok(Some(OTHER_STACK.to_string())));
-    }
-
-    #[test]
-    fn a_node_reads_its_own_stack_whether_or_not_it_names_it() {
-        // Given a node of a stack
-        let caller = a_node();
-
-        // When it reads its stack, naming it and not
-        let addressed = [
-            addressed_stack_id(&caller, PR_STACK_STATUS, None),
-            addressed_stack_id(&caller, PR_STACK_STATUS, Some(OWN_STACK)),
-        ];
-
-        // Then both are its own stack
+    fn a_call_naming_no_queue_acts_on_the_callers_own() {
         assert_eq!(
-            addressed,
-            [
-                Ok(Some(OWN_STACK.to_string())),
-                Ok(Some(OWN_STACK.to_string()))
-            ]
+            addressed_stack_id(&a_caller(), PR_ADD_PLANNED, None),
+            Ok(Some(OWN_QUEUE.to_string()))
         );
     }
 
     #[test]
-    fn a_node_naming_another_stack_is_refused_naming_that_stack() {
-        // Given a node of a stack naming another one
-        let caller = a_node();
-
-        // When it reads the other stack's status
-        let refusal = addressed_stack_id(&caller, PR_STACK_STATUS, Some(OTHER_STACK))
-            .expect_err("a node reads its own stack alone");
-
-        // Then the refusal names the stack it may not read
-        assert!(refusal.contains(OTHER_STACK), "{refusal}");
+    fn a_call_naming_a_queue_acts_on_it() {
+        assert_eq!(
+            addressed_stack_id(&a_caller(), PR_STACK_STATUS, Some(OTHER_QUEUE)),
+            Ok(Some(OTHER_QUEUE.to_string()))
+        );
     }
 
     #[test]
-    fn the_project_level_tools_address_no_stack() {
-        // Given an orchestrator owning a stack, the default of every other tool
-        let caller = an_orchestrator_owning_a_stack();
-
-        // When the two project-level tools are addressed
-        let addressed = [
-            addressed_stack_id(&caller, PR_STACK_LIST, None),
-            addressed_stack_id(&caller, PR_STACK_CREATE, None),
-        ];
-
-        // Then neither acts on a stack
-        assert_eq!(addressed, [Ok(None), Ok(None)]);
+    fn the_listing_addresses_no_queue() {
+        assert_eq!(
+            addressed_stack_id(&a_caller(), PR_STACK_LIST, None),
+            Ok(None)
+        );
     }
 
     #[test]
-    fn an_orchestrator_searches_the_project_with_no_stack_named() {
-        // Given an orchestrator naming no stack
-        let caller = an_orchestrator_owning_none();
+    fn the_owner_is_served_every_tool_and_an_addressed_session_the_two_reads() {
+        let served = |access| -> Vec<&str> {
+            WORK_QUEUE_TOOL_NAMES
+                .into_iter()
+                .filter(|tool| is_stack_tool_offered_to(access, tool))
+                .collect()
+        };
 
-        // When it searches
-        let addressed = addressed_stack_id(&caller, PR_SEARCH, None);
-
-        // Then no stack is needed
-        assert_eq!(addressed, Ok(None));
+        assert_eq!(
+            (
+                served(WorkQueueAccess::Owner),
+                served(WorkQueueAccess::Addressed)
+            ),
+            (
+                WORK_QUEUE_TOOL_NAMES.to_vec(),
+                vec![PR_STACK_STATUS, PR_READ]
+            )
+        );
     }
 
     // ── execution over a port ─────────────────────────────────────────────────────────────────
 
-    /// A port that records every operation it is asked and answers each with `{"ran": <tool>}`.
-    #[derive(Default)]
+    /// A port that records every operation it is asked and answers each with `{"ran": true}`;
+    /// `access` is what every queue grants the caller (`None`: the refusal).
     struct RecordingPort {
         ops: Mutex<Vec<(WorkQueueScope, WorkQueueOp)>>,
-        created: Mutex<Vec<(WorkQueueCaller, Option<String>)>>,
+        access: Option<WorkQueueAccess>,
         refusal: Option<String>,
     }
 
     impl RecordingPort {
+        fn granting(access: WorkQueueAccess) -> Self {
+            Self {
+                ops: Mutex::default(),
+                access: Some(access),
+                refusal: None,
+            }
+        }
+
         fn refusing(why: &str) -> Self {
             Self {
                 refusal: Some(why.to_string()),
-                ..Self::default()
+                ..Self::granting(WorkQueueAccess::Owner)
+            }
+        }
+
+        fn without_access() -> Self {
+            Self {
+                access: None,
+                ..Self::granting(WorkQueueAccess::Owner)
             }
         }
 
@@ -786,9 +488,8 @@ mod tests {
         WorkQueueRecord {
             queue_id: queue_id.to_string(),
             project_id: "proj".to_string(),
-            created_by_session_id: "main".to_string(),
             created_at_unix_ms: 1_700_000_000_000,
-            title: (queue_id == OWN_STACK).then(|| "Orchestrator sessions".to_string()),
+            title: (queue_id == OWN_QUEUE).then(|| "Orchestrator sessions".to_string()),
             stack: WorkQueue {
                 version: 1,
                 nodes: (0..nodes)
@@ -808,19 +509,16 @@ mod tests {
         }
 
         async fn list_stacks(&self, _project_id: &str) -> Result<Vec<WorkQueueRecord>, String> {
-            Ok(vec![a_record(OWN_STACK, 2), a_record(OTHER_STACK, 0)])
+            Ok(vec![a_record(OWN_QUEUE, 2), a_record(OTHER_QUEUE, 0)])
         }
 
-        async fn create_stack(
+        async fn access_to(
             &self,
-            caller: &WorkQueueCaller,
-            title: Option<&str>,
-        ) -> Result<WorkQueueRecord, String> {
-            self.created
-                .lock()
-                .unwrap()
-                .push((caller.clone(), title.map(str::to_string)));
-            Ok(a_record("stack-new", 0))
+            _caller: &WorkQueueCaller,
+            queue_id: &str,
+        ) -> Result<WorkQueueAccess, String> {
+            self.access
+                .ok_or_else(|| format!("session {queue_id} has no work queue"))
         }
 
         async fn run_stack_op(
@@ -844,88 +542,35 @@ mod tests {
     fn own_scope() -> WorkQueueScope {
         WorkQueueScope {
             project_id: "proj".to_string(),
-            queue_id: Some(OWN_STACK.to_string()),
+            queue_id: Some(OWN_QUEUE.to_string()),
         }
     }
 
     #[tokio::test]
-    async fn work_queue_create_answers_the_stack_the_port_created_for_the_caller() {
-        // Given an orchestrator
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_none();
+    async fn work_queue_list_answers_every_queue_with_the_host_that_holds_it() {
+        // Given a host holding two queues, and an owner calling
+        let port = RecordingPort::granting(WorkQueueAccess::Owner);
 
-        // When it creates a stack with no title
-        let outcome = execute_stack_tool(&port, &caller, PR_STACK_CREATE, "{}").await;
+        // When it lists them
+        let outcome = execute_stack_tool(&port, &a_caller(), PR_STACK_LIST, "{}").await;
 
-        // Then the answer is the new stack's id, created untitled for that caller
-        assert_eq!(answer_of(&outcome), json!({ "queue_id": "stack-new" }));
-        assert_eq!(*port.created.lock().unwrap(), vec![(caller, None)]);
-    }
-
-    #[tokio::test]
-    async fn work_queue_create_hands_the_port_the_title_it_names() {
-        // Given an orchestrator
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_none();
-
-        // When it creates a stack titled for what it is for
-        execute_stack_tool(
-            &port,
-            &caller,
-            PR_STACK_CREATE,
-            &json!({ "title": "Orchestrator sessions" }).to_string(),
-        )
-        .await;
-
-        // Then the port created it with that title
-        assert_eq!(
-            *port.created.lock().unwrap(),
-            vec![(caller, Some("Orchestrator sessions".to_string()))]
-        );
-    }
-
-    #[test]
-    fn work_queue_create_takes_an_optional_title() {
-        // Given the tools' definitions
-        let create = stack_tool_defs()
-            .into_iter()
-            .find(|tool| tool.name == PR_STACK_CREATE)
-            .expect("work_queue_create is defined");
-        let schema: Value = serde_json::from_str(&create.input_schema_json).unwrap();
-
-        // Then it takes a string title, and requires nothing
-        assert_eq!(
-            (&schema["properties"]["title"]["type"], &schema["required"]),
-            (&json!("string"), &json!([]))
-        );
-    }
-
-    #[tokio::test]
-    async fn work_queue_list_answers_every_stack_with_the_host_that_holds_it() {
-        // Given an orchestrator, and a host holding two stacks
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_none();
-
-        // When it lists the stacks
-        let outcome = execute_stack_tool(&port, &caller, PR_STACK_LIST, "{}").await;
-
-        // Then each is listed with its id, title, host, creator, creation time and node count
+        // Then each is listed with its id, title, host, owner, creation time and item count
         assert_eq!(
             answer_of(&outcome),
             json!({ "stacks": [
                 {
-                    "queue_id": OWN_STACK,
+                    "queue_id": OWN_QUEUE,
                     "title": "Orchestrator sessions",
                     "daemon_instance_id": "host-a",
-                    "created_by_session_id": "main",
+                    "owner_session_id": OWN_QUEUE,
                     "created_at_unix_ms": 1_700_000_000_000u64,
                     "node_count": 2,
                 },
                 {
-                    "queue_id": OTHER_STACK,
+                    "queue_id": OTHER_QUEUE,
                     "title": null,
                     "daemon_instance_id": "host-a",
-                    "created_by_session_id": "main",
+                    "owner_session_id": OTHER_QUEUE,
                     "created_at_unix_ms": 1_700_000_000_000u64,
                     "node_count": 0,
                 },
@@ -934,15 +579,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn work_item_add_is_run_on_the_addressed_stack_with_its_arguments() {
-        // Given an orchestrator owning a stack
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_a_stack();
+    async fn a_session_with_no_access_to_the_addressed_queue_is_refused_with_the_ports_reason() {
+        // Given a queue the caller has no access to
+        let port = RecordingPort::without_access();
 
-        // When it plans a PR on its own stack
+        // When it reads the status of another session's queue
         let outcome = execute_stack_tool(
             &port,
-            &caller,
+            &a_caller(),
+            PR_STACK_STATUS,
+            &json!({ "queue_id": OTHER_QUEUE }).to_string(),
+        )
+        .await;
+
+        // Then the refusal is the port's, prefixed by the tool, and nothing ran
+        assert_eq!(
+            outcome.error_message,
+            "work_queue_status: session someone-else has no work queue"
+        );
+        assert_eq!(port.ops(), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn an_addressed_session_may_read_but_not_write() {
+        // Given an addressed caller
+        let port = RecordingPort::granting(WorkQueueAccess::Addressed);
+
+        // When it reads status and tries to add an item
+        let status = execute_stack_tool(&port, &a_caller(), PR_STACK_STATUS, "{}").await;
+        let add = execute_stack_tool(
+            &port,
+            &a_caller(),
+            PR_ADD_PLANNED,
+            &json!({ "title": "t", "description": "d" }).to_string(),
+        )
+        .await;
+
+        // Then the read ran and the write was refused
+        assert_eq!((status.is_error, add.is_error), (false, true));
+        assert_eq!(port.ops().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn work_item_add_is_run_on_the_addressed_queue_with_its_arguments() {
+        // Given an owner
+        let port = RecordingPort::granting(WorkQueueAccess::Owner);
+
+        // When it plans an item on its own queue
+        let outcome = execute_stack_tool(
+            &port,
+            &a_caller(),
             PR_ADD_PLANNED,
             &json!({ "title": "Tools", "description": "the tools", "parents": ["n1"] }).to_string(),
         )
@@ -965,21 +651,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn work_pr_search_names_open_when_no_state_is_given() {
-        // Given an orchestrator
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_none();
+    async fn work_pr_search_names_open_when_no_state_is_given_and_acts_on_no_queue() {
+        // Given an owner
+        let port = RecordingPort::granting(WorkQueueAccess::Owner);
 
         // When it searches by text alone
         execute_stack_tool(
             &port,
-            &caller,
+            &a_caller(),
             PR_SEARCH,
             &json!({ "query": "store" }).to_string(),
         )
         .await;
 
-        // Then the search is of open PRs in the project, with no stack and no limit preference
+        // Then the search is of open PRs in the project, with no queue and no limit preference
         assert_eq!(
             port.ops(),
             vec![(
@@ -1000,20 +685,19 @@ mod tests {
 
     #[tokio::test]
     async fn work_pr_read_by_node_is_run_as_a_node_address() {
-        // Given a node of a stack
-        let port = RecordingPort::default();
-        let caller = a_node();
+        // Given an addressed session
+        let port = RecordingPort::granting(WorkQueueAccess::Addressed);
 
         // When it reads a node's PR with its files
         execute_stack_tool(
             &port,
-            &caller,
+            &a_caller(),
             PR_READ,
             &json!({ "node_id": "n2", "include_files": true }).to_string(),
         )
         .await;
 
-        // Then the port reads that node's PR on its stack
+        // Then the port reads that node's PR on the queue
         assert_eq!(
             port.ops(),
             vec![(
@@ -1028,16 +712,15 @@ mod tests {
 
     #[tokio::test]
     async fn a_read_naming_both_a_node_and_a_pull_number_is_refused_before_the_port_is_asked() {
-        // Given an orchestrator
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_none();
+        // Given an owner
+        let port = RecordingPort::granting(WorkQueueAccess::Owner);
 
         // When it reads a PR naming both a node and a number
         let outcome = execute_stack_tool(
             &port,
-            &caller,
+            &a_caller(),
             PR_COMMENTS,
-            &json!({ "queue_id": OWN_STACK, "node_id": "n1", "pull_number": 7 }).to_string(),
+            &json!({ "queue_id": OWN_QUEUE, "node_id": "n1", "pull_number": 7 }).to_string(),
         )
         .await;
 
@@ -1053,14 +736,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_planning_call_missing_its_title_is_refused_as_invalid_arguments() {
-        // Given an orchestrator owning a stack
-        let port = RecordingPort::default();
-        let caller = an_orchestrator_owning_a_stack();
+        // Given an owner
+        let port = RecordingPort::granting(WorkQueueAccess::Owner);
 
-        // When it plans a PR with no title
+        // When it plans an item with no title
         let outcome = execute_stack_tool(
             &port,
-            &caller,
+            &a_caller(),
             PR_ADD_PLANNED,
             &json!({ "description": "the tools" }).to_string(),
         )
@@ -1081,13 +763,12 @@ mod tests {
     #[tokio::test]
     async fn the_ports_refusal_is_the_tools_error() {
         // Given a port that refuses, naming why
-        let port = RecordingPort::refusing("project proj holds no stack stack-own");
-        let caller = an_orchestrator_owning_a_stack();
+        let port = RecordingPort::refusing("project proj holds no queue caller");
 
-        // When a node is deleted from the stack
+        // When an item is deleted from the queue
         let outcome = execute_stack_tool(
             &port,
-            &caller,
+            &a_caller(),
             PR_DELETE_PLANNED,
             &json!({ "node_id": "n1" }).to_string(),
         )
@@ -1097,7 +778,7 @@ mod tests {
         assert!(outcome.is_error, "{}", outcome.result_json);
         assert_eq!(
             outcome.error_message,
-            "work_item_delete: project proj holds no stack stack-own"
+            "work_item_delete: project proj holds no queue caller"
         );
     }
 }

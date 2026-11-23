@@ -388,7 +388,7 @@ mod tests {
     };
     use rstest::rstest;
     use std::path::Path;
-    use tddy_core::changeset::{Changeset, WorkItem};
+    use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
 
     // -----------------------------------------------------------------------
     // add_work_item
@@ -400,6 +400,8 @@ mod tests {
         let tmp = a_stack_session_dir();
         let dir = tmp.path();
         tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
+        // The session was started with a work queue, which is empty
+        tddy_changeset::work_queue_fixtures::seed_session_stack(dir, WorkQueue::default());
 
         // When
         let result = add_work_item(
@@ -501,6 +503,8 @@ mod tests {
         let tmp = a_stack_session_dir();
         let dir = tmp.path();
         tddy_core::changeset::write_changeset(dir, &Changeset::default()).unwrap();
+        // The session was started with a work queue, which is empty
+        tddy_changeset::work_queue_fixtures::seed_session_stack(dir, WorkQueue::default());
 
         // When
         let node = add_work_item(

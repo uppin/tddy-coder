@@ -1,7 +1,7 @@
 //! A project's PR stacks, addressed by id (`#orchestrators` 9/11): `ListProjectWorkQueues`,
 //! `GetWorkQueue`, and the resolution every other PR-stack request goes through to find the one
-//! stack it acts on — a [`WorkQueueAddress`], or an orchestrator `session_id` resolved through the
-//! stack its changeset names.
+//! queue it acts on — a [`WorkQueueAddress`] (its `queue_id` is the owning session's id), or a
+//! `session_id` naming the owner.
 //!
 //! Kept out of `ports.rs`, which only delegates here: that file is over its size budget
 //! (`docs/code-issues/oversized-file-pr-stack-ports.md`).
@@ -26,8 +26,8 @@ use super::WorkQueueRpcHandler;
 pub(crate) enum WorkQueueTarget {
     /// The stack's own address — served by the daemon it names.
     Address(WorkQueueAddress),
-    /// An orchestrator session, resolved through the stack its changeset names
-    /// (`Changeset.queue_id`). Kept so a caller that has no stack id yet still works.
+    /// The session that owns the queue (a queue's id is its owner's), for a caller that holds no
+    /// address.
     Session(String),
 }
 
@@ -94,7 +94,7 @@ pub(crate) fn summary_of(
         title: record.title.clone().unwrap_or_default(),
         node_counts: Some(node_counts_of(&record.stack)),
         referencing_session_ids,
-        created_by_session_id: record.created_by_session_id.clone(),
+        created_by_session_id: record.owner_session_id().to_string(),
         created_at_unix_ms: record.created_at_unix_ms,
     }
 }
@@ -109,23 +109,26 @@ pub(crate) fn store_status(error: WorkQueueStoreError) -> Status {
     }
 }
 
-/// The guard on a `session_id`-addressed mutation (`#orchestrators` 12/12, B9): the session's
-/// changeset must name a stack. There is no first-write create on this path any more — a session
-/// naming no stack is refused whatever its recipe, and a stack is made with `work_queue_create`
-/// (a session) or `CreateWorkQueue` (the web's "New stack"), then addressed by its
-/// `WorkQueueAddress` or through a session that names it.
+/// The guard on a `session_id`-addressed mutation (`#workqueue` 5/14): the session must own a work
+/// queue. Nothing here creates one — a queue exists only because its session was started with one —
+/// so a session owning none is refused with the hint naming how a queue comes to exist.
 pub(crate) fn require_a_stack(session_dir: &Path) -> Result<(), Status> {
-    let changeset = tddy_core::read_changeset(session_dir)
-        .map_err(|e| Status::invalid_argument(e.to_string()))?;
-    if changeset.work_queue_id.is_some() {
-        return Ok(());
+    match tddy_core::changeset::read_session_stack(session_dir) {
+        Ok(Some(_)) => Ok(()),
+        Ok(None) => Err(Status::failed_precondition(format!(
+            "session {} has no work queue — {}",
+            session_dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            tddy_core::session_work_queue::NO_WORK_QUEUE_HINT
+        ))),
+        Err(e) => Err(Status::invalid_argument(e.to_string())),
     }
-    Err(Status::failed_precondition(
-        "this session names no stack — create one with work_queue_create or New stack",
-    ))
 }
 
-/// Sessions on this host whose changeset names each stack, by stack id.
+/// Sessions on this host that own a work queue, by queue id — a queue's id is its owning session's,
+/// so each queue is referenced by that one session.
 pub(super) fn referencing_sessions_by_stack(sessions_base: &Path) -> HashMap<String, Vec<String>> {
     let mut by_stack: HashMap<String, Vec<String>> = HashMap::new();
     let sessions_dir = sessions_base.join("sessions");
@@ -133,21 +136,14 @@ pub(super) fn referencing_sessions_by_stack(sessions_base: &Path) -> HashMap<Str
         return by_stack;
     };
     for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
+        let owns_a_queue = entry
+            .path()
+            .join(tddy_core::session_work_queue::WORK_QUEUE_FILE)
+            .is_file();
+        if owns_a_queue {
+            let session_id = entry.file_name().to_string_lossy().into_owned();
+            by_stack.insert(session_id.clone(), vec![session_id]);
         }
-        let Ok(changeset) = tddy_core::read_changeset(&dir) else {
-            continue;
-        };
-        let Some(queue_id) = changeset.work_queue_id else {
-            continue;
-        };
-        let session_id = entry.file_name().to_string_lossy().into_owned();
-        by_stack.entry(queue_id).or_default().push(session_id);
-    }
-    for ids in by_stack.values_mut() {
-        ids.sort();
     }
     by_stack
 }
@@ -190,7 +186,7 @@ impl WorkQueueRpcHandler {
     }
 
     pub(crate) fn stack_store(&self, sessions_base: &Path) -> WorkQueueStore {
-        WorkQueueStore::new(sessions_base.join("projects"))
+        WorkQueueStore::new(sessions_base)
     }
 
     /// Forward `req` to the daemon its target's address names, when the target is an address
@@ -284,8 +280,8 @@ impl WorkQueueRpcHandler {
             .await
     }
 
-    /// The session directory a local address is served through, when a session on this host names
-    /// the stack (its creator first, then any referencing session).
+    /// The session directory a local address is served through: the owning session's — a queue's id
+    /// is its owner's — when it is on this host and the queue belongs to the address's project.
     pub(crate) fn session_dir_for_address(
         &self,
         sessions_base: &Path,
@@ -293,24 +289,9 @@ impl WorkQueueRpcHandler {
     ) -> Option<PathBuf> {
         let store = self.stack_store(sessions_base);
         let record = store.read(&address.project_id, &address.queue_id).ok()?;
-        let mut candidates = vec![record.created_by_session_id.clone()];
-        candidates.extend(
-            referencing_sessions_by_stack(sessions_base)
-                .get(&address.queue_id)
-                .cloned()
-                .unwrap_or_default(),
-        );
-        candidates.into_iter().find_map(|session_id| {
-            if validate_session_id_segment(&session_id).is_err() {
-                return None;
-            }
-            let dir = unified_session_dir_path(sessions_base, &session_id);
-            // Only a session whose changeset names this stack can serve through its directory.
-            let names_stack = tddy_core::read_changeset(&dir)
-                .map(|c| c.work_queue_id.as_deref() == Some(address.queue_id.as_str()))
-                .unwrap_or(false);
-            names_stack.then_some(dir)
-        })
+        let owner = record.owner_session_id();
+        validate_session_id_segment(owner).ok()?;
+        Some(unified_session_dir_path(sessions_base, owner))
     }
 }
 

@@ -70,7 +70,7 @@ use tddy_tool_engine::project_home_terminal_tools::{
     execute_project_home_terminal_tool, is_project_home_terminal_tool,
 };
 use tddy_tool_engine::project_home_tools::{
-    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for, SessionToolRole,
+    execute_project_home_tool, is_project_home_tool, session_offered_catalog_for,
 };
 use tddy_tool_engine::project_home_turn_tools::{
     execute_project_home_turn_tool, is_project_home_turn_tool,
@@ -85,7 +85,7 @@ use tddy_tool_engine::session_file_tools::is_session_file_tool;
 use tddy_tool_engine::session_message_tools::is_session_message_tool;
 use tddy_tool_engine::start_ledger::StartLedger;
 use tddy_tool_engine::work_item_git_tools::is_stack_git_tool;
-use tddy_tool_engine::work_queue_tools::caller_records::stack_and_git_tools_offered_to;
+use tddy_tool_engine::work_queue_tools::caller_records::with_work_tools_offered_to;
 use tddy_tool_engine::work_queue_tools::is_stack_tool;
 use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
@@ -295,7 +295,7 @@ impl ExecToolRpcHandler {
                 "session {session_id}: cannot read its record to tell which tools it is offered ({e})"
             ))
         })?;
-        let mut tools = session_offered_catalog_for(
+        let catalogue = session_offered_catalog_for(
             session_tool_role(&metadata),
             &start_choices(
                 &self.peer_routing,
@@ -305,15 +305,8 @@ impl ExecToolRpcHandler {
                     .unwrap_or_else(|| empty_coding_agents()),
             ),
         );
-        // A project-home session's catalogue already carries the stack tools; a session bound to a
-        // node of a stack is offered the two reads, which only its own records can tell.
-        if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
-            let caller = work_queue_caller_of(&sessions_base, session_id)?;
-            tools.extend(stack_and_git_tools_offered_to(
-                caller.as_ref().map(|c| &c.role),
-            ));
-        }
-        Ok(tools)
+        let access = work_queue_caller_of(&sessions_base, session_id)?.map(|(_, access)| access);
+        Ok(with_work_tools_offered_to(catalogue, access))
     }
 
     /// The OS user `session_token` maps to, as the start path resolves it.

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { CreateSessionRunInTmuxToggle } from "./CreateSessionRunInTmuxToggle";
+import { useWorkQueueToggle } from "./CreateSessionWorkQueueToggle";
 import {
   registerSessionTypeOptions,
   sessionLaunchOf,
@@ -198,6 +199,8 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     setSessionType,
   });
 
+  const { withWorkQueue, workQueueToggle } = useWorkQueueToggle();
+
   const { asOrchestrator, orchestratorField } = useCreateSessionOrchestrator(
     sessionAgent,
     projectHome,
@@ -346,6 +349,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     initialPrompt,
     sandbox,
     runInTmux,
+    withWorkQueue,
     managedCodebase,
     sandboxedCodebase,
     isSplitCodebase,
@@ -443,6 +447,7 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     remoteBranchesError,
     resolveBranchConflict,
     runInTmuxToggle,
+    workQueueToggle,
     sandbox,
     sandboxedCodebase,
     sandboxedCodebaseUnavailableReason,

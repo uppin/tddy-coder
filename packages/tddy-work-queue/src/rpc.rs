@@ -12,13 +12,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, CreateWorkQueueRequest, CreateWorkQueueResponse,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
-    LinkWorkItemRequest, LinkWorkItemResponse, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse, WorkQueueService,
+    AddWorkItemRequest, AddWorkItemResponse, GetPrStatusRequest, GetPrStatusResponse,
+    GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, WorkQueueService,
 };
 
 /// The coordinate family P is served on — `work_queue.WorkQueueService`.
@@ -80,12 +79,6 @@ pub trait WorkQueueHandler: Send + Sync {
         &self,
         request: Request<GetWorkQueueRequest>,
     ) -> Result<Response<GetWorkQueueResponse>, Status>;
-
-    /// Create a new, empty project stack, answering its address (`#orchestrators` 12/12, B9).
-    async fn create_work_queue(
-        &self,
-        request: Request<CreateWorkQueueRequest>,
-    ) -> Result<Response<CreateWorkQueueResponse>, Status>;
 }
 
 /// Thin `WorkQueueService` adapter over a [`WorkQueueHandler`].
@@ -170,13 +163,6 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<GetWorkQueueRequest>,
     ) -> Result<Response<GetWorkQueueResponse>, Status> {
         self.host.get_work_queue(request).await
-    }
-
-    async fn create_work_queue(
-        &self,
-        request: Request<CreateWorkQueueRequest>,
-    ) -> Result<Response<CreateWorkQueueResponse>, Status> {
-        self.host.create_work_queue(request).await
     }
 }
 

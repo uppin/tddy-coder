@@ -53,8 +53,10 @@ without a tab that jumps after load.
 
 With no `?inspector=` tab named, opening the inspector lands on:
 
-1. **PR**, when `SessionEntry.pr_number` is set;
-2. otherwise **Worktree**.
+1. **Work queue**, when the session owns a work queue (`SessionEntry.owns_work_queue`) — see
+   [Session drawer § Work queue tab](session-drawer.md#work-queue-tab);
+2. **PR**, when `SessionEntry.pr_number` is set;
+3. otherwise **Worktree**.
 
 An explicit `?inspector=` tab always wins, `details` included. The rule lives in
 `defaultInspectorTab(session)` (`packages/tddy-session-web/src/defaultInspectorTab.ts`), and no rule

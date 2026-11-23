@@ -1,5 +1,6 @@
-//! PRD acceptance: PR stacks live in the project — `WorkQueueStore` creates, reads, updates and
-//! lists `<projects dir>/<project_id>/stacks/<queue_id>.yaml` records, serializing writers per stack.
+//! Work queues addressed by id (`#workqueue` 5/14): `WorkQueueStore` reads, updates and lists the queues
+//! the sessions of a host own — a queue's id is its owning session's — serializing writers per queue.
+//! It creates nothing: a queue exists only because its session was started with one.
 //!
 //! Feature: docs/ft/coder/pr-stacking.md § Where a stack lives.
 
@@ -8,6 +9,7 @@ use std::thread;
 
 use pretty_assertions::assert_eq;
 use tddy_changeset::changeset::{WorkItem, WorkQueue};
+use tddy_changeset::session_work_queue::SessionWorkQueues;
 use tddy_changeset::work_queue_store::{WorkQueueStore, WorkQueueStoreError};
 
 fn a_node(node_id: &str, parents: &[&str]) -> WorkItem {
@@ -19,74 +21,92 @@ fn a_node(node_id: &str, parents: &[&str]) -> WorkItem {
     }
 }
 
-fn a_stack(nodes: Vec<WorkItem>) -> WorkQueue {
-    WorkQueue { version: 1, nodes }
-}
-
 fn node_ids(stack: &WorkQueue) -> Vec<String> {
     stack.nodes.iter().map(|n| n.node_id.clone()).collect()
 }
 
-/// A host's projects directory, empty, removed with the world.
-struct AProjectsDir {
-    _root: tempfile::TempDir,
+/// A host's data directory, removed with the world.
+struct AHost {
+    root: tempfile::TempDir,
     store: WorkQueueStore,
 }
 
-fn a_projects_dir() -> AProjectsDir {
-    let root = tempfile::tempdir().expect("temp projects dir");
-    let store = WorkQueueStore::new(root.path().join("projects"));
-    AProjectsDir { _root: root, store }
+fn a_host() -> AHost {
+    let root = tempfile::tempdir().expect("temp data dir");
+    let store = WorkQueueStore::new(root.path());
+    AHost { root, store }
+}
+
+impl AHost {
+    /// `owner` is started with a queue of `project`.
+    fn starts_with_a_queue(&self, owner: &str, project: &str) {
+        SessionWorkQueues::new(self.root.path().join("sessions"))
+            .create_for_session(owner, project, 7)
+            .expect("created");
+    }
 }
 
 #[test]
-fn a_created_stack_is_stored_under_its_project_and_read_back() {
+fn a_queue_is_read_back_by_its_owners_id_and_project() {
     // Given
-    let host = a_projects_dir();
-    let planned = a_stack(vec![a_node("n1", &[]), a_node("n2", &["n1"])]);
+    let host = a_host();
+    host.starts_with_a_queue("sess-owner", "proj-auth");
+    host.store
+        .update("proj-auth", "sess-owner", |queue| {
+            queue.nodes = vec![a_node("n1", &[]), a_node("n2", &["n1"])];
+        })
+        .expect("update");
 
     // When
-    let created = host
-        .store
-        .create("proj-auth", "sess-planner", planned.clone())
-        .expect("create");
+    let read = host.store.read("proj-auth", "sess-owner").expect("read");
 
-    // Then — the record is a file under the project's stacks/ directory, and reads back whole
-    let record_path = host
-        .store
-        .projects_dir()
-        .join("proj-auth")
-        .join("stacks")
-        .join(format!("{}.yaml", created.queue_id));
-    assert!(
-        record_path.is_file(),
-        "expected the stack record at {}",
-        record_path.display()
-    );
-    let read = host
-        .store
-        .read("proj-auth", &created.queue_id)
-        .expect("read");
-    assert_eq!(read, created);
+    // Then
     assert_eq!(
         (
-            read.project_id.as_str(),
-            read.created_by_session_id.as_str(),
-            read.stack
+            read.queue_id.as_str(),
+            read.owner_session_id(),
+            node_ids(&read.stack)
         ),
-        ("proj-auth", "sess-planner", planned)
+        (
+            "sess-owner",
+            "sess-owner",
+            vec!["n1".to_string(), "n2".to_string()]
+        )
     );
 }
 
 #[test]
-fn concurrent_updates_to_one_stack_both_land() {
-    // Given — one stack, and two independent store handles over the same projects dir, as two
-    // RPC handlers of one daemon would hold
-    let host = a_projects_dir();
-    let created = host
-        .store
-        .create("proj-auth", "sess-planner", a_stack(vec![]))
-        .expect("create");
+fn a_queue_of_another_project_or_a_session_without_one_is_not_found() {
+    // Given
+    let host = a_host();
+    host.starts_with_a_queue("sess-owner", "proj-auth");
+
+    // When
+    let other_project = host.store.read("proj-other", "sess-owner");
+    let no_queue = host.store.read("proj-auth", "sess-plain");
+    let update_of_other_project = host.store.update("proj-other", "sess-owner", |_| {});
+
+    // Then
+    assert!(matches!(
+        other_project,
+        Err(WorkQueueStoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        no_queue,
+        Err(WorkQueueStoreError::NotFound { .. })
+    ));
+    assert!(matches!(
+        update_of_other_project,
+        Err(WorkQueueStoreError::NotFound { .. })
+    ));
+}
+
+#[test]
+fn concurrent_updates_to_one_queue_both_land() {
+    // Given — one queue, and independent store handles over the same data dir, as two RPC handlers
+    // of one daemon would hold
+    let host = a_host();
+    host.starts_with_a_queue("sess-owner", "proj-auth");
     let writers = 8;
     let writes_per_writer = 10;
     let start = Arc::new(Barrier::new(writers));
@@ -94,15 +114,14 @@ fn concurrent_updates_to_one_stack_both_land() {
     // When — every writer appends its own nodes at once
     let handles: Vec<_> = (0..writers)
         .map(|w| {
-            let store = WorkQueueStore::new(host.store.projects_dir());
-            let queue_id = created.queue_id.clone();
+            let store = WorkQueueStore::new(host.root.path());
             let start = Arc::clone(&start);
             thread::spawn(move || {
                 start.wait();
                 for i in 0..writes_per_writer {
                     store
-                        .update("proj-auth", &queue_id, |stack| {
-                            stack.nodes.push(a_node(&format!("w{w}-n{i}"), &[]));
+                        .update("proj-auth", "sess-owner", |queue| {
+                            queue.nodes.push(a_node(&format!("w{w}-n{i}"), &[]));
                         })
                         .expect("update");
                 }
@@ -117,7 +136,7 @@ fn concurrent_updates_to_one_stack_both_land() {
     let mut landed = node_ids(
         &host
             .store
-            .read("proj-auth", &created.queue_id)
+            .read("proj-auth", "sess-owner")
             .expect("read")
             .stack,
     );
@@ -130,135 +149,43 @@ fn concurrent_updates_to_one_stack_both_land() {
 }
 
 #[test]
-fn a_project_id_that_escapes_the_projects_dir_is_refused() {
+fn a_project_id_that_escapes_the_data_dir_is_refused() {
     // Given
-    let host = a_projects_dir();
+    let host = a_host();
 
     // When
-    let refused = host.store.create(
-        "../outside",
-        "sess-planner",
-        a_stack(vec![a_node("n1", &[])]),
-    );
-
-    // Then — refused by name, and nothing was written beside the projects dir
-    assert!(
-        matches!(&refused, Err(WorkQueueStoreError::InvalidProjectId(id)) if id == "../outside"),
-        "expected InvalidProjectId(\"../outside\"), got {refused:?}"
-    );
-    let parent = host.store.projects_dir().parent().unwrap();
-    assert!(
-        !parent.join("outside").exists(),
-        "nothing may be written outside the projects dir"
-    );
-}
-
-#[test]
-fn listing_a_project_returns_each_of_its_stacks() {
-    // Given — two stacks in one project, one in another
-    let host = a_projects_dir();
-    let first = host
-        .store
-        .create("proj-auth", "sess-a", a_stack(vec![a_node("n1", &[])]))
-        .expect("create first");
-    let second = host
-        .store
-        .create("proj-auth", "sess-b", a_stack(vec![a_node("m1", &[])]))
-        .expect("create second");
-    host.store
-        .create("proj-billing", "sess-c", a_stack(vec![a_node("b1", &[])]))
-        .expect("create in another project");
-
-    // When
-    let listed = host.store.list("proj-auth").expect("list");
-
-    // Then — exactly that project's two stacks, sorted by stack id
-    let mut expected = vec![first.queue_id, second.queue_id];
-    expected.sort();
-    let listed_ids: Vec<String> = listed.into_iter().map(|r| r.queue_id).collect();
-    assert_eq!(listed_ids, expected);
-}
-
-#[test]
-fn a_titled_stack_keeps_its_title_through_create_read_and_update() {
-    // Given
-    let host = a_projects_dir();
-
-    // When — a titled stack is created, updated, then read back
-    let created = host
-        .store
-        .create_titled(
-            "proj-auth",
-            "sess-planner",
-            Some("Orchestrator sessions".to_string()),
-            a_stack(vec![a_node("n1", &[])]),
-        )
-        .expect("create");
-    host.store
-        .update("proj-auth", &created.queue_id, |stack| {
-            stack.nodes.push(a_node("n2", &["n1"]))
-        })
-        .expect("update");
-    let read = host
-        .store
-        .read("proj-auth", &created.queue_id)
-        .expect("read");
-
-    // Then — the title was stored, and an update of the stack leaves it alone
-    assert_eq!(
-        (created.title.as_deref(), read.title.as_deref()),
-        (Some("Orchestrator sessions"), Some("Orchestrator sessions"))
-    );
-}
-
-#[test]
-fn a_record_written_without_a_title_still_reads() {
-    // Given — a record as the store wrote it before stacks had titles
-    let host = a_projects_dir();
-    let stacks_dir = host.store.projects_dir().join("proj-auth").join("stacks");
-    std::fs::create_dir_all(&stacks_dir).unwrap();
-    std::fs::write(
-        stacks_dir.join("stack-old.yaml"),
-        "stack_id: stack-old\nproject_id: proj-auth\ncreated_by_session_id: sess-planner\ncreated_at_unix_ms: 1\nstack:\n  version: 1\n  nodes: []\n",
-    )
-    .unwrap();
-
-    // When
-    let read = host.store.read("proj-auth", "stack-old").expect("read");
-
-    // Then — it reads, untitled
-    assert_eq!((read.queue_id.as_str(), read.title), ("stack-old", None));
-}
-
-/// `#workqueue` 3/14 guard: the rename keeps the on-disk spelling — a record written before it (the
-/// `stacks/` directory, the record and node keys) still loads after it. Green renames the types this
-/// test names; the YAML below must not change.
-#[test]
-fn a_record_written_before_the_rename_still_loads() {
-    // Given — a record exactly as a pre-rename daemon wrote it
-    let root = tempfile::tempdir().expect("temp projects dir");
-    let stacks = root.path().join("projects").join("proj-1").join("stacks");
-    std::fs::create_dir_all(&stacks).unwrap();
-    std::fs::write(
-        stacks.join("0190-stack.yaml"),
-        "stack_id: 0190-stack\n\
-         project_id: proj-1\n\
-         created_by_session_id: sess-1\n\
-         created_at_unix_ms: 1795000000000\n\
-         title: The plan\n\
-         stack:\n  version: 1\n  nodes:\n  - node_id: n1\n    title: First\n    parents: []\n  - node_id: n2\n    title: Second\n    parents: [n1]\n",
-    )
-    .unwrap();
-    let store = WorkQueueStore::new(root.path().join("projects"));
-
-    // When
-    let record = store
-        .read("proj-1", "0190-stack")
-        .expect("the old record loads");
+    let read = host.store.read("../outside", "sess-owner");
+    let list = host.store.list("../outside");
 
     // Then
-    assert_eq!(
-        (record.title.as_deref(), node_ids(&record.stack)),
-        (Some("The plan"), vec!["n1".to_string(), "n2".to_string()])
+    assert!(
+        matches!(&read, Err(WorkQueueStoreError::InvalidProjectId(id)) if id == "../outside"),
+        "{read:?}"
     );
+    assert!(matches!(
+        list,
+        Err(WorkQueueStoreError::InvalidProjectId(_))
+    ));
+}
+
+#[test]
+fn listing_a_project_returns_each_of_its_queues_sorted_by_owner() {
+    // Given
+    let host = a_host();
+    host.starts_with_a_queue("sess-b", "proj-auth");
+    host.starts_with_a_queue("sess-a", "proj-auth");
+    host.starts_with_a_queue("sess-c", "proj-other");
+
+    // When
+    let listed: Vec<String> = host
+        .store
+        .list("proj-auth")
+        .expect("list")
+        .into_iter()
+        .map(|record| record.queue_id)
+        .collect();
+
+    // Then
+    assert_eq!(listed, vec!["sess-a".to_string(), "sess-b".to_string()]);
+    assert_eq!(host.store.list("proj-empty").expect("list"), Vec::new());
 }

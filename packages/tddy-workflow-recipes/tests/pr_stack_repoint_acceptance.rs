@@ -109,10 +109,10 @@ fn a_merged_node(node_id: &str, branch: &str) -> WorkItem {
 
 fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
-        stack: Some(WorkQueue { version: 1, nodes }),
         ..Changeset::default()
     };
-    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs);
+    let cs_stack = Some(WorkQueue { version: 1, nodes });
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(dir, cs, cs_stack.clone());
 }
 
 // --- tests ------------------------------------------------------------------

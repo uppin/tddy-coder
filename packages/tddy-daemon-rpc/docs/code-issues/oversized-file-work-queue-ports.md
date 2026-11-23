@@ -2,6 +2,7 @@
 
 **Location:** `packages/tddy-daemon-rpc/src/work_queue/ports.rs`
 **Moved:** 2026-11-22 by #1004 (`#workqueue` 3/14) from `packages/tddy-daemon-rpc/src/pr_stack/ports.rs` — module renamed, contents renamed per the symbol map; the finding moved with the code, it did not close
+| 2026-11-22 | 876 → 860 | **Touched, better by 16** in #1006 (`#workqueue` 5/14): `CreateWorkQueue` removed with its RPC body, and the local `work_queue_json_of` wrapper dropped for `session_list_enrichment::work_queue_json_of`. Not split: still over budget, and the file is stack-shared (n3 #1004 also edits it), so the stack-branch rule defers it. Measured to the first `#[cfg(test)]` (none) at the n4 merge-base and HEAD |
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
 **Metrics:** **775 production lines** of 775 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.6× over**

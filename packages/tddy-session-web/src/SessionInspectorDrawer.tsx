@@ -9,6 +9,7 @@ import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
+import { SessionWorkQueueTab, type SessionWorkQueueTabInputs } from "./SessionWorkQueueTab";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import {
   isDormantInspectorTabName,
@@ -40,7 +41,8 @@ import { requestSessionsRefresh } from "./lib/sessionsRefreshBridge";
 
 export type InspectorDrawerState = "closed" | "open" | "expanded";
 
-interface SessionInspectorDrawerProps {
+/** The Work queue tab's own inputs are [`SessionWorkQueueTabInputs`]. */
+interface SessionInspectorDrawerProps extends SessionWorkQueueTabInputs {
   state: InspectorDrawerState;
   session: SessionEntry | null;
   /** The drawer's full session list — the Agents tab folds this session's subagents out of it. */
@@ -129,6 +131,7 @@ export function SessionInspectorDrawer({
   buildSessionExecToolClient,
   onInsertPathIntoTerminal,
   onSwitchPeer,
+  ...workQueueTabInputs
 }: SessionInspectorDrawerProps) {
   const [pendingDelete, setPendingDelete] = useState(false);
   // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
@@ -136,7 +139,7 @@ export function SessionInspectorDrawer({
   // normalises the param itself, so the two never disagree for long.
   const { location, setParams } = useAppLocation();
   const tabParam = location.params[PARAM_INSPECTOR] ?? "";
-  // No param: the session's default tab (PR when it has one, else Worktree). A name the inspector does
+  // No param: the session's default tab (Work queue when it owns one, else PR, else Worktree). A name the inspector does
   // not have degrades to Details.
   const requestedTab: InspectorTab = isInspectorTabName(tabParam)
     ? tabParam
@@ -168,9 +171,13 @@ export function SessionInspectorDrawer({
   // session is stopped. A live session's transcript is the Agent Activity sidebar's. A request for it
   // on a live session degrades to Details, and is honoured again if the session stops.
   const activityAvailable = canResumeSession(session);
+  // The Work queue tab exists only for a session that owns a queue; a request for it on any other
+  // session degrades to Details.
+  const workQueueAvailable = session?.ownsWorkQueue === true;
   const tab: InspectorTab =
     (!mediaAvailable && isMediaInspectorTabName(requestedTab)) ||
-    (!activityAvailable && isDormantInspectorTabName(requestedTab))
+    (!activityAvailable && isDormantInspectorTabName(requestedTab)) ||
+    (!workQueueAvailable && requestedTab === "work-queue")
       ? "details"
       : requestedTab;
   const setTab = useCallback(
@@ -219,6 +226,7 @@ export function SessionInspectorDrawer({
           onChange={setTab}
           mediaAvailable={mediaAvailable}
           activityAvailable={activityAvailable}
+          workQueueAvailable={workQueueAvailable}
         />
       )}
 
@@ -300,6 +308,19 @@ export function SessionInspectorDrawer({
               client={activityClient}
               sessionToken={sessionToken ?? ""}
               sessionId={session.sessionId}
+            />
+          </ScrollArea>
+        ) : tab === "work-queue" ? (
+          <ScrollArea className="flex-1 min-h-0">
+            <SessionWorkQueueTab
+              {...workQueueTabInputs}
+              session={session}
+              sessionToken={sessionToken ?? ""}
+              sessions={sessions}
+              onOpenSession={onSwitchPeer}
+              client={client}
+              sessionFilesClient={sessionFilesClient}
+              worktreeClient={worktreeClient}
             />
           </ScrollArea>
         ) : tab === "pr" ? (

@@ -2,7 +2,7 @@
 //! (`#orchestrators` 10/11).
 //!
 //! Routed from `run_locally` beside the plan tools ([`super::work_queue_tools`]) and classified the same
-//! way (`work_queue_caller_of`): only an orchestrator-role caller is served, and a call naming another
+//! way (`work_queue_caller_of`): only the owner of the addressed queue is served, and a call naming another
 //! host with `daemon_instance_id` is forwarded whole to that host, one hop.
 //!
 //! Every git step runs **here, in the node's own worktree** — the worktree of the project's
@@ -20,8 +20,8 @@
 //!   the caller, and binds the node to the started session;
 //! - `work_item_merge` / `work_item_close` reach GitHub as the project's account.
 //!
-//! A merge keeps its crash-safety journal: beside the stack
-//! (`<projects>/<project_id>/stacks/<queue_id>.op.json`) for an operation an orchestrator started.
+//! A merge keeps its crash-safety journal beside the queue, in its owning session's directory
+//! (`<sessions>/<queue_id>/work-queue.op.json`).
 //!
 //! Feature doc: docs/ft/coder/pr-stacking.md § Merge and repoint.
 
@@ -42,7 +42,7 @@ use tddy_tool_engine::project_home_turn_tools::ProjectHomeTurnPort;
 use tddy_tool_engine::start_ledger::StartState;
 use tddy_tool_engine::start_session_args::StartSessionArgs;
 use tddy_tool_engine::work_item_git_tools::{
-    execute_stack_git_tool, is_stack_git_tool_offered_to, WorkItemGitOp, WorkItemGitToolPort,
+    execute_stack_git_tool, WorkItemGitOp, WorkItemGitToolPort,
 };
 use tddy_tool_engine::work_queue_tools::{WorkQueueCaller, WorkQueueToolPort};
 use tddy_tool_engine::ToolOutcome;
@@ -54,23 +54,31 @@ use super::work_queue_tools::{work_queue_caller_of, DaemonStackTools, WorkQueueG
 use super::ExecToolRpcHandler;
 
 impl ExecToolRpcHandler {
-    /// Serve `req`'s stack git tool: classify the caller, refuse one that is not an orchestrator,
-    /// forward a call naming another host, else run it on this host's stack and record the call.
+    /// Serve `req`'s stack git tool: read the caller's records (the owner of its own queue and
+    /// nothing else is served — checked against the addressed queue by the tool), forward a call
+    /// naming another host, else run it on this host's queue and record the call.
     pub(super) async fn run_stack_git_tool(
         &self,
         req: &ExecuteToolRequest,
         sessions_base: &Path,
     ) -> Result<ExecuteToolResponse, Status> {
+        if let Some(answered) = self
+            .forwarded_to_the_queues_host(req, sessions_base)
+            .await?
+        {
+            return Ok(answered);
+        }
         let tool = &req.tool_name;
-        let caller = work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
-            Status::permission_denied(format!(
-                "tool {tool} is served only to an orchestrator session"
-            ))
-        })?;
-        if !is_stack_git_tool_offered_to(&caller.role, tool) {
+        let (caller, access) =
+            work_queue_caller_of(sessions_base, &req.session_id)?.ok_or_else(|| {
+                Status::permission_denied(format!(
+                    "tool {tool} is served only to a session that owns a work queue"
+                ))
+            })?;
+        if !tddy_tool_engine::work_item_git_tools::is_stack_git_tool_offered_to(access, tool) {
             return Err(Status::permission_denied(format!(
-                "tool {tool} is not offered to a session bound to a node of a stack: the stack \
-                 git tools are served to an orchestrator alone"
+                "tool {tool} is not offered to a session that only a work queue addresses: the git \
+                 tools are served to a queue's owner alone"
             )));
         }
         let response = match self.served_on_target_host(req).await? {
@@ -86,7 +94,7 @@ impl ExecToolRpcHandler {
     }
 
     /// Serve a stack git tool called by a session another host holds — forwarded here by that
-    /// host — once the daemon that owns the session has confirmed it holds an orchestrator role.
+    /// host — once the daemon that owns the session has confirmed the session exists.
     /// Such a caller owns no stack here, so a call must name the stack it acts on.
     pub(super) async fn serve_stack_git_tool_for_caller_held_elsewhere(
         &self,
@@ -120,7 +128,7 @@ impl ExecToolRpcHandler {
         let local_id =
             tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config);
         let home = self.project_home_port(req, os_user.clone(), sessions_base, None, local_id)?;
-        let store = WorkQueueStore::new(sessions_base.join("projects"));
+        let store = WorkQueueStore::new(sessions_base);
         Ok(DaemonStackGitTools {
             stacks,
             home,
@@ -362,6 +370,14 @@ pub(super) struct DaemonStackGitTools {
 
 #[async_trait]
 impl WorkItemGitToolPort for DaemonStackGitTools {
+    async fn access_to(
+        &self,
+        caller: &WorkQueueCaller,
+        queue_id: &str,
+    ) -> Result<tddy_tool_engine::work_queue_access::WorkQueueAccess, String> {
+        self.stacks.access_to(caller, queue_id).await
+    }
+
     async fn run_stack_git_op(
         &self,
         caller: &WorkQueueCaller,
