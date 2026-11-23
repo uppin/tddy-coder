@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use tddy_core::changeset::{PrInternalStatus, WorkQueue};
+use tddy_core::changeset::WorkQueue;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_tool_engine::work_queue_tools::{PrAddress, WorkQueueOp};
@@ -15,8 +15,8 @@ use tddy_work_queue::internal_status::{derive_internal_status, reconcile_interna
 use tddy_work_queue::item_ops::item_annotations::{self, WorkItemBadge};
 use tddy_work_queue::item_ops::item_links;
 use tddy_work_queue::item_ops::{
-    add_work_item, adopt_pr_as_work_item, delete_work_item, sync_node_to_github_pr,
-    update_work_item, AddWorkItemInput, StoredWorkQueue, UpdateWorkItemInput, WorkQueueHome,
+    add_work_item, adopt_pr_as_work_item, delete_work_item, AddWorkItemInput, StoredWorkQueue,
+    WorkQueueHome,
 };
 use tddy_work_queue::pr_insight::{self, PrSearchInput};
 
@@ -148,7 +148,7 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
             description,
             branch_suggestion,
             sync_pr,
-        } => update_planned(
+        } => item_edits::update_planned(
             env,
             github,
             node_id,
@@ -170,7 +170,7 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
             node_id,
             kind,
             note,
-        } => set_status(env, &node_id, kind, note),
+        } => item_edits::set_status(env, &node_id, kind, note),
         WorkQueueOp::Adopt {
             pull_number,
             parents,
@@ -199,17 +199,19 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
                 url: pr.url,
                 head_branch: pr.head_branch,
             };
-            edit_links(env, &item_id, |queue| {
+            annotation_edits::edit_links(env, &item_id, |queue| {
                 item_links::assign_pr(queue, &item_id, assigned)
             })
         }
-        WorkQueueOp::UnassignPr { item_id } => edit_links(env, &item_id, |queue| {
-            item_links::unassign_pr(queue, &item_id)
-        }),
+        WorkQueueOp::UnassignPr { item_id } => {
+            annotation_edits::edit_links(env, &item_id, |queue| {
+                item_links::unassign_pr(queue, &item_id)
+            })
+        }
         WorkQueueOp::LinkSession {
             item_id,
             session_id,
-        } => edit_links(env, &item_id, |queue| {
+        } => annotation_edits::edit_links(env, &item_id, |queue| {
             item_links::link_session(
                 queue,
                 &item_id,
@@ -222,12 +224,14 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         WorkQueueOp::UnlinkSession {
             item_id,
             session_id,
-        } => edit_links(env, &item_id, |queue| {
+        } => annotation_edits::edit_links(env, &item_id, |queue| {
             item_links::unlink_session(queue, &item_id, &session_id)
         }),
-        WorkQueueOp::SetLabels { item_id, labels } => edit_annotations(env, &item_id, |queue| {
-            item_annotations::set_labels(queue, &item_id, labels)
-        }),
+        WorkQueueOp::SetLabels { item_id, labels } => {
+            annotation_edits::edit_annotations(env, &item_id, |queue| {
+                item_annotations::set_labels(queue, &item_id, labels)
+            })
+        }
         WorkQueueOp::SetBadge {
             item_id,
             key,
@@ -236,13 +240,15 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         } => {
             let tone = crate::work_queue::parse_tone(&tone)
                 .map_err(|status| status.message().to_string())?;
-            edit_annotations(env, &item_id, |queue| {
+            annotation_edits::edit_annotations(env, &item_id, |queue| {
                 item_annotations::set_badge(queue, &item_id, WorkItemBadge { key, text, tone })
             })
         }
-        WorkQueueOp::ClearBadge { item_id, key } => edit_annotations(env, &item_id, |queue| {
-            item_annotations::clear_badge(queue, &item_id, &key)
-        }),
+        WorkQueueOp::ClearBadge { item_id, key } => {
+            annotation_edits::edit_annotations(env, &item_id, |queue| {
+                item_annotations::clear_badge(queue, &item_id, &key)
+            })
+        }
         WorkQueueOp::SetDependencies { item_id, needs } => set_dependencies(env, &item_id, needs),
         WorkQueueOp::Waves => waves_answer(&env.stack()?),
         // Served through the GitHub inbox, ahead of this blocking dispatcher.
@@ -261,79 +267,7 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
     }
 }
 
-/// A refused annotation edit as the tool reports it — the same words the RPC uses.
-fn annotation_refusal_message(error: item_annotations::AnnotationError) -> String {
-    use item_annotations::AnnotationError::{NoSuchItem, TooLong, TooMany};
-    match error {
-        NoSuchItem(item) => format!("item '{item}' not found"),
-        TooMany { limit } => format!("too many: the limit is {limit}"),
-        TooLong { limit } => format!("too long: the limit is {limit} characters"),
-    }
-}
-
-/// Apply an annotation `edit` to the queue under its record lock; a refused edit writes nothing and
-/// is the error, and the answer is the item's labels and badges as stored.
-fn edit_annotations(
-    env: &OpEnv,
-    item_id: &str,
-    edit: impl FnOnce(&mut WorkQueue) -> Result<(), item_annotations::AnnotationError>,
-) -> Result<Value, String> {
-    let mut refused = None;
-    env.home()?
-        .update_stack(|queue| {
-            let mut edited = queue.clone();
-            match edit(&mut edited) {
-                Ok(()) => *queue = edited,
-                Err(error) => refused = Some(error),
-            }
-        })
-        .map_err(|e| format!("annotate: {e}"))?;
-    if let Some(error) = refused {
-        return Err(annotation_refusal_message(error));
-    }
-    let stack = env.stack()?;
-    Ok(json!({
-        "item_id": item_id,
-        "labels": item_annotations::labels_of(&stack, item_id),
-        "badges": item_annotations::badges_of(&stack, item_id)
-            .into_iter()
-            .map(|b| json!({ "key": b.key, "text": b.text, "tone": b.tone }))
-            .collect::<Vec<_>>(),
-    }))
-}
-
-/// Apply a link `edit` to the queue under its record lock; a refused edit writes nothing and is the
-/// error, and the answer is the item's links as stored.
-fn edit_links(
-    env: &OpEnv,
-    item_id: &str,
-    edit: impl FnOnce(&mut WorkQueue) -> Result<(), item_links::ItemLinkError>,
-) -> Result<Value, String> {
-    let mut refused = None;
-    env.home()?
-        .update_stack(|queue| {
-            let mut edited = queue.clone();
-            match edit(&mut edited) {
-                Ok(()) => *queue = edited,
-                Err(error) => refused = Some(error),
-            }
-        })
-        .map_err(|e| format!("link: {e}"))?;
-    if let Some(error) = refused {
-        return Err(error.to_string());
-    }
-    let stack = env.stack()?;
-    Ok(json!({
-        "item_id": item_id,
-        "pr": item_links::assigned_pr_of(&stack, item_id).map(|pr| json!({
-            "number": pr.number, "url": pr.url, "head_branch": pr.head_branch,
-        })),
-        "linked_sessions": item_links::linked_sessions_of(&stack, item_id)
-            .into_iter()
-            .map(|s| s.session_id)
-            .collect::<Vec<_>>(),
-    }))
-}
+mod annotation_edits;
 
 /// Answer the node summaries of the stack as stored — read after the statuses were refreshed, so the
 /// answer reflects what is stored. A refresh failure is surfaced as `refresh_error`, never hidden.
@@ -412,99 +346,4 @@ pub(super) fn persist_derived_statuses(
         .map_err(|e| format!("persist derived statuses: {e}"))
 }
 
-/// Edit a node's metadata and, when asked, push the same title/body to its pull request.
-///
-/// Everything a `sync_pr` push can refuse without touching the network is checked *before* the
-/// local edit, so a refused call leaves the plan exactly as it was. Only a failure GitHub itself
-/// returns can leave the node edited and its pull request not, and that is reported as such.
-fn update_planned(
-    env: &OpEnv,
-    github: &GithubSource,
-    node_id: String,
-    title: Option<String>,
-    description: Option<String>,
-    branch_suggestion: Option<String>,
-    sync_pr: bool,
-) -> Result<Value, String> {
-    let home = env.home()?;
-    // Resolved *before* the local edit: each of these can refuse without touching the network, and
-    // a refusal that has already rewritten the plan is a partial application of a call the caller
-    // was told had failed.
-    let sync_client = if sync_pr {
-        if title.is_none() && description.is_none() {
-            return Err(format!(
-                "node '{node_id}' was asked to sync its pull request, but neither a title nor a \
-                 description was given — GitHub refuses an empty edit, so there is nothing to \
-                 push and nothing was changed"
-            ));
-        }
-        env.pull_number(&PrAddress::Node(node_id.clone()))?;
-        Some(github.client()?)
-    } else {
-        None
-    };
-
-    let node = update_work_item(
-        &home,
-        UpdateWorkItemInput {
-            node_id: node_id.clone(),
-            title: title.clone(),
-            description: description.clone(),
-            branch_suggestion,
-        },
-    )?;
-    let mut out = json!({
-        "node_id": node.node_id,
-        "title": node.title,
-        "description": node.description,
-        "branch_suggestion": node.branch_suggestion,
-        "branch": node.branch,
-        "session_id": node.session_id,
-        "parents": node.parents,
-    });
-    if let Some(gh) = sync_client {
-        // The preconditions held, so a failure here is GitHub itself refusing the write — the plan
-        // is already edited and the pull request is not, which the caller has to be told.
-        let number = sync_node_to_github_pr(
-            &home,
-            &node_id,
-            title.as_deref(),
-            description.as_deref(),
-            &*gh,
-        )
-        .map_err(|e| format!("{e} (the node was updated; its pull request was not)"))?;
-        out["pr_synced"] = json!(number);
-    }
-    Ok(out)
-}
-
-/// Record a manual internal-status override on a node, which derivation never overwrites.
-fn set_status(
-    env: &OpEnv,
-    node_id: &str,
-    kind: String,
-    note: Option<String>,
-) -> Result<Value, String> {
-    let new_status = PrInternalStatus {
-        kind,
-        note,
-        source: "override".to_string(),
-    };
-    let mut found = false;
-    env.home()?
-        .update_stack(|stack| {
-            if let Some(node) = stack.nodes.iter_mut().find(|n| n.node_id == node_id) {
-                found = true;
-                node.internal_status = Some(reconcile_internal_status(
-                    node.internal_status.as_ref(),
-                    new_status.clone(),
-                ));
-            }
-        })
-        .map_err(|e| format!("failed to write stack: {e}"))?;
-    if found {
-        Ok(json!({ "ok": true }))
-    } else {
-        Err(format!("node '{node_id}' not found"))
-    }
-}
+mod item_edits;
