@@ -53,9 +53,60 @@ impl LaunchSessions {
 
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let message = self
-            .signal_session_dir(&session_dir, &req.session_id, req.signal)
+            .terminate_session_dir(
+                os_user,
+                &session_dir,
+                &req.session_id,
+                req.signal,
+                &req.session_token,
+            )
             .await?;
         Ok(Response::new(SignalSessionResponse { ok: true, message }))
+    }
+
+    /// Sends `signal` to the session in `session_dir` as [`Self::signal_session_dir`] does, and —
+    /// for a SIGTERM or SIGKILL of a tmux-run session — first kills the tmux session its agent runs
+    /// in, here or on its target, as a delete does. The terminal this daemon holds for a tmux run
+    /// is only the tmux client (locally `tmux attach`, on a target the transport's client), so
+    /// signalling it alone left the agent running in tmux for the next resume to re-attach to.
+    ///
+    /// The held client is not signalled after the kill: it ends with its tmux session, and a
+    /// session whose daemon restarted holds no client at all — the kill alone stops its agent.
+    pub async fn terminate_session_dir(
+        &self,
+        os_user: &str,
+        session_dir: &Path,
+        session_id: &str,
+        signal: i32,
+        session_token: &str,
+    ) -> Result<String, Status> {
+        if !ends_the_agent(signal) || !is_tmux_run(session_dir) {
+            return self
+                .signal_session_dir(session_dir, session_id, signal)
+                .await;
+        }
+        self.end_tmux_run(os_user, session_id, session_dir, session_token)
+            .await?;
+        Ok(format!("tmux session of {session_id} killed"))
+    }
+
+    /// Kill the tmux session a tmux-run session's agent runs in: on its target through the shell
+    /// the caller's account reaches it with, or here as `os_user`. A session that records no tmux
+    /// session has nothing to kill.
+    async fn end_tmux_run(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        session_dir: &Path,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        match target_tmux_run_of(session_dir) {
+            Some(target) => {
+                self.end_target_tmux_run(&target, session_id, session_token)
+                    .await
+            }
+            None => kill_recorded_tmux_session(os_user, session_id, session_dir).await,
+        }
     }
 
     pub async fn delete_session_at_session_coordinate(
@@ -104,13 +155,8 @@ impl LaunchSessions {
         // anything else of the session is torn down: a refused kill refuses the delete with the
         // session intact, and a retry kills whatever is left.
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        match target_tmux_run_of(&session_dir) {
-            Some(target) => {
-                self.end_target_tmux_run(&target, session_id, session_token)
-                    .await?
-            }
-            None => kill_recorded_tmux_session(os_user, session_id, &session_dir).await?,
-        }
+        self.end_tmux_run(os_user, session_id, &session_dir, session_token)
+            .await?;
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
         remove_session_pointer(session_id, &sessions_base).await;
@@ -297,6 +343,23 @@ pub(crate) async fn remove_recorded_session_pointer(session_dir: &Path) {
 
 /// The target of a session whose agent ran in tmux there: its record names both a target and a
 /// tmux session. `None` for a session that ran here, or ran on its target without tmux.
+/// Whether `signal` (a `Signal` proto value) asks the agent to stop: SIGTERM or SIGKILL. SIGINT
+/// interrupts a turn and leaves the session running.
+fn ends_the_agent(signal: i32) -> bool {
+    use tddy_service::proto::session::Signal;
+    matches!(
+        Signal::try_from(signal),
+        Ok(Signal::Sigterm) | Ok(Signal::Sigkill)
+    )
+}
+
+/// Whether the session in `session_dir` records a tmux session its agent runs in.
+fn is_tmux_run(session_dir: &Path) -> bool {
+    read_session_metadata(session_dir)
+        .map(|metadata| metadata.tmux_session.is_some())
+        .unwrap_or(false)
+}
+
 fn target_tmux_run_of(session_dir: &Path) -> Option<tddy_core::SessionTarget> {
     let metadata = read_session_metadata(session_dir).ok()?;
     metadata.tmux_session?;
