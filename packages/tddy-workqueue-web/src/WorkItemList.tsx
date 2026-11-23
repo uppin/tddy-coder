@@ -268,6 +268,13 @@ export function WorkItemList({
           );
         })
       )}
+      {drag && (
+        <div
+          data-testid="work-item-drop-indicator"
+          aria-hidden="true"
+          style={{ position: "absolute", left: 0, right: CONNECTOR_GUTTER, top: drag.indicatorY - 1, height: 3, borderRadius: 2, background: "var(--wq-graph-dependency, #2563eb)", pointerEvents: "none" }}
+        />
+      )}
       {connectors.length > 0 && (
         <WorkItemConnectors
           container={inner}

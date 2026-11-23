@@ -70,6 +70,8 @@ function dragHandleTo(id: string, targetId: string, where: "above" | "below", ex
       if (expectDragging) cy.get('[data-dragging="true"]', { timeout: 1000 }).should("have.length", 1);
       else cy.wait(300);
       cy.document().trigger("pointermove", { pointerId: 1, clientX: x, clientY: y });
+      // the grabbed box follows the pointer and a drop line shows where it would land
+      if (expectDragging) cy.get('[data-testid="work-item-drop-indicator"]').should("exist");
       cy.document().trigger("pointerup", { pointerId: 1, clientX: x, clientY: y });
     });
   });

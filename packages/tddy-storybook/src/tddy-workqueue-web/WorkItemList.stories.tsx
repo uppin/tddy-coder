@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { WorkItemList } from "tddy-workqueue-web";
 import type { WorkItem } from "tddy-workqueue-web";
@@ -53,15 +54,29 @@ export default meta;
 
 type Story = StoryObj<typeof WorkItemList>;
 
-export const StackWithAFreeTask: Story = {
-  args: {
-    nodes: NODES,
-    onStartSession: () => undefined,
-    startingNodeId: null,
-    connectors: [
-      { kind: "line", from: "n1", to: "n2" },
-      { kind: "line", from: "n2", to: "n4" },
-    ],
-    onMove: () => undefined,
-  },
-};
+/** A drop moves the task `delta` rows in the persisted order, as the daemon's reorder would. */
+function Draggable() {
+  const [nodes, setNodes] = useState(NODES);
+  const move = (itemId: string, delta: number) =>
+    setNodes((prev) => {
+      const ids = [...prev].sort((a, b) => a.displayOrder! - b.displayOrder!).map((n) => n.itemId);
+      const from = ids.indexOf(itemId);
+      ids.splice(from, 1);
+      ids.splice(Math.max(0, Math.min(ids.length, from + delta)), 0, itemId);
+      return prev.map((n) => ({ ...n, displayOrder: ids.indexOf(n.itemId) }));
+    });
+  return (
+    <WorkItemList
+      nodes={nodes}
+      onStartSession={() => undefined}
+      startingNodeId={null}
+      connectors={[
+        { kind: "line", from: "n1", to: "n2" },
+        { kind: "line", from: "n2", to: "n4" },
+      ]}
+      onMove={move}
+    />
+  );
+}
+
+export const StackWithAFreeTask: Story = { render: () => <Draggable /> };
