@@ -221,16 +221,20 @@ impl ATarget {
         for dir in [self.home(), self.agents_dir(), self.tmpdir()] {
             std::fs::create_dir_all(dir).expect("a directory of the target's login");
         }
+        // The target's tmux is this host's — the stand-in target runs here — found on its PATH.
+        std::os::unix::fs::symlink(this_hosts_tmux(), self.agents_dir().join("tmux"))
+            .expect("tmux is installed where the target's login finds it");
         write_executable(
             &self.root.join("bin/login-shell"),
             &format!(
-                "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\n\
-                 HOME='{}'\nPATH='{}:{}:/usr/bin:/bin'\nTMPDIR='{}'\nTMUX_TMPDIR='{}'\n\
+                // tmux runs a pane's command as `$SHELL -c <command>`, its default shell being the
+                // login's: the one non-login call this shell takes, and only inside tmux.
+                "#!/bin/sh\n[ \"$1\" = -lc ] || {{ [ -n \"$TMUX\" ] && [ \"$1\" = -c ]; }} || exit 64\n\
+                 HOME='{}'\nPATH='{}:/usr/bin:/bin'\nTMPDIR='{}'\nTMUX_TMPDIR='{}'\n\
                  export HOME PATH TMPDIR TMUX_TMPDIR\n\
                  exec /bin/sh -c \"$2\"\n",
                 self.home().display(),
                 self.agents_dir().display(),
-                tmux_dir().display(),
                 self.tmpdir().display(),
                 self.tmpdir().display()
             ),
@@ -247,7 +251,7 @@ impl ATarget {
 
     /// The target's tmux, run on its private socket.
     fn tmux(&self, args: &[&str]) -> std::process::Output {
-        std::process::Command::new(tmux_dir().join("tmux"))
+        std::process::Command::new(this_hosts_tmux())
             .args(args)
             .env("TMUX_TMPDIR", self.tmpdir())
             .env_remove("TMUX")
@@ -355,17 +359,15 @@ impl Drop for ATarget {
     }
 }
 
-/// The directory holding this host's `tmux`, which the target's login finds on its `PATH`: the
-/// stand-in target runs on this host.
-fn tmux_dir() -> PathBuf {
+/// This host's `tmux`, resolved to its binary: the stand-in target's login finds it on its `PATH`.
+fn this_hosts_tmux() -> PathBuf {
     let output = std::process::Command::new("/bin/sh")
         .args(["-c", "command -v tmux"])
         .output()
         .expect("`command -v tmux` runs");
     let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    path.parent()
-        .unwrap_or_else(|| panic!("tmux is installed on this host: {path:?}"))
-        .to_path_buf()
+    std::fs::canonicalize(&path)
+        .unwrap_or_else(|e| panic!("tmux is installed on this host ({path:?}): {e}"))
 }
 
 /// The name this host gives itself, as `hostname` prints it: the stand-in's target is this host.

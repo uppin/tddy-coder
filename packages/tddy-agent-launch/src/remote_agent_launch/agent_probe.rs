@@ -56,9 +56,10 @@ pub async fn probe_tmux_on_target(
     shell: &dyn RemoteShell,
     worktree: &Path,
 ) -> Result<(), RemoteLaunchError> {
-    // FIXME(#target-tmux 1/2): contract stub — asks nothing.
-    let _ = (shell, worktree);
-    Ok(())
+    match probe_agent_on_target(shell, worktree, "tmux").await {
+        Err(RemoteLaunchError::AgentNotOnTarget { .. }) => Err(RemoteLaunchError::TmuxNotOnTarget),
+        answered => answered,
+    }
 }
 
 #[cfg(test)]

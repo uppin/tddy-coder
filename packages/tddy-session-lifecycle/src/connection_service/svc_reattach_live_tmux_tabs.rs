@@ -168,9 +168,10 @@ impl Reattach<'_> {
         session_dir: &Path,
         report: &mut ReattachReport,
     ) {
+        // A target session's tmux runs on its target, never in a tmux server of this host.
         let ran_in_tmux = read_session_metadata(session_dir)
             .ok()
-            .is_some_and(|metadata| metadata.tmux_session.is_some());
+            .is_some_and(|metadata| metadata.tmux_session.is_some() && metadata.target.is_none());
         if !ran_in_tmux {
             return;
         }

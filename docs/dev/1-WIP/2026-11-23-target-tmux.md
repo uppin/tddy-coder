@@ -74,6 +74,23 @@ target session instead of the local kill; `tddy-session-driver` stop likewise.
 - `ending_a_tmux_run_kills_its_tmux_session_on_the_target`
 - `ending_a_tmux_run_whose_session_is_gone_is_not_an_error`
 
+Daemon (`packages/tddy-session-lifecycle/tests/remote_target_session_acceptance.rs`, the shared
+`StandInSshTarget` now gives its machine a private `TMUX_TMPDIR`):
+
+- `a_tmux_run_on_the_target_runs_the_agent_in_tmux_there_and_records_its_tmux_session`
+- `a_tmux_run_whose_connection_drops_keeps_its_agent_and_resumes_attached_to_it`
+- `a_tmux_run_whose_agent_ended_resumes_its_agent_in_tmux_on_the_target`
+- `deleting_a_tmux_run_kills_its_tmux_session_and_agent_on_the_target`
+
+## Implementation notes
+
+- `RemoteAgentPid` (`cli_session_pointer.rs`): the start wait and the owner record read the agent's
+  pid from the pid file or, for a tmux run, from tmux (`display-message -p -t '=<name>:'
+  '#{pane_pid}'` — `=<name>` alone names no pane and prints an empty line).
+- Host-tmux paths skip target sessions: delete (`target_tmux_run_of`), resume's unwatched-exit settle,
+  and the daemon-start re-attach (`pre_roster_main`).
+- Stop detaches (local client only), matching host tmux runs.
+
 ## Unit tests
 
 - `remote_agent_launch.rs`: `the_tmux_command_runs_the_login_exec_in_a_tmux_session_named_for_the_session`
@@ -94,6 +111,6 @@ target session instead of the local kill; `tddy-session-driver` stop likewise.
 - [x] Create changeset
 - [x] Acceptance tests (failing — `ending_a_tmux_run_whose_session_is_gone_is_not_an_error` passes against the stub by construction)
 - [x] Unit tests (failing)
-- [ ] Implementation
-- [ ] TDD green
-- [ ] TODO entry: automatic reconnect of a dropped target client
+- [x] Implementation
+- [x] TDD green — `./test -p tddy-agent-launch` green; `remote_target_session_acceptance` 17/17 (4 new daemon tests: start, resume re-attach, resume after the agent ended, delete); clippy clean on agent-launch, session-lifecycle, testing-commons, session-driver
+- [x] TODO entry: [2026-11-23-target-tmux-auto-reconnect.md](../todo/2026-11-23-target-tmux-auto-reconnect.md)

@@ -33,7 +33,8 @@ use tddy_core::SessionTarget;
 use tddy_remote_shell::{InteractiveExit, RemoteShell, RemoteShellError};
 
 use crate::cli_session_pointer::{
-    record_remote_owner, session_pointer_path, PlacedSessionPointer, PointerHost,
+    record_remote_owner_from, session_pointer_path, PlacedSessionPointer, PointerHost,
+    RemoteAgentPid,
 };
 use crate::remote_agent_launch::startup::settled_last_output;
 use crate::remote_agent_launch::startup::wait_for_agent_start;
@@ -150,8 +151,25 @@ pub fn remote_agent_tmux_command(
     argv: &[String],
     env: &[(String, String)],
 ) -> String {
-    // FIXME(#target-tmux 1/2): contract stub — runs the agent without tmux.
-    remote_agent_command(worktree, session_id, argv, env)
+    let _ = session_id;
+    format!(
+        "cd {} && {}",
+        shell_single_quote(&worktree.to_string_lossy()),
+        target_login_run(&format!(
+            "exec tmux new-session -A -s {} {}",
+            shell_single_quote(&target_tmux_session_name(session_id)),
+            shell_single_quote(&target_login_exec(argv, env))
+        ))
+    )
+}
+
+/// `inner` run by the target's login shell: `exec "${SHELL:-/bin/sh}" -lc '<inner>'`, so a command
+/// found only on the login `PATH` (tmux, the agent) is the one run.
+pub(crate) fn target_login_run(inner: &str) -> String {
+    format!(
+        "exec \"${{SHELL:-/bin/sh}}\" -lc {}",
+        shell_single_quote(inner)
+    )
 }
 
 /// Kill the tmux session `session_id`'s agent runs in on the target `shell` reaches
@@ -161,8 +179,21 @@ pub async fn end_target_tmux_session(
     shell: &dyn RemoteShell,
     session_id: &str,
 ) -> Result<(), RemoteLaunchError> {
-    // FIXME(#target-tmux 1/2): contract stub — kills nothing.
-    let _ = (shell, session_id);
+    let name = shell_single_quote(&format!("={}", target_tmux_session_name(session_id)));
+    // A session or server already gone is what the end wants; any other refusal is reported.
+    let inner = format!(
+        "out=$(tmux kill-session -t {name} 2>&1) && exit 0; \
+         case \"$out\" in *\"can't find session\"*|*\"no server running\"*|*\"error connecting to\"*) exit 0;; esac; \
+         printf '%s\\n' \"$out\" >&2; exit 1"
+    );
+    shell
+        .exec(tddy_remote_shell::ExecRequest::new(target_login_run(
+            &inner,
+        )))
+        .await
+        .map_err(RemoteLaunchError::Shell)?
+        .success_or_exited()
+        .map_err(RemoteLaunchError::Shell)?;
     Ok(())
 }
 
@@ -435,7 +466,21 @@ fn remote_command(
     passed.extend(env);
     let env = passed;
 
-    remote_agent_command(remote.worktree, session.session_id, &plan.argv, &env)
+    if remote.tmux {
+        remote_agent_tmux_command(remote.worktree, session.session_id, &plan.argv, &env)
+    } else {
+        remote_agent_command(remote.worktree, session.session_id, &plan.argv, &env)
+    }
+}
+
+/// Where the launch reads the agent's pid on the target: its tmux pane for a tmux run, the pid
+/// file its command wrote otherwise.
+fn agent_pid_source(remote: &RemoteLaunch<'_>, session_id: &str) -> RemoteAgentPid {
+    if remote.tmux {
+        RemoteAgentPid::TmuxPane(target_tmux_session_name(session_id))
+    } else {
+        RemoteAgentPid::File(remote.worktree.join(remote_agent_pid_file(session_id)))
+    }
 }
 
 fn client_command(remote: &RemoteLaunch<'_>, command: String) -> TransportClient {
@@ -498,8 +543,7 @@ async fn judge_the_start(
     let start_bound = remote.start_timeout;
     let agent_pid = match wait_for_agent_start(
         remote.shell.as_ref(),
-        remote.worktree,
-        session.session_id,
+        &agent_pid_source(&remote, session.session_id),
         &handle,
         start_bound,
     )
@@ -561,7 +605,7 @@ async fn recorded_owner(
                 },
             };
             Some(
-                record_remote_owner(&placed, pointer, session_id)
+                record_remote_owner_from(&placed, pointer, &agent_pid_source(&remote, session_id))
                     .await
                     .map_err(|status| {
                         RemoteLaunchError::Shell(RemoteShellError::Spawn(format!(

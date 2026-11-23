@@ -83,18 +83,23 @@ impl LaunchSessions {
     /// The coding agent a CLI session of `kind` runs, settled where it runs: with no `target`,
     /// resolved on this host ([`resolve_session_agent`]); on the target `target` reaches, read from
     /// its spec without a host binary ([`resolve_session_agent_for_target`]) and then asked of the
-    /// target ([`require_the_agent_on_the_target`]). A start settles it before its prelude and its
+    /// target ([`require_the_agent_on_the_target`]) — and, for a tmux run there, tmux too
+    /// ([`require_tmux_on_the_target`]). A start settles it before its prelude and its
     /// worktree cut, a resume before it re-wires anything.
     pub(crate) async fn agent_to_launch(
         &self,
         kind: CliSessionType,
         target: &Option<Arc<dyn RemoteShell>>,
+        in_tmux: bool,
     ) -> Result<CliSessionAgent, Status> {
         let Some(shell) = target else {
             return resolve_session_agent(&self.coding_agents, kind);
         };
         let session_agent = resolve_session_agent_for_target(&self.coding_agents, kind)?;
         require_the_agent_on_the_target(&**shell, &session_agent).await?;
+        if in_tmux {
+            require_tmux_on_the_target(&**shell).await?;
+        }
         Ok(session_agent)
     }
 

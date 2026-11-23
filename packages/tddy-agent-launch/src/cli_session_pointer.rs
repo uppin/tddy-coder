@@ -194,15 +194,70 @@ pub fn remote_agent_pid_file(session_id: &str) -> PathBuf {
     Path::new(".tddy/agents").join(format!("{session_id}.pid"))
 }
 
+/// Where a target agent's pid is read from on the target.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RemoteAgentPid {
+    /// The pid file the launch's command wrote before it `exec`d the agent
+    /// ([`remote_agent_pid_file`]), at this path on the target: consumed when the owner is recorded.
+    File(PathBuf),
+    /// The pane of the tmux session of this name the agent runs in: the agent is the tmux
+    /// server's child, so tmux, asked through the target's login shell, names its pid.
+    TmuxPane(String),
+}
+
+impl RemoteAgentPid {
+    /// A shell command that prints the agent's pid on the target, and exits non-zero while there is
+    /// none to print.
+    pub(crate) fn read_command(&self) -> String {
+        match self {
+            Self::File(path) => format!("cat {}", shell_single_quote(&path.to_string_lossy())),
+            // `=<name>:` — the exact session, its current pane: `=<name>` alone names no pane to
+            // `display-message`, which then prints an empty line and succeeds.
+            Self::TmuxPane(name) => crate::remote_agent_launch::target_login_run(&format!(
+                "exec tmux display-message -p -t {} {}",
+                shell_single_quote(&format!("={name}:")),
+                shell_single_quote("#{pane_pid}")
+            )),
+        }
+    }
+
+    /// The `pid=…` assignment the owner record runs: the read, and for a pid file its removal.
+    fn consume_snippet(&self) -> String {
+        match self {
+            Self::File(path) => {
+                let file = shell_single_quote(&path.to_string_lossy());
+                format!("pid=$(cat {file}); rm -f {file};")
+            }
+            Self::TmuxPane(_) => format!("pid=$({});", self.read_command()),
+        }
+    }
+}
+
 /// Once the agent has started on the target `placed` is on: one bounded command through the port
 /// reads the target's own name for itself (`hostname`) and the pid of `session_id`'s agent
 /// ([`remote_agent_pid_file`], which it removes), and rewrites the placed `pointer` owner-only
 /// with that owner, which it returns. A pointer on this host is refused: the daemon that placed
 /// it is its owner.
+#[cfg(test)]
 pub(crate) async fn record_remote_owner(
     placed: &PlacedSessionPointer,
     pointer: &SessionPointer,
     session_id: &str,
+) -> Result<SessionPointerOwner, Status> {
+    let worktree = placed
+        .path
+        .parent()
+        .and_then(Path::parent)
+        .unwrap_or(&placed.path);
+    let pid = RemoteAgentPid::File(worktree.join(remote_agent_pid_file(session_id)));
+    record_remote_owner_from(placed, pointer, &pid).await
+}
+
+/// [`record_remote_owner`], reading the agent's pid from `pid`: the owner record a launch makes.
+pub(crate) async fn record_remote_owner_from(
+    placed: &PlacedSessionPointer,
+    pointer: &SessionPointer,
+    pid: &RemoteAgentPid,
 ) -> Result<SessionPointerOwner, Status> {
     let (shell, alias): (&dyn RemoteShell, String) = match &placed.host {
         PointerHost::Ssh { shell } => (shell, shell.alias().to_string()),
@@ -219,22 +274,16 @@ pub(crate) async fn record_remote_owner(
     unowned.owner = None;
     let body = serde_json::to_vec(&unowned)
         .map_err(|e| Status::internal(format!("the session pointer cannot be encoded: {e}")))?;
-    let worktree = placed
-        .path
-        .parent()
-        .and_then(Path::parent)
-        .unwrap_or(&placed.path);
-    let pid_file = worktree.join(remote_agent_pid_file(session_id));
     let remote = format!(
         "set -e; umask 077; \
-         pid=$(cat {pid_file}); rm -f {pid_file}; host=$(hostname); \
+         {read_pid} host=$(hostname); \
          case \"$pid\" in ''|*[!0-9]*) echo \"the agent's pid file holds '$pid'\" >&2; exit 1;; esac; \
          case \"$host\" in ''|*[!A-Za-z0-9._-]*) echo \"the host name '$host' is not a plain name\" >&2; exit 1;; esac; \
          body=$(cat); \
          printf '%s,\"owner\":{{\"pid\":%s,\"host\":\"%s\"}}}}' \"${{body%?}}\" \"$pid\" \"$host\" > {file}.owned; \
          mv {file}.owned {file}; \
          echo \"$pid $host\"",
-        pid_file = shell_single_quote(&pid_file.to_string_lossy()),
+        read_pid = pid.consume_snippet(),
         file = shell_single_quote(&placed.path.to_string_lossy()),
     );
     let output = shell

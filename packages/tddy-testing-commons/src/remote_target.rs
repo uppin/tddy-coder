@@ -44,12 +44,15 @@ pub fn write_executable(path: &Path, script: &str) {
 /// the stand-in set, whose first directory is the machine's own `opt/agents` -- where its agent is
 /// installed, as a target start runs the agent's bare command, never this host's path to it.
 ///
+/// Inside tmux it also takes `-c <command>`: tmux runs a pane's command with its default shell,
+/// which is the login's.
+///
 /// `$SHELL -l` -- a person's login shell, as a shell tab on the target runs it -- records the
 /// directory it started in beside itself ([`LOGIN_SHELL_STARTED_IN`]) and becomes an interactive
 /// `/bin/sh` on its terminal.
 const A_TARGET_LOGIN_SHELL: &str = "#!/bin/sh\n\
      if [ \"$1\" = -l ]; then here=\"$(dirname \"$0\")\"; /bin/pwd -P > \"$here/login-shell-started-in.part\" && mv \"$here/login-shell-started-in.part\" \"$here/login-shell-started-in\"; exec /bin/sh; fi\n\
-     [ \"$1\" = -lc ] || exit 64\nexec /bin/sh -c \"$2\"\n";
+     [ \"$1\" = -lc ] || { [ -n \"$TMUX\" ] && [ \"$1\" = -c ]; } || exit 64\nexec /bin/sh -c \"$2\"\n";
 
 /// The file beside a stand-in machine's login shell that its `-l` run records the directory it
 /// started in.
@@ -94,6 +97,7 @@ impl StandInSshTarget {
         std::fs::create_dir_all(&bin).expect("a directory for the stand-in ssh");
         write_executable(&bin.join("login-shell"), A_TARGET_LOGIN_SHELL);
         std::fs::create_dir_all(root.join("opt/agents")).expect("the machine's agents directory");
+        std::fs::create_dir_all(root.join("tmp")).expect("the machine's tmux socket directory");
         write_executable(
             &bin.join("ssh"),
             &format!(
@@ -103,7 +107,8 @@ command=$(printf '%s' "$command" | /usr/bin/sed 's#/home/dev#{root}/home/dev#g')
 export HOME='{root}'
 SHELL='{root}/bin/login-shell'
 PATH='{root}/opt/agents':{rest}
-export SHELL PATH
+TMUX_TMPDIR='{root}/tmp'
+export SHELL PATH TMUX_TMPDIR
 exec 3<&0
 /bin/sh -c "$command" <&3 3<&- &
 remote=$!
@@ -162,8 +167,30 @@ exit $?
     }
 }
 
+impl StandInSshTarget {
+    /// The machine's tmux — this host's binary, on the machine's own socket directory, so no test
+    /// ever reaches a person's tmux server — run with `args`.
+    pub fn tmux(&self, args: &[&str]) -> std::process::Output {
+        std::process::Command::new("tmux")
+            .args(args)
+            .env("TMUX_TMPDIR", self.root.join("tmp"))
+            .env_remove("TMUX")
+            .output()
+            .expect("tmux runs")
+    }
+
+    /// Whether the machine's tmux holds the session `name`.
+    pub fn has_tmux_session(&self, name: &str) -> bool {
+        self.tmux(&["has-session", "-t", &format!("={name}")])
+            .status
+            .success()
+    }
+}
+
 impl Drop for StandInSshTarget {
     fn drop(&mut self) {
+        // A tmux server a test started on the machine's socket goes with the machine.
+        let _ = self.tmux(&["kill-server"]);
         match &self.previous_path {
             Some(path) => std::env::set_var("PATH", path),
             None => std::env::remove_var("PATH"),

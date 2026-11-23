@@ -181,8 +181,7 @@ pub(super) async fn launch(
                     worktree_path,
                     session_id,
                 ),
-                // FIXME(#target-tmux 1/2): set from `run.in_tmux`.
-                tmux: false,
+                tmux: run.in_tmux,
             },
             host_pty_session(cli_manager, session_id, os_user, kind, model, env),
             on_exit,
@@ -201,7 +200,9 @@ pub(super) async fn launch(
         }
         return Ok(LaunchedHarness {
             pid: launched.handle.pid,
-            tmux_session: None,
+            tmux_session: run
+                .in_tmux
+                .then(|| crate::remote_agent_launch::target_tmux_session_name(session_id)),
         });
     }
     if run.in_tmux {

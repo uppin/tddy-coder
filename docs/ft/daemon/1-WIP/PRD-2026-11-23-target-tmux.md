@@ -41,13 +41,19 @@ rather than the daemon host's.
    running in tmux on the target. No automatic reconnect (recorded as a TODO).
 5. **Resume** runs the same `new-session -A` command: it re-attaches when the tmux session is alive,
    and starts the agent afresh (with its resume arguments) when it is gone.
-6. **End.** Stop and delete kill `tddy-<session>` on the target (`tmux kill-session`) through the
-   remote shell; a tmux session already gone is not an error. Delete never touches the daemon host's
-   tmux for a target session.
+6. **End.** Delete kills `tddy-<session>` on the target (`tmux kill-session`) through the remote
+   shell; a tmux session already gone is not an error, an unreachable target refuses the delete with
+   the session intact. Delete never touches the daemon host's tmux for a target session. **Stop**
+   (SignalSession) signals the local client and so detaches, leaving the agent running — as Stop of
+   a host tmux run signals its attach client.
+6a. A daemon restart never looks for a target session's tmux in a tmux server of the daemon host.
 
 ### n2 — tmux tabs on the target
 
-7. On a target session, the **+** menu lists the target login's tmux sessions, and attach / new tmux
+7. Restored tabs (`ResumeSession` / daemon restart) that are tmux-run on a target re-attach to
+   their tmux session on the target. (n1 re-attaches the **main** on resume; tab restore of
+   tmux-run tabs on targets is n2.)
+8. On a target session, the **+** menu lists the target login's tmux sessions, and attach / new tmux
    session tabs run `tmux attach` / `tmux new-session` on the target over the remote shell. A target
    without tmux shows the reason, as a host without tmux does.
 

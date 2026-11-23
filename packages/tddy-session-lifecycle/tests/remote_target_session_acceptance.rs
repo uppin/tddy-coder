@@ -732,3 +732,143 @@ async fn a_target_session_resumes_without_the_agent_on_the_daemon_host() {
         vec![false, true]
     );
 }
+
+/// A start of an `acme-cli` session whose agent runs in tmux on [`the_ssh_target`].
+fn a_tmux_start_on_the_target() -> StartSessionRequest {
+    StartSessionRequest {
+        run_in_tmux: true,
+        ..a_start_on_the_target()
+    }
+}
+
+/// The tmux session `session_id`'s agent runs in on its target.
+fn tmux_session_of(session_id: &str) -> String {
+    tddy_agent_launch::remote_agent_launch::target_tmux_session_name(session_id)
+}
+
+impl ADaemonWithATarget {
+    /// The session's connection to its target drops: its local client ends, as a lost
+    /// `coder ssh`/`ssh` does, and nothing is sent to the target.
+    async fn loses_the_connection_of(&self, session_id: &str) {
+        self.manager.stop_session(session_id).await;
+        self.the_terminal_has_ended(session_id).await;
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_on_the_target_runs_the_agent_in_tmux_there_and_records_its_tmux_session() {
+    // Given
+    let daemon = a_daemon_with_a_reachable_target();
+
+    // When a session is started in tmux on the target
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target with tmux succeeds");
+    let agent = daemon.the_agent_on_the_target(&session_id).await;
+
+    // Then its agent runs in the session's tmux session there, which the session records
+    let metadata = read_session_metadata(&daemon.session_dir(&session_id)).expect("metadata");
+    assert_eq!(
+        (
+            agent.is_alive(),
+            daemon
+                .target
+                .has_tmux_session(&tmux_session_of(&session_id)),
+            metadata.tmux_session,
+        ),
+        (true, true, Some(tmux_session_of(&session_id)))
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_whose_connection_drops_keeps_its_agent_and_resumes_attached_to_it() {
+    // Given a tmux run on the target whose connection dropped
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target with tmux succeeds");
+    let agent = daemon.the_agent_on_the_target(&session_id).await;
+    daemon.loses_the_connection_of(&session_id).await;
+    let survived = agent.is_alive();
+
+    // When the session is resumed
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("a tmux run whose agent still runs resumes");
+
+    // Then it is attached to the agent that kept running: one run, alive, a terminal again
+    assert_eq!(
+        (
+            survived,
+            daemon.agent_runs().len(),
+            agent.is_alive(),
+            daemon.manager.get(&session_id).await.is_some(),
+        ),
+        (true, 1, true, true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_tmux_run_whose_agent_ended_resumes_its_agent_in_tmux_on_the_target() {
+    // Given a tmux run on the target whose agent exited
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target with tmux succeeds");
+    let first = daemon.the_agent_on_the_target(&session_id).await;
+    // SAFETY: a plain kill(2) of the stub this test started.
+    unsafe { libc::kill(first.pid, libc::SIGUSR1) };
+    daemon.the_terminal_has_ended(&session_id).await;
+    the_agent_has_ended(&first).await;
+
+    // When
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("a tmux run whose agent ended resumes");
+    let runs = daemon.runs_on_the_target(&session_id, 2).await;
+
+    // Then the agent is resumed, in the session's tmux session on the target again
+    assert_eq!(
+        (
+            runs.iter().map(AnAgentRun::is_a_resume).collect::<Vec<_>>(),
+            runs[1].is_alive(),
+            daemon
+                .target
+                .has_tmux_session(&tmux_session_of(&session_id)),
+        ),
+        (vec![false, true], true, true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_tmux_run_kills_its_tmux_session_and_agent_on_the_target() {
+    // Given a tmux run on the target whose connection dropped, its agent still running
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target with tmux succeeds");
+    let agent = daemon.the_agent_on_the_target(&session_id).await;
+    daemon.loses_the_connection_of(&session_id).await;
+
+    // When
+    daemon
+        .delete(&session_id)
+        .await
+        .expect("a tmux run on a target is deleted");
+
+    // Then its tmux session and its agent are gone from the target
+    the_agent_has_ended(&agent).await;
+    assert!(!daemon
+        .target
+        .has_tmux_session(&tmux_session_of(&session_id)));
+}
