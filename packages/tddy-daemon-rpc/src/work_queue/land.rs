@@ -19,6 +19,7 @@ use tddy_worktree_service::session_target::TargetRecord;
 
 use super::links::LinkCall;
 use super::move_activity::{ActivitySink, MovedQueue};
+use super::schedule_watch::Armer;
 use super::schedules::ScheduleCtx;
 use super::WorkQueueRpcHandler;
 use crate::exec_tool::work_item_git_tools::git_work::{land_ops, GitEnv};
@@ -271,16 +272,30 @@ impl tddy_work_queue::schedule_runner::FireSchedule for DaemonFireSchedule {
 
 impl WorkQueueRpcHandler {
     pub(super) fn git_env_source(&self, session_token: &str) -> GitEnvSource {
+        self.git_env_source_for(&Armer::Caller(session_token.to_string()))
+    }
+
+    /// A [`GitEnvSource`] acting as `armer`: through the caller's token, or — for a signed armer —
+    /// straight through their vault, which needs no token at all.
+    pub(super) fn git_env_source_for(&self, armer: &Armer) -> GitEnvSource {
         GitEnvSource {
-            identity: SessionAccountAccess::new(
-                self.credential_vaults.clone(),
-                self.user_resolver.clone(),
-                session_token,
-            ),
+            identity: armer.identity(self.credential_vaults.clone(), self.user_resolver.clone()),
             github_cli: self.github_cli.clone(),
             clients: std::sync::Arc::new(RealWorkQueueGithubClients),
             terminals: self.terminals.clone(),
             notification_bus: self.notification_bus.clone(),
+        }
+    }
+
+    /// The arming caller as a watcher acts for them: signed for afresh at every use on a daemon that
+    /// signs tokens, so the watcher outlives the caller's own short-lived token; else that token.
+    fn armer_of(&self, session_token: &str) -> Armer {
+        match (
+            &self.session_token_signer,
+            (self.user_resolver)(session_token),
+        ) {
+            (Some(signer), Some(login)) => Armer::signed(signer.clone(), &login),
+            _ => Armer::Caller(session_token.to_string()),
         }
     }
 
@@ -290,14 +305,15 @@ impl WorkQueueRpcHandler {
         let Ok(sessions_base) = self.sessions_base(&call.os_user) else {
             return;
         };
+        let armer = self.armer_of(session_token);
         super::schedule_watch::after_arming(super::schedule_watch::WatchInputs {
-            source: self.git_env_source(session_token),
+            source: self.git_env_source_for(&armer),
             pull_requests: std::sync::Arc::clone(&self.pull_requests),
             store: self.stack_store(&sessions_base),
             sessions_base,
             os_user: call.os_user.clone(),
             address: call.address.clone(),
-            session_token: session_token.to_string(),
+            armer,
         })
         .await;
     }

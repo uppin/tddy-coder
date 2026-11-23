@@ -39,6 +39,9 @@ pub struct WorkQueueRpcHandler {
     /// The host's GitHub inbox and the project credentials it reads a repository with
     /// (`#workqueue` 6/14): PR status, the status stream and an assigned PR are read through it.
     pull_requests: Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests>,
+    /// What an armed schedule's watcher signs its own short-lived tokens with (`#workqueue` 14/14);
+    /// `None` on a daemon that signs nothing.
+    session_token_signer: Option<tddy_github::SessionTokenSigner>,
     /// Where a move of a work item is published for its queue's owner (`#workqueue` 8/14); `None`
     /// on a host with no bus.
     notification_bus: Option<Arc<SessionNotificationBus>>,
@@ -58,6 +61,7 @@ impl WorkQueueRpcHandler {
             peer_routing: host.peer_routing(),
             terminals: host.terminal_sessions(),
             pull_requests: Arc::new(host.clone()),
+            session_token_signer: host.session_token_signer(),
             notification_bus: host.session_notification_bus(),
         }
     }

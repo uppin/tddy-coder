@@ -70,6 +70,8 @@ pub struct ExecToolRpcHandler {
 /// The host resources only the project-home tools use, held together so the handler stays within
 /// its field budget.
 pub(crate) struct ProjectHomeHost {
+    /// What an armed schedule's watcher signs its own short-lived tokens with (`#workqueue` 14/14).
+    pub(crate) session_token_signer: Option<tddy_github::SessionTokenSigner>,
     /// The GitHub inbox and the project credentials it reads with — `work_queue_status` reads PRs
     /// through it (`#workqueue` 6/14).
     pub(crate) pull_requests:
@@ -162,6 +164,7 @@ impl ExecToolRpcHandler {
                 activity: Arc::new(host.activity_service()),
                 work_queue_github: Arc::new(OnceLock::new()),
                 pull_requests: Arc::new(host.clone()),
+                session_token_signer: host.session_token_signer(),
             },
         }
     }

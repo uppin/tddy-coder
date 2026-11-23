@@ -192,6 +192,17 @@ impl ExecToolRpcHandler {
             session_token: req.session_token.clone(),
             terminals: self.project_home_host.terminals.clone(),
             notification_bus: self.project_home_host.notification_bus.clone(),
+            vaults: self.project_home_host.credential_vaults.clone(),
+            user_resolver: self.user_resolver.clone(),
+            armer: match (
+                &self.project_home_host.session_token_signer,
+                (self.user_resolver)(&req.session_token),
+            ) {
+                (Some(signer), Some(login)) => {
+                    crate::work_queue::schedule_watch::Armer::signed(signer.clone(), &login)
+                }
+                _ => crate::work_queue::schedule_watch::Armer::Caller(req.session_token.clone()),
+            },
         }
     }
 }
@@ -230,6 +241,11 @@ pub(super) struct DaemonStackTools {
     /// Where a firing schedule's outcomes are published for the queue's owner (`#workqueue` 14/14).
     notification_bus:
         Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
+    /// Who a schedule this caller arms is watched as (`#workqueue` 14/14), and the vaults and
+    /// resolver its identity is built from.
+    armer: crate::work_queue::schedule_watch::Armer,
+    vaults: Option<Arc<tddy_credentials::SessionVaults>>,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
 }
 
 impl DaemonStackTools {
@@ -509,7 +525,9 @@ impl DaemonStackTools {
             crate::work_queue::schedule_watch::after_arming(
                 crate::work_queue::schedule_watch::WatchInputs {
                     source: crate::work_queue::land::GitEnvSource {
-                        identity: self.identity.clone(),
+                        identity: self
+                            .armer
+                            .identity(self.vaults.clone(), self.user_resolver.clone()),
                         github_cli: self.github_cli.clone(),
                         clients: Arc::clone(&self.github),
                         terminals: self.terminals.clone(),
@@ -526,7 +544,7 @@ impl DaemonStackTools {
                             .unwrap_or_else(|| self.caller_session_id.clone()),
                         daemon_instance_id: self.daemon_instance_id.clone(),
                     },
-                    session_token: self.session_token.clone(),
+                    armer: self.armer.clone(),
                 },
             )
             .await;
