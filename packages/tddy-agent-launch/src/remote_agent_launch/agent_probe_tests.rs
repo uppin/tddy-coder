@@ -7,7 +7,7 @@ use std::path::Path;
 use pretty_assertions::assert_eq;
 use tddy_remote_shell::{ExecOutput, InMemoryShell, RemoteShellError, ShellAddress};
 
-use super::probe_agent_on_target;
+use super::{probe_agent_on_target, probe_tmux_on_target};
 use crate::remote_agent_launch::RemoteLaunchError;
 
 const WORKTREE: &str = "/home/dev/repo/.worktrees/s1";
@@ -92,4 +92,36 @@ async fn a_probe_of_a_target_its_transport_cannot_reach_fails_with_the_transport
             detail: "Could not resolve hostname buildbox".to_string(),
         }))
     );
+}
+
+/// What the probe of `tmux` in [`WORKTREE`] runs on the target.
+const PROBE_OF_TMUX: &str = r#"cd '/home/dev/repo/.worktrees/s1' && exec "${SHELL:-/bin/sh}" -lc 'command -v '"'"'tmux'"'"''"#;
+
+#[tokio::test]
+async fn the_tmux_probe_asks_the_targets_login_shell_for_tmux() {
+    // Given a target whose login shell finds tmux
+    let target = a_target();
+    target.answers(PROBE_OF_TMUX, ExecOutput::succeeded("/usr/bin/tmux\n"));
+
+    // When
+    let probed = probe_tmux_on_target(&target, Path::new(WORKTREE)).await;
+
+    // Then it ran exactly the one probe, and found tmux
+    assert_eq!(
+        (probed, target.commands_run()),
+        (Ok(()), vec![PROBE_OF_TMUX.to_string()])
+    );
+}
+
+#[tokio::test]
+async fn a_target_whose_login_shell_finds_no_tmux_has_no_tmux() {
+    // Given a target whose login shell finds no tmux
+    let target = a_target();
+    target.answers(PROBE_OF_TMUX, ExecOutput::exited(1, ""));
+
+    // When
+    let probed = probe_tmux_on_target(&target, Path::new(WORKTREE)).await;
+
+    // Then
+    assert_eq!(probed, Err(RemoteLaunchError::TmuxNotOnTarget));
 }

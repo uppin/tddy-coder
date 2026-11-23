@@ -211,6 +211,29 @@ That session is an ordinary tmux session of the user, so `ListTmuxSessions` list
 attach to it. Unlike a tab's, it belongs to the agent: Delete kills it. Daemon shutdown only detaches
 the main terminal's client, so the agent outlives the daemon.
 
+A **target session** (`StartSessionRequest.target`, a Coder workspace or ssh host) started with
+`run_in_tmux` runs its agent in tmux **on the target** (`#target-tmux` 1/2):
+
+- **Preflight.** Before any worktree is cut, start and resume ask the target's login shell for
+  `tmux` (`command -v tmux`, as the agent probe does). A target without it refuses
+  `FAILED_PRECONDITION` naming tmux; there is no fallback to a non-tmux run.
+- **Run.** The remote command is `cd <worktree> && $SHELL -lc 'exec tmux new-session -A -s
+  tddy-<session> <the agent's env -i login exec>'`; the main terminal is the local transport client
+  attached to it, and the session records `tmux_session: tddy-<session>`.
+- **Identity is the tmux session name.** No pid file is written (the agent is the tmux server's child,
+  not tddy's): the start waits for the pane's pid (`display-message -p -t '=tddy-<session>:'
+  '#{pane_pid}'`), and the session pointer's owner records that pid.
+- **Dropped connection.** The local client exits and the session lists inactive while the agent keeps
+  running. No automatic reconnect
+  ([`docs/dev/todo/2026-11-23-target-tmux-auto-reconnect.md`](../../dev/todo/2026-11-23-target-tmux-auto-reconnect.md)).
+- **Resume** runs the same `new-session -A`: it re-attaches to a live agent, and starts it again with
+  its resume arguments when the tmux session is gone.
+- **Stop** (`SignalSession`) signals the local client, so it detaches, as Stop of a host tmux run does.
+  **Delete** kills `tddy-<session>` on the target (a session already gone is not an error; an
+  unreachable target refuses the delete `UNAVAILABLE` and leaves the session intact) and never touches
+  the daemon host's tmux. Resume's exit settle and the daemon-start re-attach never look for a target
+  session's tmux on the daemon host.
+
 When a tmux-run session has **no main terminal registered** but its tmux session is alive (its client
 exited, or the daemon restarted), the first `StreamSessionTerminalIo`, `StreamTerminalOutput`,
 `SendTerminalInput` or `GetTerminalHistory` addressing `main` **re-attaches** one before it is

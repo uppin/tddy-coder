@@ -55,7 +55,9 @@ impl crate::launch_ports::LaunchSessions {
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
         let target_shell = self.resumed_target_shell(req, &metadata)?;
-        let session_agent = self.agent_to_launch(kind.clone(), &target_shell).await?;
+        let session_agent = self
+            .agent_to_launch(kind.clone(), &target_shell, metadata.tmux_session.is_some())
+            .await?;
         let identity = self.host.session_identity(
             os_user,
             &req.session_id,
@@ -170,7 +172,8 @@ impl crate::launch_ports::LaunchSessions {
         session_dir: &Path,
         metadata: &SessionMetadata,
     ) -> Result<(), Status> {
-        if metadata.tmux_session.is_some() {
+        // A target session's tmux runs on its target: there is no pane here to settle.
+        if metadata.tmux_session.is_some() && metadata.target.is_none() {
             // A tmux-run agent that exited unwatched left its token on its kept pane.
             crate::cli_harness_tmux::settle_unwatched_agent_exit(
                 &self.cli_manager,

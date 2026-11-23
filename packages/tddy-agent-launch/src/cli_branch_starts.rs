@@ -122,7 +122,9 @@ impl LaunchSessions {
         // Settled first, with nothing of the start created: the managed-codebase refusal reads the
         // agent's spec, and a target without the agent fails the start before any worktree is cut.
         let target_shell = self.start_target_shell(req)?;
-        let session_agent = self.agent_to_launch(kind.clone(), &target_shell).await?;
+        let session_agent = self
+            .agent_to_launch(kind.clone(), &target_shell, req.run_in_tmux)
+            .await?;
         refuse_an_unsupported_cli_session_start(&session_agent.agent.spec, kind.name, req)?;
         if req.sandbox {
             self.require_sandbox_placement(kind.name)?;

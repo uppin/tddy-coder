@@ -197,6 +197,7 @@ impl DriverSession {
                             &spec.worktree,
                             &spec.session_id,
                         ),
+                        tmux: false,
                     },
                     session,
                     self.on_exit(hooks),

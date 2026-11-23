@@ -226,6 +226,7 @@ impl ADaemon {
                 startup_window: STARTUP_WINDOW,
                 start_timeout: START_TIMEOUT,
                 clone_root: Some(&clone_root),
+                tmux: false,
             },
             HostPtySession {
                 manager: &self.manager,

@@ -103,12 +103,14 @@ impl LaunchSessions {
         // The agent of a tmux-run session lives in its tmux session, so that is killed before
         // anything else of the session is torn down: a refused kill refuses the delete with the
         // session intact, and a retry kills whatever is left.
-        kill_recorded_tmux_session(
-            os_user,
-            session_id,
-            &unified_session_dir_path(&sessions_base, session_id),
-        )
-        .await?;
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
+        match target_tmux_run_of(&session_dir) {
+            Some(target) => {
+                self.end_target_tmux_run(&target, session_id, session_token)
+                    .await?
+            }
+            None => kill_recorded_tmux_session(os_user, session_id, &session_dir).await?,
+        }
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
         remove_session_pointer(session_id, &sessions_base).await;
@@ -164,6 +166,31 @@ impl LaunchSessions {
         }
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    /// Kill the tmux session a target session's agent runs in on its target
+    /// ([`crate::remote_agent_launch::end_target_tmux_session`]), through the shell the caller's
+    /// account reaches it with — as the start resolved it. A target that cannot be reached, or a tmux
+    /// that refuses the kill, refuses the delete with the session intact.
+    async fn end_target_tmux_run(
+        &self,
+        target: &tddy_core::SessionTarget,
+        session_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status> {
+        let subject = (self.user_resolver)(session_token).unwrap_or_default();
+        let shell = crate::opencode_cli_spawn::session_start::shell_for_session_target(
+            target,
+            &subject,
+            self.coder_credentials.as_ref(),
+        )?;
+        crate::remote_agent_launch::end_target_tmux_session(shell.as_ref(), session_id)
+            .await
+            .map_err(|e| {
+                Status::unavailable(format!(
+                    "could not kill the session's tmux session on its target: {e}"
+                ))
+            })
     }
 
     fn sessions_base_for_delete(&self, os_user: &str) -> Result<std::path::PathBuf, Status> {
@@ -266,6 +293,14 @@ pub(crate) async fn remove_recorded_session_pointer(session_dir: &Path) {
         )
         .await;
     }
+}
+
+/// The target of a session whose agent ran in tmux there: its record names both a target and a
+/// tmux session. `None` for a session that ran here, or ran on its target without tmux.
+fn target_tmux_run_of(session_dir: &Path) -> Option<tddy_core::SessionTarget> {
+    let metadata = read_session_metadata(session_dir).ok()?;
+    metadata.tmux_session?;
+    metadata.target
 }
 
 /// What a delete removes on a session's target, captured from its record before the record

@@ -33,7 +33,8 @@ use tddy_core::SessionTarget;
 use tddy_remote_shell::{InteractiveExit, RemoteShell, RemoteShellError};
 
 use crate::cli_session_pointer::{
-    record_remote_owner, session_pointer_path, PlacedSessionPointer, PointerHost,
+    record_remote_owner_from, session_pointer_path, PlacedSessionPointer, PointerHost,
+    RemoteAgentPid,
 };
 use crate::remote_agent_launch::startup::settled_last_output;
 use crate::remote_agent_launch::startup::wait_for_agent_start;
@@ -44,7 +45,7 @@ use crate::spec_launch::{HostAgent, HostPtySession, SpecLaunchError};
 /// Where the remote command records a session's agent's pid, relative to the session's worktree on
 /// the target: what a caller that stops the agent there reads.
 pub use crate::cli_session_pointer::remote_agent_pid_file;
-pub use crate::remote_agent_launch::agent_probe::probe_agent_on_target;
+pub use crate::remote_agent_launch::agent_probe::{probe_agent_on_target, probe_tmux_on_target};
 use crate::remote_agent_launch::session_files::plan_the_launch;
 use crate::remote_agent_launch::session_files::write_rendered_session_files;
 use crate::remote_agent_launch::session_files::SessionFilesPlace;
@@ -127,6 +128,75 @@ pub fn remote_agent_command(
     )
 }
 
+/// The tmux session `session_id`'s agent runs in on a target: the name a host tmux run uses
+/// ([`tddy_cli_sessions::tmux::agent_tmux_session_name`]), `tddy-<session id>`.
+pub fn target_tmux_session_name(session_id: &str) -> String {
+    tddy_cli_sessions::tmux::agent_tmux_session_name(session_id)
+}
+
+/// The one shell command that runs `session_id`'s agent in tmux on a target: enter `worktree`, then
+/// the target's login shell runs `tmux new-session -A` for [`target_tmux_session_name`], whose
+/// command is the agent's [`target_login_exec`] — so tmux is found on the login `PATH` the probe
+/// asked ([`probe_tmux_on_target`]), and a session already running is attached to instead:
+///
+/// ```text
+/// cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '\''tddy-<id>'\'' '\''<target_login_exec>'\'''
+/// ```
+///
+/// No pid file is written: the agent is the tmux server's child, and the tmux session's name is
+/// what names it.
+pub fn remote_agent_tmux_command(
+    worktree: &Path,
+    session_id: &str,
+    argv: &[String],
+    env: &[(String, String)],
+) -> String {
+    let _ = session_id;
+    format!(
+        "cd {} && {}",
+        shell_single_quote(&worktree.to_string_lossy()),
+        target_login_run(&format!(
+            "exec tmux new-session -A -s {} {}",
+            shell_single_quote(&target_tmux_session_name(session_id)),
+            shell_single_quote(&target_login_exec(argv, env))
+        ))
+    )
+}
+
+/// `inner` run by the target's login shell: `exec "${SHELL:-/bin/sh}" -lc '<inner>'`, so a command
+/// found only on the login `PATH` (tmux, the agent) is the one run.
+pub(crate) fn target_login_run(inner: &str) -> String {
+    format!(
+        "exec \"${{SHELL:-/bin/sh}}\" -lc {}",
+        shell_single_quote(inner)
+    )
+}
+
+/// Kill the tmux session `session_id`'s agent runs in on the target `shell` reaches
+/// (`tmux kill-session -t '=tddy-<id>'`, through the target's login shell). A tmux session — or a
+/// tmux server — that is already gone is not an error.
+pub async fn end_target_tmux_session(
+    shell: &dyn RemoteShell,
+    session_id: &str,
+) -> Result<(), RemoteLaunchError> {
+    let name = shell_single_quote(&format!("={}", target_tmux_session_name(session_id)));
+    // A session or server already gone is what the end wants; any other refusal is reported.
+    let inner = format!(
+        "out=$(tmux kill-session -t {name} 2>&1) && exit 0; \
+         case \"$out\" in *\"can't find session\"*|*\"no server running\"*|*\"error connecting to\"*) exit 0;; esac; \
+         printf '%s\\n' \"$out\" >&2; exit 1"
+    );
+    shell
+        .exec(tddy_remote_shell::ExecRequest::new(target_login_run(
+            &inner,
+        )))
+        .await
+        .map_err(RemoteLaunchError::Shell)?
+        .success_or_exited()
+        .map_err(RemoteLaunchError::Shell)?;
+    Ok(())
+}
+
 /// Where and how an agent is launched on a target.
 pub struct RemoteLaunch<'a> {
     /// The shell that reaches the target ([`shell_for_target`]).
@@ -151,6 +221,10 @@ pub struct RemoteLaunch<'a> {
     /// start trusts it in the target's `~/.claude.json` ([`crate::target_trust`]); `None` when the
     /// caller does not know it, and nothing is trusted.
     pub clone_root: Option<&'a Path>,
+    /// Run the agent in a tmux session of its own on the target
+    /// ([`remote_agent_tmux_command`]), named for the session ([`target_tmux_session_name`]):
+    /// a dropped connection leaves it running, and a later launch re-attaches to it.
+    pub tmux: bool,
 }
 
 /// The clone `worktree` was cut from, when it sits where a target checkout puts a session's
@@ -206,6 +280,9 @@ pub enum RemoteLaunchError {
     /// The target's login shell does not find the agent's bare `command` on its `PATH`
     /// ([`probe_agent_on_target`]): the agent is not installed there, and nothing was started.
     AgentNotOnTarget { command: String },
+    /// A tmux run was asked for, and the target's login shell finds no `tmux` on its `PATH`
+    /// ([`probe_tmux_on_target`]): nothing was started.
+    TmuxNotOnTarget,
 }
 
 impl fmt::Display for RemoteLaunchError {
@@ -242,6 +319,10 @@ impl fmt::Display for RemoteLaunchError {
             Self::AgentNotOnTarget { command } => write!(
                 f,
                 "the agent `{command}` is not installed on the target: its login shell finds no `{command}` on its PATH"
+            ),
+            Self::TmuxNotOnTarget => write!(
+                f,
+                "run_in_tmux needs tmux on the target: its login shell finds no `tmux` on its PATH"
             ),
         }
     }
@@ -385,7 +466,21 @@ fn remote_command(
     passed.extend(env);
     let env = passed;
 
-    remote_agent_command(remote.worktree, session.session_id, &plan.argv, &env)
+    if remote.tmux {
+        remote_agent_tmux_command(remote.worktree, session.session_id, &plan.argv, &env)
+    } else {
+        remote_agent_command(remote.worktree, session.session_id, &plan.argv, &env)
+    }
+}
+
+/// Where the launch reads the agent's pid on the target: its tmux pane for a tmux run, the pid
+/// file its command wrote otherwise.
+fn agent_pid_source(remote: &RemoteLaunch<'_>, session_id: &str) -> RemoteAgentPid {
+    if remote.tmux {
+        RemoteAgentPid::TmuxPane(target_tmux_session_name(session_id))
+    } else {
+        RemoteAgentPid::File(remote.worktree.join(remote_agent_pid_file(session_id)))
+    }
 }
 
 fn client_command(remote: &RemoteLaunch<'_>, command: String) -> TransportClient {
@@ -448,8 +543,7 @@ async fn judge_the_start(
     let start_bound = remote.start_timeout;
     let agent_pid = match wait_for_agent_start(
         remote.shell.as_ref(),
-        remote.worktree,
-        session.session_id,
+        &agent_pid_source(&remote, session.session_id),
         &handle,
         start_bound,
     )
@@ -511,7 +605,7 @@ async fn recorded_owner(
                 },
             };
             Some(
-                record_remote_owner(&placed, pointer, session_id)
+                record_remote_owner_from(&placed, pointer, &agent_pid_source(&remote, session_id))
                     .await
                     .map_err(|status| {
                         RemoteLaunchError::Shell(RemoteShellError::Spawn(format!(
@@ -601,6 +695,61 @@ mod tests {
         let worktree = root.join(name);
         std::fs::create_dir_all(&worktree).expect("the worktree is created");
         (dir, worktree)
+    }
+
+    /// What `command` printed when run as [`printed_by`] runs it, on a target whose `PATH` also
+    /// holds a stand-in `tmux`: it prints its arguments but the last on one line, then runs the
+    /// last — the session's command — with `sh -c`, as a new tmux session would.
+    fn printed_through_a_stand_in_tmux(command: &str) -> String {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().expect("a directory for the stand-in tmux");
+        let tmux = dir.path().join("tmux");
+        std::fs::write(
+            &tmux,
+            "#!/bin/sh\nn=$#\ni=1\nline=\nfor a; do\n  if [ $i -lt $n ]; then line=\"$line${line:+ }$a\"; else last=$a; fi\n  i=$((i+1))\ndone\nprintf '%s\\n' \"$line\"\nexec /bin/sh -c \"$last\"\n",
+        )
+        .expect("the stand-in tmux is written");
+        std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755))
+            .expect("the stand-in tmux is made executable");
+        let output = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(command)
+            .env_clear()
+            .env("SHELL", a_login_shell())
+            .env("HOME", TARGET_HOME)
+            .env("PATH", format!("{}:{TARGET_PATH}", dir.path().display()))
+            .env("TMPDIR", TARGET_TMPDIR)
+            .output()
+            .expect("a shell runs on this host");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn the_tmux_command_runs_the_agent_in_a_tmux_session_named_for_the_session_in_the_worktree() {
+        // Given an agent that prints its working directory and an argument
+        let (_dir, worktree) = a_worktree_named("s1");
+        let argv = strings(&["sh", "-c", "/bin/pwd -P; echo \"$0\"", "it's up"]);
+
+        // When the tmux command runs on the target
+        let printed = printed_through_a_stand_in_tmux(&remote_agent_tmux_command(
+            &worktree,
+            "s1",
+            &argv,
+            &[],
+        ));
+
+        // Then tmux was asked to attach to or create the session's tmux session, whose command ran
+        // the agent in the worktree with its argument intact — and no pid file was written
+        assert_eq!(
+            (printed, worktree.join(remote_agent_pid_file("s1")).exists()),
+            (
+                format!(
+                    "new-session -A -s tddy-s1\n{}\nit's up\n",
+                    worktree.display()
+                ),
+                false
+            )
+        );
     }
 
     #[test]

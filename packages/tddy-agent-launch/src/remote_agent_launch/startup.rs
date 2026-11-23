@@ -1,7 +1,5 @@
-use std::path::Path;
 use std::time::Duration;
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
-use tddy_core::ssh_exec::shell_single_quote;
 use tddy_remote_shell::RemoteShell;
 
 /// How waiting for an agent to start on its target ended.
@@ -20,15 +18,11 @@ pub(super) enum AgentStart {
 /// first.
 pub(super) async fn wait_for_agent_start(
     shell: &dyn RemoteShell,
-    worktree: &Path,
-    session_id: &str,
+    pid: &crate::cli_session_pointer::RemoteAgentPid,
     handle: &PtyHandle,
     bound: Duration,
 ) -> AgentStart {
-    let pid_file = worktree.join(crate::cli_session_pointer::remote_agent_pid_file(
-        session_id,
-    ));
-    let probe = format!("cat {}", shell_single_quote(&pid_file.to_string_lossy()));
+    let probe = pid.read_command();
     let deadline = tokio::time::Instant::now() + bound;
     loop {
         if *handle.pty_done.borrow() {
