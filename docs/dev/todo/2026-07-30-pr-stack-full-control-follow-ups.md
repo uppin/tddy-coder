@@ -18,6 +18,12 @@
   Adding a base-URL override plus a real HTTP client would make the request shapes and the JSON parsing
   testable in one move — deliberately kept out of the feature changeset because it is a transport
   migration touching every existing call path.
+  *Narrowed 2026-11-22 (`#workqueue` 2/14, #1003):* the **parsing** half is closed for the reads — PR,
+  check-run, review and comment JSON is parsed by `pr_json.rs` / `check_runs.rs`, which
+  `RealGithubPrApi` now delegates to and the GitHub inbox's scripted-GitHub suite covers; and
+  `conditional::RestConditionalRead` is a `reqwest` reader with a base-URL argument, tested over HTTP.
+  What remains is `RealGithubPrApi`'s own `curl` transport (every mutation, and `list_pr_files` /
+  `search_prs`), which still has no seam.
 - **Review-thread resolution state needs GraphQL** — `pr_comments` returns threads without a `resolved`
   flag because the REST API does not expose one (it is `reviewThreads.isResolved` on the GraphQL v4
   schema only). No field is emitted rather than guessing. Adding it means the first GraphQL call in the

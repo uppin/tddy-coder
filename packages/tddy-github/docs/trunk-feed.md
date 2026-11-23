@@ -11,13 +11,11 @@ daemon's trunk watch (`tddy_session_activity::trunk_watch`).
 name, subject line, commit date, first parent). `X-Poll-Interval` (seconds) becomes
 `poll_interval_ms`; any status other than 200 and 304 is a `TrunkReadError`.
 
-| Transport | How it reads | Identity |
-|---|---|---|
-| `RestTrunkFeed` | `reqwest` to `https://api.github.com`, `If-None-Match` when an ETag is held | a `TokenSource` called on **every** read, so a rotated token is used from the next read on |
-| `GhCliTrunkFeed` | a `GhApi` port running `gh api -i [--hostname] [-H If-None-Match: …] <path>` | the `gh` login of the OS user the port runs as |
-
-`gh` exits non-zero for any non-2xx answer, a `304` included, while still printing the head: the
-status line decides, never the exit code.
+The daemon's `TrunkFeed` is the GitHub inbox's `InboxTrunkFeed`
+(`packages/tddy-github-inbox/docs/architecture.md`): it serves the inbox's cached, conditional
+`BranchCommits` row, read through [conditional-read.md](conditional-read.md)'s transports — REST with
+a `TokenSource` called on every read, or `gh api -i` through a `GhApi` port as the session's OS user.
+`parse_commits` is shared with the inbox.
 
 ## `TrunkPoller`
 

@@ -1,11 +1,10 @@
 //! Watching a repository's trunk branch for new commits, cheaply (`#orchestra` 5/9).
 //!
 //! [`TrunkFeed`] reads the branch's newest commits **conditionally**: it sends the ETag of its last
-//! answer, and a `304 Not Modified` costs nothing against the rate limit and changes nothing. Two
-//! transports, chosen by the project's GitHub setting: [`RestTrunkFeed`] over the REST API with the
-//! project's GitHub account token, and [`GhCliTrunkFeed`] over `gh api -i` as the session's OS
-//! user, for a project that uses the host's own `gh` login. Through `gh`, a 304 exits non-zero and
-//! is read as not-modified, never as a failure.
+//! answer, and a `304 Not Modified` costs nothing against the rate limit and changes nothing. The
+//! daemon's feed is the GitHub inbox's `InboxTrunkFeed` (`tddy-github-inbox`), which reads through
+//! [`crate::conditional`]'s transports — REST with the project's account token, or `gh api -i` as
+//! the session's OS user ([`GhApi`]).
 //!
 //! [`TrunkPoller`] is one repository's polling rule as a step with no loop and no clock of its own,
 //! so every rule is testable with a hand clock:
@@ -83,71 +82,10 @@ pub trait TrunkFeed: Send + Sync {
     ) -> Result<Conditional<Vec<TrunkCommit>>, TrunkReadError>;
 }
 
-/// Where [`RestTrunkFeed`] reads its GitHub token from, once per read: a token rotated in the vault
-/// is used from the next poll on, and one revoked fails that poll.
+/// Where a REST reader ([`crate::conditional::RestConditionalRead`]) reads its GitHub token from,
+/// once per read: a token rotated in the vault is used from the next read on, and one revoked fails
+/// that read.
 pub type TokenSource = Arc<dyn Fn() -> Result<String, TrunkReadError> + Send + Sync>;
-
-/// [`TrunkFeed`] over the REST API with a GitHub token.
-pub struct RestTrunkFeed {
-    token: TokenSource,
-}
-
-impl RestTrunkFeed {
-    pub fn new(token: TokenSource) -> Self {
-        Self { token }
-    }
-}
-
-#[async_trait]
-impl TrunkFeed for RestTrunkFeed {
-    async fn newest_commits(
-        &self,
-        repo: &RepoSlug,
-        branch: &str,
-        etag: Option<&str>,
-    ) -> Result<Conditional<Vec<TrunkCommit>>, TrunkReadError> {
-        let url = format!("https://api.github.com/{}", commits_path(repo, branch));
-        let token = (self.token)()?;
-        let mut request = reqwest::Client::new()
-            .get(url)
-            .bearer_auth(token)
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "tddy-trunk-watch")
-            .header("X-GitHub-Api-Version", "2022-11-28");
-        if let Some(etag) = etag {
-            request = request.header("If-None-Match", etag);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|e| TrunkReadError(e.to_string()))?;
-        let status = response.status().as_u16();
-        let header = |name: &str| {
-            response
-                .headers()
-                .get(name)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_string)
-        };
-        let poll_interval_ms = header("x-poll-interval").and_then(|v| seconds_to_ms(&v));
-        let response_etag = header("etag");
-        match status {
-            304 => Ok(Conditional::NotModified { poll_interval_ms }),
-            200 => {
-                let body = response
-                    .text()
-                    .await
-                    .map_err(|e| TrunkReadError(e.to_string()))?;
-                Ok(Conditional::Modified {
-                    value: parse_commits(&body)?,
-                    etag: response_etag,
-                    poll_interval_ms,
-                })
-            }
-            other => Err(TrunkReadError(format!("GitHub answered HTTP {other}"))),
-        }
-    }
-}
 
 /// What `gh api -i` printed and how it exited.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -165,61 +103,6 @@ pub trait GhApi: Send + Sync {
         path: &str,
         if_none_match: Option<&str>,
     ) -> Result<GhApiOutput, TrunkReadError>;
-}
-
-/// [`TrunkFeed`] over the host's `gh` login.
-pub struct GhCliTrunkFeed {
-    gh: Arc<dyn GhApi>,
-}
-
-impl GhCliTrunkFeed {
-    pub fn new(gh: Arc<dyn GhApi>) -> Self {
-        Self { gh }
-    }
-}
-
-#[async_trait]
-impl TrunkFeed for GhCliTrunkFeed {
-    async fn newest_commits(
-        &self,
-        repo: &RepoSlug,
-        branch: &str,
-        etag: Option<&str>,
-    ) -> Result<Conditional<Vec<TrunkCommit>>, TrunkReadError> {
-        let out = self
-            .gh
-            .api_with_headers(&commits_path(repo, branch), etag)
-            .await?;
-        let (head, body) = split_head_body(&out.stdout);
-        let mut lines = head.lines();
-        let status: u16 = lines
-            .next()
-            .and_then(|l| l.split_whitespace().nth(1))
-            .and_then(|c| c.parse().ok())
-            .ok_or_else(|| TrunkReadError("gh printed no HTTP status line".to_string()))?;
-        let header = |name: &str| {
-            head.lines().skip(1).find_map(|l| {
-                let (k, v) = l.split_once(':')?;
-                k.trim()
-                    .eq_ignore_ascii_case(name)
-                    .then(|| v.trim().to_string())
-            })
-        };
-        let poll_interval_ms = header("x-poll-interval").and_then(|v| seconds_to_ms(&v));
-        match status {
-            // `gh` exits non-zero for any non-2xx, a 304 included: the status line decides.
-            304 => Ok(Conditional::NotModified { poll_interval_ms }),
-            200 => Ok(Conditional::Modified {
-                value: parse_commits(body)?,
-                etag: header("etag"),
-                poll_interval_ms,
-            }),
-            other => Err(TrunkReadError(format!(
-                "gh answered HTTP {other} (exit {})",
-                out.exit_code
-            ))),
-        }
-    }
 }
 
 /// What one poll found.
@@ -332,18 +215,11 @@ impl TrunkPoller {
     }
 }
 
-fn commits_path(repo: &RepoSlug, branch: &str) -> String {
-    format!(
-        "repos/{}/{}/commits?sha={branch}&per_page=100",
-        repo.owner, repo.name
-    )
-}
-
-fn seconds_to_ms(seconds: &str) -> Option<u64> {
+pub(crate) fn seconds_to_ms(seconds: &str) -> Option<u64> {
     seconds.trim().parse::<u64>().ok().map(|s| s * 1000)
 }
 
-fn split_head_body(raw: &str) -> (&str, &str) {
+pub(crate) fn split_head_body(raw: &str) -> (&str, &str) {
     match (raw.find("\r\n\r\n"), raw.find("\n\n")) {
         (Some(i), _) => (&raw[..i], &raw[i + 4..]),
         (None, Some(i)) => (&raw[..i], &raw[i + 2..]),
@@ -352,7 +228,7 @@ fn split_head_body(raw: &str) -> (&str, &str) {
 }
 
 /// The commits array of `GET /repos/{o}/{r}/commits`, newest first as GitHub sends it.
-fn parse_commits(body: &str) -> Result<Vec<TrunkCommit>, TrunkReadError> {
+pub fn parse_commits(body: &str) -> Result<Vec<TrunkCommit>, TrunkReadError> {
     let json: serde_json::Value =
         serde_json::from_str(body).map_err(|e| TrunkReadError(format!("not JSON: {e}")))?;
     let items = json

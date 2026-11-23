@@ -5,7 +5,7 @@
 **Detected:** 2026-09-22 by `/pr-wrap` step 3.5 on #492, measured by hand
 **Metrics:** **≈ 915 production lines** of 1,292 total · the budget gate reports **315** · 2 test modules, 379 lines
 **Restructure:** required — split by trait, `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-08 (+96 in #516, `#keyring` 9/9)
+**Status:** Open — partially reduced 2026-11-22 (−63 in #1003, `#workqueue` 2/14); still ≈ 950 production lines
 **Moved:** was `packages/tddy-workflow-recipes/src/orchestrate_pr_stack/github.rs` — relocated byte-identical by #492 (`#carve` 6/11)
 
 ## Measurement history
@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 2026-09-22 | ≈ 915 | 315 | first detection, at the file's new home; unchanged by the move |
 | 2026-10-08 | 1,018 | 393 | 922 on `origin/master` → 1,018 production lines by the inline-test-block rule (the gate's naive count 315 → 393) after `#keyring` 9/9 (#516): +96, `RealGithubPrApi::asking`, `asking_the_session_host`, `with_api_base`, the per-call token resolution and the `TokenSource` enum. Deferred: the file is already the subject of this record |
+| 2026-11-22 | 954 | 416 | 1,017 → 954 production lines (inline-test-block rule; total 1,428 → 1,365) after `#workqueue` 2/14 (#1003): the `GithubPrInsightApi` reads now delegate their JSON parsing to `pr_json.rs` / `check_runs.rs` (−63); the gate's naive count rose 393 → 416 from the richer `CheckRun` / `CheckStatus` and the review/comment `id` fields in the DTO block. Better, not clean |
 
 ## What the tool found
 
@@ -47,8 +48,9 @@ Two cuts, both along seams the file already has:
 1. **Layout first, which is free:** move `owner_repo_from_remote_url` and both `impl` blocks above
    the test modules, so the gate measures what is really there. Pure reorder.
 2. **Then split by trait:** DTOs + traits (`pr_api/types.rs` or the root), `impl GithubPrApi`
-   (`pr_api/lifecycle.rs` — open, merge, repoint, create, close), `impl GithubPrInsightApi` and its
-   JSON helpers (`pr_api/insight.rs` — files, checks, reviews, comments, search). Each lands well
+   (`pr_api/lifecycle.rs` — open, merge, repoint, create, close), `impl GithubPrInsightApi`
+   (`pr_api/insight.rs` — files, checks, reviews, comments, search; its PR, check-run, review and
+   comment parsing already lives in `pr_json.rs` / `check_runs.rs` since #1003). Each lands well
    under 500. `pub use` at `pr_api`'s root keeps every path.
 
 ## Verified by hand

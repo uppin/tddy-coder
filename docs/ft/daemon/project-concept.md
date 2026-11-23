@@ -1089,8 +1089,10 @@ refresh its home before it starts more work.
 - **One poller per project.** However many orchestrators of a project run, the daemon polls its
   trunk once per interval, and stops polling as soon as no subscribed session is live: a stopped,
   ended or deleted session is dropped within seconds, the project's poller with its last subscriber.
-- **The read.** The trunk's newest 100 commits are read **conditionally**, with the ETag of the
-  last answer, so an unchanged trunk costs a free `304`. The next poll waits out GitHub's
+- **The read.** The trunk is read through the daemon's **GitHub inbox**, one cached row per
+  repository and branch, so projects sharing a repository share its reads. The trunk's newest 100
+  commits are read **conditionally**, with the ETag of the last answer, so an unchanged trunk costs a
+  free `304`; the row is re-read at most every 30 s. The next poll waits out GitHub's
   `X-Poll-Interval` (60 s when it names none), and at least 60 s after a failed read. Every 15
   minutes the read ignores its ETag. The first answer is a baseline: nothing already on the trunk is
   reported.
@@ -1098,7 +1100,8 @@ refresh its home before it starts more work.
   user ([Local gh](#local-gh)); `gh` exits non-zero on a `304`, which is read as "not modified".
   Any other project is read through the REST API with the project's GitHub account, from the vault
   of the GitHub user who started or resumed the first subscribed orchestrator; the token is read
-  again on every poll, so one rotated in the vault is used from the next poll on.
+  again on every poll, so one rotated in the vault is used from the next poll on. A repository
+  watched by several projects is read with the identity of the project that subscribed to it last.
 - **What an orchestrator receives.** Each new commit becomes one `trunk_commit` activity on every
   subscribed orchestrator — a record of **its own session** in the project notification log, one
   line `origin/main: <short sha> <subject> (<author>)`, oldest first. A tip that does not descend

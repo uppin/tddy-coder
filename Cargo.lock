@@ -13231,6 +13231,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-github-inbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "pretty_assertions",
+ "serde_json",
+ "tddy-github",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-graph"
 version = "0.1.0"
 dependencies = [
@@ -14209,6 +14221,7 @@ dependencies = [
  "tddy-demo-vm-service",
  "tddy-discovery",
  "tddy-github",
+ "tddy-github-inbox",
  "tddy-host-service",
  "tddy-livekit",
  "tddy-livekit-testkit",

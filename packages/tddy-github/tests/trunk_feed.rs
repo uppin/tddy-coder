@@ -1,7 +1,7 @@
 //! The trunk poller reports each new trunk commit once, oldest first, and a force-push as a
 //! rewrite; it reads conditionally, waits out GitHub's poll interval, backs off after a failure and
-//! sweeps unconditionally every fifteen minutes. The `gh` transport reads `gh api -i`'s 304 — which
-//! exits non-zero — as not-modified (`#orchestra` 5/9).
+//! sweeps unconditionally every fifteen minutes (`#orchestra` 5/9). The transports it reads through
+//! are tested in `conditional_read_over_http.rs`.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -9,9 +9,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_github::trunk_feed::{
-    Conditional, GhApi, GhApiOutput, GhCliTrunkFeed, PollOutcome, RepoSlug, TrunkChange,
-    TrunkCommit, TrunkFeed, TrunkPoller, TrunkReadError, DEFAULT_POLL_INTERVAL_MS,
-    ERROR_BACKOFF_MS, SWEEP_EVERY_MS,
+    Conditional, PollOutcome, RepoSlug, TrunkChange, TrunkCommit, TrunkFeed, TrunkPoller,
+    TrunkReadError, DEFAULT_POLL_INTERVAL_MS, ERROR_BACKOFF_MS, SWEEP_EVERY_MS,
 };
 
 type Answer = Result<Conditional<Vec<TrunkCommit>>, TrunkReadError>;
@@ -220,101 +219,4 @@ async fn every_fifteen_minutes_the_read_ignores_its_etag() {
 
     // Then that read sends no ETag
     assert_eq!(feed.etags_sent(), vec![None, None]);
-}
-
-/// A `gh api -i` that prints `stdout` and exits `exit_code`, recording what it was asked.
-struct AGh {
-    stdout: String,
-    exit_code: i32,
-    asked: Mutex<Vec<(String, Option<String>)>>,
-}
-
-#[async_trait]
-impl GhApi for AGh {
-    async fn api_with_headers(
-        &self,
-        path: &str,
-        if_none_match: Option<&str>,
-    ) -> Result<GhApiOutput, TrunkReadError> {
-        self.asked
-            .lock()
-            .unwrap()
-            .push((path.to_string(), if_none_match.map(str::to_string)));
-        Ok(GhApiOutput {
-            stdout: self.stdout.clone(),
-            exit_code: self.exit_code,
-        })
-    }
-}
-
-#[tokio::test]
-async fn the_gh_transport_reads_a_304_as_not_modified() {
-    // Given gh prints a 304 and exits 1, as it does for any non-2xx
-    let gh = Arc::new(AGh {
-        stdout: "HTTP/2.0 304 Not Modified\r\nX-Poll-Interval: 90\r\n\r\n".to_string(),
-        exit_code: 1,
-        asked: Mutex::default(),
-    });
-    let feed = GhCliTrunkFeed::new(Arc::clone(&gh) as Arc<dyn GhApi>);
-
-    // When it reads with an ETag
-    let answer = feed
-        .newest_commits(
-            &RepoSlug {
-                owner: "acme".to_string(),
-                name: "app".to_string(),
-            },
-            "main",
-            Some("\"e1\""),
-        )
-        .await;
-
-    // Then it is not-modified, with GitHub's interval, and the ETag was sent
-    assert_eq!(
-        answer,
-        Ok(Conditional::NotModified {
-            poll_interval_ms: Some(90_000)
-        })
-    );
-    assert_eq!(gh.asked.lock().unwrap()[0].1.as_deref(), Some("\"e1\""));
-}
-
-#[tokio::test]
-async fn the_gh_transport_reads_commits_and_their_etag() {
-    // Given gh prints a 200 with an ETag and one commit
-    let body = r#"[{"sha":"b","commit":{"message":"Add outbox\n\nbody","author":{"name":"dev","date":"2026-11-21T10:00:00Z"}},"parents":[{"sha":"a"}]}]"#;
-    let gh = Arc::new(AGh {
-        stdout: format!("HTTP/2.0 200 OK\r\nEtag: \"e2\"\r\n\r\n{body}"),
-        exit_code: 0,
-        asked: Mutex::default(),
-    });
-    let feed = GhCliTrunkFeed::new(gh as Arc<dyn GhApi>);
-
-    // When it reads
-    let answer = feed
-        .newest_commits(
-            &RepoSlug {
-                owner: "acme".to_string(),
-                name: "app".to_string(),
-            },
-            "main",
-            None,
-        )
-        .await;
-
-    // Then the commit and the ETag come back
-    assert_eq!(
-        answer,
-        Ok(Conditional::Modified {
-            value: vec![TrunkCommit {
-                sha: "b".to_string(),
-                author: "dev".to_string(),
-                subject: "Add outbox".to_string(),
-                committed_at_unix_ms: 1_795_255_200_000,
-                parent: "a".to_string(),
-            }],
-            etag: Some("\"e2\"".to_string()),
-            poll_interval_ms: None,
-        })
-    );
 }
