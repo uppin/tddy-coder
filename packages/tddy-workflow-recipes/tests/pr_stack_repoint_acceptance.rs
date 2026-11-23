@@ -2,7 +2,7 @@
 //!
 //! `repoint_work_item` drops merged parents from the node, rebases the node's local branch
 //! onto the effective base (skipped when the branch isn't local), and re-targets the open GitHub
-//! PR's base — the same primitives `bridge::execute_stack_repoint` uses, applied to one node so
+//! PR's base — the same primitives the propagation engine uses, applied to one node so
 //! the web Repoint control and the agent repoint converge.
 //!
 //! These cases pass `target_base_branch = None`, which selects that original drop-merged-parents rule.

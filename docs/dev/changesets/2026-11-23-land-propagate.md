@@ -16,7 +16,7 @@ arming user. Landings, propagations, refusals and firings reach the queue's owne
 
 Deleted: `execute_stack_merge` / `execute_stack_repoint` (`merge_repoint.rs`), `recover_in_flight_stack_op`
 and the file-journal helpers, `decide_next_action` / `OrchestratorAction` / `AssessTask`, and their three
-recipe-era acceptance suites. Resolves `docs/dev/todo/2026-11-22-stack-helpers-with-no-production-caller.md` (on n1's lineage; n14's [F] removes or narrows it)
+recipe-era acceptance suites. Resolves `docs/dev/todo/2026-11-22-stack-helpers-with-no-production-caller.md`
 except `docs::{write_stack_docs, validate_stack_docs}` (the per-PR documents feature).
 
 Packages: tddy-work-queue, tddy-daemon-rpc, tddy-session-activity, tddy-session-lifecycle, tddy-daemon,
