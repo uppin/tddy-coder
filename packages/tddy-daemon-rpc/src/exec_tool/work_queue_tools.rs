@@ -242,6 +242,40 @@ impl DaemonStackTools {
             .map_err(|e| format!("the stack operation failed to finish: {e}"))?
     }
 
+    /// `work_queue_graph`: each item's line edge read through the inbox (else its planned base) and
+    /// the stored dependency edges. A GitHub that cannot be read is `unavailable_reason`, with the
+    /// planned bases standing in.
+    async fn graph_through_inbox(&self, env: OpEnv, github: GithubSource) -> Result<Value, String> {
+        let project_id = env.project_id.clone();
+        let (queue, trunk_ref) = tokio::task::spawn_blocking(move || {
+            Ok::<_, String>((env.stack()?, github.default_branch()?))
+        })
+        .await
+        .map_err(|e| format!("the graph read failed to finish: {e}"))??;
+        let trunk = tddy_work_queue::lineage::trunk_branch_of(&trunk_ref);
+        let site = self.pull_requests.site_for_session(
+            &self.os_user,
+            &self.caller_session_id,
+            &project_id,
+            &self.session_token,
+        );
+        Ok(match site {
+            Ok(site) => {
+                let graph =
+                    tddy_work_queue::lineage::queue_graph(&site.inbox, &site.repo, &queue, trunk)
+                        .await;
+                ops::graph_json(&graph, None)
+            }
+            Err(status) => {
+                let graph = tddy_work_queue::lineage::QueueGraph {
+                    line: tddy_work_queue::lineage::planned_line_edges(&queue, trunk),
+                    dependencies: tddy_work_queue::lineage::dependencies_of(&queue),
+                };
+                ops::graph_json(&graph, Some(status.message()))
+            }
+        })
+    }
+
     async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {
         let read_env = env.clone();
         let inputs = tokio::task::spawn_blocking(move || ops::refresh_inputs(&read_env, &github))
@@ -314,6 +348,9 @@ impl WorkQueueToolPort for DaemonStackTools {
         };
         if matches!(op, WorkQueueOp::Status) {
             return self.status_through_inbox(env, github).await;
+        }
+        if matches!(op, WorkQueueOp::Graph) {
+            return self.graph_through_inbox(env, github).await;
         }
         // The store's locks, git and GitHub are all blocking.
         tokio::task::spawn_blocking(move || ops::run(&env, &github, op))

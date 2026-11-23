@@ -44,6 +44,7 @@ pub mod work_item_annotation_tools;
 pub mod work_item_git_tools;
 pub mod work_item_link_tools;
 pub mod work_queue_access;
+pub mod work_queue_lineage_tools;
 pub mod work_queue_tools;
 
 pub use catalog::{tool_catalog, ToolDef};

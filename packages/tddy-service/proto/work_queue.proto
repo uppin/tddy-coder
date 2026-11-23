@@ -80,6 +80,14 @@ service WorkQueueService {
   rpc SetWorkItemLabels(SetWorkItemLabelsRequest) returns (WorkItemLinksResponse);
   rpc SetWorkItemBadge(SetWorkItemBadgeRequest) returns (WorkItemLinksResponse);
   rpc ClearWorkItemBadge(ClearWorkItemBadgeRequest) returns (WorkItemLinksResponse);
+
+  // `#workqueue` 9/14: replace what an item needs (its stored dependency edges). Refused when an item
+  // is unknown or the edges would close a cycle (`failed_precondition`, naming the cycle); answers the
+  // queue after the change.
+  rpc SetWorkQueueDependencies(SetWorkQueueDependenciesRequest) returns (WorkItemLinksResponse);
+  // `#workqueue` 9/14: the queue's lineage — each item's line edge (read from its PR's base through the
+  // daemon's GitHub inbox, else its planned base) and the stored dependency edges.
+  rpc GetWorkQueueGraph(GetWorkQueueGraphRequest) returns (WorkQueueGraphResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -548,3 +556,40 @@ message ClearWorkItemBadgeRequest {
   string key = 4;
 }
 
+// `#workqueue` 9/14 — lineage.
+message SetWorkQueueDependenciesRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  // The items whose behaviour `item_id` needs; replaces the stored list.
+  repeated string needs = 4;
+}
+
+message GetWorkQueueGraphRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+}
+
+// One item's line edge: what its branch hangs from.
+message LineEdgeView {
+  string item_id = 1;
+  // "item" (`endpoint` is an item id), "trunk" or "external" (`endpoint` is a branch name).
+  string kind = 2;
+  string endpoint = 3;
+}
+
+// `to` needs `from`'s behaviour.
+message DependencyEdgeView {
+  string from = 1;
+  string to = 2;
+}
+
+message WorkQueueGraphResponse {
+  repeated LineEdgeView line_edges = 1;
+  repeated DependencyEdgeView dependencies = 2;
+  // Non-empty when the PR bases could not be read (the line edges are then the planned bases).
+  string unavailable_reason = 3;
+  // The branches of the GitHub stack the queue's items sit in, bottom first; empty when the
+  // `gh stack` extension is missing or no item is in a stack.
+  repeated string gh_stack_branches = 4;
+}

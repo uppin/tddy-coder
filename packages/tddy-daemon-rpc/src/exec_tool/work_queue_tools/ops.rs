@@ -23,6 +23,10 @@ use tddy_work_queue::pr_insight::{self, PrSearchInput};
 use super::github::GithubSource;
 use super::shape::{work_pr_comments_json, work_pr_read_json, work_pr_search_json};
 
+mod lineage_ops;
+pub(super) use lineage_ops::graph_json;
+use lineage_ops::set_dependencies;
+
 /// The stack an operation acts on, and where the host keeps it.
 #[derive(Clone)]
 pub(super) struct OpEnv {
@@ -56,7 +60,7 @@ impl OpEnv {
             .map_err(|e| e.to_string())
     }
 
-    fn stack(&self) -> Result<WorkQueue, String> {
+    pub(super) fn stack(&self) -> Result<WorkQueue, String> {
         self.record().map(|record| record.stack)
     }
 
@@ -237,6 +241,11 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         WorkQueueOp::ClearBadge { item_id, key } => edit_annotations(env, &item_id, |queue| {
             item_annotations::clear_badge(queue, &item_id, &key)
         }),
+        WorkQueueOp::SetDependencies { item_id, needs } => set_dependencies(env, &item_id, needs),
+        // Served through the GitHub inbox, ahead of this blocking dispatcher.
+        WorkQueueOp::Graph => {
+            Err("work_queue_graph is served through the GitHub inbox".to_string())
+        }
     }
 }
 

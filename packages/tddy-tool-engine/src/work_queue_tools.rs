@@ -43,6 +43,7 @@ use crate::work_item_link_tools::{
     WORK_ITEM_ASSIGN_PR, WORK_ITEM_LINK_SESSION, WORK_ITEM_UNASSIGN_PR, WORK_ITEM_UNLINK_SESSION,
 };
 use crate::work_queue_access::WorkQueueAccess;
+use crate::work_queue_lineage_tools::{WORK_QUEUE_GRAPH, WORK_QUEUE_SET_DEPENDENCIES};
 use crate::ToolOutcome;
 
 pub const PR_STACK_LIST: &str = "work_queue_list";
@@ -78,6 +79,7 @@ pub fn is_stack_tool(name: &str) -> bool {
     WORK_QUEUE_TOOL_NAMES.contains(&name)
         || crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.contains(&name)
         || crate::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES.contains(&name)
+        || crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.contains(&name)
 }
 
 /// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
@@ -218,6 +220,13 @@ pub enum WorkQueueOp {
         item_id: String,
         key: String,
     },
+    /// `work_queue_set_dependencies` (`#workqueue` 9/14).
+    SetDependencies {
+        item_id: String,
+        needs: Vec<String>,
+    },
+    /// `work_queue_graph`: line edges and stored dependency edges.
+    Graph,
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.
@@ -278,6 +287,7 @@ struct StackToolArgs {
     key: Option<String>,
     text: Option<String>,
     tone: Option<String>,
+    needs: Option<Vec<String>>,
     pull_number: Option<u64>,
     include_files: bool,
     query: Option<String>,
@@ -389,6 +399,11 @@ fn work_queue_op_of(tool_name: &str, args: StackToolArgs) -> Result<WorkQueueOp,
             item_id: required(tool_name, args.item_id, "item_id")?,
             key: required(tool_name, args.key, "key")?,
         },
+        WORK_QUEUE_SET_DEPENDENCIES => WorkQueueOp::SetDependencies {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            needs: required(tool_name, args.needs, "needs")?,
+        },
+        WORK_QUEUE_GRAPH => WorkQueueOp::Graph,
         other => return Err(format!("unknown stack tool: {other}")),
     })
 }

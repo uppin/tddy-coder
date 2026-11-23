@@ -75,6 +75,10 @@ pub struct WorkItem {
     /// Apart from the derived `internal_status`, which tddy owns.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub badges: Vec<WorkItemBadge>,
+    /// The items whose behaviour this one needs (`#workqueue` 9/14) — stored dependency edges, set by
+    /// the agent or the user and acyclic. Not `parents` (git: where to cut and rebase).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub needs: Vec<String>,
 }
 
 /// How a badge is shown.

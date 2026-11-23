@@ -13,14 +13,15 @@ use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
     AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
-    LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
+    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueGraphRequest, GetWorkQueueRequest,
+    GetWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
     ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
     PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
     ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
     ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, SetWorkItemBadgeRequest,
-    SetWorkItemLabelsRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
-    UnlinkWorkItemSessionRequest, WorkItemLinksResponse, WorkQueueService, WorkQueueStatusView,
+    SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest,
+    UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest, WorkItemLinksResponse,
+    WorkQueueGraphResponse, WorkQueueService, WorkQueueStatusView,
 };
 
 /// The frames of `StreamWorkQueueStatus`: a channel the handler's task feeds, ended when either side
@@ -159,6 +160,22 @@ pub trait WorkQueueHandler: Send + Sync {
         _request: Request<ClearWorkItemBadgeRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         Err(Status::unimplemented("ClearWorkItemBadge"))
+    }
+
+    /// `#workqueue` 9/14: replace what an item needs (its stored dependency edges).
+    async fn set_work_queue_dependencies(
+        &self,
+        _request: Request<SetWorkQueueDependenciesRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        Err(Status::unimplemented("SetWorkQueueDependencies"))
+    }
+
+    /// `#workqueue` 9/14: the queue's lineage — line edges and stored dependency edges.
+    async fn get_work_queue_graph(
+        &self,
+        _request: Request<GetWorkQueueGraphRequest>,
+    ) -> Result<Response<WorkQueueGraphResponse>, Status> {
+        Err(Status::unimplemented("GetWorkQueueGraph"))
     }
 
     /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
@@ -307,6 +324,20 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<ClearWorkItemBadgeRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         self.host.clear_work_item_badge(request).await
+    }
+
+    async fn set_work_queue_dependencies(
+        &self,
+        request: Request<SetWorkQueueDependenciesRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.set_work_queue_dependencies(request).await
+    }
+
+    async fn get_work_queue_graph(
+        &self,
+        request: Request<GetWorkQueueGraphRequest>,
+    ) -> Result<Response<WorkQueueGraphResponse>, Status> {
+        self.host.get_work_queue_graph(request).await
     }
 }
 

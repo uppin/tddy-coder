@@ -8,3 +8,5 @@ export { WorkItemLinkControls } from "./WorkItemLinkControls";
 export { WorkItemLinksContext, type WorkItemLinks, type LinkableSession, type ItemChecks } from "./workItemLinks";
 export { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
 export { WorkItemAnnotations, type WorkItemAnnotationsProps } from "./WorkItemAnnotations";
+export { WorkQueueGraph, type WorkQueueGraphProps, type GraphLineEndpoint } from "./WorkQueueGraph";
+export { WorkQueueGraphPanel, type WorkQueueGraphPanelProps } from "./WorkQueueGraphPanel";

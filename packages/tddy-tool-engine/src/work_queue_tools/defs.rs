@@ -133,6 +133,8 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
     defs.extend(crate::work_item_link_tools::work_item_link_tool_defs());
     // `#workqueue` 7/14: then the three annotation tools.
     defs.extend(crate::work_item_annotation_tools::work_item_annotation_tool_defs());
+    // `#workqueue` 9/14: the two lineage tools follow the link tools; the owner has them.
+    defs.extend(crate::work_queue_lineage_tools::work_queue_lineage_tool_defs());
     defs
 }
 

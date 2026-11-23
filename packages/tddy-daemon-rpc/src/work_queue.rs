@@ -72,6 +72,7 @@ mod add_work_item_unit_tests;
 
 mod annotations;
 pub use annotations::parse_tone;
+mod lineage;
 mod links;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;
