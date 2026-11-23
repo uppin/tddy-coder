@@ -135,7 +135,7 @@ it("each project group shows a pinned main entry first, labelled with main's mod
     .should("contain", "main")
     .and("contain", "origin/main")
     .and("contain", "opus");
-  byTestId(`sessions-drawer-home-icon-project-${ALPHA.projectId}`).should("be.visible");
+  byTestId(`sessions-drawer-home-icon-${ALPHA_HOME_SESSION.sessionId}`).should("be.visible");
   rowOrderIn(BETA.projectId).its(0).should("equal", sessionsDrawerProjectHome(BETA.projectId));
 });
 

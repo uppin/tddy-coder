@@ -221,14 +221,24 @@ it("More sits on the right with its count, and project names line up with the se
   });
 });
 
-it("a project-home session carries a home icon; an orchestrator named home does not", () => {
-  // Given — a replaced main (project-home role) and an orchestrator that happens to be called "home"
-  const oldMain = { ...aSession("old-main", ALPHA.projectId, true, "home"), sessionRole: "project-home" };
-  const orch = { ...aSession("orch", ALPHA.projectId, true, "home"), sessionRole: "orchestrator" };
-  mountDrawer({ sessions: [oldMain, orch] });
+it("a project-home session's house icon is its activity indicator; an orchestrator named home keeps the dot", () => {
+  // Given — a live and a finished project-home session, and a live orchestrator called "home"
+  const liveHome = { ...aSession("live-home", ALPHA.projectId, true, "home"), sessionRole: "project-home" };
+  const doneHome = { ...aSession("done-home", BETA.projectId, false, "home"), sessionRole: "project-home" };
+  const orch = { ...aSession("orch", GAMMA.projectId, true, "home"), sessionRole: "orchestrator" };
+  mountDrawer({ sessions: [liveHome, doneHome, orch] });
+  const indicator = (id: string) => byTestId(`sessions-drawer-item-status-${id}`);
 
-  // Then
-  byTestId("sessions-drawer-home-icon-old-main").should("be.visible");
-  byTestId("sessions-drawer-item-orchestrator-orch").should("exist");
+  // Then — the house replaces the dot and takes the status colour
+  indicator("live-home").should("have.attr", "data-status", "connected").and("have.class", "text-green-500");
+  indicator("live-home").find("[data-testid='sessions-drawer-home-icon-live-home']").should("be.visible");
+  indicator("done-home").should("have.attr", "data-status", "disconnected").and("have.class", "text-gray-400");
+  // And — the orchestrator keeps its plain dot
+  indicator("orch").should("have.class", "bg-green-500");
   byTestId("sessions-drawer-home-icon-orch").should("not.exist");
+  // And — titles stay aligned: the house takes the dot's width
+  cy.get("[data-testid='sessions-drawer-item-label-live-home']").then(($home) => {
+    const orchLabel = Cypress.$("[data-testid='sessions-drawer-item-label-orch']")[0].getBoundingClientRect();
+    expect($home[0].getBoundingClientRect().left).to.be.closeTo(orchLabel.left, 1);
+  });
 });

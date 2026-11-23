@@ -154,12 +154,13 @@ for (const layout of LAYOUTS) {
       mainEntry().find("> span:last-child").then(($model) => expectInsideTheDrawer($model, "main's model"));
     });
 
-    it("the main entry's status dot lines up with the session rows' dots", () => {
+    it("the main entry's status indicator (a house) is centred on the session rows' dots", () => {
       mainEntry().find("> :first-child").then(($mainDot) => {
         crossHostRow().find("> :first-child").then(($rowDot) => {
           const main = $mainDot[0].getBoundingClientRect();
           const row = $rowDot[0].getBoundingClientRect();
-          expect(main.left, "main dot left vs session row dot left").to.be.closeTo(row.left, 0.5);
+          const centre = (r: DOMRect) => r.left + r.width / 2;
+          expect(centre(main), "main indicator centre vs session row dot centre").to.be.closeTo(centre(row), 0.5);
         });
       });
     });

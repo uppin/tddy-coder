@@ -58,12 +58,17 @@ export function ProjectHomeEntry(props: {
             !hasMain && "text-muted-foreground",
           )}
         >
-          {homeSession && <SessionIndicatorDot session={homeSession} sizeClassName="h-2 w-2" />}
-          <Home
-            data-testid={`sessions-drawer-home-icon-project-${home.projectId}`}
-            aria-label="Project home"
-            className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
-          />
+          {/* Main's indicator is a house in its session's status colour; muted until it is listed. */}
+          {homeSession ? (
+            <SessionIndicatorDot session={homeSession} shape="home" />
+          ) : (
+            <Home
+              data-testid={`sessions-drawer-home-icon-project-${home.projectId}`}
+              aria-label="Project home"
+              className="-mx-0.5 h-3 w-3 flex-shrink-0 text-muted-foreground"
+              strokeWidth={2.5}
+            />
+          )}
           <span className="flex-shrink-0 font-medium">main</span>
           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{home.mainBranchRef}</span>
           {homeSession?.model && (

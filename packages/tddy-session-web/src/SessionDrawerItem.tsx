@@ -1,5 +1,4 @@
 import React from "react";
-import { Home } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionDrawerLabel } from "./utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
@@ -62,15 +61,12 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
                 : "hover:bg-muted",
             )}
           >
-          <SessionIndicatorDot session={session} />
-          {/* A project-home session (by role, never by name — an orchestrator called "home" gets none). */}
-          {session.sessionRole === PROJECT_HOME_ROLE && (
-            <Home
-              data-testid={`sessions-drawer-home-icon-${session.sessionId}`}
-              aria-label="Project home"
-              className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
-            />
-          )}
+          {/* A project-home session's indicator is a house, by role, never by name — an orchestrator
+              called "home" keeps the dot. */}
+          <SessionIndicatorDot
+            session={session}
+            shape={session.sessionRole === PROJECT_HOME_ROLE ? "home" : "dot"}
+          />
           {/* Label */}
           <span
             data-testid={`sessions-drawer-item-label-${session.sessionId}`}

@@ -6,5 +6,5 @@ stacks leave the project groups for one **Stacks** box above Select, which opens
 grouped per project and named by title or owning session instead of a raw id. Active sessions
 are listed with no header and the rest fold under a right-aligned **More (N)**;
 project names line up with the session dots;
-project-home sessions and the pinned main carry a house icon. See
+project-home sessions and the pinned main show their activity on a house icon instead of a dot. See
 [Session drawer § Stacks box](../session-drawer.md#stacks-box).

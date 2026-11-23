@@ -119,9 +119,12 @@ The collapsed 12px strip, bulk selection and delete, cross-host badges and deep 
 by grouping.
 
 **Home icon.** A session whose role is project-home (`SessionEntry.session_role == "project-home"`)
-carries a house icon after its dot (`sessions-drawer-home-icon-<sessionId>`), and so does the pinned
-**main** entry (`sessions-drawer-home-icon-project-<projectId>`). It is decided by role, never by
-name: an orchestrator named "home" shows none.
+shows a **house instead of its status dot** (`sessions-drawer-home-icon-<sessionId>`, inside
+`sessions-drawer-item-status-<sessionId>`). The house *is* the activity indicator: green when
+connected, blinking while working, yellow when it needs input, grey when finished. It takes the
+dot's width, so titles stay aligned. The pinned **main** entry shows the same house in its session's
+colour, muted (`sessions-drawer-home-icon-project-<projectId>`) until that session is listed. It is
+decided by role, never by name: an orchestrator named "home" keeps the dot.
 
 ### Stacks box
 

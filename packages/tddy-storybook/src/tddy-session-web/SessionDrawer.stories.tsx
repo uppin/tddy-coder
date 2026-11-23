@@ -131,14 +131,14 @@ const HOME_SESSIONS: SessionEntry[] = [
   aSession("h-input", "home", true, { sessionRole: "project-home", pendingElicitation: true }),
   aSession("h-done", "home", false, { sessionRole: "project-home" }),
   PINNED_MAIN,
-  // An orchestrator merely named "home": same green dot, no house icon
+  // An orchestrator merely named "home": a plain green dot, no house
   aSession("h-live", "home", true, { sessionRole: "orchestrator" }),
 ];
 
 /**
- * A project-home session's activity shows on its status dot, next to the house icon: green when
- * connected, yellow when it waits for input, grey when finished (folded under More). The pinned
- * **main** entry shows its session's dot the same way.
+ * A project-home session's house icon is its activity indicator, in place of the dot: green when
+ * connected, yellow when it waits for input, grey when finished. The pinned **main** entry shows its
+ * session's house the same way; an orchestrator named "home" keeps a plain dot.
  */
 export const HomeSessionStates: Story = {
   args: {
