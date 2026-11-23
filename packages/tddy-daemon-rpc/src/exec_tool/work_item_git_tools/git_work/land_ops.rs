@@ -210,7 +210,7 @@ pub(crate) fn merge_item(env: &GitEnv, item_id: &str) -> Result<Value, String> {
 fn items_in_waves(world: &DaemonQueueWorld<'_>, from: u32, to: u32) -> Result<Vec<String>, String> {
     let queue = world.queue();
     let ids: Vec<String> = queue.nodes.iter().map(|n| n.node_id.clone()).collect();
-    let derived = queue_waves(&ids, &dependencies_of(queue)).map_err(|e| e.to_string())?;
+    let derived = queue_waves(&ids, &dependencies_of(queue), &[]).map_err(|e| e.to_string())?;
     if to as usize > derived.waves.len() {
         return Err(format!(
             "wave {to} does not exist (the queue has {})",
