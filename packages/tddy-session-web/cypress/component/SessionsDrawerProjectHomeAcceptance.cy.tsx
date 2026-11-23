@@ -135,6 +135,7 @@ it("each project group shows a pinned main entry first, labelled with main's mod
     .should("contain", "main")
     .and("contain", "origin/main")
     .and("contain", "opus");
+  byTestId(`sessions-drawer-home-icon-${ALPHA_HOME_SESSION.sessionId}`).should("be.visible");
   rowOrderIn(BETA.projectId).its(0).should("equal", sessionsDrawerProjectHome(BETA.projectId));
 });
 
@@ -195,13 +196,14 @@ it("a project whose main is not listed yet still shows its pinned entry", () => 
   // When only beta (no main) has a session
   aDrawer([aSession("b1", BETA.projectId)]);
 
-  // Then alpha's group exists for its pinned entry alone, ordered before beta's
+  // Then alpha's group exists for its pinned entry alone, after beta's — beta has an active
+  // session, so it is pinned to the top
   rowOrderIn(ALPHA.projectId).should("deep.equal", [sessionsDrawerProjectHome(ALPHA.projectId)]);
   drawer
     .groupHeaderOrder()
     .should("deep.equal", [
-      sessionsDrawerProjectGroupHeader(ALPHA.projectId),
       sessionsDrawerProjectGroupHeader(BETA.projectId),
+      sessionsDrawerProjectGroupHeader(ALPHA.projectId),
     ]);
 });
 

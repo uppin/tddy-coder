@@ -58,7 +58,7 @@ it("the toggle still collapses the group, and is not the plus", () => {
   byTestId(sessionsDrawerProjectGroupHeader(BETA)).find(`[data-testid='${sessionsDrawerProjectNew(BETA)}']`).should("not.exist");
 });
 
-it("renders the actions slot after the plus", () => {
+it("renders the actions slot alongside the plus", () => {
   // Given
   const gear = <button type="button" data-testid="a-header-action">gear</button>;
 

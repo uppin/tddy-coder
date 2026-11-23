@@ -1,5 +1,5 @@
 /**
- * Acceptance: whatever sits on the right of a drawer row — the project header's count, "+" and gear;
+ * Acceptance: whatever sits on the right of a drawer row — the project header's "+" and gear;
  * a session row's host and orchestrator badges; the pinned main entry's model — stays inside the
  * drawer however long the label and however narrow the drawer, and the label truncates instead.
  * The pinned **main** entry's status dot lines up with the session rows' dots.
@@ -98,12 +98,12 @@ function mountTheDrawer({ width, isMobile }: Layout) {
 // ---------------------------------------------------------------------------
 
 /** Every element `$el` matches lies wholly inside the drawer's visible rectangle. */
-function expectInsideTheDrawer($el: JQuery<HTMLElement>, what: string) {
+function expectInsideTheDrawer($el: JQuery<HTMLElement>, what: string, opts: { mayBeCollapsed?: boolean } = {}) {
   const drawer = document.querySelector("[data-testid='sessions-drawer']")!.getBoundingClientRect();
   expect($el.length, what).to.be.greaterThan(0);
   $el.each((_, el) => {
     const r = el.getBoundingClientRect();
-    expect(r.width, `${what} has a width`).to.be.greaterThan(0);
+    if (!opts.mayBeCollapsed) expect(r.width, `${what} has a width`).to.be.greaterThan(0);
     expect(r.left, `${what} left edge`).to.be.at.least(drawer.left - 0.5);
     expect(r.right, `${what} right edge (drawer right ${drawer.right})`).to.be.at.most(drawer.right + 0.5);
   });
@@ -130,11 +130,11 @@ for (const layout of LAYOUTS) {
       mountTheDrawer(layout);
     });
 
-    it("the project header's count, \"+\" and gear stay inside the drawer, and the name truncates", () => {
-      header().find("> span:last-child").then(($count) => expectInsideTheDrawer($count, "session count"));
+    it("the project header's \"+\" and gear stay inside the drawer, and the name truncates", () => {
       byTestId(`sessions-drawer-project-new-${PROJECT_ID}`).then(($plus) => expectInsideTheDrawer($plus, '"+"'));
       byTestId(`sessions-drawer-project-settings-${PROJECT_ID}`).then(($gear) =>
-        expectInsideTheDrawer($gear, "settings gear"),
+        // Zero-width until the header row is hovered (CSS :hover cannot be synthesised here).
+        expectInsideTheDrawer($gear, "settings gear", { mayBeCollapsed: true }),
       );
       header().find("> span.truncate").then(($name) => expectTruncated($name, "project name"));
     });
@@ -154,12 +154,13 @@ for (const layout of LAYOUTS) {
       mainEntry().find("> span:last-child").then(($model) => expectInsideTheDrawer($model, "main's model"));
     });
 
-    it("the main entry's status dot lines up with the session rows' dots", () => {
+    it("the main entry's status indicator (a house) is centred on the session rows' dots", () => {
       mainEntry().find("> :first-child").then(($mainDot) => {
         crossHostRow().find("> :first-child").then(($rowDot) => {
           const main = $mainDot[0].getBoundingClientRect();
           const row = $rowDot[0].getBoundingClientRect();
-          expect(main.left, "main dot left vs session row dot left").to.be.closeTo(row.left, 0.5);
+          const centre = (r: DOMRect) => r.left + r.width / 2;
+          expect(centre(main), "main indicator centre vs session row dot centre").to.be.closeTo(centre(row), 0.5);
         });
       });
     });

@@ -193,7 +193,7 @@ function SessionPartitionBody({
   );
 }
 
-/** One project group's body: today's Active/Remaining partition and stack nesting over its sessions. */
+/** One project group's body: its active sessions, then the rest under a collapsed **More**, each stack-nested. */
 export function SessionGroupBody({
   sessions,
   selectionMode,
@@ -214,20 +214,13 @@ export function SessionGroupBody({
       />
     );
   }
+  // Active sessions are listed bare; the rest fold under a collapsed "More".
   return (
     <>
-      <SessionDrawerSeparator
-        testId="sessions-drawer-separator-active"
-        label="Active"
-        count={activeCount}
-        defaultOpen
-        forceOpen={selectionMode}
-      >
-        <SessionPartitionBody partition={active} {...partitionBodyProps} />
-      </SessionDrawerSeparator>
+      <SessionPartitionBody partition={active} {...partitionBodyProps} />
       <SessionDrawerSeparator
         testId="sessions-drawer-separator-remaining"
-        label="Remaining"
+        label="More"
         count={remainingCount}
         defaultOpen={false}
         forceOpen={selectionMode}
@@ -236,6 +229,20 @@ export function SessionGroupBody({
       </SessionDrawerSeparator>
     </>
   );
+}
+
+/**
+ * Projects with at least one active session first, then the rest — a stable partition, so each side
+ * keeps the order it came in. The trailing **Other** group is not a project and stays last.
+ */
+export function pinProjectsWithActiveSessions(groups: ProjectSessionGroup[]): ProjectSessionGroup[] {
+  const hasActive = (g: ProjectSessionGroup) => partitionSessionsByActivity(g.sessions).activeCount > 0;
+  const projectGroups = groups.filter((g) => g.projectId !== null);
+  return [
+    ...projectGroups.filter(hasActive),
+    ...projectGroups.filter((g) => !hasActive(g)),
+    ...groups.filter((g) => g.projectId === null),
+  ];
 }
 
 /** The key of the project group that holds `sessionId`, or `null` when no group does. */

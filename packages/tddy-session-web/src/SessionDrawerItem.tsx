@@ -4,7 +4,7 @@ import { sessionDrawerLabel } from "./utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerMarkBadge } from "./SessionDrawerMarkBadge";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
-import { ORCHESTRATOR_ROLE } from "./utils/projectHomeGroups";
+import { ORCHESTRATOR_ROLE, PROJECT_HOME_ROLE } from "./utils/projectHomeGroups";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
 
 interface SessionDrawerItemProps {
@@ -61,7 +61,12 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
                 : "hover:bg-muted",
             )}
           >
-          <SessionIndicatorDot session={session} />
+          {/* A project-home session's indicator is a house, by role, never by name — an orchestrator
+              called "home" keeps the dot. */}
+          <SessionIndicatorDot
+            session={session}
+            shape={session.sessionRole === PROJECT_HOME_ROLE ? "home" : "dot"}
+          />
           {/* Label */}
           <span
             data-testid={`sessions-drawer-item-label-${session.sessionId}`}

@@ -14,14 +14,19 @@ export interface SessionProjectGroupHeaderProps {
    * that cannot start one).
    */
   onNew?: () => void;
-  /** Further header actions after the "+" — the slot `#orchestrators` 11/11 puts its gear in. */
+  /**
+   * The project's settings cog, shown left of the name while the pointer is anywhere over the
+   * header row (the row is the hover target, so moving from the name onto the cog keeps it shown).
+   */
   actions?: React.ReactNode;
 }
 
 /**
- * A project group's header row (`#orchestrators` 8/11): the collapse toggle — the project's name
- * and session count, `sessions-drawer-project-group-header-<key>` — then the "+" and any further
- * actions as siblings, since a button cannot hold buttons.
+ * A project group's header row (`#orchestrators` 8/11): the collapse toggle — the project's name,
+ * `sessions-drawer-project-group-header-<key>`, starting where session rows' dots do — then the "+".
+ * Left of the name, in the gutter, the chevron; right of the name, the settings cog, shown while the
+ * row is hovered. All siblings, since a button cannot hold buttons; the chevron and the empty rest of
+ * the row toggle too.
  *
  * Feature: docs/ft/web/session-drawer.md § Orchestrator composer
  */
@@ -29,18 +34,40 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
   const { group, groupKey, collapsed, onToggle, onNew, actions } = props;
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
-    <div className="flex w-full items-center gap-1">
+    <div
+      data-testid={`sessions-drawer-project-header-row-${groupKey}`}
+      className="group relative flex w-full items-center gap-1"
+    >
+      {/* The name starts at 12px — a session row's dot (px-3). The chevron is centred in the gutter
+          between the drawer's left border and the name: the list's 8px padding (px-2) plus those 12px. */}
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={onToggle}
+        className="absolute inset-y-0 -left-2 flex w-5 items-center justify-center text-muted-foreground"
+      >
+        <Chevron className="h-3 w-3" />
+      </button>
       <button
         type="button"
         data-testid={`sessions-drawer-project-group-header-${groupKey}`}
         aria-expanded={!collapsed}
         onClick={onToggle}
-        className="flex flex-1 min-w-0 items-center gap-1 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+        className="flex min-w-0 items-center py-1 pl-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors group-hover:text-foreground"
       >
-        <Chevron className="h-3.5 w-3.5 flex-shrink-0" />
-        <span className="flex-1 truncate text-left">{group.label}</span>
-        <span className="flex-shrink-0 font-normal tabular-nums">{group.sessions.length}</span>
+        <span className="truncate text-left">{group.label}</span>
       </button>
+      {/* The settings cog, right after the name; shown while the row is hovered. */}
+      {actions}
+      {/* The rest of the row toggles too, so the whole header stays one click target. */}
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-hidden="true"
+        onClick={onToggle}
+        className="flex-1 self-stretch"
+      />
       {onNew && (
         <button
           type="button"
@@ -53,7 +80,6 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
           +
         </button>
       )}
-      {actions}
     </div>
   );
 }

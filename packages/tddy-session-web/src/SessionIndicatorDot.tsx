@@ -11,6 +11,7 @@
  */
 
 import React, { useSyncExternalStore } from "react";
+import { Home } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionIndicatorFor, type SessionIndicator } from "./lib/sessionIndicator";
 import { sessionNotificationRegistry } from "./lib/sessionNotificationRegistry";
@@ -31,6 +32,14 @@ export const SESSION_INDICATOR_COLOR: Record<SessionIndicator, string> = {
   working: "bg-green-500",
   disconnected: "bg-gray-400",
   "needs-input": "bg-yellow-500",
+};
+
+/** The same colours for the house icon, which is drawn in text colour rather than filled. */
+export const SESSION_INDICATOR_TEXT_COLOR: Record<SessionIndicator, string> = {
+  connected: "text-green-500",
+  working: "text-green-500",
+  disconnected: "text-gray-400",
+  "needs-input": "text-yellow-500",
 };
 
 /** The class carrying the fade-in/fade-out animation; see `sessionIndicatorDotStyles.ts`. */
@@ -61,6 +70,11 @@ interface SessionIndicatorDotProps {
   session: SessionEntry;
   /** Tailwind size classes. The collapsed strip renders a slightly larger dot, being all it shows. */
   sizeClassName?: string;
+  /**
+   * `"home"` draws a project-home session's indicator as a house icon in the status colour instead
+   * of the dot. It occupies the dot's width (negative margins), so row titles stay aligned.
+   */
+  shape?: "dot" | "home";
   /** Overrides the default test id, where another dot for the same session is on screen. */
   testId?: string;
 }
@@ -74,9 +88,31 @@ interface SessionIndicatorDotProps {
 export function SessionIndicatorDot({
   session,
   sizeClassName = "h-2 w-2",
+  shape = "dot",
   testId,
 }: SessionIndicatorDotProps) {
   const status = useSessionIndicator(session);
+
+  if (shape === "home") {
+    return (
+      <span
+        data-testid={testId ?? `sessions-drawer-item-status-${session.sessionId}`}
+        data-status={status}
+        className={cn(
+          "-mx-0.5 flex flex-shrink-0 items-center",
+          SESSION_INDICATOR_TEXT_COLOR[status],
+          status === "working" && SESSION_INDICATOR_BLINK_CLASS,
+        )}
+      >
+        <Home
+          data-testid={`sessions-drawer-home-icon-${session.sessionId}`}
+          aria-label="Project home"
+          className="h-3 w-3"
+          strokeWidth={2.5}
+        />
+      </span>
+    );
+  }
 
   return (
     <span
