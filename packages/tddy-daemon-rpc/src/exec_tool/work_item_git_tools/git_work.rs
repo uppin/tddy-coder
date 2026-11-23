@@ -72,6 +72,9 @@ pub(crate) struct GitEnv {
     pub(crate) identity: SessionAccountAccess,
     pub(crate) github_cli: GithubCli,
     pub(crate) clients: Arc<dyn WorkQueueGithubClients>,
+    /// Where landings, propagations and refusals are published for the queue's owner, and by whom
+    /// (`#workqueue` 14/14); `None` publishes nothing.
+    pub(crate) activity: Option<crate::work_queue::move_activity::ActivitySink>,
 }
 
 pub(super) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {

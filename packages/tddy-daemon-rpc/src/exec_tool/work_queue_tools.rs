@@ -191,6 +191,7 @@ impl ExecToolRpcHandler {
             caller_session_id: req.session_id.clone(),
             session_token: req.session_token.clone(),
             terminals: self.project_home_host.terminals.clone(),
+            notification_bus: self.project_home_host.notification_bus.clone(),
         }
     }
 }
@@ -226,6 +227,9 @@ pub(super) struct DaemonStackTools {
     session_token: String,
     /// The live terminals, which say whether an item's session is running.
     terminals: tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
+    /// Where a firing schedule's outcomes are published for the queue's owner (`#workqueue` 14/14).
+    notification_bus:
+        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
 }
 
 impl DaemonStackTools {
@@ -509,6 +513,7 @@ impl DaemonStackTools {
                         github_cli: self.github_cli.clone(),
                         clients: Arc::clone(&self.github),
                         terminals: self.terminals.clone(),
+                        notification_bus: self.notification_bus.clone(),
                     },
                     pull_requests: Arc::clone(&self.pull_requests),
                     store: self.store.clone(),

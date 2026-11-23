@@ -10,11 +10,15 @@ use tddy_service::proto::work_queue::{
     LandStepView, LandWorkQueueRequest, LandWorkQueueResponse, PropagateWorkItemRequest,
     PropagateWorkItemResponse,
 };
+use tddy_session_activity::session_notifications::SessionNotificationBus;
+use tddy_session_activity::work_queue_activity::{Actor, WorkQueueChange};
 use tddy_session_lifecycle::connection_service::session_acting_identity::SessionAccountAccess;
 use tddy_work_queue::engine::EngineRefusal;
+use tddy_work_queue::schedule::{Schedule, ScheduleKind};
 use tddy_worktree_service::session_target::TargetRecord;
 
 use super::links::LinkCall;
+use super::move_activity::{ActivitySink, MovedQueue};
 use super::schedules::ScheduleCtx;
 use super::WorkQueueRpcHandler;
 use crate::exec_tool::work_item_git_tools::git_work::{land_ops, GitEnv};
@@ -77,6 +81,8 @@ pub(crate) struct GitEnvSource {
         std::sync::Arc<dyn crate::exec_tool::work_queue_tools::WorkQueueGithubClients>,
     pub(crate) terminals:
         tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
+    /// Where the engines' outcomes are published for the queue's owner (`#workqueue` 14/14).
+    pub(crate) notification_bus: Option<std::sync::Arc<SessionNotificationBus>>,
 }
 
 impl GitEnvSource {
@@ -86,6 +92,7 @@ impl GitEnvSource {
         sessions_base: &std::path::Path,
         os_user: &str,
         address: &tddy_service::proto::work_queue::WorkQueueAddress,
+        actor: Actor,
     ) -> Result<GitEnv, Status> {
         let queue = store
             .read(&address.project_id, &address.queue_id)
@@ -102,6 +109,7 @@ impl GitEnvSource {
             identity: self.identity.clone(),
             github_cli: self.github_cli.clone(),
             clients: std::sync::Arc::clone(&self.clients),
+            activity: ActivitySink::on(self.notification_bus.as_ref(), actor),
         })
     }
 }
@@ -127,14 +135,10 @@ pub(crate) fn fire_met_in_background(
     });
 }
 
-/// What firing one claimed schedule does: land (merge) or propagate the item.
+/// What firing one claimed schedule does: land (merge) or propagate its item.
 #[async_trait::async_trait]
 pub(crate) trait FireAction: Send + Sync {
-    async fn run(
-        &self,
-        item_id: &str,
-        kind: &tddy_work_queue::schedule::ScheduleKind,
-    ) -> Result<(), String>;
+    async fn run(&self, schedule: &Schedule) -> Result<(), String>;
 }
 
 /// The engines, over this host's git and GitHub.
@@ -148,12 +152,7 @@ pub(crate) struct EngineAction {
 
 #[async_trait::async_trait]
 impl FireAction for EngineAction {
-    async fn run(
-        &self,
-        item_id: &str,
-        kind: &tddy_work_queue::schedule::ScheduleKind,
-    ) -> Result<(), String> {
-        use tddy_work_queue::schedule::ScheduleKind;
+    async fn run(&self, schedule: &Schedule) -> Result<(), String> {
         let env = self
             .source
             .env_of(
@@ -161,10 +160,13 @@ impl FireAction for EngineAction {
                 &self.sessions_base,
                 &self.os_user,
                 &self.address,
+                Actor::Schedule {
+                    armed_by: schedule.armed_by.clone(),
+                },
             )
             .await
             .map_err(|status| status.message().to_string())?;
-        let (kind, item_id) = (kind.clone(), item_id.to_string());
+        let (kind, item_id) = (schedule.kind.clone(), schedule.item_id.clone());
         tokio::task::spawn_blocking(move || match kind {
             ScheduleKind::Merge { .. } => land_ops::merge_item(&env, &item_id).map(drop),
             ScheduleKind::Propagate => land_ops::propagate_item(&env, &item_id, None, false)
@@ -177,10 +179,13 @@ impl FireAction for EngineAction {
 }
 
 /// Fires an armed schedule: the schedule is taken out of the store first, in one write, so a second
-/// firing of the same arming finds it gone and does nothing; then the action runs.
+/// firing of the same arming finds it gone and does nothing; then the queue's owner is told it fired
+/// (`#workqueue` 14/14) and the action runs.
 pub(crate) struct DaemonFireSchedule {
     pub(crate) store: tddy_core::work_queue_store::WorkQueueStore,
     pub(crate) address: tddy_service::proto::work_queue::WorkQueueAddress,
+    pub(crate) os_user: String,
+    pub(crate) notification_bus: Option<std::sync::Arc<SessionNotificationBus>>,
     pub(crate) action: std::sync::Arc<dyn FireAction>,
 }
 
@@ -194,16 +199,47 @@ impl DaemonFireSchedule {
         address: tddy_service::proto::work_queue::WorkQueueAddress,
     ) -> Self {
         Self {
+            notification_bus: source.notification_bus.clone(),
             action: std::sync::Arc::new(EngineAction {
                 source,
                 store: store.clone(),
                 sessions_base,
-                os_user,
+                os_user: os_user.clone(),
                 address: address.clone(),
             }),
             store,
             address,
+            os_user,
         }
+    }
+
+    /// Tell the queue's owner that `schedule` fired.
+    async fn announce_fired(&self, schedule: &Schedule, stack: &tddy_core::changeset::WorkQueue) {
+        let Some(sink) = ActivitySink::on(
+            self.notification_bus.as_ref(),
+            Actor::Schedule {
+                armed_by: schedule.armed_by.clone(),
+            },
+        ) else {
+            return;
+        };
+        let action = match schedule.kind {
+            ScheduleKind::Merge { .. } => "merge",
+            ScheduleKind::Propagate => "propagate",
+        };
+        sink.publish(
+            &MovedQueue {
+                queue_session_id: &self.address.queue_id,
+                project_id: &self.address.project_id,
+                os_user: &self.os_user,
+            },
+            &schedule.item_id,
+            stack,
+            WorkQueueChange::ScheduleFired {
+                action: action.to_string(),
+            },
+        )
+        .await;
     }
 }
 
@@ -215,7 +251,8 @@ impl tddy_work_queue::schedule_runner::FireSchedule for DaemonFireSchedule {
             view.schedule.armed_at.clone(),
         );
         let mut taken = false;
-        self.store
+        let after = self
+            .store
             .update(&self.address.project_id, &self.address.queue_id, |queue| {
                 let before = queue.schedules.len();
                 queue
@@ -227,7 +264,8 @@ impl tddy_work_queue::schedule_runner::FireSchedule for DaemonFireSchedule {
         if !taken {
             return Ok(());
         }
-        self.action.run(&item_id, &view.schedule.kind).await
+        self.announce_fired(&view.schedule, &after.stack).await;
+        self.action.run(&view.schedule).await
     }
 }
 
@@ -242,6 +280,7 @@ impl WorkQueueRpcHandler {
             github_cli: self.github_cli.clone(),
             clients: std::sync::Arc::new(RealWorkQueueGithubClients),
             terminals: self.terminals.clone(),
+            notification_bus: self.notification_bus.clone(),
         }
     }
 
@@ -265,12 +304,14 @@ impl WorkQueueRpcHandler {
 
     async fn git_env_of(&self, call: &LinkCall, session_token: &str) -> Result<GitEnv, Status> {
         let sessions_base = self.sessions_base(&call.os_user)?;
+        let (login, _) = self.authenticated_user(session_token)?;
         self.git_env_source(session_token)
             .env_of(
                 self.stack_store(&sessions_base),
                 &sessions_base,
                 &call.os_user,
                 &call.address,
+                Actor::User { login },
             )
             .await
     }
@@ -387,7 +428,7 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tddy_changeset::work_queue_fixtures::{a_stack_host, A_PROJECT};
     use tddy_core::changeset::{WorkItem, WorkQueue};
-    use tddy_work_queue::schedule::{ConditionState, Schedule, ScheduleKind, ScheduleView};
+    use tddy_work_queue::schedule::{ConditionState, ScheduleView};
     use tddy_work_queue::schedule_runner::ScheduleRunner;
 
     use super::*;
@@ -400,12 +441,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl FireAction for ARecordingEngine {
-        async fn run(&self, item_id: &str, kind: &ScheduleKind) -> Result<(), String> {
-            let what = match kind {
+        async fn run(&self, schedule: &Schedule) -> Result<(), String> {
+            let what = match schedule.kind {
                 ScheduleKind::Merge { .. } => "merge",
                 ScheduleKind::Propagate => "propagate",
             };
-            self.ran.lock().unwrap().push(format!("{what} {item_id}"));
+            self.ran
+                .lock()
+                .unwrap()
+                .push(format!("{what} {}", schedule.item_id));
             Ok(())
         }
     }
@@ -454,6 +498,8 @@ mod tests {
                 queue_id: "owner".to_string(),
                 daemon_instance_id: String::new(),
             },
+            os_user: "dev".to_string(),
+            notification_bus: None,
             action: engine.clone(),
         }));
 
@@ -515,6 +561,8 @@ mod tests {
                     queue_id: "owner".to_string(),
                     daemon_instance_id: String::new(),
                 },
+                os_user: "dev".to_string(),
+                notification_bus: None,
                 action: engine.clone(),
             }))
         };
@@ -532,5 +580,59 @@ mod tests {
             engine.ran.lock().unwrap().clone(),
             vec!["merge n1".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn a_firing_tells_the_queues_owner_once_naming_who_armed_it() {
+        use tddy_session_activity::session_notifications::{
+            RecordingSessionNotificationSubscriber, SessionNotificationKind,
+        };
+        // Given n1 armed to merge by octocat, and a bus the owner's activities are recorded on
+        let host = a_stack_host();
+        let merge = an_armed("n1", ScheduleKind::Merge { skip_review: false });
+        host.orchestrator(
+            "owner",
+            WorkQueue {
+                version: 1,
+                nodes: vec![WorkItem {
+                    node_id: "n1".to_string(),
+                    title: "Wire the inbox".to_string(),
+                    ..WorkItem::default()
+                }],
+                schedules: vec![merge.clone()],
+            },
+        );
+        let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());
+        let bus = Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&recorded)));
+        let runner = ScheduleRunner::new(Arc::new(DaemonFireSchedule {
+            store: tddy_core::work_queue_store::WorkQueueStore::new(host.base()),
+            address: tddy_service::proto::work_queue::WorkQueueAddress {
+                project_id: A_PROJECT.to_string(),
+                queue_id: "owner".to_string(),
+                daemon_instance_id: String::new(),
+            },
+            os_user: "dev".to_string(),
+            notification_bus: Some(bus),
+            action: Arc::new(ARecordingEngine::default()),
+        }));
+
+        // When it is seen met twice
+        for _ in 0..2 {
+            runner
+                .on_change(&[a_view(&merge, ConditionState::Met)])
+                .await;
+        }
+
+        // Then the owner got one activity that wakes it, naming the item, the merge and who armed it
+        let received = recorded.received();
+        assert_eq!(received.len(), 1, "{received:?}");
+        let fired = &received[0];
+        assert_eq!(
+            (fired.session_id.as_str(), fired.kind),
+            ("owner", SessionNotificationKind::AttentionRequired)
+        );
+        for word in ["Wire the inbox", "merge", "octocat"] {
+            assert!(fired.text.contains(word), "{:?} names {word:?}", fired.text);
+        }
     }
 }

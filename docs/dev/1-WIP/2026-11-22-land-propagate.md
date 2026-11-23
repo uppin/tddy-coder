@@ -7,16 +7,6 @@
 **Stack**: `#workqueue` 14/14 — branch `feature/workqueue/land-propagate`, base `feature/workqueue/schedules`
 **PR**: [#1015](https://github.com/uppin/tddy-coder/pull/1015)
 
-## Stack note (temporary)
-
-Planned on n13 and rebased (2026-11-23) onto n13's green head `dda3c4668` while the line skips n7, n8
-and n12 (n13 sits on n11 on n10 on n9). **Rebase onto n13's wrapped head before n14's [W].**
-
-- `tddy_session_activity::work_queue_activity::WorkQueueChange` is n8's enum and does not exist on this
-  lineage: the contract commit's edit to it was left out, and the four variants
-  (`Landed`, `Propagated`, `Refused`, `ScheduleFired`) land when n8 joins the line.
-- n12 (leak/linearity) is not on this lineage; the engines consume nothing from it.
-
 ## Initial Discovery
 
 [2026-11-22-land-propagate-initial-discovery.md](./2026-11-22-land-propagate-initial-discovery.md)

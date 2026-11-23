@@ -224,6 +224,12 @@ impl DaemonStackGitTools {
             identity: self.identity.clone(),
             github_cli: self.github_cli.clone(),
             clients: Arc::clone(&self.github),
+            activity: crate::work_queue::move_activity::ActivitySink::on(
+                self.notification_bus.as_ref(),
+                tddy_session_activity::work_queue_activity::Actor::Agent {
+                    session_id: caller.session_id.clone(),
+                },
+            ),
         };
         tokio::task::spawn_blocking(move || git_work::run_git_work(&env, work))
             .await
@@ -405,7 +411,7 @@ pub(super) struct DaemonStackGitTools {
     identity: SessionAccountAccess,
     github_cli: GithubCli,
     github: Arc<dyn WorkQueueGithubClients>,
-    /// Where a move of a work item is published for its queue's owner (`#workqueue` 8/14).
+    /// Where a change of a work item is published for its queue's owner (`#workqueue` 8/14, 14/14).
     notification_bus:
         Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
 }

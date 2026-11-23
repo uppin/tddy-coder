@@ -15,12 +15,58 @@ use tddy_work_queue::lineage::{dependencies_of, planned_line_parent, LineEndpoin
 use tddy_work_queue::op_journal::{MergePhase, WorkQueueOpJournal};
 use tddy_work_queue::waves::queue_waves;
 
+use tddy_session_activity::work_queue_activity::WorkQueueChange;
+
 use super::queue_ports::DaemonQueueWorld;
 use super::{journal_path, node_of, write_journal, GitEnv};
+use crate::work_queue::move_activity::MovedQueue;
 
 /// Drive an engine future from the blocking thread the git work runs on.
 fn drive<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::runtime::Handle::current().block_on(future)
+}
+
+/// Tell the queue's owner about `changes` (`#workqueue` 14/14), each item titled from the queue as it
+/// is now. Nothing without a sink; a queue that cannot be read again is announced untitled.
+fn announce(env: &GitEnv, changes: Vec<(String, WorkQueueChange)>) {
+    let Some(sink) = &env.activity else { return };
+    let stack = env.stack().unwrap_or_default();
+    let queue = MovedQueue {
+        queue_session_id: &env.queue_id,
+        project_id: &env.project_id,
+        os_user: &env.os_user,
+    };
+    drive(async {
+        for (item_id, change) in changes {
+            sink.publish(&queue, &item_id, &stack, change).await;
+        }
+    });
+}
+
+/// What a land announces: each landing, each propagation between them, and where it stopped.
+fn land_changes(report: &LandReport) -> Vec<(String, WorkQueueChange)> {
+    let landed = report
+        .landed
+        .iter()
+        .map(|(id, sha)| (id.clone(), WorkQueueChange::Landed { sha: sha.clone() }));
+    let propagated = report.propagated.iter().map(|p| {
+        (
+            p.item_id.clone(),
+            WorkQueueChange::Propagated {
+                onto: p.onto.clone(),
+            },
+        )
+    });
+    let stopped = report.stopped_at.iter().map(|(id, why)| {
+        (
+            id.clone(),
+            WorkQueueChange::Refused {
+                action: "land".to_string(),
+                reason: why.clone(),
+            },
+        )
+    });
+    landed.chain(propagated).chain(stopped).collect()
 }
 
 fn is_merged(item: &tddy_core::changeset::WorkItem) -> bool {
@@ -84,7 +130,22 @@ pub(crate) fn propagate_item(
         }
     };
     let request = request_for(&world, item_id, &onto, force).map_err(EngineRefusal::Failed)?;
-    drive(propagate(&world, &world, &request))
+    let outcome = drive(propagate(&world, &world, &request));
+    announce(env, vec![(item_id.to_string(), propagate_change(&outcome))]);
+    outcome
+}
+
+/// What a propagation announces: where it went, or why it was refused.
+fn propagate_change(outcome: &Result<Propagated, EngineRefusal>) -> WorkQueueChange {
+    match outcome {
+        Ok(done) => WorkQueueChange::Propagated {
+            onto: done.onto.clone(),
+        },
+        Err(refusal) => WorkQueueChange::Refused {
+            action: "propagate".to_string(),
+            reason: refusal.to_string(),
+        },
+    }
 }
 
 pub(crate) fn propagate_tool(env: &GitEnv, item_id: &str, force: bool) -> Result<Value, String> {
@@ -173,6 +234,7 @@ fn run_land(
             let _ = std::fs::remove_file(path);
         }
     }
+    announce(env, land_changes(&report));
     Ok(report)
 }
 
@@ -255,4 +317,78 @@ pub(crate) fn land_waves(
     held_up: &HashMap<String, (String, String)>,
 ) -> Result<Value, String> {
     land_range(env, from, to, held_up).map(|report| report_json(&report))
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    fn a_propagation(item_id: &str, onto: &str) -> Propagated {
+        Propagated {
+            item_id: item_id.to_string(),
+            onto: onto.to_string(),
+            commits_taken: 1,
+        }
+    }
+
+    #[test]
+    fn a_land_announces_each_landing_each_propagation_and_where_it_stopped() {
+        // Given a land that merged n1, rebased n2 onto the trunk, and stopped at n3
+        let report = LandReport {
+            landed: vec![("n1".to_string(), "abc1234".to_string())],
+            propagated: vec![a_propagation("n2", "master")],
+            stopped_at: Some(("n3".to_string(), "checks are failing".to_string())),
+        };
+
+        // When
+        let changes = land_changes(&report);
+
+        // Then
+        assert_eq!(
+            changes,
+            vec![
+                (
+                    "n1".to_string(),
+                    WorkQueueChange::Landed {
+                        sha: "abc1234".to_string()
+                    }
+                ),
+                (
+                    "n2".to_string(),
+                    WorkQueueChange::Propagated {
+                        onto: "master".to_string()
+                    }
+                ),
+                (
+                    "n3".to_string(),
+                    WorkQueueChange::Refused {
+                        action: "land".to_string(),
+                        reason: "checks are failing".to_string()
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_propagation_announces_where_it_went_or_why_it_was_refused() {
+        // When
+        let went = propagate_change(&Ok(a_propagation("n2", "feature/n1")));
+        let refused = propagate_change(&Err(EngineRefusal::Failed("no worktree".to_string())));
+
+        // Then
+        assert_eq!(
+            went,
+            WorkQueueChange::Propagated {
+                onto: "feature/n1".to_string()
+            }
+        );
+        assert!(
+            matches!(&refused, WorkQueueChange::Refused { action, reason }
+                if action == "propagate" && reason.contains("no worktree")),
+            "{refused:?}"
+        );
+    }
 }

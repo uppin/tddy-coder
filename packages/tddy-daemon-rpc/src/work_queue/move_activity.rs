@@ -1,8 +1,10 @@
-//! Moves of a work item, published as activities of the queue's owner (`#workqueue` 8/14).
+//! Changes of a work item, published as activities of the queue's owner (`#workqueue` 8/14, 14/14).
 //!
 //! A move is a reorder or a change of parents, by the operator (the queue view's RPC) or by an
-//! agent (the stack git tool). Each is published after it succeeded, to the session that owns the
-//! queue; [`tddy_session_activity::work_queue_activity`] decides what that does to its watch.
+//! agent (the stack git tool). A landing, a propagation, a refusal of either, and a schedule firing
+//! are published through an [`ActivitySink`] the land and propagate engines' daemon side carries. Each
+//! is published after it happened, to the session that owns the queue;
+//! [`tddy_session_activity::work_queue_activity`] decides what that does to its watch.
 
 use std::sync::Arc;
 
@@ -73,6 +75,42 @@ pub(crate) async fn publish_parents_changed(
     .await;
 }
 
+/// Where the land and propagate engines' outcomes go, and who they are by (`#workqueue` 14/14).
+#[derive(Clone)]
+pub(crate) struct ActivitySink {
+    pub(crate) bus: Arc<SessionNotificationBus>,
+    pub(crate) actor: Actor,
+}
+
+impl ActivitySink {
+    /// A sink on `bus` for `actor`, or none without a bus (a host that publishes nothing).
+    pub(crate) fn on(bus: Option<&Arc<SessionNotificationBus>>, actor: Actor) -> Option<Self> {
+        bus.map(|bus| Self {
+            bus: Arc::clone(bus),
+            actor,
+        })
+    }
+
+    /// Publish `change` of `item_id`, titled from `stack`.
+    pub(crate) async fn publish(
+        &self,
+        queue: &MovedQueue<'_>,
+        item_id: &str,
+        stack: &WorkQueue,
+        change: WorkQueueChange,
+    ) {
+        publish(
+            Some(&self.bus),
+            queue,
+            item_id,
+            stack,
+            change,
+            self.actor.clone(),
+        )
+        .await;
+    }
+}
+
 async fn publish(
     bus: Option<&Arc<SessionNotificationBus>>,
     queue: &MovedQueue<'_>,
@@ -83,7 +121,7 @@ async fn publish(
 ) {
     let Some(bus) = bus else { return };
     WorkQueueActivities::new(Arc::clone(bus))
-        .publish_move(&WorkQueueEvent {
+        .publish(&WorkQueueEvent {
             queue_session_id: queue.queue_session_id.to_string(),
             project_id: queue.project_id.to_string(),
             os_user: queue.os_user.to_string(),
