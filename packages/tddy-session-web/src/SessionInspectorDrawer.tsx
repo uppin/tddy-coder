@@ -133,6 +133,8 @@ export function SessionInspectorDrawer({
   onSwitchPeer,
   ...workQueueTabInputs
 }: SessionInspectorDrawerProps) {
+  // The Work queue tab takes the whole input set by spread; the PR tab reads the client by name.
+  const { workQueueClient } = workQueueTabInputs;
   const [pendingDelete, setPendingDelete] = useState(false);
   // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
   // An unresolvable value degrades to Details rather than rendering a blank panel; the screen
