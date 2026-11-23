@@ -10,6 +10,7 @@ tddy-git = { path = "../tddy-git" }
 tddy-github = { path = "../tddy-github" }
 # `inbox_reads`: PR status, queue status and checks read through the daemon's GitHub inbox.
 tddy-github-inbox = { path = "../tddy-github-inbox" }
+tddy-session-worktree = { path = "../tddy-session-worktree" }
 # `docs::node_doc_paths` resolves the session artifacts root from it.
 tddy-workflow = { path = "../tddy-workflow" }
 # `rpc` holds the `work_queue.WorkQueueService` handler trait, adapter and transport entry.

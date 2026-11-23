@@ -2,12 +2,15 @@
 //! the daemon's GitHub inbox — a snapshot, then a new one whenever the inbox reports a PR or checks
 //! change in the queue's repository. The browser never polls GitHub.
 
+use super::chain_health::{leak_views, line_view};
 use super::project_stacks::{store_status, work_queue_target, WorkQueueTarget};
 use super::WorkQueueRpcHandler;
 use tddy_github_inbox::EventKind;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{StreamWorkQueueStatusRequest, WorkQueueStatusView};
+use tddy_work_queue::chain_health_reads::queue_chain_health;
 use tddy_work_queue::inbox_reads::work_queue_status_view;
+use tddy_work_queue::lineage::line_edges_through_inbox;
 use tddy_work_queue::rpc::WorkQueueStatusStream;
 
 impl WorkQueueRpcHandler {
@@ -50,6 +53,19 @@ impl WorkQueueRpcHandler {
                 return Ok(Response::new(rx.into()));
             }
         };
+        // The trunk the line edges end at, and the checkout the behind counts are read in. Without
+        // them an item carries no chain health: the rest of its status is unaffected.
+        let trunk = self
+            .link_call(&req.session_token, req.queue.as_ref())
+            .and_then(|call| self.read_queue_and_trunk(&call))
+            .ok()
+            .map(|(_, _, trunk)| trunk);
+        let repo_root = tddy_core::repo_root_for_session(
+            &tddy_core::session_lifecycle::unified_session_dir_path(
+                &sessions_base,
+                &address.queue_id,
+            ),
+        );
         // Subscribed before the first read, so a change landing during it is not missed.
         let mut events = site
             .inbox
@@ -64,7 +80,26 @@ impl WorkQueueRpcHandler {
                         return;
                     }
                 };
-                let view = work_queue_status_view(&site.inbox, &site.repo, &record.stack).await;
+                let mut view = work_queue_status_view(&site.inbox, &site.repo, &record.stack).await;
+                if let Some(trunk) = &trunk {
+                    let line =
+                        line_edges_through_inbox(&site.inbox, &site.repo, &record.stack, trunk)
+                            .await;
+                    let health = queue_chain_health(
+                        &site.inbox,
+                        &site.repo,
+                        &record.stack,
+                        &line,
+                        repo_root.clone(),
+                    )
+                    .await;
+                    for item in &mut view.items {
+                        if let Some(h) = health.iter().find(|h| h.item_id == item.item_id) {
+                            item.leaks = leak_views(&h.leaks);
+                            item.line = h.line.as_ref().map(line_view);
+                        }
+                    }
+                }
                 if tx.send(Ok(view)).is_err() {
                     return;
                 }

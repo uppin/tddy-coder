@@ -187,7 +187,7 @@ pub fn compare_base_sync_refs(
 /// A reply that cannot be parsed is an error rather than a zero: `(0, 0)` is what a branch that is
 /// perfectly in sync looks like, and reporting a failed count that way is the exact conflation this
 /// module exists to prevent.
-fn count_divergence(
+pub fn count_divergence(
     repo_root: &Path,
     base_sha: &str,
     head_sha: &str,

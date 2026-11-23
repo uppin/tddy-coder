@@ -1,6 +1,7 @@
 //! Family P — `work_queue.WorkQueueService`.
 
 mod branch_legs;
+pub(crate) mod chain_health;
 mod guards;
 pub(crate) mod move_activity;
 mod ports;

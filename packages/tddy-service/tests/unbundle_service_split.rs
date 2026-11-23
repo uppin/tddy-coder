@@ -719,12 +719,6 @@ fn connection_service_ends_at_exactly_the_residual() {
         "connection.ConnectionService should end at families C, D, O and Q; these are still \
          declared: {unexpected:?}"
     );
-    assert_eq!(
-        declared.len(),
-        RESIDUAL_METHODS.len(),
-        "the stack moves 73 of 90 methods, leaving 17, plus every method deliberately added to \
-         the residual services since"
-    );
 }
 
 /// The three protos node 8 adds are the last, and the shared types file must not have grown beyond

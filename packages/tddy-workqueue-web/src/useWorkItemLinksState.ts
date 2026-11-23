@@ -3,6 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { WorkQueueService, WorkQueueAddress } from "tddy-client-web/gen/work_queue_pb";
 import type { ItemChecks, LinkableSession, WorkItemLinks } from "./workItemLinks";
+import type { ItemChainHealth } from "./WorkItemChainHealth";
 
 type Address = Pick<WorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId">;
 
@@ -13,6 +14,8 @@ export interface UseWorkItemLinksStateArgs {
   sessions: SessionEntry[];
   /** Applies the queue a link call answers with — every link call answers the queue after the change. */
   onWorkQueueJson: (workQueueJson: string) => void;
+  /** Receives each item's leaks and line state (`#workqueue` 12/14), which ride on the same stream. */
+  onChainHealth?: (health: ReadonlyMap<string, ItemChainHealth>) => void;
 }
 
 function failureReason(err: unknown): string {
@@ -38,6 +41,7 @@ export function useWorkItemLinksState({
   address,
   sessions,
   onWorkQueueJson,
+  onChainHealth,
 }: UseWorkItemLinksStateArgs): WorkItemLinks | null {
   const [errorByItemId, setErrorByItemId] = useState<Record<string, string>>({});
   const [checksByItemId, setChecksByItemId] = useState<Readonly<Record<string, ItemChecks>>>({});
@@ -52,7 +56,17 @@ export function useWorkItemLinksState({
           { signal: abort.signal },
         )) {
           const next: Record<string, ItemChecks> = {};
+          const health = new Map<string, ItemChainHealth>();
           for (const item of view.items) {
+            if (item.line) {
+              health.set(item.itemId, {
+                leaks: item.leaks.map((leak) => ({ sha: leak.sha, ancestor: leak.ancestor })),
+                line: {
+                  state: item.line.state as "linear" | "behind" | "conflicting" | "unknown",
+                  by: item.line.by,
+                },
+              });
+            }
             if (item.hasChecks) {
               next[item.itemId] = {
                 running: item.checksRunning,
@@ -63,6 +77,7 @@ export function useWorkItemLinksState({
             }
           }
           setChecksByItemId(next);
+          onChainHealth?.(health);
         }
       } catch {
         // Keep the counts shown; a dropped stream must not blank them.

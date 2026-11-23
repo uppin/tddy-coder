@@ -22,6 +22,7 @@ import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
 import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
+import { WorkItemChainHealthContext, type ItemChainHealth } from "./WorkItemChainHealth";
 import { WorkItemCommitCountsContext, useWorkQueueCommitCounts } from "./workItemCommitCounts";
 import { WorkItemLinksContext } from "./workItemLinks";
 import { useWorkItemLinksState } from "./useWorkItemLinksState";
@@ -224,6 +225,8 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     }
   };
 
+  // `#workqueue` 12/14: leaks and line state ride on the same stream.
+  const [chainHealth, setChainHealth] = useState<ReadonlyMap<string, ItemChainHealth>>(new Map());
   // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
   const workItemLinks = useWorkItemLinksState({
     workQueueClient,
@@ -231,6 +234,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     address,
     sessions,
     onWorkQueueJson: setWorkQueueJson,
+    onChainHealth: setChainHealth,
   });
 
   const handleReorder = async (itemId: string, direction: "up" | "down") => {
@@ -422,6 +426,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       )}
       <WorkItemLinksContext.Provider value={workItemLinks}>
       <WorkItemCommitCountsContext.Provider value={commitCounts}>
+      <WorkItemChainHealthContext.Provider value={chainHealth}>
       <WorkItemList
         nodes={shownNodes}
         onStartSession={handleStartSession}
@@ -442,6 +447,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         orchestratorSessionId={createdBySessionId}
         branchQueries={branchQueries}
       />
+      </WorkItemChainHealthContext.Provider>
       </WorkItemCommitCountsContext.Provider>
       </WorkItemLinksContext.Provider>
       <WorkQueueGraphPanel

@@ -9,7 +9,7 @@
 //! | Tool | WorkQueue | Writes |
 //! |---|---|---|
 //! | `work_queue_list` | — (the project's stacks on the host) | — |
-//! | `work_queue_status` | required | derived statuses |
+//! | `work_queue_status` | required | derived statuses, wave, `chain_health` (leaks, line state) |
 //! | `work_pr_read`, `work_pr_comments` | required for `node_id`, optional for `pull_number` | — |
 //! | `work_pr_search` | optional (the project's repository) | — |
 //! | `work_item_add`, `work_item_update`, `work_item_delete`, `work_item_set_status`, `work_item_adopt` | required | the store; `work_item_update` with `sync_pr` also the PR's title and body |
