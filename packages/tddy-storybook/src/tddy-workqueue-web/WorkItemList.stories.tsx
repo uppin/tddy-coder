@@ -2,6 +2,9 @@ import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
 import { WorkItemChainHealthContext, WorkItemLinksContext, WorkItemList } from "tddy-workqueue-web";
 import type { WorkItemLinks } from "tddy-workqueue-web";
+import { create } from "@bufbuild/protobuf";
+import { SessionEntrySchema } from "tddy-client-web/gen/session_pb";
+import { SESSION_INDICATOR_DOT_STYLES, SessionIndicatorDot, sessionNotificationRegistry } from "tddy-session-web";
 import type { WorkItem } from "tddy-workqueue-web";
 
 /**
@@ -196,15 +199,34 @@ export const PullRequestChecks: Story = {
 };
 
 const PR_BY_LINEAGE_ID: Record<string, number> = { l1: 201, l2: 202, l3: 203, l4: 204, l5: 205, l6: 206 };
-/** Attached sessions: l1's is working, l3's is idle; the rest have none yet. */
-const ATTACHED: Record<string, { sessionId: string; isActive: boolean }> = {
-  l1: { sessionId: "sess-l1", isActive: true },
-  l3: { sessionId: "sess-l3", isActive: false },
+/**
+ * Attached sessions, one per activity state the drawer's dot paints: l1 working (green, breathing),
+ * l2 connected and idle (green), l3 needs input (yellow), l4 disconnected (grey).
+ */
+const ATTACHED: Record<string, { sessionId: string; isActive: boolean; needsInput?: boolean; working?: boolean }> = {
+  l1: { sessionId: "sess-l1", isActive: true, working: true },
+  l2: { sessionId: "sess-l2", isActive: true },
+  l3: { sessionId: "sess-l3", isActive: true, needsInput: true },
+  l4: { sessionId: "sess-l4", isActive: false },
+};
+const ATTACHED_SESSIONS = Object.fromEntries(
+  Object.values(ATTACHED).map((a) => [
+    a.sessionId,
+    create(SessionEntrySchema, { sessionId: a.sessionId, isActive: a.isActive, pendingElicitation: Boolean(a.needsInput), status: a.isActive ? "active" : "exited" }),
+  ]),
+);
+const renderSessionIndicator = (sessionId: string) => {
+  const session = ATTACHED_SESSIONS[sessionId];
+  if (!session) return null;
+  if (ATTACHED[Object.keys(ATTACHED).find((k) => ATTACHED[k].sessionId === sessionId)!]?.working) {
+    sessionNotificationRegistry.recordActivity(sessionId, Date.now());
+  }
+  return <SessionIndicatorDot session={session} sizeClassName="h-7 w-7" testId={`work-item-session-indicator-${sessionId}`} />;
 };
 const COMBINED_NODES = LINEAGE_NODES.map((node) => ({
   ...node,
   ...(PR_BY_LINEAGE_ID[node.itemId] ? { pr: pr(PR_BY_LINEAGE_ID[node.itemId], node.branch ?? "") } : {}),
-  ...(ATTACHED[node.itemId] ? { sessionId: ATTACHED[node.itemId].sessionId, childState: ATTACHED[node.itemId].isActive ? "Implementing" : "Idle" } : {}),
+  ...(ATTACHED[node.itemId] ? { sessionId: ATTACHED[node.itemId].sessionId, childState: ATTACHED[node.itemId].working ? "Implementing" : "Idle" } : {}),
 }));
 /** PR state per branch: ready for review (green) or draft (grey), plus merged and closed. */
 const PR_STATE: Record<string, string> = { "feat/a": "open", "feat/b": "draft", "feat/c": "open", "feat/d": "draft", "feat/e": "merged", "feat/f": "closed" };
@@ -234,16 +256,19 @@ const COMBINED_LINKS: WorkItemLinks = {
 /**
  * Lineage on the lines and PR data in the boxes, together: the full queue as the sidebar shows it. The
  * PR number is green when ready for review, grey when a draft (purple merged, red closed); its checks
- * are a pill wedged into the box's top edge; a task with an attached session shows a session icon in
- * place of Play — green while the session works, grey while idle.
+ * are a pill wedged into the box's top edge; a task with an attached session shows the drawer's activity dot, scaled to the Play
+ * button's size, in its place — green and breathing while the session works, green when idle, yellow
+ * when it needs input, grey when disconnected.
  */
 export const LineageWithPullRequests: Story = {
   render: () => (
     <WorkItemLinksContext.Provider value={COMBINED_LINKS}>
+      <style>{SESSION_INDICATOR_DOT_STYLES}</style>
       <WorkItemChainHealthContext.Provider value={LINEAGE_HEALTH}>
         <WorkItemList
           nodes={COMBINED_NODES}
           branchResolutionByBranch={COMBINED_RESOLUTIONS}
+          renderSessionIndicator={renderSessionIndicator}
           onStartSession={() => undefined}
           startingNodeId={null}
           connectors={[

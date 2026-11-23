@@ -68,6 +68,8 @@ export interface WorkQueueViewProps {
   sessionFilesClient?: Client<typeof SessionFilesService>;
   worktreeClient?: Client<typeof WorktreeService>;
   taskClient?: Client<typeof TaskService>;
+  /** The activity indicator an attached session's task shows in place of Start; the caller owns the session registry. */
+  renderSessionIndicator?: (sessionId: string) => React.ReactNode;
 }
 
 const NO_SESSION_METADATA: ReadonlyMap<string, StackChildMetadata> = new Map();
@@ -98,6 +100,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     sessionFilesClient,
     worktreeClient,
     taskClient,
+    renderSessionIndicator,
   } = props;
   const [workQueueJson, setWorkQueueJson] = useState("");
   const [createdBySessionId, setCreatedBySessionId] = useState("");
@@ -455,6 +458,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         orchestratorSessionId={createdBySessionId}
         branchQueries={branchQueries}
         connectors={connectors}
+        renderSessionIndicator={renderSessionIndicator}
         onMove={labelFilter ? undefined : handleMove}
       />
       </LandPropagateContext.Provider>

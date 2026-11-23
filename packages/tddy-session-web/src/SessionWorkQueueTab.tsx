@@ -6,6 +6,8 @@ import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_p
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { WorkQueueView } from "tddy-workqueue-web";
+import { SessionIndicatorDot } from "./SessionIndicatorDot";
+import { SESSION_INDICATOR_DOT_STYLES } from "./sessionIndicatorDotStyles";
 
 type WorkQueueViewProps = React.ComponentProps<typeof WorkQueueView>;
 
@@ -46,6 +48,8 @@ export function SessionWorkQueueTab({
   ...rest
 }: SessionWorkQueueTabProps) {
   return (
+    <>
+    <style>{SESSION_INDICATOR_DOT_STYLES}</style>
     <WorkQueueView
       address={{
         projectId: session.projectId,
@@ -56,7 +60,20 @@ export function SessionWorkQueueTab({
         projects.find((project) => project.projectId === session.projectId)?.mainBranchRef ?? ""
       }
       sessions={[...sessions]}
+      // An attached session shows the activity dot the drawer paints for it: green and breathing while
+      // it works, green when idle, yellow when it needs input, grey when disconnected.
+      renderSessionIndicator={(sessionId) => {
+        const attached = sessions.find((candidate) => candidate.sessionId === sessionId);
+        return attached ? (
+          <SessionIndicatorDot
+            session={attached}
+            sizeClassName="h-7 w-7"
+            testId={`work-item-session-indicator-${sessionId}`}
+          />
+        ) : null;
+      }}
       {...rest}
     />
+    </>
   );
 }

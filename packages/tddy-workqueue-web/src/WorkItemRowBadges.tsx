@@ -59,14 +59,6 @@ export function WorkItemRowBadges({
 
   return (
     <>
-      {inProgress && (
-        <span
-          data-testid={`work-item-in-progress-${node.itemId}`}
-          className={`${BADGE_CLASS} bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100`}
-        >
-          in progress
-        </span>
-      )}
       {prUnavailable && (
         <span
           data-testid={`work-item-pr-unavailable-${node.itemId}`}

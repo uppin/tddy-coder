@@ -135,6 +135,8 @@ export interface WorkItemRowProps {
   identityChildSession?: StackChildSession;
   /** The drag handle at the row's left edge, rendered by the list that owns the drag. */
   dragHandle?: React.ReactNode;
+  /** The activity indicator of the attached session, shown in place of Start (the drawer's dot). */
+  sessionIndicator?: React.ReactNode;
 }
 
 /**
@@ -183,6 +185,7 @@ export function WorkItemRow({
   childSession,
   identityChildSession,
   dragHandle,
+  sessionIndicator,
 }: WorkItemRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
@@ -221,18 +224,25 @@ export function WorkItemRow({
   // The attached session as an icon, green while it is working and grey otherwise; the phase is its
   // tooltip and its accessible text.
   const phaseText = node.prStatus?.phase || node.childState || "spawned";
+  const inProgressMarker = inProgressEffective ? (
+    <span data-testid={`work-item-in-progress-${node.itemId}`} className="sr-only">
+      in progress
+    </span>
+  ) : null;
   const statusChip = (
     <span
       data-testid={`work-item-status-chip-${node.itemId}`}
       data-active={inProgressEffective || undefined}
       title={`Session attached — ${phaseText}`}
       className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-        inProgressEffective
+        sessionIndicator
+          ? ""
+          : inProgressEffective
           ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
           : "bg-muted text-muted-foreground"
       }`}
     >
-      <MonitorPlay className="h-4 w-4" />
+      {sessionIndicator ?? <MonitorPlay className="h-4 w-4" />}
       <span className="sr-only">{phaseText}</span>
     </span>
   );
@@ -285,6 +295,7 @@ export function WorkItemRow({
             {repointTarget ? `Repoint to ${repointTarget}` : "Repoint to default branch"}
           </Button>
         )}
+        {inProgressMarker}
         <WorkItemPrBadge
           node={node}
           pr={foundPr ? { number: foundPr.number, url: foundPr.url, state: foundPr.state } : undefined}

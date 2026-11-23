@@ -89,6 +89,8 @@ export interface WorkItemListProps {
    * task can be dragged. A task bound to a PR stack never calls it; its handle is disabled.
    */
   onMove?: (itemId: string, delta: number) => void;
+  /** The activity indicator for an attached session (the drawer's dot); absent: a plain session icon. */
+  renderSessionIndicator?: (sessionId: string) => React.ReactNode;
 }
 
 /**
@@ -118,6 +120,7 @@ export function WorkItemList({
   branchQueries = [],
   connectors = [],
   onMove,
+  renderSessionIndicator,
 }: WorkItemListProps) {
   const ordered = orderWorkItems(nodes);
   // The names the poll asked about as planned rather than owned — the discriminator a row's
@@ -256,6 +259,10 @@ export function WorkItemList({
               workItem={workItem}
               childSession={childSession}
               identityChildSession={identityChildSession}
+              sessionIndicator={(() => {
+                const sessionId = childSession?.sessionId || boundChildSession(node, resolution, sessions) || node.sessionId;
+                return sessionId ? renderSessionIndicator?.(sessionId) : undefined;
+              })()}
               dragHandle={
                 <WorkItemDragHandle
                   itemId={node.itemId}
