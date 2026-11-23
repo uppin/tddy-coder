@@ -19,6 +19,8 @@ export interface UseWorkItemLinksStateArgs {
   onChainHealth?: (health: ReadonlyMap<string, ItemChainHealth>) => void;
   /** Receives the armed merges and propagations (`#workqueue` 13/14), re-evaluated on every update. */
   onSchedules?: (schedules: ScheduleViewModel[]) => void;
+  /** Receives the number of waves the daemon derives (`#workqueue` 14/14) — the Land range's upper bound. */
+  onWaveCount?: (waveCount: number) => void;
 }
 
 function failureReason(err: unknown): string {
@@ -46,6 +48,7 @@ export function useWorkItemLinksState({
   onWorkQueueJson,
   onChainHealth,
   onSchedules,
+  onWaveCount,
 }: UseWorkItemLinksStateArgs): WorkItemLinks | null {
   const [errorByItemId, setErrorByItemId] = useState<Record<string, string>>({});
   const [checksByItemId, setChecksByItemId] = useState<Readonly<Record<string, ItemChecks>>>({});
@@ -83,6 +86,7 @@ export function useWorkItemLinksState({
           setChecksByItemId(next);
           onChainHealth?.(health);
           onSchedules?.(view.schedules.map(toScheduleViewModel));
+          onWaveCount?.(view.items.reduce((most, item) => Math.max(most, item.wave), 0));
         }
       } catch {
         // Keep the counts shown; a dropped stream must not blank them.

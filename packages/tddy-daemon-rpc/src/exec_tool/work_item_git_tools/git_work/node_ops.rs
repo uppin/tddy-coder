@@ -4,10 +4,6 @@ use tddy_core::changeset::PrInternalStatus;
 
 use std::path::PathBuf;
 
-use super::journal_path;
-
-use super::write_journal;
-
 use super::node_of;
 
 use serde_json::{json, Value};
@@ -15,30 +11,7 @@ use serde_json::{json, Value};
 use super::GitEnv;
 
 pub(crate) fn merge_node(env: &GitEnv, node_id: &str) -> Result<Value, String> {
-    use tddy_work_queue::op_journal::{MergePhase, WorkQueueOpJournal};
-    let stack = env.stack()?;
-    let node = node_of(&stack, node_id)?.clone();
-    let gh = env.github_client()?;
-    let number = env.pull_number(&stack, &node, &*gh)?;
-    let dependents: Vec<String> = stack
-        .nodes
-        .iter()
-        .filter(|candidate| candidate.parents.iter().any(|parent| parent == node_id))
-        .map(|candidate| candidate.node_id.clone())
-        .collect();
-    let mut journal = WorkQueueOpJournal {
-        op_id: uuid::Uuid::new_v4().to_string(),
-        merged_node_id: node_id.to_string(),
-        merge_phase: MergePhase::Planned,
-        dependents,
-    };
-    write_journal(env, &journal)?;
-    let sha = gh.merge_pr(number).map_err(|e| format!("merge pr: {e}"))?;
-    journal.merge_phase = MergePhase::PrMerged { sha: sha.clone() };
-    write_journal(env, &journal)?;
-    env.set_phase(node_id, "merged")?;
-    let _ = std::fs::remove_file(journal_path(env)?);
-    Ok(json!({ "merged": true, "sha": sha }))
+    super::land_ops::merge_item(env, node_id)
 }
 
 pub(crate) fn close_node(env: &GitEnv, node_id: &str) -> Result<Value, String> {
@@ -76,7 +49,9 @@ pub(crate) fn repoint_node(
     if node.branch.is_none() {
         return Ok(json!({ "node_id": node_id, "new_base": base_branch }));
     }
-    env.realign(&node, &base_branch, &base_ref)?;
+    let _ = base_ref;
+    super::land_ops::propagate_item(env, node_id, Some(&base_branch), false)
+        .map_err(|refusal| format!("{node_id} was not repointed — {refusal}"))?;
     Ok(json!({ "node_id": node_id, "new_base": base_branch }))
 }
 
@@ -176,7 +151,7 @@ pub(crate) fn resolve_conflicts(env: &GitEnv, node_id: &str) -> Result<Value, St
 
 /// The paths `branch` and `base_ref` conflict on, probed with `git merge-tree --write-tree`:
 /// no merge is started, so the worktree's HEAD, index and files are left exactly as they were.
-fn merge_tree_conflicts(
+pub(super) fn merge_tree_conflicts(
     worktree: &Path,
     branch: &str,
     base_ref: &str,

@@ -156,6 +156,15 @@ impl ScheduleCtx<'_> {
     /// Every armed schedule of `queue`, evaluated now, in the order armed; and why GitHub or the
     /// checkout could not be read at all (empty when they could).
     pub(crate) async fn evaluate(&self, queue: &WorkQueue) -> (Vec<ScheduleStatusView>, String) {
+        let (views, reason) = self.evaluate_views(queue).await;
+        (views.into_iter().map(status_view).collect(), reason)
+    }
+
+    /// [`Self::evaluate`] before it is put on the wire: what the schedule runner is fed.
+    pub(crate) async fn evaluate_views(
+        &self,
+        queue: &WorkQueue,
+    ) -> (Vec<schedule::ScheduleView>, String) {
         if queue.schedules.is_empty() {
             return (Vec::new(), String::new());
         }
@@ -212,7 +221,39 @@ impl ScheduleCtx<'_> {
             (_, Err(reason)) => reason.clone(),
             _ => String::new(),
         };
-        (views.into_iter().map(status_view).collect(), reason)
+        (views, reason)
+    }
+
+    /// What holds each item's merge up, judged as an armed merge would be (`#workqueue` 14/14):
+    /// `item -> (condition, detail)` for every item with a branch whose merge conditions are not all
+    /// met. Nothing is armed or stored — the schedules are evaluated and dropped.
+    pub(crate) async fn merge_holdups(
+        &self,
+        queue: &WorkQueue,
+    ) -> HashMap<String, (String, String)> {
+        let mut judged = queue.clone();
+        judged.schedules = queue
+            .nodes
+            .iter()
+            .filter(|item| item.branch.is_some())
+            .map(|item| Schedule {
+                item_id: item.node_id.clone(),
+                kind: ScheduleKind::Merge { skip_review: false },
+                armed_at: String::new(),
+                armed_by: self.armed_by.to_string(),
+            })
+            .collect();
+        let (views, _) = self.evaluate(&judged).await;
+        views
+            .into_iter()
+            .filter(|view| view.status != "met")
+            .filter_map(|view| {
+                let held = ["blocked", "waiting"]
+                    .into_iter()
+                    .find_map(|state| view.conditions.iter().find(|c| c.state == state).cloned())?;
+                Some((view.item_id, (held.name, held.detail)))
+            })
+            .collect()
     }
 
     /// The facts of one armed schedule; the first that cannot be read is the error.

@@ -36,7 +36,7 @@ fn the_user() -> Actor {
 async fn published_by(event: &WorkQueueEvent) -> Vec<(String, String, String)> {
     let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());
     let bus = Arc::new(SessionNotificationBus::new().with_subscriber(Arc::clone(&recorded)));
-    WorkQueueActivities::new(bus).publish_move(event).await;
+    WorkQueueActivities::new(bus).publish(event).await;
     recorded
         .received()
         .into_iter()
@@ -107,4 +107,56 @@ fn the_work_queue_watch_kind_is_named_work_queue() {
 
     // Then
     assert_eq!(kind.map(|k| k.as_str()), Some("work_queue"));
+}
+
+/// `#workqueue` 14/14: landings, propagations, refusals and schedule firings are the same kind.
+#[tokio::test]
+async fn land_propagate_refusal_and_firing_reach_the_owner_naming_what_happened() {
+    // Given one change of each kind, by a schedule someone armed
+    let by_a_schedule = || Actor::Schedule {
+        armed_by: "octocat".to_string(),
+    };
+    let changes = [
+        (
+            WorkQueueChange::Landed {
+                sha: "abc1234".to_string(),
+            },
+            "abc1234",
+        ),
+        (
+            WorkQueueChange::Propagated {
+                onto: "master".to_string(),
+            },
+            "master",
+        ),
+        (
+            WorkQueueChange::Refused {
+                action: "propagate".to_string(),
+                reason: "the local branch is dirty".to_string(),
+            },
+            "the local branch is dirty",
+        ),
+        (
+            WorkQueueChange::ScheduleFired {
+                action: "merge".to_string(),
+            },
+            "merge",
+        ),
+    ];
+
+    for (change, named) in changes {
+        // When
+        let event = a_move(change, by_a_schedule());
+        let published = published_by(&event).await;
+
+        // Then each is one activity of the owner, naming the item, what happened and who armed it,
+        // and it wakes the owner
+        assert_eq!(published.len(), 1, "{published:?}");
+        let (session, source, text) = &published[0];
+        assert_eq!((session.as_str(), source.as_str()), (OWNER, "WorkQueue"));
+        for word in ["Wire the inbox", named, "octocat"] {
+            assert!(text.contains(word), "{text:?} names {word:?}");
+        }
+        assert!(wakes_owner(&event), "{text:?} wakes the owner");
+    }
 }

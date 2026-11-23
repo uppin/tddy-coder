@@ -67,6 +67,7 @@ impl WorkQueueRpcHandler {
         let pull_requests = std::sync::Arc::clone(&self.pull_requests);
         let session_token = req.session_token.clone();
         let os_user_for_schedules = os_user.clone();
+        let git_env_source = self.git_env_source(&req.session_token);
         let repo_root = tddy_core::repo_root_for_session(
             &tddy_core::session_lifecycle::unified_session_dir_path(
                 &sessions_base,
@@ -115,7 +116,7 @@ impl WorkQueueRpcHandler {
                 }
                 view.schedules = match &trunk_read {
                     Ok(trunk) => {
-                        super::schedules::ScheduleCtx {
+                        let (views, _) = super::schedules::ScheduleCtx {
                             store: &store,
                             pull_requests: pull_requests.as_ref(),
                             os_user: &os_user_for_schedules,
@@ -127,9 +128,23 @@ impl WorkQueueRpcHandler {
                             trunk,
                             armed_by: &os_user_for_schedules,
                         }
-                        .evaluate(&record.stack)
-                        .await
-                        .0
+                        .evaluate_views(&record.stack)
+                        .await;
+                        // A schedule whose conditions all hold fires, once (`#workqueue` 14/14).
+                        super::land::fire_met_in_background(
+                            super::land::DaemonFireSchedule::through_engines(
+                                git_env_source.clone(),
+                                store.clone(),
+                                sessions_base.clone(),
+                                os_user.clone(),
+                                address.clone(),
+                            ),
+                            views.clone(),
+                        );
+                        views
+                            .into_iter()
+                            .map(super::schedules::status_view)
+                            .collect()
                     }
                     Err(reason) => super::schedules::unreadable_views(&record.stack, reason),
                 };

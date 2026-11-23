@@ -21,7 +21,7 @@ use super::order::assign_missing_display_order;
 /// The parent change is persisted atomically. The effective base branch (the nearest remaining
 /// non-merged ancestor's branch, or `default_branch` when none remains) is then computed, the
 /// node's local branch is rebased onto it and force-pushed, and the open GitHub PR's base is
-/// re-targeted to it. Mirrors `bridge::execute_stack_repoint` applied to one node so the web
+/// re-targeted to it. Mirrors the propagation engine applied to one node so the web
 /// Repoint control and that agent path stay coherent. When the branch is not local (remote-only),
 /// the git rebase is skipped and the PR base is still re-targeted.
 ///

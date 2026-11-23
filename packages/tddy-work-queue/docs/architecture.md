@@ -77,8 +77,9 @@ recorded on `WorkItem`.
 
 `assemble_views` reads the stack DAG, the child sessions' states and the GitHub PR states into one
 `NodeView` per node (`ChildPhase`, `PrLiveStatus`); `effective_base_ref` resolves a node's base as its
-nearest unmerged ancestor's branch, else the default branch; `decide_next_action` returns an
-`OrchestratorAction`. The daemon's `work_queue_status` calls `assemble_views` and `effective_base_ref`.
+nearest unmerged ancestor's branch, else the default branch. The recipe-era decision loop
+(`decide_next_action`, `OrchestratorAction`, `AssessTask`) was deleted in `#workqueue` 14/14: the land
+and propagate engines and the schedule runner act instead.
 
 ### `git_ops.rs` — git helpers for stack syncs
 
@@ -141,6 +142,21 @@ Pure over a `ScheduleSnapshot` of the item's facts: `evaluate` gives a `Schedule
 fold check runs and reviews into verdicts. The daemon (`tddy-daemon-rpc` `work_queue/schedules/`) gathers
 the snapshot — line parent (`lineage`), inbox predictions (`commit_flow`), checks and reviews through the
 GitHub inbox, worktree sync state — and the status stream re-evaluates every schedule on each update.
+
+### `engine.rs`, `schedule_runner.rs`, `op_journal.rs` — land and propagate *(added 2026-11-23)*
+
+`engine::propagate` and `engine::land` behind two ports: `QueueGit` (fetch, local-branch state, inbox
+count, predicted conflicts, tip, rebase onto, push with lease) and `QueueGithub` (merge, retarget).
+`propagate` refuses (`EngineRefusal::LocalBranch { state, actions }`) unless the branch is `InSync` —
+`force` never overrides that — then pre-flights the base's checks and, unless `force`, predicted
+conflicts (`Preflight`), rebases, pushes with lease and retargets. `land` walks `LandItem`s in line
+order: an item `held_up_on` a condition stops the run, else its PR merges and each successor is
+propagated before the next item; the `LandReport` lists what landed, what propagated and where it
+stopped. `ScheduleRunner` fires a met `ScheduleView` once per arming (`armed_at`) through a
+`FireSchedule` port; the daemon's implementation takes the schedule out of the store first, which is
+what keeps two runners from firing one arming twice. `op_journal` holds only the types
+(`WorkQueueOpJournal`, `MergePhase`) the daemon writes beside a queue during a land;
+`execute_stack_merge` / `execute_stack_repoint` and `recover_in_flight_stack_op` were deleted.
 
 ### `rpc.rs` — the PR-stack RPC family
 

@@ -13,16 +13,17 @@ pub mod chain_health;
 pub mod chain_health_reads;
 pub mod commit_flow;
 pub mod docs;
+pub mod engine;
 pub mod git_ops;
 pub mod inbox_reads;
 pub mod internal_status;
 pub mod item_ops;
 pub mod lineage;
-pub mod merge_repoint;
 pub mod op_journal;
 pub mod pr_insight;
 pub mod rpc;
 pub mod schedule;
+pub mod schedule_runner;
 pub mod waves;
 
 pub use rpc::WORK_QUEUE_SERVICE;

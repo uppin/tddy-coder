@@ -26,6 +26,8 @@ fn is_a_git_tool(name: &str) -> bool {
             | "work_item_set_parents"
             | "work_item_resolve_conflicts"
             | "work_item_spawn_session"
+            | "work_item_propagate"
+            | "work_queue_land"
     )
 }
 

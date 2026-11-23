@@ -1,4 +1,5 @@
 import React from "react";
+import { PropagateControl } from "./landPropagate";
 import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import { Button } from "tddy-ui-web";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
@@ -252,6 +253,7 @@ export function WorkItemRow({
         />
         <WorkItemCommitCounts itemId={node.itemId} />
         <WorkItemChainHealthChips itemId={node.itemId} />
+        {node.branch && <PropagateControl itemId={node.itemId} />}
         {canRepoint && (
           <Button
             data-testid={`work-item-repoint-${node.itemId}`}

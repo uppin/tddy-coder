@@ -181,6 +181,8 @@ mod tests {
                 "mcp__tddy-tools__work_item_set_parents",
                 "mcp__tddy-tools__work_item_resolve_conflicts",
                 "mcp__tddy-tools__work_item_spawn_session",
+                "mcp__tddy-tools__work_item_propagate",
+                "mcp__tddy-tools__work_queue_land",
                 // Offered to every role (`#activity-wake` 5/5).
                 "mcp__tddy-tools__PostSessionMessage",
                 "mcp__tddy-tools__ReadSessionMessages",

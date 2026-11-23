@@ -158,6 +158,13 @@ impl RpcHandlers {
         self.exec_tool.start_watch_waker(cues, timings)
     }
 
+    /// Re-attach the watchers of every work queue that still has armed schedules (`#workqueue`
+    /// 14/14), so an arming survives a daemon restart. Runs once, at startup.
+    pub fn start_armed_schedule_watchers(&self) -> tokio::task::JoinHandle<usize> {
+        let work_queue = Arc::clone(&self.work_queue);
+        tokio::spawn(async move { work_queue.reattach_armed_schedules().await })
+    }
+
     /// Build the handlers from `host` and install them on it as its [`DaemonRpcFamilies`] — the
     /// composition root's last step before the host goes behind its `Arc`. Returns both, so the
     /// root serves the same handlers on its own transports.

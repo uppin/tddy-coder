@@ -101,6 +101,7 @@ impl WorkQueueRpcHandler {
                 Box::pin(async move { ctx.arm_item(&item_id, &kind, skip_review).await })
             })
             .await?;
+        self.fire_met_schedules(&call, &req.session_token).await;
         Ok(Response::new(ScheduleWorkItemResponse {
             schedule: Some(schedule),
         }))
@@ -128,6 +129,7 @@ impl WorkQueueRpcHandler {
                 Box::pin(async move { ctx.arm_wave(wave, skip_review).await })
             })
             .await?;
+        self.fire_met_schedules(&call, &req.session_token).await;
         Ok(listed(answered))
     }
 

@@ -51,6 +51,15 @@ pub(crate) enum GitWork {
     ResolveConflicts {
         node_id: String,
     },
+    Propagate {
+        item_id: String,
+        force: bool,
+    },
+    Land {
+        from_wave: u32,
+        to_wave: u32,
+        held_up: std::collections::HashMap<String, (String, String)>,
+    },
 }
 
 pub(crate) struct GitEnv {
@@ -63,9 +72,12 @@ pub(crate) struct GitEnv {
     pub(crate) identity: SessionAccountAccess,
     pub(crate) github_cli: GithubCli,
     pub(crate) clients: Arc<dyn WorkQueueGithubClients>,
+    /// Where landings, propagations and refusals are published for the queue's owner, and by whom
+    /// (`#workqueue` 14/14); `None` publishes nothing.
+    pub(crate) activity: Option<crate::work_queue::move_activity::ActivitySink>,
 }
 
-fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+pub(super) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let output = std::process::Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -83,7 +95,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-fn project_token(
+pub(super) fn project_token(
     project: &ProjectData,
     identity: &SessionAccountAccess,
     github_cli: &GithubCli,
@@ -390,7 +402,7 @@ impl GitEnv {
     }
 }
 
-fn node_of<'a>(stack: &'a WorkQueue, node_id: &str) -> Result<&'a WorkItem, String> {
+pub(super) fn node_of<'a>(stack: &'a WorkQueue, node_id: &str) -> Result<&'a WorkItem, String> {
     stack
         .node(node_id)
         .ok_or_else(|| format!("node '{node_id}' not found"))
@@ -405,17 +417,23 @@ pub(crate) fn run_git_work(env: &GitEnv, work: GitWork) -> Result<Value, String>
         }
         GitWork::SetParents { node_id, parents } => node_ops::set_parents(env, &node_id, &parents),
         GitWork::ResolveConflicts { node_id } => node_ops::resolve_conflicts(env, &node_id),
+        GitWork::Propagate { item_id, force } => land_ops::propagate_tool(env, &item_id, force),
+        GitWork::Land {
+            from_wave,
+            to_wave,
+            held_up,
+        } => land_ops::land_waves(env, from_wave, to_wave, &held_up),
     }
 }
 
 /// Beside the queue, in its owning session's directory (`#workqueue` 5/14).
-fn journal_path(env: &GitEnv) -> Result<PathBuf, String> {
+pub(super) fn journal_path(env: &GitEnv) -> Result<PathBuf, String> {
     env.store
         .op_journal_path(&env.queue_id)
         .map_err(|e| e.to_string())
 }
 
-fn write_journal(
+pub(super) fn write_journal(
     env: &GitEnv,
     journal: &tddy_work_queue::op_journal::WorkQueueOpJournal,
 ) -> Result<(), String> {
@@ -427,4 +445,6 @@ fn write_journal(
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
+pub(crate) mod land_ops;
 mod node_ops;
+mod queue_ports;

@@ -683,4 +683,24 @@ impl WorkQueueService for TestDaemon {
             .list_work_queue_schedules(request)
             .await
     }
+
+    async fn propagate_work_item(
+        &self,
+        request: Request<tddy_service::proto::work_queue::PropagateWorkItemRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::PropagateWorkItemResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .propagate_work_item(request)
+            .await
+    }
+
+    async fn land_work_queue(
+        &self,
+        request: Request<tddy_service::proto::work_queue::LandWorkQueueRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::LandWorkQueueResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .land_work_queue(request)
+            .await
+    }
 }

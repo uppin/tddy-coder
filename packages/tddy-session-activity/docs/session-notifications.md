@@ -243,15 +243,16 @@ and the subscribing caller's GitHub user).
   `SessionNotificationSource::is_a_sessions_own` keeps it — like a message — out of the drawer's
   stream and `ReadProjectNotifications`.
 
-## Work-queue moves (`work_queue_activity`)
+## Work-queue changes (`work_queue_activity`)
 
-`WorkQueueActivities::publish_move` (`#workqueue` 8/14) publishes one move of one work item —
+`WorkQueueActivities::publish` (`#workqueue` 8/14, 14/14) publishes one change of one work item —
 `WorkQueueEvent { queue_session_id, project_id, os_user, item_id, item_title, change, actor }`, with
-`WorkQueueChange::{Reordered { from, to }, ParentsChanged { before, after }}` and
-`Actor::{User { login }, Agent { session_id }}` — as a `SessionNotificationSource::WorkQueue` record
-whose `session_id` is the queue's owner. It awaits the bus. `wakes_owner` decides the kind:
-`ATTENTION_REQUIRED` unless the actor is the owner's own agent, then `ACTIVITY`. Later queue events
-(land, propagate, a schedule firing) are new `WorkQueueChange` variants, not new kinds.
+`WorkQueueChange::{Reordered { from, to }, ParentsChanged { before, after }, Landed { sha },
+Propagated { onto }, Refused { action, reason }, ScheduleFired { action }}` and
+`Actor::{User { login }, Agent { session_id }, Schedule { armed_by }}` — as a
+`SessionNotificationSource::WorkQueue` record whose `session_id` is the queue's owner. It awaits the bus.
+`wakes_owner` decides the kind: `ATTENTION_REQUIRED` unless the actor is the owner's own agent, then
+`ACTIVITY`. Every queue event is a `WorkQueueChange` variant, never a new kind.
 
 - **Where the records go.** The project log keeps both kinds; `watch_matches` lets an owner's
   `work_queue` watch match its own record of this source only when it is `ATTENTION_REQUIRED`, so its
@@ -259,7 +260,10 @@ whose `session_id` is the queue's owner. It awaits the bus. `wakes_owner` decide
   `is_a_sessions_own` keeps it out of the drawer's stream, Telegram and `ReadProjectNotifications`.
 - **Publish sites** are in `tddy-daemon-rpc`: `work_queue::move_activity` diffs the queue before and
   after a successful `ReorderWorkItem` (session- or address-keyed) or `work_item_set_parents`, and
-  publishes nothing when the position or the parents did not change.
+  publishes nothing when the position or the parents did not change. Landings, propagations and
+  refusals are published by `exec_tool::work_item_git_tools::git_work::land_ops` through the
+  `ActivitySink` its `GitEnv` carries (the tools, the `PropagateWorkItem` / `LandWorkQueue` RPCs and a
+  firing schedule each build one with their actor); a firing by `work_queue::land::DaemonFireSchedule`.
 
 ## Messages between sessions (`session_messages`)
 

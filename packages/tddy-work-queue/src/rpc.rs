@@ -15,9 +15,10 @@ use tddy_service::proto::work_queue::{
     AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
     GetPrStatusRequest, GetPrStatusResponse, GetWorkItemCommitFlowRequest,
     GetWorkQueueGraphRequest, GetWorkQueueRequest, GetWorkQueueResponse, GetWorkQueueWavesRequest,
-    LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
-    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, ListWorkQueueSchedulesRequest,
-    ListWorkQueueSchedulesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    LandWorkQueueRequest, LandWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
+    LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse,
+    ListWorkQueueSchedulesRequest, ListWorkQueueSchedulesResponse, PropagateWorkItemRequest,
+    PropagateWorkItemResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
     QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
     RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
     ResolveWorkItemBaseResponse, ScheduleWorkItemRequest, ScheduleWorkItemResponse,
@@ -246,6 +247,22 @@ pub trait WorkQueueHandler: Send + Sync {
         Err(Status::unimplemented("ListWorkQueueSchedules"))
     }
 
+    /// `#workqueue` 14/14: PropagateWorkItem.
+    async fn propagate_work_item(
+        &self,
+        _request: Request<PropagateWorkItemRequest>,
+    ) -> Result<Response<PropagateWorkItemResponse>, Status> {
+        Err(Status::unimplemented("PropagateWorkItem"))
+    }
+
+    /// `#workqueue` 14/14: LandWorkQueue.
+    async fn land_work_queue(
+        &self,
+        _request: Request<LandWorkQueueRequest>,
+    ) -> Result<Response<LandWorkQueueResponse>, Status> {
+        Err(Status::unimplemented("LandWorkQueue"))
+    }
+
     /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
     async fn stream_work_queue_status(
         &self,
@@ -462,6 +479,20 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<ListWorkQueueSchedulesRequest>,
     ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
         self.host.list_work_queue_schedules(request).await
+    }
+
+    async fn propagate_work_item(
+        &self,
+        request: Request<PropagateWorkItemRequest>,
+    ) -> Result<Response<PropagateWorkItemResponse>, Status> {
+        self.host.propagate_work_item(request).await
+    }
+
+    async fn land_work_queue(
+        &self,
+        request: Request<LandWorkQueueRequest>,
+    ) -> Result<Response<LandWorkQueueResponse>, Status> {
+        self.host.land_work_queue(request).await
     }
 }
 

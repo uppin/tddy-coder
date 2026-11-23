@@ -111,6 +111,8 @@ impl BuildContext {
         start_watch_waker(&shared, &hosted);
         // The trunk watch runs for the daemon's life; its handle is not kept.
         drop(hosted.connection_arc.spawn_trunk_watch());
+        // Armed schedules outlive a restart: their queues are watched again (`#workqueue` 14/14).
+        drop(hosted.rpc_handlers.start_armed_schedule_watchers());
         self.register_code_intelligence(&hosted.task_registry);
         let livekit_service = livekit_service(&mount);
         let mounted = Mounted {

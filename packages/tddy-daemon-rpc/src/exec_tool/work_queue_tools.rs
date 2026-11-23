@@ -190,6 +190,19 @@ impl ExecToolRpcHandler {
             pull_requests: Arc::clone(&self.project_home_host.pull_requests),
             caller_session_id: req.session_id.clone(),
             session_token: req.session_token.clone(),
+            terminals: self.project_home_host.terminals.clone(),
+            notification_bus: self.project_home_host.notification_bus.clone(),
+            vaults: self.project_home_host.credential_vaults.clone(),
+            user_resolver: self.user_resolver.clone(),
+            armer: match (
+                &self.project_home_host.session_token_signer,
+                (self.user_resolver)(&req.session_token),
+            ) {
+                (Some(signer), Some(login)) => {
+                    crate::work_queue::schedule_watch::Armer::signed(signer.clone(), &login)
+                }
+                _ => crate::work_queue::schedule_watch::Armer::Caller(req.session_token.clone()),
+            },
         }
     }
 }
@@ -223,6 +236,16 @@ pub(super) struct DaemonStackTools {
     pull_requests: Arc<dyn SessionPullRequests>,
     caller_session_id: String,
     session_token: String,
+    /// The live terminals, which say whether an item's session is running.
+    terminals: tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
+    /// Where a firing schedule's outcomes are published for the queue's owner (`#workqueue` 14/14).
+    notification_bus:
+        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
+    /// Who a schedule this caller arms is watched as (`#workqueue` 14/14), and the vaults and
+    /// resolver its identity is built from.
+    armer: crate::work_queue::schedule_watch::Armer,
+    vaults: Option<Arc<tddy_credentials::SessionVaults>>,
+    user_resolver: tddy_daemon_kernel::SessionUserResolver,
 }
 
 impl DaemonStackTools {
@@ -400,6 +423,47 @@ impl DaemonStackTools {
         }
     }
 
+    /// What holds each item's merge up, judged as an armed merge would be (`#workqueue` 14/14):
+    /// `item -> (condition, detail)` for every item with a branch whose merge conditions are not all
+    /// met. Nothing is armed or stored — the schedules are evaluated and dropped.
+    pub(super) async fn merge_holdups(
+        &self,
+        project_id: &str,
+        queue_id: &str,
+    ) -> Result<std::collections::HashMap<String, (String, String)>, String> {
+        use crate::work_queue::schedules::ScheduleCtx;
+        let github = GithubSource {
+            projects_dir: self.store.projects_dir().to_path_buf(),
+            project_id: project_id.to_string(),
+            os_user: self.os_user.clone(),
+            identity: self.identity.clone(),
+            github_cli: self.github_cli.clone(),
+            clients: Arc::clone(&self.github),
+        };
+        let trunk_ref = tokio::task::spawn_blocking(move || github.default_branch())
+            .await
+            .map_err(|e| format!("the merge conditions failed to be read: {e}"))??;
+        let trunk = tddy_work_queue::lineage::trunk_branch_of(&trunk_ref);
+        let queue = self
+            .store
+            .read(project_id, queue_id)
+            .map(|record| record.stack)
+            .map_err(|e| e.to_string())?;
+        let ctx = ScheduleCtx {
+            store: &self.store,
+            pull_requests: self.pull_requests.as_ref(),
+            os_user: &self.os_user,
+            sessions_base: &self.sessions_base,
+            project_id,
+            queue_id,
+            caller_session_id: &self.caller_session_id,
+            session_token: &self.session_token,
+            trunk,
+            armed_by: &self.os_user,
+        };
+        Ok(ctx.merge_holdups(&queue).await)
+    }
+
     /// `work_item_schedule`, `work_queue_schedule_wave`, `work_item_unschedule` and
     /// `work_queue_schedules`: armed merges and propagations, their conditions read through the inbox.
     async fn schedules_through_inbox(
@@ -426,7 +490,13 @@ impl DaemonStackTools {
             trunk,
             armed_by: &self.os_user,
         };
-        match op {
+        let changes_schedules = matches!(
+            op,
+            WorkQueueOp::Schedule { .. }
+                | WorkQueueOp::ScheduleWave { .. }
+                | WorkQueueOp::Unschedule { .. }
+        );
+        let answered = match op {
             WorkQueueOp::Schedule {
                 item_id,
                 kind,
@@ -449,7 +519,37 @@ impl DaemonStackTools {
                 .map(|(views, reason)| json::schedules(views, &reason)),
             _ => return Err("not a schedule operation".to_string()),
         }
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+        if changes_schedules && answered.is_ok() {
+            // `#workqueue` 14/14: what is already met fires now, and the queue is watched from here on.
+            crate::work_queue::schedule_watch::after_arming(
+                crate::work_queue::schedule_watch::WatchInputs {
+                    source: crate::work_queue::land::GitEnvSource {
+                        identity: self
+                            .armer
+                            .identity(self.vaults.clone(), self.user_resolver.clone()),
+                        github_cli: self.github_cli.clone(),
+                        clients: Arc::clone(&self.github),
+                        terminals: self.terminals.clone(),
+                        notification_bus: self.notification_bus.clone(),
+                    },
+                    pull_requests: Arc::clone(&self.pull_requests),
+                    store: self.store.clone(),
+                    sessions_base: self.sessions_base.clone(),
+                    os_user: self.os_user.clone(),
+                    address: tddy_service::proto::work_queue::WorkQueueAddress {
+                        project_id: env.project_id.clone(),
+                        queue_id: queue_id
+                            .clone()
+                            .unwrap_or_else(|| self.caller_session_id.clone()),
+                        daemon_instance_id: self.daemon_instance_id.clone(),
+                    },
+                    armer: self.armer.clone(),
+                },
+            )
+            .await;
+        }
+        answered
     }
 
     async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {

@@ -35,6 +35,16 @@ impl DaemonSessionHost {
         Arc::clone(&self.user_resolver)
     }
 
+    /// This daemon's session-token signer, or `None` on a daemon that signs nothing. What a task
+    /// acting for a person long after their call (an armed schedule's watcher, `#workqueue` 14/14)
+    /// signs a fresh short-lived token with at every use, rather than holding one that expires.
+    #[must_use]
+    pub fn session_token_signer(&self) -> Option<tddy_github::SessionTokenSigner> {
+        self.session_tokens
+            .as_ref()
+            .map(|tokens| tokens.signer().clone())
+    }
+
     /// The daemon's data root — the parent of every user's sessions and projects.
     #[must_use]
     pub fn tddy_data_dir(&self) -> &Path {

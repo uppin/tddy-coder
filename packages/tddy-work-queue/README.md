@@ -21,9 +21,10 @@ and the `pr_*` stack tools, which call everything below.
 | `item_ops/pull_base.rs` | `pull_base_into_node_branch`, `BaseSyncStrategy` |
 | `docs.rs` | per-node `PRD.md` / `changeset.md` paths, writing and validation |
 | `internal_status.rs` | `derive_internal_status`, `reconcile_internal_status` |
-| `op_journal.rs` | the crash-safe merge journal: `WorkQueueOpJournal`, `MergePhase`, `recover_in_flight_stack_op` |
-| `merge_repoint.rs` | `execute_stack_merge`, `execute_stack_repoint` |
-| `assess.rs` | node views, `decide_next_action`, `effective_base_ref` |
+| `op_journal.rs` | the merge journal the daemon writes beside a queue: `WorkQueueOpJournal`, `MergePhase` |
+| `engine.rs` | `propagate`, `land` behind the `QueueGit` / `QueueGithub` ports (replaced `execute_stack_merge`, `execute_stack_repoint`) |
+| `schedule_runner.rs` | `ScheduleRunner`: fires an armed schedule exactly once |
+| `assess.rs` | node views (`assemble_views`, `NodeView`, `ChildPhase`, `PrLiveStatus`), `effective_base_ref` |
 | `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers |
 | `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` |
 | `rpc.rs` | `WorkQueueHandler`, `WorkQueueServiceImpl`, `build_pr_stack_entry`, `WORK_QUEUE_SERVICE` (also at the crate root) |

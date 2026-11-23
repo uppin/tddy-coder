@@ -761,6 +761,20 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         self.list_work_queue_schedules_rpc(request).await
     }
 
+    async fn propagate_work_item(
+        &self,
+        request: Request<tddy_service::proto::work_queue::PropagateWorkItemRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::PropagateWorkItemResponse>, Status> {
+        self.propagate_work_item_rpc(request).await
+    }
+
+    async fn land_work_queue(
+        &self,
+        request: Request<tddy_service::proto::work_queue::LandWorkQueueRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::LandWorkQueueResponse>, Status> {
+        self.land_work_queue_rpc(request).await
+    }
+
     /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,
     /// and push the result.
     ///
