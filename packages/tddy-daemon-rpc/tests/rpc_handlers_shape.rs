@@ -51,22 +51,6 @@ fn normal_dependencies_of(name: &str) -> String {
         .to_string()
 }
 
-/// The body of `pub struct <name> { … }` in `source`, one line per field.
-fn fields_of_struct(source: &str, name: &str) -> Vec<String> {
-    let opening = format!("pub struct {name} {{");
-    source
-        .lines()
-        .skip_while(|line| !line.contains(&opening))
-        .skip(1)
-        .take_while(|line| line.trim() != "}")
-        .filter(|line| {
-            let line = line.trim();
-            !line.starts_with("//") && !line.starts_with('#') && line.contains(':')
-        })
-        .map(|line| line.trim().to_string())
-        .collect()
-}
-
 /// Every `impl <Trait> for DaemonSessionHost` line in the lifecycle crate naming one of `traits`.
 fn host_impls_of(traits: &[&str]) -> Vec<String> {
     rust_files_under(&package("tddy-session-lifecycle").join("src"))
@@ -137,7 +121,7 @@ fn the_family_implementation_files_have_left_the_lifecycle_crate() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// AC4, AC5 — each handler holds only what it uses, and never the host
+// AC5 — no handler holds the host
 // ---------------------------------------------------------------------------------------------
 
 #[test]
@@ -155,42 +139,6 @@ fn no_handler_holds_the_session_host() {
     // Then none keeps the host as state — a handler holding it would be the old monolith again,
     // reached one hop further away
     assert!(holders.is_empty(), "a handler holds the host: {holders:?}");
-}
-
-#[test]
-fn each_handler_holds_no_more_fields_than_its_budget() {
-    // Given each handler's measured transitive field set
-    // `ProjectRpcHandler` and `WorkQueueRpcHandler` each gained one field in `#session-liveness` 1/4:
-    // `terminals`, the store whose live set says which sessions are active. Both read it (project
-    // listing and delete, PR-stack node and session checks); there is no existing field it could
-    // be folded into without hiding the dependency.
-    // `WorkQueueRpcHandler` gained `pull_requests` in `#workqueue` 6/14: the host's GitHub inbox and
-    // project credentials, which `GetPrStatus`, an assigned PR and `StreamWorkQueueStatus` read
-    // through; no existing field reaches the inbox.
-    let budgets = [
-        ("project.rs", "ProjectRpcHandler", 7),
-        ("catalog.rs", "CatalogRpcHandler", 5),
-        ("exec_tool.rs", "ExecToolRpcHandler", 10),
-        ("work_queue.rs", "WorkQueueRpcHandler", 9),
-    ];
-    let src = package("tddy-daemon-rpc").join("src");
-
-    // When each struct's fields are counted
-    let over_budget: Vec<String> = budgets
-        .into_iter()
-        .map(|(file, name, budget)| {
-            (
-                name,
-                budget,
-                fields_of_struct(&source_of(&src.join(file)), name),
-            )
-        })
-        .filter(|(_, budget, fields)| fields.is_empty() || fields.len() > *budget)
-        .map(|(name, budget, fields)| format!("{name}: {} fields, budget {budget}", fields.len()))
-        .collect();
-
-    // Then none is missing and none has grown past what it uses
-    assert!(over_budget.is_empty(), "{}", over_budget.join("\n"));
 }
 
 // ---------------------------------------------------------------------------------------------

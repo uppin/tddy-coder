@@ -67,6 +67,8 @@ pub fn session_notification_event(notification: SessionNotification) -> SessionN
             SessionNotificationSource::Message => ProtoSessionNotificationSource::Unspecified,
             // Nor has a trunk commit: it is the orchestrator's own activity (`#orchestra` 5/9).
             SessionNotificationSource::TrunkCommit => ProtoSessionNotificationSource::Unspecified,
+            // Nor has a work-queue move: it is its owner's own activity (`#workqueue` 8/14).
+            SessionNotificationSource::WorkQueue => ProtoSessionNotificationSource::Unspecified,
         } as i32,
         text: notification.text,
         at_unix_ms: notification.at_unix_ms,

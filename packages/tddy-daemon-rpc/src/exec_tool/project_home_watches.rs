@@ -127,8 +127,10 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
         if request.wake_when_idle {
             self.refuse_an_agent_that_takes_no_turn(home)?;
         }
-        // The one self-watch: the orchestrator's own trunk activity (`#orchestra` 5/9).
-        let own_trunk_watch = request.kinds == [WatchKind::TrunkCommit.as_str()];
+        // The self-watches: the orchestrator's own trunk activity (`#orchestra` 5/9) and its own
+        // work queue's moves (`#workqueue` 8/14).
+        let own_trunk_watch = request.kinds == [WatchKind::TrunkCommit.as_str()]
+            || request.kinds == [WatchKind::WorkQueue.as_str()];
         for session_id in &request.session_ids {
             if own_trunk_watch && session_id == &home.session_id {
                 continue;

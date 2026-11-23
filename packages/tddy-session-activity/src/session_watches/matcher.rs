@@ -1,7 +1,9 @@
 use crate::project_notification_log::ProjectNotificationRecord;
 use crate::session_watches::SessionWatch;
 use serde::{Deserialize, Serialize};
-use tddy_daemon_kernel::session_notification::SessionNotificationSource;
+use tddy_daemon_kernel::session_notification::{
+    SessionNotificationKind, SessionNotificationSource,
+};
 
 /// One kind of event a watch can ask for, over the log's records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -26,11 +28,15 @@ pub enum WatchKind {
     /// 5/9). The orchestrator's own activity: the one kind a watch may ask for on its owner's own
     /// session.
     TrunkCommit,
+    /// A work item of the owner's own queue was moved (`#workqueue` 8/14). The owner's own
+    /// activity, so a watch may ask for it on its owner's own session — but never for a move the
+    /// owner's own agent made.
+    WorkQueue,
 }
 
 impl WatchKind {
     /// Every kind, in the order the tools list them.
-    pub const ALL: [WatchKind; 8] = [
+    pub const ALL: [WatchKind; 9] = [
         WatchKind::Question,
         WatchKind::Permission,
         WatchKind::TurnFinished,
@@ -39,6 +45,7 @@ impl WatchKind {
         WatchKind::Ended,
         WatchKind::Message,
         WatchKind::TrunkCommit,
+        WatchKind::WorkQueue,
     ];
 
     /// The kind's name, as the tools take it.
@@ -52,6 +59,7 @@ impl WatchKind {
             WatchKind::Ended => "ended",
             WatchKind::Message => "message",
             WatchKind::TrunkCommit => "trunk_commit",
+            WatchKind::WorkQueue => "work_queue",
         }
     }
 
@@ -87,6 +95,7 @@ impl WatchKind {
             SessionNotificationSource::AgentToolCall => None,
             SessionNotificationSource::Message => Some(Self::Message),
             SessionNotificationSource::TrunkCommit => Some(Self::TrunkCommit),
+            SessionNotificationSource::WorkQueue => Some(Self::WorkQueue),
         }
     }
 }
@@ -129,11 +138,20 @@ pub(super) fn watch_matches(
     owner_inbox_position: u64,
 ) -> bool {
     // A watch never matches its owner's own session — except for the owner's trunk activity, which
-    // is the orchestrator's own and exactly what its self-watch asks for.
-    if record.session_id == watch.owner.session_id
-        && record.source != SessionNotificationSource::TrunkCommit
-    {
-        return false;
+    // is the orchestrator's own and exactly what its self-watch asks for, and the moves of its own
+    // work queue, bar the ones its own agent made (those are published as `Activity`, not
+    // `AttentionRequired`: recorded, never delivered).
+    if record.session_id == watch.owner.session_id {
+        let own_activity = match record.source {
+            SessionNotificationSource::TrunkCommit => true,
+            SessionNotificationSource::WorkQueue => {
+                record.kind == SessionNotificationKind::AttentionRequired
+            }
+            _ => false,
+        };
+        if !own_activity {
+            return false;
+        }
     }
     if record.source == SessionNotificationSource::Message {
         let Some(message) = &record.message else {
@@ -240,5 +258,44 @@ mod trunk_commit_tests {
         };
 
         assert!(!watch_matches(&watch, &own_end, 0));
+    }
+
+    fn a_move_record_of(
+        session_id: &str,
+        kind: SessionNotificationKind,
+    ) -> ProjectNotificationRecord {
+        ProjectNotificationRecord {
+            kind,
+            source: SessionNotificationSource::WorkQueue,
+            text: "Work item Wire the inbox (n3) moved from position 3 to 1, by octocat"
+                .to_string(),
+            ..a_trunk_record_of(session_id)
+        }
+    }
+
+    #[test]
+    fn an_owners_work_queue_watch_matches_a_move_it_did_not_make() {
+        let watch = an_orchestrators_watch(vec![WatchKind::WorkQueue]);
+        let record = a_move_record_of(ORCHESTRATOR, SessionNotificationKind::AttentionRequired);
+
+        assert!(watch_matches(&watch, &record, 0));
+    }
+
+    #[test]
+    fn an_owners_work_queue_watch_never_matches_a_move_its_own_agent_made() {
+        let watch = an_orchestrators_watch(vec![WatchKind::WorkQueue]);
+        let own_move = a_move_record_of(ORCHESTRATOR, SessionNotificationKind::Activity);
+
+        assert!(!watch_matches(&watch, &own_move, 0));
+    }
+
+    #[test]
+    fn no_other_sessions_watch_matches_the_queues_moves() {
+        let mut watch = an_orchestrators_watch(vec![WatchKind::WorkQueue]);
+        watch.owner.session_id = "someone-else".to_string();
+        watch.filter.session_ids = vec!["someone-else".to_string()];
+        let record = a_move_record_of(ORCHESTRATOR, SessionNotificationKind::AttentionRequired);
+
+        assert!(!watch_matches(&watch, &record, 0));
     }
 }

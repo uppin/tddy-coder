@@ -153,8 +153,8 @@ opens it over the data dir before the bus is assembled and installs the same `Ar
 ## Session watches (`session_watches`)
 
 An orchestrator's watches over the sessions it can see (`#activity-wake` 2/3): a filter — sessions
-by id and/or `started_by_me`, eight kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
-`waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`) — with its own position in the project
+by id and/or `started_by_me`, nine kinds (`WatchKind`: `question`, `permission`, `turn_finished`,
+`waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`, `work_queue`) — with its own position in the project
 notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 86 400, at most
 `MAX_LIVE_WATCHES` = 16 live per orchestrator).
 
@@ -242,6 +242,24 @@ and the subscribing caller's GitHub user).
   waker takes it; `watch_matches` lets a watch match its owner's own record of this source alone;
   `SessionNotificationSource::is_a_sessions_own` keeps it — like a message — out of the drawer's
   stream and `ReadProjectNotifications`.
+
+## Work-queue moves (`work_queue_activity`)
+
+`WorkQueueActivities::publish_move` (`#workqueue` 8/14) publishes one move of one work item —
+`WorkQueueEvent { queue_session_id, project_id, os_user, item_id, item_title, change, actor }`, with
+`WorkQueueChange::{Reordered { from, to }, ParentsChanged { before, after }}` and
+`Actor::{User { login }, Agent { session_id }}` — as a `SessionNotificationSource::WorkQueue` record
+whose `session_id` is the queue's owner. It awaits the bus. `wakes_owner` decides the kind:
+`ATTENTION_REQUIRED` unless the actor is the owner's own agent, then `ACTIVITY`. Later queue events
+(land, propagate, a schedule firing) are new `WorkQueueChange` variants, not new kinds.
+
+- **Where the records go.** The project log keeps both kinds; `watch_matches` lets an owner's
+  `work_queue` watch match its own record of this source only when it is `ATTENTION_REQUIRED`, so its
+  own moves are recorded but never delivered; no other session's watch matches it.
+  `is_a_sessions_own` keeps it out of the drawer's stream, Telegram and `ReadProjectNotifications`.
+- **Publish sites** are in `tddy-daemon-rpc`: `work_queue::move_activity` diffs the queue before and
+  after a successful `ReorderWorkItem` (session- or address-keyed) or `work_item_set_parents`, and
+  publishes nothing when the position or the parents did not change.
 
 ## Messages between sessions (`session_messages`)
 
@@ -337,6 +355,7 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 | `session_watch_stream_unit` | `tddy-session-activity` | a stream batch not advancing until acknowledged; `ack_seq` past what was handed refused; `take_delivery` and `deliver_with` skipping a streamed watch; the lease lapsing after its grace; a new stream taking over from the old one |
 | `session_messages_unit` | `tddy-session-activity` | a message record round-tripping through the log; the inbox position advancing past what is read; an inbox watch matching only what is addressed to its owner; delivered once across reads and watches; the kind matching only message records; the 8 KiB limit |
 | `session_messages_acceptance` | `tddy-daemon-rpc` | the tools through the exec-tool harness with real session records: a child messaging its orchestrator and being read; `reply_to` carried and a reply to a message never received refused; every out-of-rule address refused naming the reaches; the message absent from `ReadProjectNotifications`; each message read once; an orchestrator's `message` watch and the wake; a session's own inbox watch and no other; a Cursor session reading its messages |
+| `work_queue_activity_acceptance` | `tddy-session-activity` | a user reorder and a parents change published on the queue owner, naming the item, the change and the actor; the owner's own moves not waking it; the kind named `work_queue` |
 
 ⚠ The bus's classification, fan-out and stream are asserted from `tddy-session-lifecycle` and
 `tddy-telegram-control`, not from this crate. Recorded in

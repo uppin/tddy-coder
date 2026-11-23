@@ -498,7 +498,7 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | `RefreshHome` | — | the same answer after fetching and fast-forwarding the caller's home worktree to the trunk tip. A home with commits of its own is refused, the error naming where it stands, and left untouched. Orchestrator roles only |
 | `WaitProjectNotifications` | `cursor?`, `timeout_ms?` (at most 20000, the default), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, timed_out, lost?}`: returns at once when the project's notification log holds records after `cursor`, otherwise holds until one arrives or `timeout_ms` passes. Without a cursor it waits for the next new record. See [Waiting for notifications](#waiting-for-notifications) |
 | `ReadProjectNotifications` | `cursor?`, `limit?` (50 by default, at most 200), `started_by_me?`, `daemon_instance_id?` | `{items, next_cursor, has_more, clamped_to?, lost?}`: up to `limit` records after `cursor`, oldest first, without waiting; without a cursor, the newest page. See [Waiting for notifications](#waiting-for-notifications) |
-| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400), `wake_when_idle?` (default `false`) | `{watch_id, session_ids, started_by_me, kinds, wake_when_idle, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (every kind when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
+| `CreateSessionWatch` | `session_ids?`, `started_by_me?`, `kinds?`, `ttl_seconds` (required, 1 to 86400), `wake_when_idle?` (default `false`) | `{watch_id, session_ids, started_by_me, kinds, wake_when_idle, created_at_unix_ms, expires_at_unix_ms}`: a watch over the sessions it names, or every session the caller started, for the kinds named (every kind when none: `question`, `permission`, `turn_finished`, `waiting_for_input`, `agent_notification`, `ended`, `message`, `trunk_commit`, `work_queue`). The kind `message` alone with no session selected is the caller's inbox watch — the one watch a session that is not an orchestrator may hold. See [Watching sessions](#watching-sessions) |
 | `ListSessionWatches` | — | `{watches}`: the caller's live watches, each with its filter, expiry and how many matched events wait (`waiting`) |
 | `RenewSessionWatch` | `watch_id`, `ttl_seconds` (required, 1 to 86400), `wake_when_idle?` | the watch, expiring `ttl_seconds` from now; `wake_when_idle` turns its idle wake on or off, kept when omitted |
 | `CancelSessionWatch` | `watch_id` | `{watch_id, cancelled: true}`: the watch ends; nothing more is delivered for it |
@@ -996,12 +996,13 @@ interrupts it unless it opts into the idle wake.
 
 - **Creation.** `CreateSessionWatch` names sessions by `session_ids`, or every session the caller
   started with `started_by_me`, or both — at least one of the two, except the **inbox watch**,
-  which selects no session and is the caller's own (below). `kinds` names which of the eight kinds
+  which selects no session and is the caller's own (below). `kinds` names which of the nine kinds
   match (all of them when none is named): a `question` or `permission` prompt, a `turn_finished`
   (`Done`), a `waiting_for_input` (`WaitingForInput` with no question — an activity-status record
   carrying a question matches nothing, since its `pending_question` record already announced that
-  prompt), an `agent_notification`, an `ended` (`session_ended`), a `message`, or a `trunk_commit`
-  (the caller's own, see [Watching the trunk](#watching-the-trunk)). `ttl_seconds` is
+  prompt), an `agent_notification`, an `ended` (`session_ended`), a `message`, a `trunk_commit`
+  (the caller's own, see [Watching the trunk](#watching-the-trunk)), or a `work_queue` — a work item of
+  the caller's own queue moved (reordered or given other parents) by anyone but the caller's own agent. `ttl_seconds` is
   required, from 1 to 86400 (24 hours); `RenewSessionWatch` restarts it for one of the caller's
   watches. `wake_when_idle` (default `false`) opts the watch into the idle wake (below);
   `RenewSessionWatch` turns it on or off, and keeps it when the call names none. Every watch answer
@@ -1010,7 +1011,8 @@ interrupts it unless it opts into the idle wake.
   user, on this host, never the caller's own session. A `session_ids` entry with no session record
   here, or one of another project, is refused naming the session; naming the caller's own session is
   refused saying why — except a watch of the kind `trunk_commit` alone, which is how an orchestrator
-  watches its own trunk activity. A caller that is not an orchestrator is refused by the role guard — except its
+  watches its own trunk activity, or of the kind `work_queue` alone, which is how it watches its own
+  queue's moves. A caller that is not an orchestrator is refused by the role guard — except its
   **inbox watch**, the one watch any session may hold: `CreateSessionWatch` with the kind `message`
   alone and no session selected, matching the messages addressed to it
   ([Messages between sessions](#messages-between-sessions)); every other watch tool call from such a

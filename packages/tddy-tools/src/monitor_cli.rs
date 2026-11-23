@@ -55,7 +55,7 @@ pub struct MonitorArgs {
     pub started_by_me: bool,
 
     /// Which events, comma-separated: question, permission, turn_finished, waiting_for_input,
-    /// agent_notification, ended, message, trunk_commit. Default every kind.
+    /// agent_notification, ended, message, trunk_commit, work_queue. Default every kind.
     #[arg(long, value_delimiter = ',', conflicts_with = "watch_ids")]
     pub kinds: Vec<String>,
 

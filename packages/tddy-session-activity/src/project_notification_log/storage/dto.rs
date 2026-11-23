@@ -86,6 +86,7 @@ enum SourceDto {
     SessionEnded,
     Message,
     TrunkCommit,
+    WorkQueue,
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -206,6 +207,7 @@ impl From<SessionNotificationSource> for SourceDto {
             SessionNotificationSource::SessionEnded => Self::SessionEnded,
             SessionNotificationSource::Message => Self::Message,
             SessionNotificationSource::TrunkCommit => Self::TrunkCommit,
+            SessionNotificationSource::WorkQueue => Self::WorkQueue,
         }
     }
 }
@@ -221,6 +223,7 @@ impl From<SourceDto> for SessionNotificationSource {
             SourceDto::SessionEnded => Self::SessionEnded,
             SourceDto::Message => Self::Message,
             SourceDto::TrunkCommit => Self::TrunkCommit,
+            SourceDto::WorkQueue => Self::WorkQueue,
         }
     }
 }
