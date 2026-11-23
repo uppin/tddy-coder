@@ -342,6 +342,21 @@ and **Outbox** tabs next to Commits, and each queue row shows its inbox/outbox c
 marker. Agents use `work_item_inbox` and `work_item_outbox`; the RPCs are `GetWorkItemInbox`,
 `GetWorkItemOutbox` and `GetWorkQueueCommitCounts`. Nothing here pushes or merges.
 
+### Leaked commits and non-linear items *(added 2026-11-23)*
+
+Two checks per work item with an open PR, read from the GitHub inbox and the queue owner's clone (remote
+tips, after a fetch; nothing local is touched):
+
+- **Leaks** — commits in the item's PR that belong to one of its line ancestors: the same SHA, or a
+  rebased copy (same author, author date and subject). Each leak names the nearest ancestor carrying it.
+  It usually means a rebase used the wrong upstream, so the PR's diff carries an ancestor's work.
+- **Linearity** — whether the item contains its line parent's tip: **linear**; **behind by N** (the parent
+  has N commits the item lacks); **conflicting** (behind, and GitHub reports the PR as not mergeable); or
+  **unknown** (the parent merged or is only planned, or no reading is possible).
+
+Each row shows a leak chip and a linearity chip from the status stream; `work_queue_status` returns both
+per node as `chain_health`. Nothing here repairs, rebases or edits a PR.
+
 ### GitHub API surface
 
 `GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.

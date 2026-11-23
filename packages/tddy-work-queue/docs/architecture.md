@@ -123,6 +123,16 @@ per item, keyed by the remote tips of its whole chain, and replaces it when they
 one `CommitFlow` per clone so the cache outlives a request; `item_branches` joins the queue with n9's line
 edges.
 
+### `chain_health.rs`, `chain_health_reads.rs` — leaks and line state *(added 2026-11-23)*
+
+`chain_health` is pure: `leaks(own, ancestors_nearest_first)` matches a commit by SHA or by author, author
+date and subject, naming the nearest ancestor; `line_state(behind, mergeable)` gives `Linear`, `Behind`,
+`Conflicting` or `Unknown`. `chain_health_reads::queue_chain_health` supplies the inputs: PR commits and
+`mergeable` through the inbox for the item and each live line ancestor, and the behind count from remote tips
+with `base_sync::count_divergence` in the owner's clone (fetched first). A merged or planned parent, or no
+checkout, reads `Unknown`. The status stream and the `work_queue_status` tool overlay the result on
+`WorkItemStatus.{leaks, line}`.
+
 ### `rpc.rs` — the PR-stack RPC family
 
 The one transport-facing module: family P's handler trait, its service adapter and its transport
