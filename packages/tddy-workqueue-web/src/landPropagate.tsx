@@ -66,7 +66,7 @@ export function useLandPropagate(
         [itemId]: { kind: "failed", state: "", actions: [], detail: failureOf(err) },
       }));
     } finally {
-      setPropagating(({ ...prev }) => {
+      setPropagating((prev) => {
         const next = new Set(prev);
         next.delete(itemId);
         return next;

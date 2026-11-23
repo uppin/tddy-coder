@@ -35,7 +35,7 @@ pub(crate) enum Armer {
     Caller(String),
     /// A GitHub user this daemon signs a fresh short-lived token for at every use.
     Signed {
-        signer: tddy_github::SessionTokenSigner,
+        signer: Box<tddy_github::SessionTokenSigner>,
         user: tddy_github::GitHubUser,
     },
 }
@@ -44,7 +44,7 @@ impl Armer {
     /// `login` as this daemon signs for it.
     pub(crate) fn signed(signer: tddy_github::SessionTokenSigner, login: &str) -> Self {
         Self::Signed {
-            signer,
+            signer: Box::new(signer),
             user: tddy_github::GitHubUser {
                 id: 0,
                 login: login.to_string(),

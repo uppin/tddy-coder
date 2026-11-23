@@ -43,6 +43,21 @@ fn announce(env: &GitEnv, changes: Vec<(String, WorkQueueChange)>) {
     });
 }
 
+/// Tell the queue's owner that `item_id` could not even be lined up to land (its project, PR or
+/// branch could not be read); a land that ran announces through [`land_changes`].
+fn refused_land(env: &GitEnv, item_id: &str, why: &str) {
+    announce(
+        env,
+        vec![(
+            item_id.to_string(),
+            WorkQueueChange::Refused {
+                action: "land".to_string(),
+                reason: why.to_string(),
+            },
+        )],
+    );
+}
+
 /// What a land announces: each landing, each propagation between them, and where it stopped.
 fn land_changes(report: &LandReport) -> Vec<(String, WorkQueueChange)> {
     let landed = report
@@ -120,6 +135,18 @@ pub(crate) fn propagate_item(
     onto: Option<&str>,
     force: bool,
 ) -> Result<Propagated, EngineRefusal> {
+    // Every outcome is announced, a failure to reach the item's worktree or PR included.
+    let outcome = propagate_unannounced(env, item_id, onto, force);
+    announce(env, vec![(item_id.to_string(), propagate_change(&outcome))]);
+    outcome
+}
+
+fn propagate_unannounced(
+    env: &GitEnv,
+    item_id: &str,
+    onto: Option<&str>,
+    force: bool,
+) -> Result<Propagated, EngineRefusal> {
     let world = DaemonQueueWorld::new(env).map_err(EngineRefusal::Failed)?;
     let trunk = env.default_branch(world.project());
     let onto = match onto {
@@ -130,9 +157,7 @@ pub(crate) fn propagate_item(
         }
     };
     let request = request_for(&world, item_id, &onto, force).map_err(EngineRefusal::Failed)?;
-    let outcome = drive(propagate(&world, &world, &request));
-    announce(env, vec![(item_id.to_string(), propagate_change(&outcome))]);
-    outcome
+    drive(propagate(&world, &world, &request))
 }
 
 /// What a propagation announces: where it went, or why it was refused.
@@ -250,9 +275,10 @@ fn report_json(report: &LandReport) -> Value {
 
 /// `work_item_merge`: land one item and propagate what sits on it.
 pub(crate) fn merge_item(env: &GitEnv, item_id: &str) -> Result<Value, String> {
-    let world = DaemonQueueWorld::new(env)?;
+    let world = DaemonQueueWorld::new(env).inspect_err(|why| refused_land(env, item_id, why))?;
     let trunk = env.default_branch(world.project());
-    let line = [land_item_of(&world, item_id, &trunk, None)?];
+    let line = [land_item_of(&world, item_id, &trunk, None)
+        .inspect_err(|why| refused_land(env, item_id, why))?];
     let report = run_land(env, &world, &line)?;
     match report.landed.first() {
         None => Err(match &report.stopped_at {
