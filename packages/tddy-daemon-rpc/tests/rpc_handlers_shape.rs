@@ -167,11 +167,13 @@ fn each_handler_holds_no_more_fields_than_its_budget() {
     // `WorkQueueRpcHandler` gained `pull_requests` in `#workqueue` 6/14: the host's GitHub inbox and
     // project credentials, which `GetPrStatus`, an assigned PR and `StreamWorkQueueStatus` read
     // through; no existing field reaches the inbox.
+    // `WorkQueueRpcHandler` gained `notification_bus` in `#workqueue` 8/14: a reorder publishes the
+    // move for the queue's owner on the session-notification bus; no existing field reaches it.
     let budgets = [
         ("project.rs", "ProjectRpcHandler", 7),
         ("catalog.rs", "CatalogRpcHandler", 5),
         ("exec_tool.rs", "ExecToolRpcHandler", 10),
-        ("work_queue.rs", "WorkQueueRpcHandler", 9),
+        ("work_queue.rs", "WorkQueueRpcHandler", 10),
     ];
     let src = package("tddy-daemon-rpc").join("src");
 
