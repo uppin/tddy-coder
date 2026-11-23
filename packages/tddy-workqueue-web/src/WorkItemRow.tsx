@@ -1,12 +1,12 @@
 import React from "react";
 import { PropagateControl } from "./landPropagate";
-import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, TriangleAlert } from "lucide-react";
 import { Button } from "tddy-ui-web";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 import type { StackChildSession } from "./workItemSessions";
-import { WorkItemChainHealthChips } from "./WorkItemChainHealth";
+import { WorkItemBehindBadge } from "./WorkItemChainHealth";
 import { WorkItemCommitCounts } from "./workItemCommitCounts";
 import { WorkItemRowBadges } from "./WorkItemRowBadges";
 import { WorkItemRowDetails } from "./WorkItemRowDetails";
@@ -227,8 +227,9 @@ export function WorkItemRow({
   return (
     <div
       data-testid={`work-item-row-${node.itemId}`}
-      className="flex flex-col gap-1 rounded-md border border-border px-3 py-2"
+      className="relative flex flex-col gap-1 rounded-md border border-border px-3 py-2"
     >
+      <WorkItemBehindBadge itemId={node.itemId} />
       <div className="flex items-center justify-between gap-3">
         {dragHandle}
         <button
@@ -256,7 +257,6 @@ export function WorkItemRow({
           baseSync={baseSync}
         />
         <WorkItemCommitCounts itemId={node.itemId} />
-        <WorkItemChainHealthChips itemId={node.itemId} />
         {node.branch && <PropagateControl itemId={node.itemId} />}
         {canRepoint && (
           <Button
@@ -306,16 +306,18 @@ export function WorkItemRow({
           // disables it: that is this row's own in-flight state, not a verdict about the fleet.
           <Button
             data-testid={`work-item-start-session-${node.itemId}`}
-            size="sm"
+            size="icon-sm"
             variant={isBlocked ? "warning" : "default"}
             disabled={starting}
-            title={blockerSummary || undefined}
+            aria-label="Start session"
+            title={blockerSummary || "Start session"}
             onClick={() => onStartSession(node)}
           >
-            {isBlocked && (
+            {isBlocked ? (
               <TriangleAlert data-testid={`work-item-start-session-blocked-icon-${node.itemId}`} />
+            ) : (
+              <Play />
             )}
-            Start session
           </Button>
         )}
       </div>

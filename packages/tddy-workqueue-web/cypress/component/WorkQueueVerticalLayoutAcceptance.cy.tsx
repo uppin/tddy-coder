@@ -179,3 +179,13 @@ it("a free task can be dragged between stack items and the move is persisted as 
     expect(calls[0].stack).to.include(ADDRESS);
   });
 });
+
+it("a task's start control is an icon, so the box stays narrow", () => {
+  // When
+  theQueue();
+
+  // Then
+  cy.get('[data-testid="work-item-start-session-n3"]').should("have.attr", "aria-label", "Start session").and(($b) => {
+    expect($b[0].getBoundingClientRect().width).to.be.at.most(40);
+  });
+});

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react";
-import { WorkItemChainHealthContext, WorkItemList } from "tddy-workqueue-web";
+import { WorkItemChainHealthContext, WorkItemLinkControls, WorkItemLinksContext, WorkItemList } from "tddy-workqueue-web";
+import type { WorkItemLinks } from "tddy-workqueue-web";
 import type { WorkItem } from "tddy-workqueue-web";
 
 /**
@@ -110,9 +111,10 @@ const LINEAGE_HEALTH = new Map([
 ]);
 
 /**
- * Lineage states: solid brackets for PR-stack line edges (l1 → l2 → l3 → l4), a dashed bracket for a
- * stored dependency (l1 → l6), the linearity chip per task (linear, behind, conflicting, unknown), a
- * leak chip naming the ancestors commits leaked from, and a free task with no lineage at all.
+ * Lineage states, drawn on the lines: solid brackets for PR-stack line edges (l1 → l2 → l3 → l4) each
+ * carrying a linearity icon (linear, behind, conflicting) and a leak icon naming the ancestors commits
+ * leaked from, a dashed bracket for a stored dependency (l1 → l6), a round corner badge on a box
+ * for the commits it is behind, and a free task with no lineage at all.
  */
 export const LineageStates: Story = {
   render: () => (
@@ -134,6 +136,59 @@ export const LineageStates: Story = {
   decorators: [
     (Story) => (
       <div style={{ width: 640 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+const pr = (number: number, headBranch: string) => ({ number, url: `https://github.com/acme/app/pull/${number}`, headBranch });
+const run = (name: string, status: string, conclusion: string) =>
+  ({ name, status, conclusion, startedAt: "", completedAt: "", detailsUrl: "" }) as never;
+
+const PR_NODES: WorkItem[] = [
+  item("p1", "Checks running", { branch: "feat/running", pr: pr(101, "feat/running") }),
+  item("p2", "Checks failed", { branch: "feat/failed", pr: pr(102, "feat/failed") }),
+  item("p3", "Checks completed", { branch: "feat/done", pr: pr(103, "feat/done") }),
+];
+
+const noop = () => undefined;
+const PR_LINKS: WorkItemLinks = {
+  sessions: [],
+  errorByItemId: {},
+  onAssignPr: noop,
+  onUnassignPr: noop,
+  onLinkSession: noop,
+  onUnlinkSession: noop,
+  onSetLabels: noop,
+  onClearBadge: noop,
+  checksByItemId: {
+    p1: { running: 2, failed: 0, succeeded: 3, runs: [run("Rust tests", "in_progress", ""), run("Web build", "completed", "success"), run("Lint", "queued", "")] },
+    p2: { running: 0, failed: 2, succeeded: 4, runs: [run("Rust tests", "completed", "failure"), run("Web tests", "completed", "failure"), run("Lint", "completed", "success")] },
+    p3: { running: 0, failed: 0, succeeded: 6, runs: [run("Rust tests", "completed", "success"), run("Web tests", "completed", "success")] },
+  },
+};
+
+/**
+ * PR data on work items: each task's PR and its checks — running, failed and completed — as the
+ * queue's status stream reports them. "Show checks" expands each run.
+ */
+export const PullRequestChecks: Story = {
+  render: () => (
+    <WorkItemLinksContext.Provider value={PR_LINKS}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 12 }}>
+        {PR_NODES.map((node) => (
+          <div key={node.itemId} className="rounded-md border border-border px-3 py-2">
+            <p className="text-sm font-medium">{node.title}</p>
+            <WorkItemLinkControls node={node} />
+          </div>
+        ))}
+      </div>
+    </WorkItemLinksContext.Provider>
+  ),
+  decorators: [
+    (Story) => (
+      <div style={{ width: 480 }}>
         <Story />
       </div>
     ),

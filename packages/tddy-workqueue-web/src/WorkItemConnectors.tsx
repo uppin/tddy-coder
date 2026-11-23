@@ -1,4 +1,5 @@
-import React, { useLayoutEffect, useState } from "react";
+import React, { useContext, useLayoutEffect, useState } from "react";
+import { WorkItemChainHealth, WorkItemChainHealthContext } from "./WorkItemChainHealth";
 
 /** Width of the right gutter the brackets are drawn in; the list reserves it as padding. */
 export const CONNECTOR_GUTTER = 36;
@@ -92,11 +93,12 @@ export function WorkItemConnectors({
   }, [container, edges, layoutKey]);
 
   const lanes = lanesOf(edges, boxes);
+  const health = useContext(WorkItemChainHealthContext);
   return (
+    <div data-testid="work-item-connectors" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
     <svg
       aria-hidden="true"
-      data-testid="work-item-connectors"
-      style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", pointerEvents: "none", overflow: "visible" }}
+      style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", overflow: "visible" }}
     >
       {edges.map((edge, i) => {
         const a = boxes[edge.from];
@@ -123,5 +125,23 @@ export function WorkItemConnectors({
         );
       })}
     </svg>
+    {edges.map((edge, i) => {
+      // Lineage health belongs to the line into the child: its icons sit on that bracket.
+      const reading = edge.kind === "line" ? health.get(edge.to) : undefined;
+      const a = boxes[edge.from];
+      const b = boxes[edge.to];
+      if (!reading?.line || !a || !b) return null;
+      const xg = Math.max(a.right, b.right) + 10 + lanes[i] * 8;
+      const y = (a.top + a.height / 2 + b.top + b.height / 2) / 2;
+      return (
+        <div
+          key={`health-${edge.from}-${edge.to}`}
+          style={{ position: "absolute", left: xg, top: y, transform: "translate(-50%, -50%)", display: "flex", flexDirection: "column", gap: 2, pointerEvents: "auto" }}
+        >
+          <WorkItemChainHealth itemId={edge.to} leaks={reading.leaks} line={reading.line} />
+        </div>
+      );
+    })}
+    </div>
   );
 }
