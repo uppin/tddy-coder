@@ -246,7 +246,10 @@ it("expands only the row whose header was clicked", () => {
 
 it("keeps a row expanded when its branch resolution changes on the poll interval", () => {
   // Given — the worktree only appears on the second poll, so the row genuinely re-renders
-  cy.clock();
+  // Only the poll's interval is faked: the queue opens in its session's inspector, whose terminal
+  // (xterm) schedules idle work through requestIdleCallback, and a faked one is called without
+  // the deadline xterm reads (`timeRemaining`).
+  cy.clock(Date.now(), ["setInterval", "clearInterval"]);
   let pollCount = 0;
   const backend = aSessionsDrawerBackend([
     anOrchestratorSession(aWorkQueueJson(1, aTwoNodeStack())),
