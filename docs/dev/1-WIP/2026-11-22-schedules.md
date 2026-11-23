@@ -7,12 +7,6 @@
 **Stack**: `#workqueue` 13/14 — branch `feature/workqueue/schedules`, base `feature/workqueue/leak-linearity`
 **PR**: [#1014](https://github.com/uppin/tddy-coder/pull/1014)
 
-## Stack note (temporary)
-
-This branch is rebased onto n11's head (`feature/workqueue/commit-inbox-outbox`, dcb2f3c55: n11 on n10 on
-n9), not onto n12 — n12's implementation is still in progress. n13's real dependencies are n10 (waves) and
-n11 (commit inbox). **Rebase onto n12 before n13's [W].** Remove this note then.
-
 ## Initial Discovery
 
 [2026-11-22-schedules-initial-discovery.md](./2026-11-22-schedules-initial-discovery.md)
