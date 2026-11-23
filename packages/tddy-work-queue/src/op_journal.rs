@@ -1,6 +1,5 @@
-//! Crash-safe journal for in-flight merge+repoint operations.
-
-use std::path::Path;
+//! The journal the daemon writes beside a queue before each destructive step of a land
+//! (`tddy-daemon-rpc` `git_work::land_ops`), so an interrupted merge is visible on disk.
 
 /// Phase of the merge+repoint atomic operation for one node.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -20,57 +19,6 @@ pub struct WorkQueueOpJournal {
     pub dependents: Vec<String>,
 }
 
-const JOURNAL_SUBDIR: &str = ".workflow";
-const JOURNAL_FILENAME: &str = "stack-op.json";
-
-fn journal_path(parent_dir: &Path) -> std::path::PathBuf {
-    parent_dir.join(JOURNAL_SUBDIR).join(JOURNAL_FILENAME)
-}
-
-/// Write a journal to `parent_dir/.workflow/stack-op.json` atomically (temp + rename).
-pub fn write_stack_op_journal(
-    parent_dir: &Path,
-    journal: &WorkQueueOpJournal,
-) -> Result<(), tddy_core::WorkflowError> {
-    let dir = parent_dir.join(JOURNAL_SUBDIR);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| tddy_core::WorkflowError::WriteFailed(e.to_string()))?;
-    let content = serde_json::to_string_pretty(journal)
-        .map_err(|e| tddy_core::WorkflowError::WriteFailed(e.to_string()))?;
-    tddy_core::atomic_file::write_atomic_labelled(&journal_path(parent_dir), content)
-        .map_err(tddy_core::WorkflowError::WriteFailed)?;
-    Ok(())
-}
-
-/// Read the in-flight journal from `parent_dir/.workflow/stack-op.json` (if present).
-/// Returns `Ok(None)` when no journal exists or when phase is `Done`.
-/// A journal at `PrMerged` is returned as it is: the dependents it lists still have to be propagated.
-pub fn recover_in_flight_stack_op(
-    parent_dir: &Path,
-) -> Result<Option<WorkQueueOpJournal>, tddy_core::WorkflowError> {
-    let path = journal_path(parent_dir);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| tddy_core::WorkflowError::ChangesetInvalid(e.to_string()))?;
-    let journal: WorkQueueOpJournal = serde_json::from_str(&content)
-        .map_err(|e| tddy_core::WorkflowError::ChangesetInvalid(e.to_string()))?;
-    match &journal.merge_phase {
-        MergePhase::Done => Ok(None),
-        _ => Ok(Some(journal)),
-    }
-}
-
-/// Delete the journal file (call after a successful complete operation).
-pub fn delete_stack_op_journal(parent_dir: &Path) -> Result<(), std::io::Error> {
-    let path = parent_dir.join(".workflow").join("stack-op.json");
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,61 +31,5 @@ mod tests {
         let json = serde_json::to_string(&phase).expect("MergePhase should serialize");
         let back: MergePhase = serde_json::from_str(&json).expect("MergePhase should deserialize");
         assert_eq!(back, phase);
-    }
-
-    #[test]
-    fn write_stack_op_journal_creates_file() {
-        let tmp = tempfile::tempdir().unwrap();
-        let journal = WorkQueueOpJournal {
-            op_id: "op-1".to_string(),
-            merged_node_id: "n1".to_string(),
-            merge_phase: MergePhase::Planned,
-            dependents: vec![],
-        };
-        write_stack_op_journal(tmp.path(), &journal).unwrap();
-        assert!(tmp.path().join(".workflow").join("stack-op.json").exists());
-    }
-
-    #[test]
-    fn recover_in_flight_stack_op_returns_none_when_no_journal() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = recover_in_flight_stack_op(tmp.path()).unwrap();
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn recover_in_flight_stack_op_returns_a_merged_journal_as_it_is() {
-        let tmp = tempfile::tempdir().unwrap();
-        let journal = WorkQueueOpJournal {
-            op_id: "op-1".to_string(),
-            merged_node_id: "n1".to_string(),
-            merge_phase: MergePhase::PrMerged {
-                sha: "abc".to_string(),
-            },
-            dependents: vec!["n2".to_string()],
-        };
-        write_stack_op_journal(tmp.path(), &journal).unwrap();
-        let recovered = recover_in_flight_stack_op(tmp.path()).unwrap().unwrap();
-        assert_eq!(recovered.merged_node_id, "n1");
-        assert_eq!(
-            recovered.merge_phase,
-            MergePhase::PrMerged {
-                sha: "abc".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn recover_in_flight_stack_op_returns_none_when_done() {
-        let tmp = tempfile::tempdir().unwrap();
-        let journal = WorkQueueOpJournal {
-            op_id: "op-1".to_string(),
-            merged_node_id: "n1".to_string(),
-            merge_phase: MergePhase::Done,
-            dependents: vec![],
-        };
-        write_stack_op_journal(tmp.path(), &journal).unwrap();
-        let result = recover_in_flight_stack_op(tmp.path()).unwrap();
-        assert!(result.is_none());
     }
 }

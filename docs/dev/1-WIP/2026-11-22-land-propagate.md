@@ -137,7 +137,7 @@ The fold-in shrinks them; new code goes in the engine modules.
 - [x] Land engine (wave order, propagate successors, verify, stop at first failure)
 - [x] Schedule runner (exactly once)
 - [x] Two tools + RPCs + web actions; merge/repoint folded in
-- [ ] Activities for landings, propagations, refusals, firings — **blocked on n8** (`WorkQueueChange` is not on this lineage; see the stack note)
+- [x] Activities for landings, propagations, refusals, firings (`WorkQueueChange::{Landed, Propagated, Refused, ScheduleFired}`)
 - [x] Old merge/repoint paths deleted
 - [ ] Docs updated through the wrap
 
@@ -220,11 +220,35 @@ Activities on landings and refusals reaching the owner need n8's publisher; `/gr
 - The direct tools (`work_item_merge`, `work_item_repoint`, `work_item_propagate`) are explicit acts and
   do not evaluate n13's schedule conditions; `work_queue_land` and every firing schedule do.
 - **Daemon driver**: one watcher per queue with schedules, subscribed to the GitHub inbox's PR, checks,
-  comment and push events (no polling); arming or disarming evaluates at once. It carries the
-  credentials of whoever armed and does not survive a daemon restart (re-armed by the next arming or by
-  an open queue status stream). A firing's refusal is logged; surfacing it as `Refused` waits for n8.
+  comment and push events (no polling); arming or disarming evaluates at once. It acts as an `Armer`:
+  on a daemon that signs tokens, the arming user's verified login, for which a fresh short-lived access
+  token is signed at every use (the arming call's own token lapses after minutes) and whose vault is
+  reached by subject; otherwise the caller's token. **At startup** `reattach_armed_schedules`
+  (`tddy-daemon` mount wiring) starts a watcher on every queue with schedules, as the GitHub user
+  `users[]` maps the schedule's `armed_by` OS user to — an identity from config, never one read from the
+  queue file; an unmapped arming user's queue is left unwatched.
+- **Activities** (`#workqueue` 8/14's kind): each landing, each propagation between landings, every
+  refusal (land or propagate) and every schedule firing is published to the queue's owner as
+  `WorkQueueChange::{Landed, Propagated, Refused, ScheduleFired}`, by `Actor::{User, Agent, Schedule}`;
+  the owner's own agent's acts are recorded without waking it.
 - `RepointWorkItem` (the web's plan-level repoint RPC) still runs `item_ops::repoint_work_item`; only the
-  tools were folded onto the engine. The 1/14 TODO named in the brief is not in this tree.
+  tools were folded onto the engine.
+- **Resolves `docs/dev/todo/2026-11-22-stack-helpers-with-no-production-caller.md`** (n1's wrap; it
+  reaches this lineage only when the fix stages rebase up the chain, so n14's **[F] deletes the file**
+  once its rebase brings it in):
+  - now called through the engines: merge and repoint run as `land` / `propagate`
+    (`tddy_work_queue::engine`) from `work_item_merge`, `work_item_repoint`, `work_item_propagate`,
+    `work_queue_land`, `PropagateWorkItem`, `LandWorkQueue` and every firing schedule;
+    `WorkQueueOpJournal` / `MergePhase` are written by the daemon's land (`git_work::land_ops`);
+  - deleted: `execute_stack_merge` / `execute_stack_repoint` (`merge_repoint.rs`) with
+    `orchestrate_pr_stack_merge_repoint_acceptance.rs`; `recover_in_flight_stack_op`,
+    `write_stack_op_journal`, `delete_stack_op_journal` with `orchestrate_pr_stack_resume_acceptance.rs`;
+    `decide_next_action`, `OrchestratorAction` and `AssessTask` with
+    `orchestrate_pr_stack_loop_acceptance.rs` and their unit tests;
+  - still without a production caller, out of n14's scope (the per-PR documents feature):
+    `tddy_work_queue::docs::{write_stack_docs, validate_stack_docs}` — `docs.rs`'s types stay live through
+    `tddy_session_files::stack_doc_attachments`, which the split session's attached prompt reaches. The
+    [F] should narrow the file to this row rather than delete it if the docs writer still has no caller.
 
 ## Refactoring Needed
 
