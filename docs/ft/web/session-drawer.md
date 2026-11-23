@@ -128,7 +128,7 @@ decided by role, never by name: an orchestrator named "home" keeps the dot.
 
 ### Stacks box
 
-Stacks are not listed inside project groups. One **Stacks** box (`sessions-drawer-stacks-box`, `SessionDrawerStacksBox` in `packages/tddy-session-web/src/ProjectWorkQueuesRow.tsx`) sits directly above the Select bar, showing the total; it is absent when no project has a stack. Clicking it opens a panel **upward** over the list (`sessions-drawer-stacks-panel`) with one section per project (`sessions-drawer-project-queues-<projectId>`, headed by the project's name) listing the project's work queues from `ListProjectWorkQueues` — one entry per queue, that is one per session that owns a queue (`sessions-drawer-project-queue-<queueId>`, where the queue id is the owning session's id), across hosts. An entry is named by the queue's title, else by the owning session's drawer label, and only as a last resort by the raw queue id. A project whose listing did not answer shows no section. Selecting a queue selects its **owning session** and opens that session's inspector on the [Work queue tab](#work-queue-tab) (`#/sessions/<sessionId>?inspector=work-queue`). See [PR stacking § Opening a session's work queue](../coder/pr-stacking.md#opening-a-sessions-work-queue).
+Stacks are not listed inside project groups. One **Stacks** box (`sessions-drawer-stacks-box`, `SessionDrawerStacksBox` in `packages/tddy-session-web/src/ProjectWorkQueuesRow.tsx`) sits directly above the Select bar, showing the total; it is absent when no project has a stack. Clicking it opens a panel **upward** over the list (`sessions-drawer-stacks-panel`) with one section per project (`sessions-drawer-project-queues-<projectId>`, headed by the project's name) listing the project's work queues from `ListProjectWorkQueues` — one entry per queue, that is one per session that owns a queue (`sessions-drawer-project-queue-<queueId>`, where the queue id is the owning session's id), across hosts. An entry is named by the queue's title, else by the owning session's drawer label, and only as a last resort by the raw queue id. A project whose listing did not answer shows no section. Selecting a queue selects its **owning session** and opens on that session's [work queue sidebar](#work-queue-sidebar) (`#/sessions/<sessionId>`). See [PR stacking § Opening a session's work queue](../coder/pr-stacking.md#opening-a-sessions-work-queue).
 
 ### Orchestrator composer
 
@@ -586,26 +586,31 @@ Two of the strip's tabs are described here:
 - **Details** — the metadata + controls section described above.
 - **Tools** — per-session tool-call log and an inline invoke panel.
 
-With no tab named in the URL, opening the inspector lands on **Work queue** when the session owns a
-work queue (`SessionEntry.owns_work_queue`), else on **PR** when the session's branch has a pull
-request (`SessionEntry.pr_number`), otherwise on **Worktree**. A tab the URL names always wins.
+With no tab named in the URL, opening the inspector lands on **PR** when the session's branch has a
+pull request (`SessionEntry.pr_number`), otherwise on **Worktree**. A tab the URL names always wins.
 See [session-pr-inspector.md § Default tab](session-pr-inspector.md#default-tab) and
 [session-worktree-inspector.md](session-worktree-inspector.md).
 
 The rest of the strip is listed under the `inspector` param in
 [url-state-routing.md](url-state-routing.md#params).
 
-### Work queue tab
+### Work queue sidebar
 
-A session that **owns a work queue** (`SessionEntry.owns_work_queue`) has a **Work queue** tab
-(`sessions-inspector-tab-work-queue`), and the inspector opens on it. A session that owns none has no
-such tab, and `?inspector=work-queue` on it degrades to Details. The tab (`SessionWorkQueueTab` in
-`packages/tddy-session-web/src/`) shows the session's own queue in `WorkQueueView`
-(`tddy-workqueue-web`), addressed `{ project_id, queue_id: <the session's id>, daemon_instance_id }`
-on the daemon that holds the session. The user adds, edits, reorders and removes work items there and
-starts a session on one through the view's Start-session dialog, which the tab offers when the drawer
-hands it the project, catalog and task clients. A queue exists only because its session was started
-with one — the view has no "New stack" action. See
+A session that **owns a work queue** (`SessionEntry.owns_work_queue`) shows it as a **right sidebar**
+(`work-queue-sidebar`, toggle `work-queue-button`), not an inspector tab — `work-queue` is no longer an
+`inspector` value, and `?inspector=work-queue` degrades to Details. The sidebar shares the Agent
+Activity sidebar's slot (`SessionWithActivitySidebar`): opening one closes the other, and a session
+that owns a queue opens on it. It shows the session's own queue in `WorkQueueView` (`tddy-workqueue-web`),
+addressed `{ project_id, queue_id: <the session's id>, daemon_instance_id }` on the daemon that holds
+the session (`SessionWorkQueueTab` builds the panel in `SessionMainPane`).
+
+Tasks stack top-to-bottom, one box per row with a small gap. Where `GetWorkQueueGraph` reports a PR-stack
+line edge between two tasks, a bracket joins the right sides of their boxes
+(`work-item-connector-<parent>-<child>`; stored dependencies are dashed). Each task has a drag handle at
+its left edge: disabled, with a tooltip, for a task bound to a PR stack (it has a branch or PR, or sits
+on a line edge); a free task can be dragged, including between stack items, and a drop persists as
+`ReorderWorkItem` steps. The user adds, edits and removes work items and starts a session on one through
+the view's Start-session dialog. A queue exists only because its session was started with one. See
 [PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives).
 
 ### Media tabs are offered only where the wire carries video

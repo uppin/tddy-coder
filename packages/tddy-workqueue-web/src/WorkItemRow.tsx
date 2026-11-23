@@ -1,13 +1,14 @@
 import React from "react";
 import { PropagateControl } from "./landPropagate";
-import { ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronRight, MonitorPlay, Play, TriangleAlert } from "lucide-react";
 import { Button } from "tddy-ui-web";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 import type { StackChildSession } from "./workItemSessions";
-import { WorkItemChainHealthChips } from "./WorkItemChainHealth";
+import { WorkItemBehindBadge } from "./WorkItemChainHealth";
 import { WorkItemCommitCounts } from "./workItemCommitCounts";
+import { WorkItemPrBadge } from "./WorkItemPrBadge";
 import { WorkItemRowBadges } from "./WorkItemRowBadges";
 import { WorkItemRowDetails } from "./WorkItemRowDetails";
 import type { StartBlocker } from "./startBlockers";
@@ -132,6 +133,10 @@ export interface WorkItemRowProps {
    * child it no longer has, with no control left to start a new one.
    */
   identityChildSession?: StackChildSession;
+  /** The drag handle at the row's left edge, rendered by the list that owns the drag. */
+  dragHandle?: React.ReactNode;
+  /** The activity indicator of the attached session, shown in place of Start (the drawer's dot). */
+  sessionIndicator?: React.ReactNode;
 }
 
 /**
@@ -179,9 +184,13 @@ export function WorkItemRow({
   workItem,
   childSession,
   identityChildSession,
+  dragHandle,
+  sessionIndicator,
 }: WorkItemRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
+  // The PR the row states: the one found for its branch, else for its planned name.
+  const foundPr = resolution?.pr?.exists ? resolution.pr : workItem?.exists ? workItem : undefined;
   const isSpawned = Boolean(node.sessionId) && !isNodeOrphaned(node, resolution, identityChildSession);
   // A session is in progress when any source says so: `QueryBranch` resolves it server-side by branch
   // on one host, `inProgress` comes from the session list the caller already holds, and
@@ -212,21 +221,36 @@ export function WorkItemRow({
   // than leaving a screen reader to infer the relationship from document order.
   const detailsId = `work-item-details-${node.itemId}`;
 
+  // The attached session in the Start control's own box, the activity dot where Play's arrow was; the
+  // phase is its tooltip and its accessible text.
+  const phaseText = node.prStatus?.phase || node.childState || "spawned";
+  const inProgressMarker = inProgressEffective ? (
+    <span data-testid={`work-item-in-progress-${node.itemId}`} className="sr-only">
+      in progress
+    </span>
+  ) : null;
   const statusChip = (
     <span
       data-testid={`work-item-status-chip-${node.itemId}`}
-      className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+      data-active={inProgressEffective || undefined}
+      title={`Session attached — ${phaseText}`}
+      className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border bg-background hover:bg-muted ${
+        sessionIndicator ? "" : inProgressEffective ? "text-green-700 dark:text-green-300" : "text-muted-foreground"
+      }`}
     >
-      {node.prStatus?.phase || node.childState || "spawned"}
+      {sessionIndicator ?? <MonitorPlay className="h-4 w-4" />}
+      <span className="sr-only">{phaseText}</span>
     </span>
   );
 
   return (
     <div
       data-testid={`work-item-row-${node.itemId}`}
-      className="flex flex-col gap-1 rounded-md border border-border px-3 py-2"
+      className="relative flex flex-col gap-1 rounded-md border border-border px-3 py-2"
     >
+      <WorkItemBehindBadge itemId={node.itemId} />
       <div className="flex items-center justify-between gap-3">
+        {dragHandle}
         <button
           type="button"
           data-testid={`work-item-toggle-${node.itemId}`}
@@ -252,7 +276,6 @@ export function WorkItemRow({
           baseSync={baseSync}
         />
         <WorkItemCommitCounts itemId={node.itemId} />
-        <WorkItemChainHealthChips itemId={node.itemId} />
         {node.branch && <PropagateControl itemId={node.itemId} />}
         {canRepoint && (
           <Button
@@ -268,6 +291,11 @@ export function WorkItemRow({
             {repointTarget ? `Repoint to ${repointTarget}` : "Repoint to default branch"}
           </Button>
         )}
+        {inProgressMarker}
+        <WorkItemPrBadge
+          node={node}
+          pr={foundPr ? { number: foundPr.number, url: foundPr.url, state: foundPr.state } : undefined}
+        />
         {/* One CTA slot, two occupants: the live child's status chip, or the Start-session button —
             marked when blocked rather than replaced or disabled, since it is the control that
             recovers a node the blockers may only *believe* is unstartable. */}
@@ -302,16 +330,18 @@ export function WorkItemRow({
           // disables it: that is this row's own in-flight state, not a verdict about the fleet.
           <Button
             data-testid={`work-item-start-session-${node.itemId}`}
-            size="sm"
+            size="icon-sm"
             variant={isBlocked ? "warning" : "default"}
             disabled={starting}
-            title={blockerSummary || undefined}
+            aria-label="Start session"
+            title={blockerSummary || "Start session"}
             onClick={() => onStartSession(node)}
           >
-            {isBlocked && (
+            {isBlocked ? (
               <TriangleAlert data-testid={`work-item-start-session-blocked-icon-${node.itemId}`} />
+            ) : (
+              <Play />
             )}
-            Start session
           </Button>
         )}
       </div>

@@ -75,3 +75,6 @@ export * from "./SessionHostStatsFooter";
 export * from "./UploadProgressIndicator";
 export * from "./useLiveKitTerminalToken";
 export * from "./SessionWorkflowStatusCells";
+export { SessionIndicatorDot } from "./SessionIndicatorDot";
+export { sessionNotificationRegistry } from "./lib/sessionNotificationRegistry";
+export { SESSION_INDICATOR_DOT_STYLES } from "./sessionIndicatorDotStyles";

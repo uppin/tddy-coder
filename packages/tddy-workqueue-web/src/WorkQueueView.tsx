@@ -9,7 +9,7 @@ import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
 import { Button } from "tddy-ui-web";
 import { WorkItemList } from "./WorkItemList";
-import { WorkQueueGraphPanel } from "./WorkQueueGraphPanel";
+import { connectorEdgesOf, useWorkQueueGraph } from "./useWorkQueueGraph";
 import { SchedulesPanel, type ScheduleViewModel } from "./SchedulesPanel";
 import { AddWorkItemForm, type AddWorkItemFormSubmission } from "./AddWorkItemForm";
 import { parseWorkQueue, type WorkItem } from "./workQueue";
@@ -68,6 +68,8 @@ export interface WorkQueueViewProps {
   sessionFilesClient?: Client<typeof SessionFilesService>;
   worktreeClient?: Client<typeof WorktreeService>;
   taskClient?: Client<typeof TaskService>;
+  /** The activity indicator an attached session's task shows in place of Start; the caller owns the session registry. */
+  renderSessionIndicator?: (sessionId: string) => React.ReactNode;
 }
 
 const NO_SESSION_METADATA: ReadonlyMap<string, StackChildMetadata> = new Map();
@@ -98,9 +100,8 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     sessionFilesClient,
     worktreeClient,
     taskClient,
+    renderSessionIndicator,
   } = props;
-
-
   const [workQueueJson, setWorkQueueJson] = useState("");
   const [createdBySessionId, setCreatedBySessionId] = useState("");
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
@@ -123,9 +124,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         setWorkQueueJson(res.workQueueJson);
         setCreatedBySessionId(res.summary?.createdBySessionId ?? "");
       })
-      .catch(() => {
-        // Keep what is shown; a failed read must not blank a plan already loaded.
-      });
+      .catch(() => undefined); // keep what is shown: a failed read must not blank a plan already loaded
     return () => {
       cancelled = true;
     };
@@ -222,9 +221,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     workQueueClient
       ?.getWorkQueue({ sessionToken, stack: address })
       .then((res) => setWorkQueueJson(res.workQueueJson))
-      .catch(() => {
-        // Keep what is shown; the next status update brings the change.
-      });
+      .catch(() => undefined); // keep what is shown; the next status update brings the change
   });
   // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
   const workItemLinks = useWorkItemLinksState({
@@ -237,6 +234,11 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     onSchedules: setSchedules,
     onWaveCount: setWaveCount,
   });
+
+  // The brackets between linked tasks: PR-stack line edges between two tasks of the queue, and
+  // stored dependencies. Nothing is drawn until the daemon answers — never a guess.
+  const graph = useWorkQueueGraph(workQueueClient, sessionToken, address, workQueueJson);
+  const connectors = useMemo(() => connectorEdgesOf(graph), [graph]);
 
   const handleReorder = async (itemId: string, direction: "up" | "down") => {
     if (!workQueueClient) return;
@@ -255,6 +257,13 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       setReorderErrorByNodeId((errors) => ({ ...errors, [itemId]: failureReason(err) }));
     } finally {
       setReorderingNodeIds((prev) => withoutNodeInFlight(prev, itemId));
+    }
+  };
+
+  // A drop `delta` rows away is that many one-step `ReorderWorkItem`s: the same `display_order` the arrows write.
+  const handleMove = async (itemId: string, delta: number) => {
+    for (let step = 0; step < Math.abs(delta); step += 1) {
+      await handleReorder(itemId, delta < 0 ? "up" : "down");
     }
   };
 
@@ -448,6 +457,9 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         childSessions={childSessions}
         orchestratorSessionId={createdBySessionId}
         branchQueries={branchQueries}
+        connectors={connectors}
+        renderSessionIndicator={renderSessionIndicator}
+        onMove={labelFilter ? undefined : handleMove}
       />
       </LandPropagateContext.Provider>
       </WorkItemChainHealthContext.Provider>
@@ -457,13 +469,11 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         <LandWaves waveCount={waveCount} onLand={landPropagate.land} results={landPropagate.results} />
       )}
       {schedules.length > 0 && <SchedulesPanel schedules={schedules} />}
-      <WorkQueueGraphPanel
-        workQueueClient={workQueueClient}
-        sessionToken={sessionToken}
-        address={address}
-        items={nodes.map((node) => ({ itemId: node.itemId, title: node.title }))}
-        refreshKey={workQueueJson}
-      />
+      {graph?.unavailableReason && (
+        <p data-testid="work-queue-graph-unavailable" className="flex-shrink-0 px-3 pb-2 text-xs text-muted-foreground">
+          Pull request bases could not be read ({graph.unavailableReason}); showing planned bases.
+        </p>
+      )}
       <DirtyWorktreeDialog
         prompt={dirtyWorktreePrompt}
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}

@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import { CONNECTOR_GUTTER, WorkItemConnectors, type ConnectorEdge } from "./WorkItemConnectors";
+import { WorkItemDragHandle } from "./WorkItemDragHandle";
+import { useItemDrag } from "./useItemDrag";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import { resolveNodeSession } from "./resolveNodeSession";
@@ -76,6 +79,18 @@ export interface WorkItemListProps {
    * PR as its own.
    */
   branchQueries?: BranchQuery[];
+  /**
+   * Brackets drawn on the right gutter between linked tasks — PR-stack line edges (`kind: "line"`,
+   * a child's PR base is the parent's branch) and stored dependencies (`kind: "dependency"`).
+   */
+  connectors?: ConnectorEdge[];
+  /**
+   * Move a **free** task (no branch or PR, on no line) by `delta` rows — negative is up. Absent: no
+   * task can be dragged. A task bound to a PR stack never calls it; its handle is disabled.
+   */
+  onMove?: (itemId: string, delta: number) => void;
+  /** The activity indicator for an attached session (the drawer's dot); absent: a plain session icon. */
+  renderSessionIndicator?: (sessionId: string) => React.ReactNode;
 }
 
 /**
@@ -103,12 +118,26 @@ export function WorkItemList({
   childSessions = [],
   orchestratorSessionId = "",
   branchQueries = [],
+  connectors = [],
+  onMove,
+  renderSessionIndicator,
 }: WorkItemListProps) {
   const ordered = orderWorkItems(nodes);
   // The names the poll asked about as planned rather than owned — the discriminator a row's
   // `workItem` is gated on.
   const plannedNames = plannedNameBranches(branchQueries);
   const nodeById = new Map(nodes.map((n) => [n.itemId, n]));
+  const [inner, setInner] = useState<HTMLDivElement | null>(null);
+  const { drag, start: startDrag } = useItemDrag(
+    inner,
+    ordered.map((n) => n.itemId),
+    (itemId, delta) => onMove?.(itemId, delta),
+  );
+  // A task on a line (either end of a line edge) belongs to its PR stack, as does one with a branch
+  // or a PR: only a task with none of these is free to move.
+  const onLine = new Set(connectors.filter((c) => c.kind === "line").flatMap((c) => [c.from, c.to]));
+  const isBound = (node: WorkItem) =>
+    Boolean(node.branch) || Boolean(node.pr) || Boolean(node.prStatus?.url) || onLine.has(node.itemId);
   const [expandedNodeIds, setExpandedNodeIds] = useState<ReadonlySet<string>>(new Set());
 
   const toggleExpanded = (itemId: string) => {
@@ -124,7 +153,13 @@ export function WorkItemList({
   };
 
   return (
-    <div data-testid="work-item-list" className="flex flex-col gap-2 overflow-y-auto p-3">
+    <div data-testid="work-item-list" className="overflow-y-auto p-3">
+    <div
+      ref={setInner}
+      data-testid="work-item-stack"
+      className="relative flex flex-col gap-3"
+      style={{ paddingRight: CONNECTOR_GUTTER }}
+    >
       {ordered.length === 0 ? (
         <p className="text-sm text-muted-foreground">No planned PRs yet.</p>
       ) : (
@@ -224,10 +259,37 @@ export function WorkItemList({
               workItem={workItem}
               childSession={childSession}
               identityChildSession={identityChildSession}
+              sessionIndicator={(() => {
+                const sessionId = childSession?.sessionId || boundChildSession(node, resolution, sessions) || node.sessionId;
+                return sessionId ? renderSessionIndicator?.(sessionId) : undefined;
+              })()}
+              dragHandle={
+                <WorkItemDragHandle
+                  itemId={node.itemId}
+                  bound={isBound(node) || !onMove}
+                  dragging={drag?.itemId === node.itemId}
+                  onPointerDown={startDrag(node.itemId)}
+                />
+              }
             />
           );
         })
       )}
+      {drag && (
+        <div
+          data-testid="work-item-drop-indicator"
+          aria-hidden="true"
+          style={{ position: "absolute", left: 0, right: CONNECTOR_GUTTER, top: drag.indicatorY - 1, height: 3, borderRadius: 2, background: "var(--wq-graph-dependency, #2563eb)", pointerEvents: "none" }}
+        />
+      )}
+      {connectors.length > 0 && (
+        <WorkItemConnectors
+          container={inner}
+          edges={connectors}
+          layoutKey={ordered.map((n) => n.itemId).join(",") + [...expandedNodeIds].join(",")}
+        />
+      )}
+    </div>
     </div>
   );
 }

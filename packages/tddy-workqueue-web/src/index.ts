@@ -8,9 +8,8 @@ export { WorkItemLinkControls } from "./WorkItemLinkControls";
 export { WorkItemLinksContext, type WorkItemLinks, type LinkableSession, type ItemChecks } from "./workItemLinks";
 export { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
 export { WorkItemAnnotations, type WorkItemAnnotationsProps } from "./WorkItemAnnotations";
-export { WorkQueueGraph, type WorkQueueGraphProps, type GraphLineEndpoint } from "./WorkQueueGraph";
 export { WorkItemCommitCounts, WorkItemCommitCountsContext, type ItemCommitCounts } from "./workItemCommitCounts";
-export { WorkQueueGraphPanel, type WorkQueueGraphPanelProps } from "./WorkQueueGraphPanel";
+export { useWorkQueueGraph } from "./useWorkQueueGraph";
 export { WaveLanes, type WaveLanesProps } from "./WaveLanes";
 export {
   WorkItemChainHealth,
@@ -21,3 +20,5 @@ export {
 } from "./WorkItemChainHealth";
 export { SchedulesPanel, toScheduleViewModel, type ScheduleViewModel, type ScheduleConditionView } from "./SchedulesPanel";
 export { LandWaves, PropagationRefusal, type LandResultView } from "./LandAndPropagate";
+export type { WorkItem } from "./workQueue";
+export { WorkItemPrBadge, type PrBadgeSource } from "./WorkItemPrBadge";

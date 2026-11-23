@@ -296,8 +296,7 @@ The owner's tools `work_queue_set_dependencies { item_id, needs }` and `work_que
 `gh stack` extension, the graph also carries the checked-out branch's stack membership
 (`gh_stack_branches`, read from local tracking); without it nothing else is missing.
 
-The Work queue tab draws both under the item list (`WorkQueueGraph`): line edges solid along the branch
-chain, dependency edges dashed, an external base as an endpoint outside the queue. The graph is read when
+The work queue sidebar draws both as brackets on the right gutter of the task list (`WorkItemConnectors`): line edges solid between the boxes of two stacked tasks, dependency edges dashed; the trunk and an external base draw nothing. The graph is read when
 the view opens and after each queue edit; a retarget on GitHub shows on the next read
 (`docs/dev/todo/2026-11-23-work-queue-graph-is-not-live.md`).
 
@@ -318,7 +317,7 @@ From a queue's dependency edges tddy derives — and never stores — three thin
 
 `work_queue_waves` (owner tool) and `GetWorkQueueWaves` answer all four; `work_queue_status` and
 `StreamWorkQueueStatus` carry each item's `wave` (0 when the edges close a cycle) and `binding_needs`. The
-Work queue tab draws the items in wave lanes with their readiness text and a banner naming the first item
+work queue sidebar draws the items in wave lanes with their readiness text and a banner naming the first item
 out of place (`WaveLanes`). Nothing here reorders a branch or a PR.
 
 ### Commit inbox and outbox *(added 2026-11-23)*

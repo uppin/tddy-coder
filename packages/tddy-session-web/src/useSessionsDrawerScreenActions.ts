@@ -94,17 +94,14 @@ export function useSessionsDrawerScreenActions(input: {
     if (isMobile) setSessionListOpen(false);
     navigate(sessionsProjectNewPath(projectId));
   };
-  // A project's work queue opens in its owning session's inspector, on the Work queue tab: a queue's
-  // id is its session's (`#workqueue` 5/14).
+  // A project's work queue opens in its owning session, whose work queue sidebar it opens on: a
+  // queue's id is its session's (`#workqueue` 5/14).
   const handleOpenProjectStack = (summary: WorkQueueSummary) => {
     const owner = summary.address?.queueId;
     if (!owner) return;
     if (isMobile) setSessionListOpen(false);
     handleSelectSession(owner);
-    navigationPort.navigate({
-      path: sessionsDrawerPathForSession(owner),
-      params: { inspector: "work-queue" },
-    });
+    navigationPort.navigate({ path: sessionsDrawerPathForSession(owner), params: {} });
   };
   const handleCancelCreate = () => navigate(SESSIONS_DRAWER_ROUTE);
   const handleSessionCreated = (sessionId: string) => {

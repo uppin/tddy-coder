@@ -75,6 +75,8 @@ interface SessionIndicatorDotProps {
    * of the dot. It occupies the dot's width (negative margins), so row titles stay aligned.
    */
   shape?: "dot" | "home";
+  /** Overrides the default test id, where another dot for the same session is on screen. */
+  testId?: string;
 }
 
 /**
@@ -87,13 +89,14 @@ export function SessionIndicatorDot({
   session,
   sizeClassName = "h-2 w-2",
   shape = "dot",
+  testId,
 }: SessionIndicatorDotProps) {
   const status = useSessionIndicator(session);
 
   if (shape === "home") {
     return (
       <span
-        data-testid={`sessions-drawer-item-status-${session.sessionId}`}
+        data-testid={testId ?? `sessions-drawer-item-status-${session.sessionId}`}
         data-status={status}
         className={cn(
           "-mx-0.5 flex flex-shrink-0 items-center",
@@ -113,7 +116,7 @@ export function SessionIndicatorDot({
 
   return (
     <span
-      data-testid={`sessions-drawer-item-status-${session.sessionId}`}
+      data-testid={testId ?? `sessions-drawer-item-status-${session.sessionId}`}
       data-status={status}
       className={cn(
         "flex-shrink-0 rounded-full",
