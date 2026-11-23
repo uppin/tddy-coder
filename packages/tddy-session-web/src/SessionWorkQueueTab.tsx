@@ -67,7 +67,7 @@ export function SessionWorkQueueTab({
         return attached ? (
           <SessionIndicatorDot
             session={attached}
-            sizeClassName="h-7 w-7"
+            sizeClassName="h-3 w-3"
             testId={`work-item-session-indicator-${sessionId}`}
           />
         ) : null;

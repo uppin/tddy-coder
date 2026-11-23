@@ -221,8 +221,8 @@ export function WorkItemRow({
   // than leaving a screen reader to infer the relationship from document order.
   const detailsId = `work-item-details-${node.itemId}`;
 
-  // The attached session as an icon, green while it is working and grey otherwise; the phase is its
-  // tooltip and its accessible text.
+  // The attached session in the Start control's own box, the activity dot where Play's arrow was; the
+  // phase is its tooltip and its accessible text.
   const phaseText = node.prStatus?.phase || node.childState || "spawned";
   const inProgressMarker = inProgressEffective ? (
     <span data-testid={`work-item-in-progress-${node.itemId}`} className="sr-only">
@@ -234,12 +234,8 @@ export function WorkItemRow({
       data-testid={`work-item-status-chip-${node.itemId}`}
       data-active={inProgressEffective || undefined}
       title={`Session attached — ${phaseText}`}
-      className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-        sessionIndicator
-          ? ""
-          : inProgressEffective
-          ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
-          : "bg-muted text-muted-foreground"
+      className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border bg-background hover:bg-muted ${
+        sessionIndicator ? "" : inProgressEffective ? "text-green-700 dark:text-green-300" : "text-muted-foreground"
       }`}
     >
       {sessionIndicator ?? <MonitorPlay className="h-4 w-4" />}

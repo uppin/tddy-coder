@@ -221,7 +221,7 @@ const renderSessionIndicator = (sessionId: string) => {
   if (ATTACHED[Object.keys(ATTACHED).find((k) => ATTACHED[k].sessionId === sessionId)!]?.working) {
     sessionNotificationRegistry.recordActivity(sessionId, Date.now());
   }
-  return <SessionIndicatorDot session={session} sizeClassName="h-7 w-7" testId={`work-item-session-indicator-${sessionId}`} />;
+  return <SessionIndicatorDot session={session} sizeClassName="h-3 w-3" testId={`work-item-session-indicator-${sessionId}`} />;
 };
 const COMBINED_NODES = LINEAGE_NODES.map((node) => ({
   ...node,
@@ -256,8 +256,8 @@ const COMBINED_LINKS: WorkItemLinks = {
 /**
  * Lineage on the lines and PR data in the boxes, together: the full queue as the sidebar shows it. The
  * PR number is green when ready for review, grey when a draft (purple merged, red closed); its checks
- * are a pill wedged into the box's top edge; a task with an attached session shows the drawer's activity dot, scaled to the Play
- * button's size, in its place — green and breathing while the session works, green when idle, yellow
+ * are a pill wedged into the box's top edge; a task with an attached session shows the drawer's activity dot, inside the Play
+ * button's box, where the arrow was — green and breathing while the session works, green when idle, yellow
  * when it needs input, grey when disconnected.
  */
 export const LineageWithPullRequests: Story = {
