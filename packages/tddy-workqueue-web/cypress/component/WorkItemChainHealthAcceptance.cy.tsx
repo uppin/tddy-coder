@@ -1,6 +1,6 @@
 /**
- * Acceptance (`#workqueue` 12/14): a work item's row shows a leak chip naming the ancestor and a
- * linearity chip.
+ * Acceptance (`#workqueue` 12/14): a line's health is icons — a leak icon naming the ancestor and a
+ * linearity icon — whose tooltips carry the detail.
  *
  * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-leak-linearity.md
  */
@@ -10,7 +10,7 @@ import { WorkItemChainHealth } from "../../src";
 
 const byTestId = (id: string) => cy.get(`[data-testid="${id}"]`, { timeout: 5000 });
 
-it("rows show a leak chip naming the ancestor and a linearity chip", () => {
+it("a line shows a leak icon naming the ancestor and a linearity icon", () => {
   // When
   cy.mount(
     <WorkItemChainHealth
@@ -24,6 +24,6 @@ it("rows show a leak chip naming the ancestor and a linearity chip", () => {
   );
 
   // Then
-  byTestId("work-item-leaks-n3").should("contain.text", "2").and("contain.text", "feat/two");
-  byTestId("work-item-linearity-n3").should("have.attr", "data-state", "behind").and("contain.text", "4");
+  byTestId("work-item-leaks-n3").should("have.attr", "title").and("match", /2 leaked from feat\/two/);
+  byTestId("work-item-linearity-n3").should("have.attr", "data-state", "behind").and("have.attr", "title", "Line: behind 4");
 });

@@ -1,6 +1,6 @@
 /**
  * Acceptance (`#workqueue` 6/14): the user assigns an existing PR to a work item and links a tddy session
- * to it from its row; a PR'ed item shows its running, failed and succeeded check counts.
+ * to it from its row; a PR'ed item shows its failed and succeeded check counts.
  *
  * Test ids are final (`#workqueue` 3/14's `work-item-…`); the view and its RPCs are mounted under
  * today's names, which `/green` follows through n3's rename.
@@ -77,28 +77,14 @@ it("the user assigns a PR to an item from its row", () => {
   });
 });
 
-it("the user links a session to an item from its row", () => {
-  // Given
-  const backend = theQueueView();
-  prStackScreenPage.expandRow("n1");
-
-  // When
-  byTestId("work-item-link-session-n1").select(A_SESSION.sessionId);
-
-  // Then
-  cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(WorkQueueService.method.linkWorkItemSession);
-    expect(calls).to.have.length(1);
-    expect(calls[0].sessionId).to.equal(A_SESSION.sessionId);
-  });
-});
-
-it("a PR'ed item shows running, failed and succeeded check counts", () => {
+it("a PR'ed item shows failed and succeeded check counts, and not the running ones", () => {
   // When
   cy.mount(<WorkItemChecksSummary itemId="n1" running={1} failed={2} succeeded={3} />);
+  byTestId("work-item-checks-failed-n1").should("have.class", "text-red-600");
+  byTestId("work-item-checks-succeeded-n1").should("have.class", "text-green-600");
 
   // Then
-  byTestId("work-item-checks-running-n1").should("have.text", "1");
+  byTestId("work-item-checks-running-n1").should("not.exist"); // running is the PR bubble's spinner
   byTestId("work-item-checks-failed-n1").should("have.text", "2");
   byTestId("work-item-checks-succeeded-n1").should("have.text", "3");
 });

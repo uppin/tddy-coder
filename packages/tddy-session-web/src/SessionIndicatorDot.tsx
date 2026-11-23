@@ -61,6 +61,8 @@ interface SessionIndicatorDotProps {
   session: SessionEntry;
   /** Tailwind size classes. The collapsed strip renders a slightly larger dot, being all it shows. */
   sizeClassName?: string;
+  /** Overrides the default test id, where another dot for the same session is on screen. */
+  testId?: string;
 }
 
 /**
@@ -72,12 +74,13 @@ interface SessionIndicatorDotProps {
 export function SessionIndicatorDot({
   session,
   sizeClassName = "h-2 w-2",
+  testId,
 }: SessionIndicatorDotProps) {
   const status = useSessionIndicator(session);
 
   return (
     <span
-      data-testid={`sessions-drawer-item-status-${session.sessionId}`}
+      data-testid={testId ?? `sessions-drawer-item-status-${session.sessionId}`}
       data-status={status}
       className={cn(
         "flex-shrink-0 rounded-full",

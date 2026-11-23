@@ -50,7 +50,6 @@ export function WorkItemRowBadges({
   // A node owns a branch or it plans one, never both, so one of the two legs answers and the other is
   // absent — the row states whichever PR was actually found.
   const foundPr = pr?.exists ? pr : workItem?.exists ? workItem : undefined;
-  const hasPr = foundPr !== undefined;
   // "Could not look up" is deliberately distinct from "this branch has no PR": conflating the two is
   // why a live open PR stayed invisible while the daemon held no GitHub credential.
   const prUnavailable = Boolean(pr?.unavailable) || Boolean(workItem?.unavailable);
@@ -60,30 +59,6 @@ export function WorkItemRowBadges({
 
   return (
     <>
-      {inProgress && (
-        <span
-          data-testid={`work-item-in-progress-${node.itemId}`}
-          className={`${BADGE_CLASS} bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100`}
-        >
-          in progress
-        </span>
-      )}
-      {hasPr && (
-        <a
-          data-testid={`work-item-pr-link-${node.itemId}`}
-          href={foundPr.url}
-          target="_blank"
-          rel="noreferrer"
-          className="flex-shrink-0 text-xs text-blue-600 hover:underline dark:text-blue-400"
-        >
-          #{foundPr.number.toString()}
-        </a>
-      )}
-      {hasPr && (
-        <span data-testid={`work-item-pr-state-${node.itemId}`} className={MUTED_BADGE_CLASS}>
-          {foundPr.state}
-        </span>
-      )}
       {prUnavailable && (
         <span
           data-testid={`work-item-pr-unavailable-${node.itemId}`}

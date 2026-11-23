@@ -22,8 +22,8 @@ shown while a start clones over SSH.
 - A start that asks for a key passphrase shows the Hosts screen's dialog over the form, as before.
 - A **"With work queue"** checkbox (`create-session-with-work-queue`, unchecked by default) starts
   the session owning an empty work queue (`StartSessionRequest.with_work_queue`). A queue is created
-  only at start, so a session started without it has none — and no Work queue tab
-  ([session-drawer.md § Work queue tab](session-drawer.md#work-queue-tab)).
+  only at start, so a session started without it has none — and no work queue sidebar
+  ([session-drawer.md § Work queue sidebar](session-drawer.md#work-queue-sidebar)).
 - The Host field groups the hosts a daemon reaches through a remote shell (its SSH config aliases
   and its Coder workspaces) under that daemon. Choosing one starts the session on the parent daemon with the derived host as
   its target, and the form says that permission prompts are answered in the terminal.
