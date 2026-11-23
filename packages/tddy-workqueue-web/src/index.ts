@@ -6,3 +6,5 @@ export type { StackChildMetadata } from "./workItemSessions";
 export { WorkItemChecksSummary, type WorkItemChecksSummaryProps } from "./WorkItemChecksSummary";
 export { WorkItemLinkControls } from "./WorkItemLinkControls";
 export { WorkItemLinksContext, type WorkItemLinks, type LinkableSession, type ItemChecks } from "./workItemLinks";
+export { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
+export { WorkItemAnnotations, type WorkItemAnnotationsProps } from "./WorkItemAnnotations";

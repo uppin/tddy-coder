@@ -151,6 +151,19 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     () => hydrateWorkItems(stack.nodes, childSessions, createdBySessionId),
     [stack.nodes, childSessions, createdBySessionId],
   );
+  // The label the operator chose to filter by (`#workqueue` 7/14); empty shows every item.
+  const [labelFilter, setLabelFilter] = useState("");
+  const everyLabel = useMemo(
+    () => [...new Set(nodes.flatMap((node) => node.labels))].sort(),
+    [nodes],
+  );
+  // A chosen label nobody carries any more (removed meanwhile) filters nothing: the control would
+  // otherwise hide with the list still emptied by it.
+  const activeLabel = everyLabel.includes(labelFilter) ? labelFilter : "";
+  const shownNodes = useMemo(
+    () => (activeLabel ? nodes.filter((node) => node.labels.includes(activeLabel)) : nodes),
+    [nodes, activeLabel],
+  );
   const branchQueries = useMemo(
     () => buildBranchQueries(nodes, defaultBranch),
     [nodes, defaultBranch],
@@ -385,9 +398,28 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
           onCancel={() => setIsAddingPlannedPr(false)}
         />
       )}
+      {everyLabel.length > 0 && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-3 pt-2 text-xs">
+          <label htmlFor="work-queue-label-filter">Label</label>
+          <select
+            id="work-queue-label-filter"
+            data-testid="work-queue-label-filter"
+            value={activeLabel}
+            onChange={(event) => setLabelFilter(event.target.value)}
+            className="rounded border border-border bg-background px-2 py-1"
+          >
+            <option value="">All</option>
+            {everyLabel.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <WorkItemLinksContext.Provider value={workItemLinks}>
       <WorkItemList
-        nodes={nodes}
+        nodes={shownNodes}
         onStartSession={handleStartSession}
         startingNodeId={startSessionNode?.itemId ?? null}
         sessions={sessions}

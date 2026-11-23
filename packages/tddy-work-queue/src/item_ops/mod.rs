@@ -11,6 +11,7 @@ use tddy_core::work_queue_store::{WorkQueueStore, WorkQueueStoreError};
 use tddy_core::WorkflowError;
 
 mod adopt;
+pub mod item_annotations;
 pub mod item_links;
 mod nodes;
 mod order;

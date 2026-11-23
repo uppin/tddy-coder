@@ -27,7 +27,7 @@ fn link_refusal(error: ItemLinkError) -> Status {
     }
 }
 
-fn required<'a>(value: &'a str, what: &str) -> Result<&'a str, Status> {
+pub(super) fn required<'a>(value: &'a str, what: &str) -> Result<&'a str, Status> {
     let value = value.trim();
     if value.is_empty() {
         return Err(Status::invalid_argument(format!("{what} is required")));
@@ -36,16 +36,16 @@ fn required<'a>(value: &'a str, what: &str) -> Result<&'a str, Status> {
 }
 
 /// What every link call resolves before it acts: the caller's OS user and the queue's address.
-struct LinkCall {
-    os_user: String,
-    address: WorkQueueAddress,
+pub(super) struct LinkCall {
+    pub(super) os_user: String,
+    pub(super) address: WorkQueueAddress,
 }
 
 impl WorkQueueRpcHandler {
     /// Authenticate the caller and resolve the queue's address. The address is the only way to name a
     /// queue here: a queue is its owning session's (`#workqueue` 5/14), and the web view opens one by
     /// address.
-    fn link_call(
+    pub(super) fn link_call(
         &self,
         session_token: &str,
         queue: Option<&WorkQueueAddress>,
@@ -64,6 +64,16 @@ impl WorkQueueRpcHandler {
         call: &LinkCall,
         edit: impl FnOnce(&mut WorkQueue) -> Result<(), ItemLinkError>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.edit_queue(call, edit, link_refusal)
+    }
+
+    /// [`Self::edit_links`] for any refusal type: `refusal` turns the edit's error into the status.
+    pub(super) fn edit_queue<E>(
+        &self,
+        call: &LinkCall,
+        edit: impl FnOnce(&mut WorkQueue) -> Result<(), E>,
+        refusal: impl FnOnce(E) -> Status,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
         let sessions_base = self.sessions_base(&call.os_user)?;
         let store = self.stack_store(&sessions_base);
         let mut refused = None;
@@ -78,7 +88,7 @@ impl WorkQueueRpcHandler {
             })
             .map_err(store_status)?;
         if let Some(error) = refused {
-            return Err(link_refusal(error));
+            return Err(refusal(error));
         }
         let work_queue_json =
             serde_json::to_string(&updated.stack).map_err(|e| Status::internal(e.to_string()))?;

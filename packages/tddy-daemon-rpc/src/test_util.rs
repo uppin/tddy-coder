@@ -549,4 +549,34 @@ impl WorkQueueService for TestDaemon {
             .unlink_work_item_session(request)
             .await
     }
+
+    async fn set_work_item_labels(
+        &self,
+        request: Request<tddy_service::proto::work_queue::SetWorkItemLabelsRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .set_work_item_labels(request)
+            .await
+    }
+
+    async fn set_work_item_badge(
+        &self,
+        request: Request<tddy_service::proto::work_queue::SetWorkItemBadgeRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .set_work_item_badge(request)
+            .await
+    }
+
+    async fn clear_work_item_badge(
+        &self,
+        request: Request<tddy_service::proto::work_queue::ClearWorkItemBadgeRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .clear_work_item_badge(request)
+            .await
+    }
 }

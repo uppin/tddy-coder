@@ -40,6 +40,7 @@ pub mod start_ledger;
 pub mod start_options;
 pub mod start_session_args;
 pub mod terminal_keys;
+pub mod work_item_annotation_tools;
 pub mod work_item_git_tools;
 pub mod work_item_link_tools;
 pub mod work_queue_access;

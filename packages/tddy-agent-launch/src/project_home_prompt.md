@@ -78,4 +78,4 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
   and `work_pr_comments`; plan with `work_item_add`, `work_item_update`, `work_item_delete`; move them along with
   `work_item_set_status`, `work_item_adopt`, `work_item_merge`, `work_item_close`, `work_item_repoint`, `work_item_set_parents` and `work_item_resolve_conflicts`; and
   start a child session on a node with `work_item_spawn_session`. Tie an existing PR or a session to an item with
-  `work_item_assign_pr`, `work_item_unassign_pr`, `work_item_link_session` and `work_item_unlink_session`.
+  `work_item_assign_pr`, `work_item_unassign_pr`, `work_item_link_session` and `work_item_unlink_session`. Label items with `work_item_set_labels` and mark them with keyed badges (`work_item_set_badge` in a tone — info, success, warning or danger — and `work_item_clear_badge`); the queue view shows them and filters by label.

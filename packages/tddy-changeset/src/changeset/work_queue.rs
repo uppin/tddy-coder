@@ -67,6 +67,32 @@ pub struct WorkItem {
     /// *addressed* by the queue: it may read it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub linked_sessions: Vec<LinkedSession>,
+    /// Free-form tags the agent or the user put on this item (`#workqueue` 7/14); the queue view
+    /// filters by them. Deduplicated, in the order given.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    /// Keyed markers with a short text and a tone (`#workqueue` 7/14); a key is unique on the item.
+    /// Apart from the derived `internal_status`, which tddy owns.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub badges: Vec<WorkItemBadge>,
+}
+
+/// How a badge is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BadgeTone {
+    Info,
+    Success,
+    Warning,
+    Danger,
+}
+
+/// A keyed badge on an item.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkItemBadge {
+    pub key: String,
+    pub text: String,
+    pub tone: BadgeTone,
 }
 
 /// The pull request assigned to an item.

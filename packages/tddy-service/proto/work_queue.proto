@@ -76,6 +76,10 @@ service WorkQueueService {
   // `#workqueue` 6/14: the queue's PR state and check counts per item — a snapshot, then a new one
   // whenever the daemon's GitHub inbox reports a change to a PR or its checks. No browser polls.
   rpc StreamWorkQueueStatus(StreamWorkQueueStatusRequest) returns (stream WorkQueueStatusView);
+  // `#workqueue` 7/14: labels and keyed badges on a work item; each answers the queue after the change.
+  rpc SetWorkItemLabels(SetWorkItemLabelsRequest) returns (WorkItemLinksResponse);
+  rpc SetWorkItemBadge(SetWorkItemBadgeRequest) returns (WorkItemLinksResponse);
+  rpc ClearWorkItemBadge(ClearWorkItemBadgeRequest) returns (WorkItemLinksResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -519,3 +523,28 @@ message WorkItemCheck {
   string completed_at = 5;
   string details_url = 6;
 }
+// `#workqueue` 7/14 — work-item annotations.
+message SetWorkItemLabelsRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  repeated string labels = 4;
+}
+
+message SetWorkItemBadgeRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string key = 4;
+  string text = 5;
+  // `info` / `success` / `warning` / `danger`.
+  string tone = 6;
+}
+
+message ClearWorkItemBadgeRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string key = 4;
+}
+

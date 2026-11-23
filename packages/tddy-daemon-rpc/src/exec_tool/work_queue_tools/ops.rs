@@ -12,6 +12,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_tool_engine::work_queue_tools::{PrAddress, WorkQueueOp};
 use tddy_work_queue::internal_status::{derive_internal_status, reconcile_internal_status};
+use tddy_work_queue::item_ops::item_annotations::{self, WorkItemBadge};
 use tddy_work_queue::item_ops::item_links;
 use tddy_work_queue::item_ops::{
     add_work_item, adopt_pr_as_work_item, delete_work_item, sync_node_to_github_pr,
@@ -218,7 +219,66 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         } => edit_links(env, &item_id, |queue| {
             item_links::unlink_session(queue, &item_id, &session_id)
         }),
+        WorkQueueOp::SetLabels { item_id, labels } => edit_annotations(env, &item_id, |queue| {
+            item_annotations::set_labels(queue, &item_id, labels)
+        }),
+        WorkQueueOp::SetBadge {
+            item_id,
+            key,
+            text,
+            tone,
+        } => {
+            let tone = crate::work_queue::parse_tone(&tone)
+                .map_err(|status| status.message().to_string())?;
+            edit_annotations(env, &item_id, |queue| {
+                item_annotations::set_badge(queue, &item_id, WorkItemBadge { key, text, tone })
+            })
+        }
+        WorkQueueOp::ClearBadge { item_id, key } => edit_annotations(env, &item_id, |queue| {
+            item_annotations::clear_badge(queue, &item_id, &key)
+        }),
     }
+}
+
+/// A refused annotation edit as the tool reports it — the same words the RPC uses.
+fn annotation_refusal_message(error: item_annotations::AnnotationError) -> String {
+    use item_annotations::AnnotationError::{NoSuchItem, TooLong, TooMany};
+    match error {
+        NoSuchItem(item) => format!("item '{item}' not found"),
+        TooMany { limit } => format!("too many: the limit is {limit}"),
+        TooLong { limit } => format!("too long: the limit is {limit} characters"),
+    }
+}
+
+/// Apply an annotation `edit` to the queue under its record lock; a refused edit writes nothing and
+/// is the error, and the answer is the item's labels and badges as stored.
+fn edit_annotations(
+    env: &OpEnv,
+    item_id: &str,
+    edit: impl FnOnce(&mut WorkQueue) -> Result<(), item_annotations::AnnotationError>,
+) -> Result<Value, String> {
+    let mut refused = None;
+    env.home()?
+        .update_stack(|queue| {
+            let mut edited = queue.clone();
+            match edit(&mut edited) {
+                Ok(()) => *queue = edited,
+                Err(error) => refused = Some(error),
+            }
+        })
+        .map_err(|e| format!("annotate: {e}"))?;
+    if let Some(error) = refused {
+        return Err(annotation_refusal_message(error));
+    }
+    let stack = env.stack()?;
+    Ok(json!({
+        "item_id": item_id,
+        "labels": item_annotations::labels_of(&stack, item_id),
+        "badges": item_annotations::badges_of(&stack, item_id)
+            .into_iter()
+            .map(|b| json!({ "key": b.key, "text": b.text, "tone": b.tone }))
+            .collect::<Vec<_>>(),
+    }))
 }
 
 /// Apply a link `edit` to the queue under its record lock; a refused edit writes nothing and is the

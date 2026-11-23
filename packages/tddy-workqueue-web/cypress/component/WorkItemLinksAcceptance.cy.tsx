@@ -124,6 +124,8 @@ it("a PR'ed item lists each of its checks when the user expands them", () => {
     onUnassignPr: () => {},
     onLinkSession: () => {},
     onUnlinkSession: () => {},
+    onSetLabels: () => {},
+    onClearBadge: () => {},
   };
   cy.mount(
     <WorkItemLinksContext.Provider value={links}>

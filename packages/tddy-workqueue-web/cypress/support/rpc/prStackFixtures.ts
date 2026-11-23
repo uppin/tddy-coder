@@ -25,6 +25,9 @@ export interface WorkItemFixture {
    * exercising the topological fallback.
    */
   displayOrder?: number | null;
+  /** Labels and keyed badges on the item (`#workqueue` 7/14). */
+  labels?: string[];
+  badges?: { key: string; text: string; tone: string }[];
 }
 
 /** A planned PR node with sensible defaults — override only what a scenario cares about. */
@@ -174,6 +177,8 @@ export function aWorkQueueJson(version: number, nodes: WorkItemFixture[]): strin
       internal_status: n.internalStatus ?? null,
       child_recipe: n.childRecipe ?? null,
       display_order: n.displayOrder ?? null,
+      labels: n.labels ?? [],
+      badges: n.badges ?? [],
     })),
   });
 }

@@ -251,6 +251,28 @@ reader of the same branch costs no GitHub request; a read the inbox cannot make 
 reason, never "no PR". The inbox keeps one reader per repository, so two projects of one repository on
 one host share cached rows (`docs/dev/todo/2026-11-22-github-inbox-reads-a-repository-with-one-projects-credential.md`).
 
+### Labels and badges on a work item *(added 2026-11-22)*
+
+A work item carries the agent's and the user's own annotations, apart from the derived internal status
+(`needs-repoint`, `has-conflicts`, …), which tddy owns and which they never touch:
+
+- **Labels** — free-form tags (`WorkItem.labels`), several per item, shown as chips; the queue view's
+  label selector filters the list to the items carrying the chosen label. Setting labels **replaces** the
+  set; each label is trimmed, blanks are dropped and duplicates collapse, in the order given.
+- **Badges** — keyed markers (`WorkItem.badges`: `key`, `text`, `tone`) with a tone of `info`, `success`,
+  `warning` or `danger`. Setting a badge under an existing key **replaces** it; clearing a key that is
+  not set changes nothing.
+- **Limits are refusals, never truncation**: at most 16 labels of 40 characters, 8 badges, 60 characters
+  of badge text — an over-limit call writes nothing and names the limit.
+
+The three tools — `work_item_set_labels { item_id, labels }`, `work_item_set_badge { item_id, key, text,
+tone }`, `work_item_clear_badge { item_id, key }` — are daemon exec tools in
+`tddy-tool-engine::work_item_annotation_tools`, offered to the queue's **owner** only, and the same three
+operations are RPCs on `work_queue.WorkQueueService` (`SetWorkItemLabels`, `SetWorkItemBadge`,
+`ClearWorkItemBadge`, each answering the queue after the change; an unknown item is *not found*, a bad
+tone or an over-limit call *invalid argument*). An expanded row edits its labels (comma-separated, saved
+as the whole set) and clears a badge by key. A change to an annotation records no activity.
+
 ### GitHub API surface
 
 `GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.

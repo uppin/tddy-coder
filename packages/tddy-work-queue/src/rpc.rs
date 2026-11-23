@@ -12,13 +12,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, GetPrStatusRequest,
-    GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse, LinkWorkItemRequest,
-    LinkWorkItemResponse, LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest,
-    ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
+    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
+    GetPrStatusRequest, GetPrStatusResponse, GetWorkQueueRequest, GetWorkQueueResponse,
+    LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
+    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
+    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
+    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, SetWorkItemBadgeRequest,
+    SetWorkItemLabelsRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
     UnlinkWorkItemSessionRequest, WorkItemLinksResponse, WorkQueueService, WorkQueueStatusView,
 };
 
@@ -135,6 +136,30 @@ pub trait WorkQueueHandler: Send + Sync {
         &self,
         request: Request<UnlinkWorkItemSessionRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status>;
+
+    /// `#workqueue` 7/14: SetWorkItemLabels.
+    async fn set_work_item_labels(
+        &self,
+        _request: Request<SetWorkItemLabelsRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        Err(Status::unimplemented("SetWorkItemLabels"))
+    }
+
+    /// `#workqueue` 7/14: SetWorkItemBadge.
+    async fn set_work_item_badge(
+        &self,
+        _request: Request<SetWorkItemBadgeRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        Err(Status::unimplemented("SetWorkItemBadge"))
+    }
+
+    /// `#workqueue` 7/14: ClearWorkItemBadge.
+    async fn clear_work_item_badge(
+        &self,
+        _request: Request<ClearWorkItemBadgeRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        Err(Status::unimplemented("ClearWorkItemBadge"))
+    }
 
     /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
     async fn stream_work_queue_status(
@@ -261,6 +286,27 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<UnlinkWorkItemSessionRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         self.host.unlink_work_item_session(request).await
+    }
+
+    async fn set_work_item_labels(
+        &self,
+        request: Request<SetWorkItemLabelsRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.set_work_item_labels(request).await
+    }
+
+    async fn set_work_item_badge(
+        &self,
+        request: Request<SetWorkItemBadgeRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.set_work_item_badge(request).await
+    }
+
+    async fn clear_work_item_badge(
+        &self,
+        request: Request<ClearWorkItemBadgeRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.clear_work_item_badge(request).await
     }
 }
 

@@ -2,6 +2,7 @@ import React from "react";
 import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import type { BaseSyncView } from "./baseSyncStatus";
 import type { WorkItem } from "./workQueue";
+import { WorkItemAnnotations } from "./WorkItemAnnotations";
 
 export interface WorkItemRowBadgesProps {
   node: WorkItem;
@@ -144,6 +145,7 @@ export function WorkItemRowBadges({
           {node.internalStatus.kind}
         </span>
       )}
+      <WorkItemAnnotations itemId={node.itemId} labels={node.labels} badges={node.badges} />
     </>
   );
 }
