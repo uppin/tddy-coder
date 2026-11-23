@@ -74,6 +74,7 @@ pub fn add_work_item(
         &tddy_core::changeset::WorkQueue {
             version: existing.version,
             nodes: candidate_nodes,
+            ..Default::default()
         },
         "",
     )?;

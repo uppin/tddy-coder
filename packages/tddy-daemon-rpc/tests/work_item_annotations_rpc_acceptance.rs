@@ -33,6 +33,7 @@ fn a_host_holding_a_queue_with_one_item() -> (Host, WorkQueueAddress) {
                     title: "Wire it".to_string(),
                     ..WorkItem::default()
                 }],
+                ..WorkQueue::default()
             }
         })
         .expect("the queue is filled");

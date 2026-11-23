@@ -66,6 +66,7 @@ fn a_stack_of(titles: &[&str]) -> WorkQueue {
                 ..WorkItem::default()
             })
             .collect(),
+        ..Default::default()
     }
 }
 

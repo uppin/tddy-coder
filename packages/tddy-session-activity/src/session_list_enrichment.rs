@@ -2085,6 +2085,7 @@ state:
                     title: "Add token store".to_string(),
                     ..Default::default()
                 }],
+                ..Default::default()
             },
         );
 
@@ -2310,6 +2311,7 @@ state:
                     title: "Root PR".to_string(),
                     ..Default::default()
                 }],
+                ..Default::default()
             },
         );
 

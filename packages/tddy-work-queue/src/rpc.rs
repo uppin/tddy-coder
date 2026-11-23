@@ -16,12 +16,14 @@ use tddy_service::proto::work_queue::{
     GetPrStatusRequest, GetPrStatusResponse, GetWorkItemCommitFlowRequest,
     GetWorkQueueGraphRequest, GetWorkQueueRequest, GetWorkQueueResponse, GetWorkQueueWavesRequest,
     LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
-    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, PullBaseIntoBranchRequest,
-    PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest,
-    ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
-    ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse, SetWorkItemBadgeRequest,
-    SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest,
-    UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest, WorkItemInboxResponse,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, ListWorkQueueSchedulesRequest,
+    ListWorkQueueSchedulesResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
+    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
+    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
+    ResolveWorkItemBaseResponse, ScheduleWorkItemRequest, ScheduleWorkItemResponse,
+    ScheduleWorkQueueWaveRequest, SetWorkItemBadgeRequest, SetWorkItemLabelsRequest,
+    SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
+    UnlinkWorkItemSessionRequest, UnscheduleWorkItemRequest, WorkItemInboxResponse,
     WorkItemLinksResponse, WorkItemOutboxResponse, WorkQueueCommitCountsResponse,
     WorkQueueGraphResponse, WorkQueueService, WorkQueueStatusView, WorkQueueWavesResponse,
 };
@@ -212,6 +214,38 @@ pub trait WorkQueueHandler: Send + Sync {
         Err(Status::unimplemented("GetWorkQueueCommitCounts"))
     }
 
+    /// `#workqueue` 13/14: ScheduleWorkItem.
+    async fn schedule_work_item(
+        &self,
+        _request: Request<ScheduleWorkItemRequest>,
+    ) -> Result<Response<ScheduleWorkItemResponse>, Status> {
+        Err(Status::unimplemented("ScheduleWorkItem"))
+    }
+
+    /// `#workqueue` 13/14: ScheduleWorkQueueWave.
+    async fn schedule_work_queue_wave(
+        &self,
+        _request: Request<ScheduleWorkQueueWaveRequest>,
+    ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
+        Err(Status::unimplemented("ScheduleWorkQueueWave"))
+    }
+
+    /// `#workqueue` 13/14: UnscheduleWorkItem.
+    async fn unschedule_work_item(
+        &self,
+        _request: Request<UnscheduleWorkItemRequest>,
+    ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
+        Err(Status::unimplemented("UnscheduleWorkItem"))
+    }
+
+    /// `#workqueue` 13/14: ListWorkQueueSchedules.
+    async fn list_work_queue_schedules(
+        &self,
+        _request: Request<ListWorkQueueSchedulesRequest>,
+    ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
+        Err(Status::unimplemented("ListWorkQueueSchedules"))
+    }
+
     /// `#workqueue` 6/14: the queue's PR state and check counts, live from the GitHub inbox.
     async fn stream_work_queue_status(
         &self,
@@ -400,6 +434,34 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<GetWorkQueueGraphRequest>,
     ) -> Result<Response<WorkQueueCommitCountsResponse>, Status> {
         self.host.get_work_queue_commit_counts(request).await
+    }
+
+    async fn schedule_work_item(
+        &self,
+        request: Request<ScheduleWorkItemRequest>,
+    ) -> Result<Response<ScheduleWorkItemResponse>, Status> {
+        self.host.schedule_work_item(request).await
+    }
+
+    async fn schedule_work_queue_wave(
+        &self,
+        request: Request<ScheduleWorkQueueWaveRequest>,
+    ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
+        self.host.schedule_work_queue_wave(request).await
+    }
+
+    async fn unschedule_work_item(
+        &self,
+        request: Request<UnscheduleWorkItemRequest>,
+    ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
+        self.host.unschedule_work_item(request).await
+    }
+
+    async fn list_work_queue_schedules(
+        &self,
+        request: Request<ListWorkQueueSchedulesRequest>,
+    ) -> Result<Response<ListWorkQueueSchedulesResponse>, Status> {
+        self.host.list_work_queue_schedules(request).await
     }
 }
 

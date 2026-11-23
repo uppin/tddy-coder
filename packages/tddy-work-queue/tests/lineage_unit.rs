@@ -28,6 +28,7 @@ fn a_queue() -> WorkQueue {
             an_item("n2", "feat/two", &["n1"]),
             an_item("n3", "feat/three", &["n2"]),
         ],
+        ..Default::default()
     }
 }
 

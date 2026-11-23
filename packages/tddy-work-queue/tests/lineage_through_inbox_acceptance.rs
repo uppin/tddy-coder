@@ -119,6 +119,7 @@ async fn retargeting_a_pr_on_github_moves_its_line_edge_without_a_queue_write() 
                 ..WorkItem::default()
             },
         ],
+        ..Default::default()
     };
     let before = line_edges_through_inbox(&inbox, &repo, &queue, "master").await;
 

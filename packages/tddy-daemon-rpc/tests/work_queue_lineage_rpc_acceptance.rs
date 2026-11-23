@@ -40,6 +40,7 @@ fn a_host_holding_a_two_item_queue() -> (Host, WorkQueueAddress) {
             *queue = WorkQueue {
                 version: 1,
                 nodes: vec![an_item("n1", &[]), an_item("n2", &["n1"])],
+                ..Default::default()
             }
         })
         .expect("the queue is filled");

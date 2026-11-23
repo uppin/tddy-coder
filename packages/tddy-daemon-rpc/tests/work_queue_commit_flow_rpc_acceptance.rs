@@ -101,6 +101,7 @@ fn a_queue_over_real_branches() -> AQueueOverRealBranches {
                     an_item("n2", Some("feat/two"), &["n1"]),
                     an_item("n3", None, &["n2"]),
                 ],
+                ..Default::default()
             }
         })
         .expect("the queue is filled");

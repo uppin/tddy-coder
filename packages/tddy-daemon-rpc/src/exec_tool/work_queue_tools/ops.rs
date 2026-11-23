@@ -246,6 +246,12 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         WorkQueueOp::SetDependencies { item_id, needs } => set_dependencies(env, &item_id, needs),
         WorkQueueOp::Waves => waves_answer(&env.stack()?),
         // Served through the GitHub inbox, ahead of this blocking dispatcher.
+        WorkQueueOp::Schedule { .. }
+        | WorkQueueOp::ScheduleWave { .. }
+        | WorkQueueOp::Unschedule { .. }
+        | WorkQueueOp::Schedules => {
+            Err("the schedule tools are served through the GitHub inbox".to_string())
+        }
         WorkQueueOp::Inbox { .. } | WorkQueueOp::Outbox { .. } => Err(
             "work_item_inbox and work_item_outbox are served through the GitHub inbox".to_string(),
         ),

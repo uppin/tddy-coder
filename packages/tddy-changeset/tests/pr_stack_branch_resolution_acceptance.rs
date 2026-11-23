@@ -113,8 +113,14 @@ fn an_orchestrator_with_stack(sessions_root: &Path, session_id: &str, nodes: Vec
     tddy_changeset::session_work_queue::SessionWorkQueues::new(sessions_root.join("sessions"))
         .create_for_session(session_id, "proj-test", 0)
         .expect("the orchestrator is started with a queue");
-    update_stack_atomic(&dir, |stack| *stack = WorkQueue { version: 1, nodes })
-        .expect("store the orchestrator's stack");
+    update_stack_atomic(&dir, |stack| {
+        *stack = WorkQueue {
+            version: 1,
+            nodes,
+            ..Default::default()
+        }
+    })
+    .expect("store the orchestrator's stack");
 }
 
 fn a_sessions_root() -> tempfile::TempDir {

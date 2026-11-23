@@ -4,6 +4,7 @@ import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { WorkQueueService, WorkQueueAddress } from "tddy-client-web/gen/work_queue_pb";
 import type { ItemChecks, LinkableSession, WorkItemLinks } from "./workItemLinks";
 import type { ItemChainHealth } from "./WorkItemChainHealth";
+import { toScheduleViewModel, type ScheduleViewModel } from "./SchedulesPanel";
 
 type Address = Pick<WorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId">;
 
@@ -16,6 +17,8 @@ export interface UseWorkItemLinksStateArgs {
   onWorkQueueJson: (workQueueJson: string) => void;
   /** Receives each item's leaks and line state (`#workqueue` 12/14), which ride on the same stream. */
   onChainHealth?: (health: ReadonlyMap<string, ItemChainHealth>) => void;
+  /** Receives the armed merges and propagations (`#workqueue` 13/14), re-evaluated on every update. */
+  onSchedules?: (schedules: ScheduleViewModel[]) => void;
 }
 
 function failureReason(err: unknown): string {
@@ -42,6 +45,7 @@ export function useWorkItemLinksState({
   sessions,
   onWorkQueueJson,
   onChainHealth,
+  onSchedules,
 }: UseWorkItemLinksStateArgs): WorkItemLinks | null {
   const [errorByItemId, setErrorByItemId] = useState<Record<string, string>>({});
   const [checksByItemId, setChecksByItemId] = useState<Readonly<Record<string, ItemChecks>>>({});
@@ -78,6 +82,7 @@ export function useWorkItemLinksState({
           }
           setChecksByItemId(next);
           onChainHealth?.(health);
+          onSchedules?.(view.schedules.map(toScheduleViewModel));
         }
       } catch {
         // Keep the counts shown; a dropped stream must not blank them.

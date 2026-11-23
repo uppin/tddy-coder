@@ -14,6 +14,7 @@ fn a_queue_with_item(id: &str) -> WorkQueue {
             node_id: id.to_string(),
             ..WorkItem::default()
         }],
+        ..Default::default()
     }
 }
 

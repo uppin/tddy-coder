@@ -98,6 +98,7 @@ fn spawn_chain_child_sets_orchestrator_session_id() {
             display_order: None,
             ..Default::default()
         }],
+        ..Default::default()
     });
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &orch_dir,
@@ -159,6 +160,7 @@ fn link_work_item_sets_session_id_and_branch() {
             display_order: None,
             ..Default::default()
         }],
+        ..Default::default()
     });
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &orch_dir,

@@ -19,6 +19,33 @@ pub struct WorkQueue {
     pub version: u32,
     #[serde(default)]
     pub nodes: Vec<WorkItem>,
+    /// Armed merges and propagations (`#workqueue` 13/14) — at most one per item. Evaluated live,
+    /// fired by `#workqueue` 14/14.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schedules: Vec<Schedule>,
+}
+
+/// What a schedule fires.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScheduleKind {
+    Merge {
+        #[serde(default)]
+        skip_review: bool,
+    },
+    Propagate,
+}
+
+/// A merge or propagation armed on a work item.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Schedule {
+    pub item_id: String,
+    pub kind: ScheduleKind,
+    /// ISO-8601, stamped by whoever arms it; empty until then.
+    #[serde(default)]
+    pub armed_at: String,
+    #[serde(default)]
+    pub armed_by: String,
 }
 
 /// A single node in the PR-stack DAG.
@@ -475,6 +502,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let refs = stack.effective_base_refs("n2", "origin/master");
         assert_eq!(refs, vec!["origin/master".to_string()]);
@@ -536,6 +564,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let refs = stack.effective_base_refs("n3", "origin/master");
         assert_eq!(
@@ -602,6 +631,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let refs = stack.effective_base_refs("n3", "origin/master");
         assert_eq!(refs, vec!["origin/master".to_string()]);
@@ -655,6 +685,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let order = stack.topo_order().unwrap();
         assert_eq!(
@@ -697,6 +728,7 @@ mod stack_tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let result = stack.topo_order();
         assert!(result.is_err(), "expected Err for cycle, got Ok");
@@ -722,7 +754,11 @@ mod stack_tests {
     }
 
     fn a_stack(nodes: Vec<WorkItem>) -> WorkQueue {
-        WorkQueue { version: 1, nodes }
+        WorkQueue {
+            version: 1,
+            nodes,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -823,6 +859,7 @@ mod stack_tests {
             WorkQueue {
                 version: 1,
                 nodes: vec![],
+                ..Default::default()
             },
         );
 
@@ -860,6 +897,7 @@ mod stack_tests {
             WorkQueue {
                 version: 1,
                 nodes: vec![a_plain_node("n1")],
+                ..Default::default()
             },
         );
 
@@ -886,6 +924,7 @@ mod stack_tests {
             WorkQueue {
                 version: 1,
                 nodes: vec![a_plain_node("n1")],
+                ..Default::default()
             },
         );
 
@@ -925,6 +964,7 @@ mod stack_tests {
                     session_id: Some(child_id.to_string()),
                     ..a_plain_node("n1")
                 }],
+                ..Default::default()
             },
         );
 

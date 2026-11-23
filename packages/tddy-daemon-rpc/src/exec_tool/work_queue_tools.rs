@@ -400,6 +400,58 @@ impl DaemonStackTools {
         }
     }
 
+    /// `work_item_schedule`, `work_queue_schedule_wave`, `work_item_unschedule` and
+    /// `work_queue_schedules`: armed merges and propagations, their conditions read through the inbox.
+    async fn schedules_through_inbox(
+        &self,
+        env: OpEnv,
+        github: GithubSource,
+        op: WorkQueueOp,
+    ) -> Result<Value, String> {
+        use crate::work_queue::schedules::{json, ScheduleCtx};
+        let trunk_ref = tokio::task::spawn_blocking(move || github.default_branch())
+            .await
+            .map_err(|e| format!("the schedule operation failed to finish: {e}"))??;
+        let trunk = tddy_work_queue::lineage::trunk_branch_of(&trunk_ref);
+        let queue_id = env.queue_id.clone();
+        let ctx = ScheduleCtx {
+            store: &env.store,
+            pull_requests: self.pull_requests.as_ref(),
+            os_user: &self.os_user,
+            sessions_base: &env.sessions_base,
+            project_id: &env.project_id,
+            queue_id: queue_id.as_deref().unwrap_or(&self.caller_session_id),
+            caller_session_id: &self.caller_session_id,
+            session_token: &self.session_token,
+            trunk,
+            armed_by: &self.os_user,
+        };
+        match op {
+            WorkQueueOp::Schedule {
+                item_id,
+                kind,
+                skip_review,
+            } => ctx
+                .arm_item(&item_id, &kind, skip_review)
+                .await
+                .map(json::schedule),
+            WorkQueueOp::ScheduleWave { wave, skip_review } => ctx
+                .arm_wave(wave, skip_review)
+                .await
+                .map(|(views, reason)| json::schedules(views, &reason)),
+            WorkQueueOp::Unschedule { item_id } => ctx
+                .disarm(&item_id)
+                .await
+                .map(|(views, reason)| json::schedules(views, &reason)),
+            WorkQueueOp::Schedules => ctx
+                .list()
+                .await
+                .map(|(views, reason)| json::schedules(views, &reason)),
+            _ => return Err("not a schedule operation".to_string()),
+        }
+        .map_err(|e| e.to_string())
+    }
+
     async fn refresh_through_inbox(&self, env: &OpEnv, github: GithubSource) -> Result<(), String> {
         let read_env = env.clone();
         let inputs = tokio::task::spawn_blocking(move || ops::refresh_inputs(&read_env, &github))
@@ -479,6 +531,13 @@ impl WorkQueueToolPort for DaemonStackTools {
         if let WorkQueueOp::Inbox { .. } | WorkQueueOp::Outbox { .. } = &op {
             return self.commit_flow_through_inbox(env, github, op).await;
         }
+        if let WorkQueueOp::Schedule { .. }
+        | WorkQueueOp::ScheduleWave { .. }
+        | WorkQueueOp::Unschedule { .. }
+        | WorkQueueOp::Schedules = &op
+        {
+            return self.schedules_through_inbox(env, github, op).await;
+        }
         // The store's locks, git and GitHub are all blocking.
         tokio::task::spawn_blocking(move || ops::run(&env, &github, op))
             .await
@@ -503,6 +562,7 @@ mod tests {
                 session_id: child.map(str::to_string),
                 ..WorkItem::default()
             }],
+            ..Default::default()
         }
     }
 

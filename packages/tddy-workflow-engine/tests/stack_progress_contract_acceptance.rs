@@ -76,6 +76,7 @@ fn sync_stack_node_reflects_child_state_and_pr_status() {
             display_order: None,
             ..Default::default()
         }],
+        ..Default::default()
     });
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &orch_dir,
@@ -144,6 +145,7 @@ fn update_stack_atomic_applies_mutation_and_writes_back() {
             display_order: None,
             ..Default::default()
         }],
+        ..Default::default()
     });
     tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &orch_dir,

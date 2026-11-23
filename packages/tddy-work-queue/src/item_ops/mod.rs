@@ -275,7 +275,11 @@ mod test_support {
         .unwrap();
         tddy_changeset::work_queue_fixtures::seed_session_stack(
             dir,
-            WorkQueue { version: 1, nodes },
+            WorkQueue {
+                version: 1,
+                nodes,
+                ..Default::default()
+            },
         );
     }
 

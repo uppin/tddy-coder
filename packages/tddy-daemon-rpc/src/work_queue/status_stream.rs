@@ -49,17 +49,24 @@ impl WorkQueueRpcHandler {
                 let _ = tx.send(Ok(WorkQueueStatusView {
                     items: Vec::new(),
                     unavailable_reason: status.message().to_string(),
+                    schedules: Vec::new(),
                 }));
                 return Ok(Response::new(rx.into()));
             }
         };
         // The trunk the line edges end at, and the checkout the behind counts are read in. Without
         // them an item carries no chain health: the rest of its status is unaffected.
-        let trunk = self
+        // The schedules' conditions are re-evaluated with every update as well (`#workqueue` 13/14);
+        // they say why when the trunk is unreadable.
+        let trunk_read = self
             .link_call(&req.session_token, req.queue.as_ref())
             .and_then(|call| self.read_queue_and_trunk(&call))
-            .ok()
-            .map(|(_, _, trunk)| trunk);
+            .map(|(_, _, trunk)| trunk)
+            .map_err(|status| status.message().to_string());
+        let trunk = trunk_read.as_ref().ok().cloned();
+        let pull_requests = std::sync::Arc::clone(&self.pull_requests);
+        let session_token = req.session_token.clone();
+        let os_user_for_schedules = os_user.clone();
         let repo_root = tddy_core::repo_root_for_session(
             &tddy_core::session_lifecycle::unified_session_dir_path(
                 &sessions_base,
@@ -67,9 +74,15 @@ impl WorkQueueRpcHandler {
             ),
         );
         // Subscribed before the first read, so a change landing during it is not missed.
-        let mut events = site
-            .inbox
-            .subscribe(&site.repo, &[EventKind::Pr, EventKind::Checks]);
+        let mut events = site.inbox.subscribe(
+            &site.repo,
+            &[
+                EventKind::Pr,
+                EventKind::Checks,
+                EventKind::Comments,
+                EventKind::Push,
+            ],
+        );
         tokio::spawn(async move {
             loop {
                 // A queue deleted while it is viewed ends the stream with the store's reason.
@@ -100,6 +113,26 @@ impl WorkQueueRpcHandler {
                         }
                     }
                 }
+                view.schedules = match &trunk_read {
+                    Ok(trunk) => {
+                        super::schedules::ScheduleCtx {
+                            store: &store,
+                            pull_requests: pull_requests.as_ref(),
+                            os_user: &os_user_for_schedules,
+                            sessions_base: &sessions_base,
+                            project_id: &address.project_id,
+                            queue_id: &address.queue_id,
+                            caller_session_id: &address.queue_id,
+                            session_token: &session_token,
+                            trunk,
+                            armed_by: &os_user_for_schedules,
+                        }
+                        .evaluate(&record.stack)
+                        .await
+                        .0
+                    }
+                    Err(reason) => super::schedules::unreadable_views(&record.stack, reason),
+                };
                 if tx.send(Ok(view)).is_err() {
                     return;
                 }

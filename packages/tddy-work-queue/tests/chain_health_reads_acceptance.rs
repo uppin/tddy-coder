@@ -142,6 +142,7 @@ fn the_queue() -> WorkQueue {
                 ..WorkItem::default()
             },
         ],
+        ..Default::default()
     }
 }
 

@@ -441,6 +441,7 @@ fn a_stack_of(titles: &[&str]) -> WorkQueue {
                 ..WorkItem::default()
             })
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -480,7 +481,7 @@ fn pair(node_id: &str, title: &str) -> (String, String) {
     (node_id.to_string(), title.to_string())
 }
 
-const EVERY_STACK_TOOL: [&str; 22] = [
+const EVERY_STACK_TOOL: [&str; 26] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -503,6 +504,10 @@ const EVERY_STACK_TOOL: [&str; 22] = [
     "work_queue_waves",
     "work_item_inbox",
     "work_item_outbox",
+    "work_item_schedule",
+    "work_queue_schedule_wave",
+    "work_item_unschedule",
+    "work_queue_schedules",
 ];
 
 fn names(names: &[&str]) -> Vec<String> {

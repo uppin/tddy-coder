@@ -190,6 +190,7 @@ impl Orchestrator {
                     a_started_node(FIRST_NODE, FIRST_BRANCH, 0),
                     a_planned_node(SECOND_NODE, 1),
                 ],
+                ..Default::default()
             }),
         );
         self

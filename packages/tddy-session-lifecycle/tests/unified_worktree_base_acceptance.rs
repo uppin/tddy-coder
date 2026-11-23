@@ -230,6 +230,7 @@ fn write_orchestrator_with_materialized_parent(
             a_materialized_node("bottom", parent_branch, &[]),
             a_planned_child_node("child", child_branch, &["bottom"]),
         ],
+        ..Default::default()
     };
 
     let cs = Changeset {
@@ -475,6 +476,7 @@ fn write_orchestrator_with_externally_merged_parent(
             an_externally_merged_parent_node("bottom", &[]),
             a_planned_child_node("child", child_branch, &["bottom"]),
         ],
+        ..Default::default()
     };
 
     let cs = Changeset {

@@ -56,6 +56,7 @@ fn a_stack_part_way_through() -> WorkQueue {
                 n.pr_status = merged();
             }),
         ],
+        ..Default::default()
     }
 }
 

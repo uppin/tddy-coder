@@ -62,6 +62,7 @@ fn a_session_linked_to_an_item_is_addressed_by_its_queue() {
             node_id: "n1".to_string(),
             ..WorkItem::default()
         }],
+        ..Default::default()
     };
     link_through_the_queue_crate(&mut queue, "n1", "sess-reviewer");
 

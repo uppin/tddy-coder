@@ -68,6 +68,7 @@ fn stack_roundtrip_linear_and_dag() {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // When — the queue is written and read the way a session's record carries it
@@ -131,6 +132,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // When — n2's effective base: n1 is merged, so it collapses to stack_bottom_base
@@ -179,6 +181,7 @@ fn topo_order_rejects_cycle() {
                 ..Default::default()
             },
         ],
+        ..Default::default()
     };
 
     // When
@@ -227,6 +230,7 @@ fn internal_status_roundtrips_through_changeset_yaml() {
             display_order: None,
             ..Default::default()
         }],
+        ..Default::default()
     };
 
     // When

@@ -97,6 +97,13 @@ service WorkQueueService {
   rpc GetWorkItemInbox(GetWorkItemCommitFlowRequest) returns (WorkItemInboxResponse);
   rpc GetWorkItemOutbox(GetWorkItemCommitFlowRequest) returns (WorkItemOutboxResponse);
   rpc GetWorkQueueCommitCounts(GetWorkQueueGraphRequest) returns (WorkQueueCommitCountsResponse);
+  // `#workqueue` 13/14: arm a merge or a propagation on an item (replacing what was armed), arm a wave's
+  // merges bottom-up, disarm, and list with every condition evaluated live. Nothing here fires a
+  // schedule (`#workqueue` 14/14).
+  rpc ScheduleWorkItem(ScheduleWorkItemRequest) returns (ScheduleWorkItemResponse);
+  rpc ScheduleWorkQueueWave(ScheduleWorkQueueWaveRequest) returns (ListWorkQueueSchedulesResponse);
+  rpc UnscheduleWorkItem(UnscheduleWorkItemRequest) returns (ListWorkQueueSchedulesResponse);
+  rpc ListWorkQueueSchedules(ListWorkQueueSchedulesRequest) returns (ListWorkQueueSchedulesResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -515,6 +522,8 @@ message WorkQueueStatusView {
   repeated WorkItemStatus items = 1;
   // Why the queue's GitHub state could not be read at all (no inbox, no credential); empty otherwise.
   string unavailable_reason = 2;
+  // `#workqueue` 13/14: the armed schedules with their conditions, re-evaluated on every update.
+  repeated ScheduleStatusView schedules = 3;
 }
 
 // One item's PR (by branch, or the assigned PR) and, when it has one, its checks at the head.
@@ -707,5 +716,67 @@ message ItemCommitCountsView {
 
 message WorkQueueCommitCountsResponse {
   repeated ItemCommitCountsView items = 1;
+  string unavailable_reason = 2;
+}
+
+// `#workqueue` 13/14 — armed merges and propagations.
+message ScheduleWorkItemRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  // "merge" or "propagate".
+  string kind = 4;
+  // Merge only: go once CI is green without an approval — never past a change request.
+  bool skip_review = 5;
+}
+
+message ScheduleWorkQueueWaveRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  // 1-based, as `GetWorkQueueWaves` numbers them.
+  uint32 wave = 3;
+  bool skip_review = 4;
+}
+
+message UnscheduleWorkItemRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+}
+
+message ListWorkQueueSchedulesRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+}
+
+// One condition of an armed schedule.
+message ScheduleConditionView {
+  string name = 1;
+  // "met" | "waiting" | "blocked".
+  string state = 2;
+  string detail = 3;
+}
+
+message ScheduleStatusView {
+  string item_id = 1;
+  // "merge" | "propagate".
+  string kind = 2;
+  bool skip_review = 3;
+  string armed_at = 4;
+  string armed_by = 5;
+  // The worst condition's state: "met" | "waiting" | "blocked".
+  string status = 6;
+  // The first blocked condition's name, else the first waiting one's; empty when all are met.
+  string held_up_on = 7;
+  repeated ScheduleConditionView conditions = 8;
+}
+
+message ScheduleWorkItemResponse {
+  ScheduleStatusView schedule = 1;
+}
+
+message ListWorkQueueSchedulesResponse {
+  repeated ScheduleStatusView schedules = 1;
+  // Non-empty when the facts could not all be read (the conditions that needed them are `waiting`).
   string unavailable_reason = 2;
 }

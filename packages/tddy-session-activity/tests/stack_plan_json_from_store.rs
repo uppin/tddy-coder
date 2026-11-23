@@ -87,6 +87,7 @@ fn a_legacy_stack() -> WorkQueue {
             a_node("n2", &["n1"]),
             a_node("n3", &["n1"]),
         ],
+        ..Default::default()
     }
 }
 

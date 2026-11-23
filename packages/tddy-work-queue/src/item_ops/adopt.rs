@@ -107,6 +107,7 @@ pub fn adopt_pr_as_stack_node(
         &tddy_core::changeset::WorkQueue {
             version: existing.version,
             nodes: candidate_nodes,
+            ..Default::default()
         },
         OP,
     )?;
