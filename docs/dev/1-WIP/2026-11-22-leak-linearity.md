@@ -195,9 +195,3 @@ _(populated by validation)_
   made `pub`); it fetches the owner's clone first. A merged or planned parent, or no checkout, gives `unknown`.
 - Wire: `WorkItemStatus.{leaks, line}` on `StreamWorkQueueStatus`; the `work_queue_status` tool adds
   `chain_health: { leaks, line }` to each node. Rows show the chips from the status stream.
-
-## Stack note (temporary)
-
-This branch is rebased onto n11 commit-inbox-outbox (`dcb2f3c55`, itself on n10 on n9's green, which skip
-n7/n8 for now). n9, n12's real dependency, is contained. It is rebased onto n11's **wrapped** head before
-n12's [W]. Remove this note then. n11's surfaces are not implemented here.

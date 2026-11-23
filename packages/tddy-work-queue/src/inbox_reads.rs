@@ -196,6 +196,9 @@ pub async fn work_queue_status_view(
             checks: checks.map_or_else(Vec::new, |c| c.runs.iter().map(check_view).collect()),
             wave,
             binding_needs,
+            // Chain health is read by the daemon's stream from the owner's checkout.
+            leaks: Vec::new(),
+            line: None,
         });
     }
     WorkQueueStatusView {
