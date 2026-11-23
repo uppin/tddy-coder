@@ -17,7 +17,7 @@ export interface SessionWorkQueueTabInputs {
   catalogClient?: Client<typeof CatalogService>;
   taskClient?: Client<typeof TaskService>;
   /** The projects the drawer lists — the Work queue tab reads its project's default branch from them. */
-  projects?: ProjectEntry[];
+  projects?: ReadonlyArray<ProjectEntry>;
   /** `work_queue.WorkQueueService` on the selected daemon — the Work queue tab's queue is read and edited through it. */
   workQueueClient?: Client<typeof WorkQueueService>;
   sessionMetadataBySessionId?: WorkQueueViewProps["sessionMetadataBySessionId"];
@@ -27,7 +27,7 @@ export interface SessionWorkQueueTabInputs {
 export interface SessionWorkQueueTabProps extends SessionWorkQueueTabInputs {
   /** The session whose own work queue the tab shows. */
   session: SessionEntry;
-  sessions: WorkQueueViewProps["sessions"];
+  sessions: ReadonlyArray<SessionEntry>;
   sessionToken: string;
   onOpenSession?: WorkQueueViewProps["onOpenSession"];
   client: WorkQueueViewProps["client"];
@@ -42,6 +42,7 @@ export interface SessionWorkQueueTabProps extends SessionWorkQueueTabInputs {
 export function SessionWorkQueueTab({
   session,
   projects = [],
+  sessions,
   ...rest
 }: SessionWorkQueueTabProps) {
   return (
@@ -54,6 +55,7 @@ export function SessionWorkQueueTab({
       defaultBranch={
         projects.find((project) => project.projectId === session.projectId)?.mainBranchRef ?? ""
       }
+      sessions={[...sessions]}
       {...rest}
     />
   );
