@@ -6,7 +6,7 @@
 **Metrics:** **514 production lines** · budget 500
 **Thresholds breached:** length 514 > 500
 **Restructure:** not designed
-**Status:** Open — unclaimed
+**Status:** Closed — `#workqueue` 15/15 sweep (#1022): 273 lines — `WorkQueueServiceImpl` and `build_pr_stack_entry` moved to `rpc/service.rs`, re-exported. Record deleted at wrap.
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seams are a first reading
 
 ## Measurement history

@@ -6,7 +6,7 @@
 **Metrics:** **529 production lines** · budget 500
 **Thresholds breached:** length 529 > 500
 **Restructure:** not designed
-**Status:** Open — unclaimed
+**Status:** Closed — `#workqueue` 15/15 sweep (#1022): 290 lines — inherent `impl DaemonStackGitTools` moved to `work_item_git_tools/item_git_legs.rs`. Record deleted at wrap.
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seams are a first reading
 
 ## Measurement history

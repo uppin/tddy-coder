@@ -8,7 +8,7 @@
 **Metrics:** **775 production lines** of 775 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.6× over**
 **Thresholds breached:** length 775 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-11-23 (956 → 970 in #1015, `#workqueue` 14/14; stack-shared, split deferred); earlier regressed 2026-11-14 (818 → 868 in #886, `#orchestrators` 9/11; split deferred under the stack-branch rule — n10 also edits this file) — **unclaimed**
+**Status:** Closed — `#workqueue` 15/15 sweep (#1022): 277 lines — `ports.rs` only delegates: seven method bodies moved verbatim (hand move, consented D1) to `branch_reads.rs`, `item_writes.rs`, `repoint_rpc.rs`, `pull_base_rpc.rs`. Record deleted at wrap.
 **Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (see `docs/dev/todo/2026-11-14-restructure-engine-path-module-blocks-moves.md` and `docs/dev/todo/2026-11-14-restructure-engine-no-extract-for-guarded-ranges.md`)
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 

@@ -6,7 +6,7 @@
 **Metrics:** **552 production lines** of 552 total · budget 500 · **1.1× over**
 **Thresholds breached:** length 552 > 500
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Closed — `#workqueue` 15/15 sweep (#1022): 391 lines — `impl WorkQueueService for TestDaemon` moved to `test_util/work_queue_service.rs`. Record deleted at wrap.
 **Verified:** line count machine-measured at HEAD and the merge-base with `feature/workqueue/session-work-queue`
 
 The file is the crate's shared test daemon (`pub mod test_util`, compiled into the library so other

@@ -6,7 +6,7 @@
 **Metrics:** **647 production lines** · budget 500
 **Thresholds breached:** length 647 > 500
 **Restructure:** not designed
-**Status:** Open — unclaimed
+**Status:** Closed — `#workqueue` 15/15 sweep (#1022): 312 lines — inherent `impl DaemonStackTools` moved to `work_queue_tools/queue_legs.rs`; `ops.rs` 510 → 349 (item edits moved to `ops/item_edits.rs`, `ops/annotation_edits.rs`). Record deleted at wrap.
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seams are a first reading
 
 ## Measurement history

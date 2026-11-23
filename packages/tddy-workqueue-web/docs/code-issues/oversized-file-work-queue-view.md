@@ -6,7 +6,7 @@
 **Metrics:** **501 lines** · budget 500
 **Thresholds breached:** length 501 > 500
 **Restructure:** not designed
-**Status:** Open — unclaimed
+**Status:** Closed — `#workqueue` 15/15 sweep (#1022): 489 (whole TypeScript file) lines — pure mutation-state helpers moved to `workItemMutationState.ts`. Record deleted at wrap.
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam is a first reading
 
 ## Measurement history
