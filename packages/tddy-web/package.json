@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "prebuild": "bun run --cwd ../tddy-livekit-rpc-web build && node scripts/gen-build-id.mjs",
+    "prebuild": "node scripts/gen-build-id.mjs",
     "build": "vite build",
     "dev": "vite --port ${VITE_PORT:-5173}",
     "test": "bun run test:unit && bun run cypress:component && bun run cypress:e2e",

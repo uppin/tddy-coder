@@ -6,7 +6,6 @@
   "type": "module",
   "scripts": {
     "storybook": "storybook dev -p 6006 --host 0.0.0.0",
-    "prebuild": "bun run --cwd ../tddy-livekit-rpc-web build",
     "build": "storybook build",
     "build-storybook": "bun run build",
     "typecheck": "tsc --noEmit",
