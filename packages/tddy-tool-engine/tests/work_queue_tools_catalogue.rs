@@ -1,5 +1,5 @@
 //! Which work tools each access is offered (`#workqueue` 5/14): the owner of a queue every one of the
-//! ten (and, since 6/14, the four link tools), an addressed session the two read tools, and a session
+//! ten (and, since 6/14, the four link tools and, since 7/14, the three annotation tools), an addressed session the two read tools, and a session
 //! with no access none. The queue decides; no role does. The daemon offers and serves the same set: `tddy-daemon-rpc`'s
 //! `stack_plan_tools_acceptance.rs` drives it end to end.
 //!
@@ -29,8 +29,8 @@ fn is_a_git_tool(name: &str) -> bool {
     )
 }
 
-/// The ten work tools, then `#workqueue` 6/14's four link tools.
-const EVERY_PLAN_TOOL: [&str; 14] = [
+/// The ten work tools, `#workqueue` 6/14's four link tools, then 7/14's three annotation tools.
+const EVERY_PLAN_TOOL: [&str; 17] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -45,6 +45,9 @@ const EVERY_PLAN_TOOL: [&str; 14] = [
     "work_item_unassign_pr",
     "work_item_link_session",
     "work_item_unlink_session",
+    "work_item_set_labels",
+    "work_item_set_badge",
+    "work_item_clear_badge",
 ];
 
 #[test]
