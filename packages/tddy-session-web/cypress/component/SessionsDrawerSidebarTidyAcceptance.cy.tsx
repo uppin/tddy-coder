@@ -162,7 +162,7 @@ it("no Stacks box when no project has a stack", () => {
   byTestId("sessions-drawer-stacks-box").should("not.exist");
 });
 
-it("the settings cog sits left of the project name and stays visible across the header row", () => {
+it("the settings cog sits right of the project name and stays visible across the header row", () => {
   // Given
   const openedSettings: string[] = [];
   mountDrawer({ sessions: [aSession("a1", ALPHA.projectId, true)], onOpenProjectSettings: (p) => openedSettings.push(p) });
@@ -175,7 +175,7 @@ it("the settings cog sits left of the project name and stays visible across the 
     const name = Cypress.$(`[data-testid='${sessionsDrawerProjectGroupHeader(ALPHA.projectId)}'] span`).filter(
       (_, el) => el.textContent === "alpha",
     )[0];
-    expect($cog[0].getBoundingClientRect().right).to.be.at.most(name.getBoundingClientRect().left);
+    expect($cog[0].getBoundingClientRect().left).to.be.at.least(name.getBoundingClientRect().right);
   });
 
   // And — the hover target is the whole row, which contains the cog, so moving from the name onto
