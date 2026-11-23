@@ -112,3 +112,40 @@ export const ManyProjects: Story = {};
 export const NoStacks: Story = {
   args: { workQueueClient: null },
 };
+
+// ---------------------------------------------------------------------------
+// Home sessions in every activity state
+// ---------------------------------------------------------------------------
+
+const HOME_PROJECTS = [
+  { projectId: "h-live", name: "home-connected" },
+  { projectId: "h-input", name: "home-needs-input" },
+  { projectId: "h-done", name: "home-finished" },
+  { projectId: "h-main", name: "pinned-main" },
+];
+
+const PINNED_MAIN = aSession("h-main", "main", true, { sessionRole: "project-home", model: "opus" });
+
+const HOME_SESSIONS: SessionEntry[] = [
+  aSession("h-live", "home", true, { sessionRole: "project-home" }),
+  aSession("h-input", "home", true, { sessionRole: "project-home", pendingElicitation: true }),
+  aSession("h-done", "home", false, { sessionRole: "project-home" }),
+  PINNED_MAIN,
+  // An orchestrator merely named "home": same green dot, no house icon
+  aSession("h-live", "home", true, { sessionRole: "orchestrator" }),
+];
+
+/**
+ * A project-home session's activity shows on its status dot, next to the house icon: green when
+ * connected, yellow when it waits for input, grey when finished (folded under More). The pinned
+ * **main** entry shows its session's dot the same way.
+ */
+export const HomeSessionStates: Story = {
+  args: {
+    sessions: HOME_SESSIONS,
+    projects: HOME_PROJECTS,
+    workQueueClient: null,
+    projectHomes: [{ projectId: "h-main", mainBranchRef: "origin/master", homeSessionId: PINNED_MAIN.sessionId }],
+    onEnsureProjectHome: async () => {},
+  },
+};
