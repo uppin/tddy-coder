@@ -38,13 +38,14 @@ export function SessionProjectGroupHeader(props: SessionProjectGroupHeaderProps)
       data-testid={`sessions-drawer-project-header-row-${groupKey}`}
       className="group relative flex w-full items-center gap-1"
     >
-      {/* The name starts at 12px — a session row's dot (px-3); the chevron sits in the gutter before it. */}
+      {/* The name starts at 12px — a session row's dot (px-3). The chevron is centred in the gutter
+          between the drawer's left border and the name: the list's 8px padding (px-2) plus those 12px. */}
       <button
         type="button"
         tabIndex={-1}
         aria-hidden="true"
         onClick={onToggle}
-        className="absolute inset-y-0 left-0 flex w-3 items-center justify-center text-muted-foreground"
+        className="absolute inset-y-0 -left-2 flex w-5 items-center justify-center text-muted-foreground"
       >
         <Chevron className="h-3 w-3" />
       </button>

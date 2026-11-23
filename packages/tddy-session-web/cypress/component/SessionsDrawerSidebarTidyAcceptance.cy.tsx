@@ -210,7 +210,14 @@ it("More sits on the right with its count, and project names line up with the se
     // And — the project's name starts where the session dot does
     byTestId(sessionsDrawerProjectGroupHeader(ALPHA.projectId))
       .find("span")
-      .then(($name) => expect($name[0].getBoundingClientRect().left).to.be.closeTo(dot.left, 1));
+      .then(($name) => {
+        const nameLeft = $name[0].getBoundingClientRect().left;
+        expect(nameLeft).to.be.closeTo(dot.left, 1);
+        // And — the chevron is centred between the drawer's left border and the name
+        const drawerLeft = Cypress.$("[data-testid='sessions-drawer']")[0].getBoundingClientRect().left;
+        const chev = Cypress.$(`[data-testid='sessions-drawer-project-header-row-${ALPHA.projectId}'] svg`)[0].getBoundingClientRect();
+        expect(chev.left + chev.width / 2).to.be.closeTo((drawerLeft + nameLeft) / 2, 1);
+      });
   });
 });
 
