@@ -186,15 +186,33 @@ wave without GitHub); `packages/tddy-workqueue-web/src/toScheduleViewModel.test.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- `threads` condition absent — accepted TODO (no GraphQL read yet).
+- Nothing fires a schedule — `#workqueue` 14/14 owns firing.
 
 ## Refactoring Needed
 
-_(populated by validation)_
+- ✅ Done: `tddy-daemon-rpc/src/work_queue/schedules.rs` (694 production lines) split into
+  `schedules/{mod,facts,evaluate,rpc}.rs`, each under 300.
+- Stack-shared files already past 500 lines before this PR and grown by it are **not split here**:
+  `tddy-changeset/src/changeset/work_queue.rs`, `tddy-daemon-rpc/src/exec_tool/work_queue_tools.rs`,
+  `tddy-daemon-rpc/src/work_queue/ports.rs`, `tddy-daemon-rpc/src/test_util.rs`,
+  `tddy-tool-engine/src/work_queue_tools.rs`, `tddy-tool-engine/src/lib.rs`.
 
 ## Validation Results
 
-_(populated by validation)_
+2026-11-23, after rebasing onto n12 (`80f8cff76`):
+- Stack gate: `origin/feature/workqueue/leak-linearity..HEAD` holds only n13's commits.
+- `cargo check --all-targets` on the 9 touched Rust packages ✅; `cargo clippy -D warnings` on
+  tddy-work-queue, tddy-daemon-rpc, tddy-tool-engine, tddy-changeset ✅.
+- Tests (scoped): tddy-work-queue lib + schedule_unit, schedule_ops_unit, annotations, chain health ✅;
+  tddy-tool-engine schedule tools + catalogue ✅; tddy-daemon-rpc lib + schedules RPC, stack plan tools,
+  project-home watch ✅; tddy-workqueue-web `bun test src` (151) ✅; Cypress schedules, chain health,
+  links, queue view ✅.
+- Rebase merge: the status stream carries n12's chain health and n13's schedules together; the
+  queue view's stream hook (`useWorkItemLinksState`) gained `onSchedules`. Wave arming passes no
+  landed items to `queue_waves` — membership is structural.
+- Risks: no CRITICAL; production `expect` in `schedules/evaluate.rs` is an invariant (a wave holds the
+  queue's own items).
 
 ## TODO
 
@@ -206,12 +224,12 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues
@@ -220,5 +238,5 @@ _(populated by validation)_
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p {package} -- -D warnings`, `cargo fmt`)
 - [ ] USER REVIEW — scope developed, every gap approved: ready to wrap
