@@ -52,7 +52,9 @@ const SESSIONS: SessionEntry[] = [
   ...Array.from({ length: 12 }, (_, i) => aSession("p-qape", `qape chore ${i + 1}`, false)),
   aSession("p-mazep", "map tiles", false),
   aSession("p-mazep", "map legend", false),
-  aSession("p-editor", "home", false),
+  // A replaced main (project-home role → house icon) and an orchestrator merely named "home" (no icon)
+  aSession("p-editor", "home", false, { sessionRole: "project-home" }),
+  aSession("p-editor", "home", true, { sessionRole: "orchestrator" }),
 ];
 
 function aStack(projectId: string, queueId: string, title: string, total: number): WorkQueueSummary {
