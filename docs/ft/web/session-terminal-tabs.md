@@ -115,6 +115,10 @@ styled like the inspector tab strip (`InspectorTabs`).
   - **Closing a tmux tab detaches** its client: the tmux session keeps running and can be attached
     again from the menu or from any real terminal. tmux runs on the alternate screen, which a
     reattaching browser's snapshot open carries, so the tmux screen renders correctly on reload.
+  - **On a target session** (`SessionEntry.target` set) every tmux item runs on the target: the tmux
+    section lists the **target's** tmux sessions, attach and **New tmux session…** open with
+    `wrappers: [target]`, and **<agent> in tmux** with `wrappers: [target, tmux]`
+    (see [Terminal sessions § tmux terminals](../daemon/terminal-sessions.md#tmux-terminals)).
 - **Keep-alive**: the active tab's terminal is visible; the others are `display:none` but stay
   mounted and subscribed to their output stream, so switching back is instant and background
   terminals keep receiving bytes.
