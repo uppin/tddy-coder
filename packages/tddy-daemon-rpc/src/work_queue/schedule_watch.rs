@@ -251,42 +251,21 @@ impl super::WorkQueueRpcHandler {
         };
         let users = self.config.users.snapshot();
         let mut watched = 0;
-        for (os_user, sessions_base) in self.sessions_bases_of(&users) {
+        for (mapping, sessions_base) in self.sessions_bases_of(&users) {
             let store = self.stack_store(&sessions_base);
-            let projects = tddy_projects::project_storage::read_projects(&store.projects_dir())
-                .unwrap_or_default();
-            for project in projects {
-                let Ok(records) = store.list(&project.project_id) else {
-                    continue;
-                };
-                for record in records {
-                    let Some(armed_by) = record.stack.schedules.first().map(|s| s.armed_by.clone())
-                    else {
-                        continue;
-                    };
-                    if armed_by != os_user {
-                        continue;
-                    }
-                    let Some(mapping) = users.iter().find(|m| m.os_user == armed_by) else {
-                        continue;
-                    };
-                    let armer = Armer::signed(signer.clone(), &mapping.github_user);
-                    after_arming(WatchInputs {
-                        source: self.git_env_source_for(&armer),
-                        pull_requests: Arc::clone(&self.pull_requests),
-                        store: store.clone(),
-                        sessions_base: sessions_base.clone(),
-                        os_user: os_user.clone(),
-                        address: WorkQueueAddress {
-                            project_id: project.project_id.clone(),
-                            queue_id: record.queue_id.clone(),
-                            daemon_instance_id: self.local_instance_id(),
-                        },
-                        armer,
-                    })
-                    .await;
-                    watched += 1;
-                }
+            for address in self.queues_armed_by(&store, &mapping.os_user) {
+                let armer = Armer::signed(signer.clone(), &mapping.github_user);
+                after_arming(WatchInputs {
+                    source: self.git_env_source_for(&armer),
+                    pull_requests: Arc::clone(&self.pull_requests),
+                    store: store.clone(),
+                    sessions_base: sessions_base.clone(),
+                    os_user: mapping.os_user.clone(),
+                    address,
+                    armer,
+                })
+                .await;
+                watched += 1;
             }
         }
         if watched > 0 {
@@ -295,18 +274,40 @@ impl super::WorkQueueRpcHandler {
         watched
     }
 
-    /// Each mapped OS user once, with the sessions base its queues are under.
+    /// Every queue in `store` whose schedules `os_user` armed, across the registered projects.
+    fn queues_armed_by(&self, store: &WorkQueueStore, os_user: &str) -> Vec<WorkQueueAddress> {
+        let projects = tddy_projects::project_storage::read_projects(&store.projects_dir())
+            .unwrap_or_default();
+        projects
+            .iter()
+            .flat_map(|project| store.list(&project.project_id).unwrap_or_default())
+            .filter(|record| {
+                record
+                    .stack
+                    .schedules
+                    .first()
+                    .is_some_and(|schedule| schedule.armed_by == os_user)
+            })
+            .map(|record| WorkQueueAddress {
+                project_id: record.project_id,
+                queue_id: record.queue_id,
+                daemon_instance_id: self.local_instance_id(),
+            })
+            .collect()
+    }
+
+    /// Each mapped OS user once (its first `users[]` row), with the sessions base its queues are under.
     fn sessions_bases_of(
         &self,
         users: &[tddy_daemon_kernel::config::UserMapping],
-    ) -> Vec<(String, PathBuf)> {
+    ) -> Vec<(tddy_daemon_kernel::config::UserMapping, PathBuf)> {
         let mut seen = HashSet::new();
         users
             .iter()
             .filter(|mapping| seen.insert(mapping.os_user.clone()))
             .filter_map(|mapping| {
                 let base = self.sessions_base(&mapping.os_user).ok()?;
-                Some((mapping.os_user.clone(), base))
+                Some((mapping.clone(), base))
             })
             .collect()
     }

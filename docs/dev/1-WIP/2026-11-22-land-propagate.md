@@ -164,11 +164,11 @@ As listed under Affected Packages.
 
 ## Implementation Milestones
 
-- [ ] Ports + propagate engine with temp-repo tests
-- [ ] Land engine with port doubles
-- [ ] Fold-in of merge/repoint; delete the old paths
-- [ ] Schedule runner
-- [ ] Tools, RPCs, web actions, activities
+- [x] Ports + propagate engine with temp-repo tests
+- [x] Land engine with port doubles
+- [x] Fold-in of merge/repoint; delete the old paths
+- [x] Schedule runner — driven by the daemon (one watcher per queue), re-attached at startup
+- [x] Tools, RPCs, web actions, activities
 
 ## Testing Plan
 
@@ -198,8 +198,25 @@ integration test proves `work_item_merge` now repoints successors.
 `packages/tddy-tool-engine/tests/work_queue_land_tools.rs`:
 - [x] `propagate_takes_an_item_and_land_takes_a_wave_range`
 
-Activities on landings and refusals reaching the owner need n8's publisher; `/green` proves it in
-`work_queue_activity_acceptance.rs` with the new variants.
+Activities (n8's publisher, four new variants):
+- [x] `tddy-session-activity/tests/work_queue_activity_acceptance.rs` —
+  `land_propagate_refusal_and_firing_reach_the_owner_naming_what_happened`
+- [x] `tddy-daemon-rpc` `git_work::land_ops` unit — `a_land_announces_each_landing_each_propagation_and_where_it_stopped`,
+  `a_propagation_announces_where_it_went_or_why_it_was_refused`
+- [x] `tddy-daemon-rpc` `work_queue::land` unit — `a_firing_tells_the_queues_owner_once_naming_who_armed_it`
+
+Daemon driver:
+- [x] `tddy-daemon-rpc` `work_queue::schedule_watch` unit —
+  `after_a_restart_queues_armed_by_a_mapped_user_are_watched_again_as_that_user`
+- **No end-to-end met → merge test through the daemon**: the daemon test host has no GitHub inbox
+  and `WorkQueueRpcHandler::from_host` offers no seam to inject one, and a met merge needs checks,
+  reviews, worktree and commit-flow facts. Claim + fire are covered with port doubles
+  (`a_met_armed_merge_runs_the_engine_once_and_is_disarmed_in_the_store`,
+  `two_runners_seeing_the_same_arming_met_run_the_engine_once`), conditions by n13's snapshot tests.
+
+`packages/tddy-workqueue-web/cypress/component/LandPropagateHookAcceptance.cy.tsx`:
+- [x] `a refused propagation names why and offers Propagate again` (red before the fix: the hook's
+  `finally` spread the `Set` into an object and threw, leaving Propagate disabled)
 
 `packages/tddy-workqueue-web/cypress/component/WorkQueueLandPropagateAcceptance.cy.tsx`:
 - [x] `Land wave asks for the wave range and shows the result per item`
@@ -252,11 +269,50 @@ Activities on landings and refusals reaching the owner need n8's publisher; `/gr
 
 ## Refactoring Needed
 
-_(populated by validation)_
+- Files this PR left over 500 production lines — handled at wrap (`pr-wrap` 3.5):
+  `tddy-daemon-rpc/src/exec_tool/work_queue_tools.rs` (620 → 647 incl. tests ⇒ 647 production),
+  `tddy-daemon-rpc/src/exec_tool/work_item_git_tools.rs` (499 → 529), `tddy-work-queue/src/rpc.rs`
+  (492 → 514 production).
 
 ## Validation Results
 
-_(populated by validation)_
+**2026-11-23 — `/validate-changes` ([W], after rebasing onto n13's wrapped head `c62cbbc7d`).**
+
+Stack gate: base `feature/workqueue/schedules` @ `c62cbbc7d`; `origin/<base>..HEAD` is n14's commits
+only. The schedules edits were re-homed into n13's split `schedules/{evaluate,rpc}.rs`.
+
+Gaps closed in this pass (planned scope, now that n8 and n12 are underneath):
+- 🆕 `WorkQueueChange::{Landed, Propagated, Refused, ScheduleFired}` and `Actor::Schedule`, published from
+  `land_ops` (every land, propagation and refusal — including one that could not be lined up) and from
+  `DaemonFireSchedule` (each firing). `WorkQueueActivities::publish_move` renamed `publish`.
+- 🆕 Watchers hold an `Armer`, not a token (the arming call's access token lapses within minutes, which
+  silently stopped a watcher's reads and firings); `reattach_armed_schedules` at startup.
+  `DaemonSessionHost::session_token_signer` added for it.
+- 🆕 Deleted the remaining recipe-era helpers (see Technical Debt).
+
+Findings fixed: **[WARNING]** a scheduled firing that failed before the engine ran was disarmed with
+no outcome told to the owner → now `Refused`; **[CRITICAL]** web `useLandPropagate` threw in its
+`finally`, leaving Propagate disabled after the first call → fixed, with a component test.
+
+**[WARNING]** fixed in `/pr-wrap`: the engine's git port invented a fork point when `merge-base` failed
+and pushed with the host's ambient credentials when the project's account could not be read — the
+silent-failure paths `2026-07-26-pr-stack-status-polling-and-stack-hygiene.md` named; both are now
+refusals that name the cause.
+
+Remaining, accepted:
+- **[INFO]** `push_with_lease` leases against the remote-tracking ref (bare `--force-with-lease`; the
+  `GitOp::Push` op takes no SHA). Equivalent to the engine's expected tip here: the local-branch gate
+  only lets an `InSync` branch through, right after a fetch.
+- **[INFO]** A firing takes the schedule out of the store *before* the engine runs (exactly-once), so a
+  transient GitHub failure costs the arming; the owner is told (`Refused`) and re-arms.
+- **[INFO]** A queue status stream also fires met schedules with the viewer's credentials, beside the
+  watcher; the store claim keeps it exactly-once.
+- **[INFO]** Pre-existing, not this PR: `cargo clippy -p tddy-workflow-recipes --all-targets` fails on
+  `tests/pr_stack_display_order_acceptance.rs:76` (`empty_line_after_doc_comment`, n1/n3's file).
+
+Build/lint (scoped): `cargo clippy -p tddy-work-queue -p tddy-daemon-rpc -p tddy-session-activity
+-p tddy-tool-engine -p tddy-session-lifecycle -p tddy-service --all-targets -D warnings` clean;
+`tddy-workflow-recipes --lib` clean; `cargo check -p tddy-daemon` clean.
 
 ## TODO
 

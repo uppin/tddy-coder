@@ -8,7 +8,7 @@
 **Metrics:** **775 production lines** of 775 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.6× over**
 **Thresholds breached:** length 775 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-11-14 (818 → 868 in #886, `#orchestrators` 9/11; split deferred under the stack-branch rule — n10 also edits this file) — **unclaimed**
+**Status:** Open — regressed 2026-11-23 (956 → 970 in #1015, `#workqueue` 14/14; stack-shared, split deferred); earlier regressed 2026-11-14 (818 → 868 in #886, `#orchestrators` 9/11; split deferred under the stack-branch rule — n10 also edits this file) — **unclaimed**
 **Accepted as standing debt:** developer consent, 2026-11-14 — reason: "restructure engine refused" (see `docs/dev/todo/2026-11-14-restructure-engine-path-module-blocks-moves.md` and `docs/dev/todo/2026-11-14-restructure-engine-no-extract-for-guarded-ranges.md`)
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
@@ -30,6 +30,7 @@
 | 2026-11-23 | 881 → 895 | **Regressed by 14** in #1010 (`#workqueue` 9/14): delegating one-liners for `SetWorkQueueDependencies` and `GetWorkQueueGraph`; the handlers live in `work_queue/lineage.rs`. Not split: stack-shared (n5–n8 edited it, n10+ will), deferred to the post-stack sweep |
 | 2026-11-23 | 896 → 903 | **Regressed by 7** in #1011 (`#workqueue` 10/14): the `GetWorkQueueWaves` delegating one-liner; the handler lives in `work_queue/waves.rs`. Not split: stack-shared (n11–n14 edit it), deferred to the post-stack sweep |
 | 2026-11-23 | 903 → 925 | **Regressed by 22** in #1012 (`#workqueue` 11/14): delegating one-liners for `GetWorkItemInbox`, `GetWorkItemOutbox` and `GetWorkQueueCommitCounts`; the handlers live in `work_queue/commit_flow.rs`. Not split: stack-shared (n12–n14 edit it), deferred to the post-stack sweep |
+| 2026-11-23 | 956 → 970 | **Regressed by 14** in #1015 (`#workqueue` 14/14): delegating one-liners for `PropagateWorkItem` and `LandWorkQueue`; the handlers live in `work_queue/land.rs`. Not split: stack-shared (n3–n13 edit it), deferred to the post-stack sweep |
 
 ## What would close it — candidate seams (not proven)
 

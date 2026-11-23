@@ -149,8 +149,14 @@ impl QueueGit for DaemonQueueWorld<'_> {
         }
         let base_ref = self.remote_ref(onto);
         let worktree = self.worktree_of(branch)?;
-        let old_base = tddy_work_queue::git_ops::merge_base(&worktree, branch, &base_ref)
-            .unwrap_or_else(|_| base_ref.clone());
+        // The fork point is read, never invented: rebasing from a guessed base replays the wrong
+        // commits.
+        let old_base =
+            tddy_work_queue::git_ops::merge_base(&worktree, branch, &base_ref).map_err(|e| {
+                failed(format!(
+                    "the fork point of {branch} on {onto} is unknown: {e}"
+                ))
+            })?;
         tddy_work_queue::git_ops::rebase_onto(&self.repo_root, &base_ref, &old_base, branch)
             .map_err(|e| failed(format!("rebase of {branch} onto {onto} failed: {e}")))
     }
@@ -158,13 +164,20 @@ impl QueueGit for DaemonQueueWorld<'_> {
     async fn push_with_lease(&self, branch: &str, _expected_sha: &str) -> Result<(), EngineError> {
         let item = self.item_on(branch)?;
         let worktree = self.worktree_of(branch)?;
+        // Pushed as the project's account or not at all — never with whatever credentials the
+        // host happens to hold.
         let token = project_token(
             &self.project,
             &self.env.identity,
             &self.env.github_cli,
             &self.env.os_user,
         )
-        .ok();
+        .map(Some)
+        .map_err(|e| {
+            failed(format!(
+                "{branch} is not pushed: the project's account: {e}"
+            ))
+        })?;
         let identity = PushIdentity {
             env: Vec::new(),
             remote_name: Some(self.remote.clone()),
