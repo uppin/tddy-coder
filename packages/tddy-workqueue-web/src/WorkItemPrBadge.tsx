@@ -23,7 +23,7 @@ const STATE_LABEL: Record<string, string> = { open: "ready for review", draft: "
  * The PR of a task, inline in its box's header just before the Start/session control: the PR number
  * as a link — green when the PR is ready for review, grey when it is a draft — with its checks
  * (`WorkItemChecksSummary`: failed and succeeded counts) as a small round-cornered pill wedged into the
- * box's top edge, above the number, and a spinner turning around the number's bubble while any check
+ * box's top edge, above the number, and an arc running along the number's bubble border while any check
  * is still running. A PR'ed task is the same box as any other, so this adds no height; nothing renders for a
  * task without a PR.
  *
@@ -48,13 +48,17 @@ export function WorkItemPrBadge({ node, pr }: { node: WorkItem; pr?: PrBadgeSour
       )}
       <span className="relative flex items-center">
         {checks && checks.running > 0 && (
-          <span
+          <svg
             data-testid={`work-item-checks-running-${node.itemId}`}
-            title={`${checks.running} check${checks.running === 1 ? "" : "s"} running`}
-            className="absolute -inset-[3px] animate-spin rounded-full border-2 border-amber-500 border-t-transparent"
+            aria-label={`${checks.running} check${checks.running === 1 ? "" : "s"} running`}
+            className="pointer-events-none absolute inset-0 h-full w-full text-amber-500"
           >
-            <span className="sr-only">{checks.running}</span>
-          </span>
+            <title>{`${checks.running} check${checks.running === 1 ? "" : "s"} running`}</title>
+            {/* An arc running along the bubble's own border. */}
+            <rect x="1" y="1" style={{ width: "calc(100% - 2px)", height: "calc(100% - 2px)" }} rx="11" ry="11" pathLength={100} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="22 78">
+              <animate attributeName="stroke-dashoffset" from="0" to="-100" dur="1.2s" repeatCount="indefinite" />
+            </rect>
+          </svg>
         )}
         <a
           data-testid={`work-item-pr-link-${node.itemId}`}

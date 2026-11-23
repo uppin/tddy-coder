@@ -12,7 +12,8 @@ import { createClient } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
-import { WorkQueueView } from "../../src";
+import { WorkItemLinksContext, WorkItemPrBadge, WorkQueueView } from "../../src";
+import { parseWorkQueue } from "../../src/workQueue";
 import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 const ADDRESS = { projectId: "proj-ux", queueId: "queue-ux", daemonInstanceId: "" };
@@ -187,5 +188,34 @@ it("a task's start control is an icon, so the box stays narrow", () => {
   // Then
   cy.get('[data-testid="work-item-start-session-n3"]').should("have.attr", "aria-label", "Start session").and(($b) => {
     expect($b[0].getBoundingClientRect().width).to.be.at.most(40);
+  });
+});
+
+it("a running check is an arc on the PR bubble's own border, not a ring around it", () => {
+  // Given
+  const node = aPlannedNode({ itemId: "n9", title: "Running", branch: "feat/r", displayOrder: 0 });
+  const [parsed] = parseWorkQueue(aWorkQueueJson(1, [node])).nodes;
+  const links = {
+    sessions: [], errorByItemId: {}, onAssignPr: () => {}, onUnassignPr: () => {}, onLinkSession: () => {},
+    onUnlinkSession: () => {}, onSetLabels: () => {}, onClearBadge: () => {},
+    checksByItemId: { n9: { running: 2, failed: 0, succeeded: 1, runs: [] } },
+  };
+  cy.mount(
+    <WorkItemLinksContext.Provider value={links}>
+      <WorkItemPrBadge node={{ ...parsed, pr: { number: 9, url: "https://x/9", headBranch: "feat/r" } }} pr={{ number: 9, url: "https://x/9", state: "open" }} />
+    </WorkItemLinksContext.Provider>,
+  );
+
+  // Then — the arc is exactly the bubble's box
+  cy.get('[data-testid="work-item-pr-link-n9"]').then(($bubble) =>
+    cy.get('[data-testid="work-item-checks-running-n9"]').then(($arc) => {
+      const b = $bubble[0].getBoundingClientRect();
+      const a = $arc[0].getBoundingClientRect();
+      expect(a.width).to.be.closeTo(b.width, 1);
+      expect(a.height).to.be.closeTo(b.height, 1);
+    }),
+  );
+  cy.get('[data-testid="work-item-checks-running-n9"] rect').should(($r) => {
+    expect($r[0].getBoundingClientRect().width).to.be.greaterThan(10);
   });
 });
