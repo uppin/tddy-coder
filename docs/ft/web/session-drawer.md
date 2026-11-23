@@ -639,9 +639,7 @@ A toggle at the top of the form switches between:
 |-------|-------|----------|
 | Project | both | yes — dropdown from `ListProjects` |
 | Agent/coder | tool | yes — dropdown from `ListAgents` |
-| Recipe | tool | no — `<select>` with all 9 workflow recipes (default: `tdd`) |
-| PR stack parent | both | conditional — `<select>` listing PR-stack orchestrator sessions; hidden when none exist |
-| Base the stack on | tool | conditional — `<select>` naming the existing session that seeds the new stack's bottom node; shown only while the recipe is `pr-stack` (see [Stack Base Session Picker](#stack-base-session-picker)) |
+| Recipe | tool | no — `<select>` with the workflow recipes (default: `tdd`) |
 | Model | claude-cli | yes — dropdown of `CLAUDE_CLI_MODELS` |
 | Effort | any CLI agent whose spec declares levels | no — `<select>` (`create-session-effort-select`) beside Model listing the agent's served `AgentInfo.effort_levels`, a **Default** choice first; preselects `default_effort`; hidden for an agent without levels; sends `StartSessionRequest.effort` (field 48), never for a tool session |
 | Name | any session type but a tool session | no — text input (`create-session-name-input`); sent trimmed as `StartSessionRequest.display_name` (field 49), omitted when blank — see [Session names](#session-names) |
@@ -658,7 +656,7 @@ when multiple tools are available.
 > naming the concrete base ref the branch will be created from (`CreateSessionInitialValues.baseBranchLabel`).
 > A **"Create Remote Branch"** checkbox (`create-session-create-remote-branch-toggle`, shown only for
 > `claude-cli` / `cursor-cli` session types in `new_branch_from_base` mode, **default unchecked** via
-> `initialValues?.createRemoteBranch ?? false`; the PR-stack Start-session dialog passes `true`) sends `StartSessionRequest.create_remote_branch` (proto
+> `initialValues?.createRemoteBranch ?? false`; the stack view's Start-session dialog passes `true`) sends `StartSessionRequest.create_remote_branch` (proto
 > field 28). When set, the daemon runs `git push -u origin <branch>` after worktree creation
 > (`tddy_core::worktree::push_new_branch_to_origin`) and records `Changeset.remote_pushed = true`; a
 > push failure fails session start (no fallback).
@@ -666,64 +664,28 @@ when multiple tools are available.
 > **Updated 2026-07-26** — `CreateSessionInitialValues.selectedBranch` pre-fills the **Work on existing
 > branch** select, honoured only when `branchIntent === "work_on_selected_branch"`. It is what lets a
 > caller open the dialog pre-set to *resume* a branch that already exists instead of creating one — see
-> [§ PR-Stack Chat Screen § Start session CTA](#start-session-cta).
+> [§ Project stack view § Start session CTA](#start-session-cta).
 
 ### Recipe Dropdown
 
-The recipe `<select>` lists all 8 workflow recipes (constant `WORKFLOW_RECIPES` in
-`CreateSessionPane.tsx`): `tdd`, `tdd-small`, `bugfix`, `free-prompting`, `grill-me`,
-`review`, `merge-pr`, `pr-stack`. Defaults to `tdd`.
+The recipe `<select>` lists the workflow recipes (constant `WORKFLOW_RECIPES` in
+`packages/tddy-session-create-web/src/createSessionRecipes.ts`): `tdd`, `tdd-small`, `bugfix`,
+`free-prompting`, `grill-me`, `review`, `merge-pr`. Defaults to `tdd`. No stack recipe is offered: a
+stack is a project record, planned in the [project stack view](#project-stack-view).
 
-> **Updated 2026-07-01** — the legacy `plan-pr-stack` and `orchestrate-pr-stack` entries were
-> consolidated into a single `pr-stack` recipe (see
-> [PR stacking § pr-stack recipe](../coder/pr-stacking.md#pr-stack-recipe)). Both legacy CLI
-> names still resolve on the backend for back-compat, but the dropdown only offers the
-> canonical `pr-stack` name for new sessions.
+### Stack parent
 
-### PR Stack Parent Picker
+The form offers no stack picker of its own. A child of a planned PR is started from that PR's row in
+the [project stack view](#project-stack-view), which opens the form with `initialValues.stackParent`
+and `stackNodeId` already named; `StartSession` carries them as `stackParent` (proto field 15) and
+`stackNodeId`. The host that owns the stack parent is found from the session list
+(`stackParentDaemonInstanceId`); a failed session-list read is shown as
+`create-session-sessions-load-error`.
 
-When creating a **tool** or **claude-cli** session, the form also calls `ListSessions` and
-filters to PR-stack orchestrator sessions — sessions with `recipe === "pr-stack"` (or a
-legacy alias) that are not themselves children of another orchestrator. This filtering
-is performed by the `prStackOrchestrators()` helper in `src/utils/stackParents.ts`.
-
-The `recipe` field is populated on `SessionEntry` (proto field 22) by the daemon's enrichment
-layer from `Changeset.recipe`; the TS filter reads it directly without reverse-deriving from
-child back-references (the old `stackParentCandidates` approach).
-
-If any candidates exist, a **PR stack parent** `<select>` appears. Selecting a session causes
-`StartSession` to include `stackParent = <session_id>` (proto field 15).
-
-For **tool** sessions: the daemon threads `stackParent` as `--stack-parent <id>` to the
-spawned `tddy-coder` process, setting `Changeset.orchestrator_session_id` on the child.
-
-For **claude-cli** sessions: the daemon writes `orchestrator_session_id` into the child's
-`changeset.yaml` directly, and resolves the parent's branch via
-`resolve_chain_integration_base_ref_from_parent_session` so the child worktree is based off
-`origin/<parent-branch>` (git PR-stack chaining).
-
-### Stack Base Session Picker
-
-> **Added: 2026-08-13** — a new `pr-stack` orchestrator can be created **on top of a session that
-> already exists**, instead of leaving the agent to plan a stack from a feature description.
-
-A **"Base the stack on"** `<select>` (`create-session-pr-stack-base-session-select`) appears when the
-session type is **tool** and the recipe is `pr-stack`. It reads the same
-`ListSessions` fetch as the [parent picker](#pr-stack-parent-picker), filtered by
-`stackBaseSessionCandidates()` in `src/utils/stackParents.ts` to the sessions that **own a branch**, are
-in the form's effective project, are on its effective host, and are not already a node of another
-orchestrator's stack. Options read `<session id> — <branch>`; the default option is empty and reads
-*"None (agent plans the stack)"*.
-
-Choosing one sends `StartSessionRequest.pr_stack_base_session_id` (field 31), and the created
-orchestrator comes up with a one-node stack bound to that session's branch and id, already in its
-`orchestrate` operator loop. Switching project or host clears the choice, and the field is only ever
-sent while the recipe is still `pr-stack`.
-
-The daemon validates the choice **before it spawns anything**, so a base session that cannot seed a
-stack (no branch, unresolvable, another repository, already owned by another orchestrator) is reported
-in the form's own error strip and nothing is created. Rules, refusals and the seeded node's contents:
-[PR stacking § Seeding the stack from an existing session](../coder/pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13).
+For **tool** sessions the daemon threads `stackParent` as `--stack-parent <id>` to the spawned
+`tddy-coder` process, setting `Changeset.orchestrator_session_id` on the child. For **claude-cli**
+sessions it writes `orchestrator_session_id` into the child's `changeset.yaml` directly and resolves
+the base through the stack (`resolve_chain_integration_base_ref_from_parent_session`).
 
 ### Start progress
 
@@ -1041,7 +1003,7 @@ question "who is working for this agent?" is answered, and it answers it with th
   orchestrator, which is the whole of how the subagent tree is discovered: no new RPC, just the
   `ListSessions` poll the drawer already runs, folded recursively by `agentTree.ts`.
 - `SessionsDrawerScreen.onChildSessionStarted` — the optimistic drawer overlay, so a child spawned
-  from the PR-Stack screen appears without waiting for the next poll.
+  from the project stack view appears without waiting for the next poll.
 - `AttachSessionAgent` / `OpenAgentConversation` / `PromptAgentConversation` /
   `CancelAgentConversation` (`session_agents.SessionAgentService`) — the roster and conversation
   RPCs behind **Add agent**, all of which already existed and were already reachable with a
@@ -1052,11 +1014,11 @@ No proto or daemon changes; no new external dependencies. Both halves are tddy-w
 ## Per-Workflow Session Views
 
 > **Added: 2026-07-01** — a session's `recipe` can now select a fully custom main-pane
-> screen instead of the terminal. First consumer: the PR-Stack Chat Screen below.
+> screen instead of the terminal.
 >
-> **Updated: 2026-07-21** — chat is now the default surface for **every** tddy-coder workflow.
-> `pr-stack` keeps its dedicated screen (chat + Planned PRs panel); every other `tool` workflow recipe opens the
-> single-pane full-screen [Workflow Chat Screen](#workflow-chat-screen). `claude-cli` / `cursor-cli`
+> Chat is the default surface for **every** tddy-coder workflow: every `tool` workflow recipe opens the
+> single-pane full-screen [Workflow Chat Screen](#workflow-chat-screen) — including a session still
+> recorded with the retired `pr-stack` recipe, which no longer resumes. `claude-cli` / `cursor-cli`
 > PTY sessions keep the terminal (they have no Presenter).
 
 ### View registry
@@ -1073,7 +1035,7 @@ if (customView) return customView;
 registry keyed by `session.recipe` and `session.sessionType`:
 
 ```typescript
-resolveWorkflowView({ recipe: "pr-stack", ... })              → <PrStackScreen session={...} />
+resolveWorkflowView({ recipe: "pr-stack", sessionType: "tool" }) → <WorkflowChatScreen session={...} />  // retired recipe
 resolveWorkflowView({ recipe: "tdd", sessionType: "tool" })   → <WorkflowChatScreen session={...} />
 resolveWorkflowView({ recipe: "tdd", sessionType: "claude-cli" }) → null  // terminal (PTY, no Presenter)
 resolveWorkflowView({ recipe: "", sessionType: "claude-cli" }) → null      // terminal
@@ -1083,8 +1045,8 @@ The gate for the generic chat screen (`sessionPaneIsWorkflowView`) is a session 
 launch kind is `tddy_coder` (`tool`; [Session types are declared](../daemon/session-agent-roster.md#session-types-are-declared)),
 or a legacy record's empty one, with `recipe != ""` — only tddy-coder sessions run a Presenter/ACP
 surface the chat can reach, so a `claude-cli` /
-`cursor-cli` session keeps the terminal even when it carries a managed `recipe`. `pr-stack` is
-matched first and routes to its own chat + Planned PRs panel screen.
+`cursor-cli` session keeps the terminal even when it carries a managed `recipe`. No recipe has a
+screen of its own.
 
 Custom views own their own connection/chrome and render **in place of** the terminal
 container — they are not gated on `attachment.status`; a workflow session shows its chat screen
@@ -1098,49 +1060,21 @@ placeholder behaviour is the fallback when no custom view is registered.
 already surfaced for the create-session form / inspector, are the routing keys — no new field was
 needed to decide *which* view opens.
 
-## PR-Stack Chat Screen
+## Project stack view
 
-The custom screen for `recipe === "pr-stack"` sessions. Replaces the terminal with a **full-width chat
-window** backed by a remote Presenter, plus a **Planned PRs panel** docked to its right. Lets the
-operator review a freshly-written stack plan, keep refining it by chatting with the agent, and start
-child sessions for each planned PR — all without leaving the orchestrator session.
+One project stack, opened by its address at `#/sessions/project/<projectId>/stack/<stackId>`, with
+its planned PRs rendered full width. Lets the operator plan the stack ("+ New planned PR", "New
+stack"), read each PR's live state, and start, repoint, reorder and pull-base its nodes. See
+[PR stacking § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id).
 
-**Component:** `PrStackScreen` (`packages/tddy-prstack-web/src/PrStackScreen.tsx`), with
-`PlannedPrPanel` / `PlannedPrList` / `PlannedPrRow` subcomponents.
-
-> **Rewritten 2026-07-26** — the screen was a fixed 50/50 split (`w-1/2` columns, no toggle, no
-> breakpoint handling), which permanently halved the chat on desktop and was unusable on mobile with no
-> way to dismiss the list. The list is now a panel with the same contract as the Session Inspector.
-
-### Planned PRs panel
-
-| Viewport | Default | Layout |
-|---|---|---|
-| Desktop (≥ 768px) | **open** | docked 360px column to the right of the chat |
-| Mobile (< 768px) | **closed** | full-screen overlay above the chat |
-
-- **Always mounted**; `data-state` ∈ `{closed, open}` drives visibility
-  (`data-testid="pr-stack-planned-pr-panel"`), matching `SessionInspectorDrawer` — so the list keeps its
-  scroll position and the screen keeps its branch poll set across a close and reopen.
-- Positioned `absolute top-0 right-0 z-10` against the screen's **content row** (which carries
-  `relative`), not the screen root — so the panel never covers the header toggle that opens it. The
-  chat owns the full width and reserves a `paddingRight` column only while the panel is docked; the
-  mobile overlay deliberately covers the chat instead.
-- **Width and closed-visibility are inline styles driven by an `isMobile` prop**, not `w-full
-  md:w-[360px]` + a Tailwind `hidden` class. They are the panel's layout contract rather than
-  decoration, and `SessionDrawer` already establishes the idiom: component tests mount without the app
-  stylesheet, so a media-query/class-only panel would have no width and no way to hide.
-- Two controls: a header **toggle** in the screen's own top strip
-  (`pr-stack-planned-pr-panel-toggle`, labelled "Planned PRs") and the panel's own **close** control
-  (`pr-stack-planned-pr-panel-close`). The open/closed seed is `detectIsMobile()`; live changes come
-  from `useIsMobile()`.
-- The panel contains the planned-PR list, the "+ New planned PR" entry point, and the add form.
+**Component:** `ProjectStackView` (`packages/tddy-prstack-web/src/ProjectStackView.tsx`,
+`data-testid="project-stack-view"`), with `PlannedPrList` / `PlannedPrRow` subcomponents.
 
 ### Planned-PR list
 
-Reads the orchestrator's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
-via `SessionEntry.stackPlanJson` (proto field 23 — a JSON-serialized `Stack`, empty string
-until a plan exists) and renders one row per `StackNode`.
+Reads the stack's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
+from `GetProjectStack`'s `stack_plan_json` (a JSON-serialized `Stack`) and renders one row per
+`StackNode`.
 
 > **Updated 2026-08-01** — rows render in the order the plan **persists** (`StackNode.display_order`),
 > not in `Stack::topo_order`. The reading order and the dependency graph are different facts, and
@@ -1286,54 +1220,31 @@ merged (`effective_base_ref`, [PR stacking § assess decision algorithm](../code
 After the child is spawned, the node is linked via `link_stack_node_to_child_session` and the
 row updates from CTA to status chip on the next session-list refresh.
 
-### Chat window (remote Presenter over RPC)
-
-The chat surface (full-width behind the Planned PRs panel) is a thin UI over the session's existing **remote Presenter**
-protocol — the same bidirectional `TddyRemote.Stream` RPC already used for programmatic
-control (`tddy-service/proto/tddy/v1/remote.proto`), not a new backend concept:
-
-- **Inbound** — the screen subscribes to the stream over the session's LiveKit room
-  (`useLiveKitClient(TddyRemote)`), and renders each `ServerMessage` `PresenterEvent` as a
-  chat item: `AgentOutput` / `ActivityLogged` → agent bubbles, `StateChanged` / `GoalStarted`
-  → status lines, `WorkflowComplete` → a completion bubble.
-- **Outbound** — submitting chat text sends a `ClientMessage` intent on the same stream:
-  `QueuePrompt` for a plan-refinement turn, `AnswerSelect` / `AnswerText` for clarification
-  answers.
-- **Refine loop** — a refinement turn causes the recipe's `write-stack-plan` goal to re-run
-  (`plan_refinement_goal()`, [PR stacking § pr-stack recipe](../coder/pr-stacking.md#pr-stack-recipe)),
-  which rewrites `stack-plan.yaml` and re-seeds the orchestrator's stack. The planned-PR list
-  re-reads `stackPlanJson` after a `WorkflowComplete` / `StateChanged` event so edits appear
-  without a manual refresh.
-
-**Component:** the reusable **`AgentChat`** (`packages/tddy-chat-web/src/AgentChat.tsx`) +
-`useAgentChat` hook — see [Agent Chat](#agent-chat) below. `PrStackScreen` mounts `AgentChat`
-with a pr-stack-appropriate placeholder; the component itself is recipe-agnostic.
-
 ## Workflow Chat Screen
 
-The custom screen for every non-`pr-stack` tddy-coder `tool` workflow session (`tdd`, `tdd-small`,
+The custom screen for every tddy-coder `tool` workflow session (`tdd`, `tdd-small`,
 `bugfix`, `free-prompting`, `grill-me`, `review`, `merge-pr`). Replaces the terminal with a single,
 full-screen chat window — no second pane. The operator drives the workflow entirely by prompting and
-answering clarifications, exactly as with pr-stack, minus the planned-PR list.
+answering clarifications.
 
 **Component:** `WorkflowChatScreen` (`packages/tddy-prstack-web/src/WorkflowChatScreen.tsx`) — a thin
 single-pane wrapper that derives its own presenter LiveKit room from the session's attachment
-(the media port's `usePresenterRoom`, shared with `PrStackScreen`) and mounts the reusable [`AgentChat`](#agent-chat)
-over the **ACP mirror** (`acp`), matching pr-stack's chat and tddy-coder's ACP-agent direction. Root
+(the media port's `usePresenterRoom`) and mounts the reusable [`AgentChat`](#agent-chat)
+over the **ACP mirror** (`acp`), matching tddy-coder's ACP-agent direction. Root
 marker: `data-testid="workflow-chat-screen"`.
 
 ## Agent Chat
 
-`AgentChat` is the recipe-agnostic chat window extracted from the PR-Stack screen. It is a thin
+`AgentChat` is the recipe-agnostic chat window. It is a thin
 UI over a session's remote agent and knows nothing about PR stacks — any recipe can mount it. It
 speaks one of two wire protocols over the same LiveKit session connection, chosen by an `acp` prop:
 the default Presenter `TddyRemote.Stream`, or the ACP protobuf mirror `AcpService.Session` (see
-[acp-protobuf-rpc](../coder/acp-protobuf-rpc.md)). **The pr-stack chat uses ACP** (`acp`), at full
+[acp-protobuf-rpc](../coder/acp-protobuf-rpc.md)). **The workflow chat uses ACP** (`acp`), at full
 behavior parity with the Presenter path.
 
 - **Inputs:** `room: Room | null` + `livekitServerIdentity` select the LiveKit transport target;
   `placeholder` is display-only; `acp` selects the ACP transport. There is no dependency on
-  `SessionEntry` or any pr-stack type.
+  `SessionEntry` or any stack type.
 - **Behavior:** inbound agent output chunks are merged into one growing agent bubble (mirroring
   the TUI's `AgentOutputActivityLogMerge`); a select / multi-select clarification renders a
   clarification panel; outbound text starts (first message on a fresh connection) or nudges the
@@ -1355,8 +1266,7 @@ the identical `UseAgentChatResult` — `messages`, `elicitations`, `sendPrompt`,
 
 ### New RPCs / proto fields used
 
-- `SessionEntry.stack_plan_json` (proto field 23, new) — JSON-serialized `Stack` for the
-  planned-PR list.
+- `GetProjectStack` `stack_plan_json` — JSON-serialized `Stack` for the planned-PR list.
 - `TddyRemote.Stream` (existing) — chat window transport.
 - `ConnectionService.StartSession` (existing, `recipe` + `stack_parent`) — the Start session CTA.
 

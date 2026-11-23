@@ -17,16 +17,13 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
@@ -140,8 +137,7 @@ function aPrStackBackend(queryBranch: QueryBranchHandler) {
 }
 
 function openPrStackScreen(backend: ReturnType<typeof aPrStackBackend>) {
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +178,8 @@ function aQueryBranchWhoseSecondRoundIsWithheld(rounds: {
         withheld.push(() => resolve(answer(rounds.withheld, req.branch)));
       });
     }) satisfies QueryBranchHandler,
+    /** How many branches have had their first poll answered. */
+    firstRoundAnswered: () => answeredOnce.size,
     /** Answer every withheld call, in the order the polls were issued. */
     releaseWithheldRound: () => {
       for (const send of withheld.splice(0)) send();
@@ -204,6 +202,8 @@ it("keeps a completed pull's result when the poll it overtook finally answers", 
     ),
   );
   prStackScreenPage.expandRow("n3");
+  // The first round must be answered before the tick: the poll's interval is registered with it.
+  cy.wrap(null).should(() => expect(polls.firstRoundAnswered(), "first poll round").to.be.greaterThan(0));
   cy.tick(POLL_INTERVAL_MS);
   prStackScreenPage.clickSyncMerge("n3");
   prStackScreenPage.baseInSync("n3").should("exist");

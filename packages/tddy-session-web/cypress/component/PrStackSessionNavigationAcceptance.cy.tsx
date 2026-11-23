@@ -15,17 +15,16 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
+import { projectStacksPage } from "../support/pages/projectStacksPage";
 import {
   aPlannedNode,
   aStackPlanJson,
@@ -116,8 +115,7 @@ function openPrStackScreen(opts: MountOptions) {
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
 }
 
 /** A resolution reporting that a live session owns the branch. */
@@ -154,9 +152,9 @@ it("opens the child session a spawned planned PR is bound to", () => {
   // When
   prStackScreenPage.openBoundSession("n1");
 
-  // Then — the app navigated: the child is selected, and its own view replaced the PR-Stack screen
+  // Then — the app navigated: the child is selected, and its own view replaced the project stack view
   sessionsDrawerPage.expectSessionSelected(RECORDED_CHILD_SESSION_ID);
-  prStackScreenPage.screen().should("not.exist");
+  projectStacksPage.stackView().should("not.exist");
 });
 
 it("shows the bound session's id in the row's detail", () => {

@@ -39,7 +39,7 @@ owns its domain —
 `tddy_bsp::build_cli`, `tddy_code_analysis::analyze_cli`,
 `tddy_code_restructuring::restructure_cli`, `tddy_workflow_recipes::schema`,
 `tddy_core::toolcall::client` — and each MCP tool's implementation likewise, in
-`tddy_tool_engine`, `tddy_lsp_executor::lsp_tools`, `tddy_workflow_recipes::pr_stack` and
+`tddy_tool_engine`, `tddy_lsp_executor::lsp_tools` and
 `tddy_discovery::{roster, subagent_runtime}`. What this crate contributes is the *shape* those
 things take on the wire: the clap surface, the `#[tool]` advertisement, and the router that assembles
 them into one server. The six `restructure_*` tool definitions are in `restructure_tools.rs`, merged by

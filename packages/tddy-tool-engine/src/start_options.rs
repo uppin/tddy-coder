@@ -3,14 +3,8 @@
 //!
 //! The closed lists — session types, recipes, permission modes, hosts — are enums in `StartSession`'s
 //! own schema. What depends on a host and on other choices (the agents a host offers, the models of
-//! one agent or provider account, the branches of the project's checkout there, the sessions that can
-//! parent or seed a stack) is asked for here, when the agent needs it, rather than frozen into a
-//! schema that would go stale.
-//!
-//! The two stack pickers are filters over the listed sessions. [`pr_stack_orchestrators`] and
-//! [`stack_base_session_candidates`] mirror the form's `prStackOrchestrators` and
-//! `stackBaseSessionCandidates` (`tddy-web/src/utils/stackParents.ts`); the web's
-//! `stackParentsParity.cy.ts` runs those over the fixture `tests/start_options.rs` runs these over.
+//! one agent or provider account, the branches of the project's checkout there) is asked for here,
+//! when the agent needs it, rather than frozen into a schema that would go stale.
 //!
 //! A list that could not be answered is empty, and its `*_unavailable` field says why; a list that
 //! was answered has an empty reason. The reason is never a silent stand-in for the list.
@@ -24,9 +18,6 @@ use crate::catalog::ToolDef;
 use crate::project_home_tools::tool_def;
 
 pub const DESCRIBE_SESSION_START_OPTIONS: &str = "DescribeSessionStartOptions";
-
-/// The recipes whose sessions orchestrate a PR stack (the form's `PR_STACK_RECIPES`).
-pub const PR_STACK_RECIPES: &[&str] = &["pr-stack", "orchestrate-pr-stack", "plan-pr-stack"];
 
 /// What the calling agent narrows the answer by. Every field is optional.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,17 +86,6 @@ pub struct AgentEffortLevels {
     pub levels: Vec<String>,
 }
 
-/// One session as the stack pickers filter it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CandidateSession {
-    pub session_id: String,
-    pub project_id: String,
-    pub daemon_instance_id: String,
-    pub branch: String,
-    pub recipe: String,
-    pub orchestrator_session_id: String,
-}
-
 /// `DescribeSessionStartOptions`'s answer.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StartOptions {
@@ -139,43 +119,6 @@ pub struct StartOptions {
     /// Qualified `name@daemon_instance_id`, as `specialized_agents` takes them.
     pub subagents: Vec<String>,
     pub branches: Vec<String>,
-    pub stack_parents: Vec<CandidateSession>,
-    pub pr_stack_base_candidates: Vec<CandidateSession>,
-}
-
-/// The sessions the form offers as a PR-stack parent: a PR-stack recipe, and not itself a child of
-/// another orchestrator.
-pub fn pr_stack_orchestrators(sessions: &[CandidateSession]) -> Vec<CandidateSession> {
-    sessions
-        .iter()
-        .filter(|s| {
-            PR_STACK_RECIPES.contains(&s.recipe.as_str()) && s.orchestrator_session_id.is_empty()
-        })
-        .cloned()
-        .collect()
-}
-
-/// The sessions whose branch may seed a new PR-stack orchestrator's stack on `daemon_instance_id`
-/// in `project_id`: owning a branch, in that project, on that host, not already stacked. Nothing
-/// when `project_id` is empty.
-pub fn stack_base_session_candidates(
-    sessions: &[CandidateSession],
-    project_id: &str,
-    daemon_instance_id: &str,
-) -> Vec<CandidateSession> {
-    if project_id.is_empty() {
-        return Vec::new();
-    }
-    sessions
-        .iter()
-        .filter(|s| {
-            !s.branch.is_empty()
-                && s.project_id == project_id
-                && s.daemon_instance_id == daemon_instance_id
-                && s.orchestrator_session_id.is_empty()
-        })
-        .cloned()
-        .collect()
 }
 
 /// The coding agent among `agents` that `session_type` starts, when it is one's.
@@ -248,7 +191,7 @@ pub fn models_agent(
 pub fn start_options_tool_def() -> ToolDef {
     tool_def(
         DESCRIBE_SESSION_START_OPTIONS,
-        "Describe the choices a StartSession call can make on a host: its agents, the models of an agent or of a provider account, the provider accounts that can run a session type's harness, its SSH config hosts, its subagents, the branches of this project's checkout there, and the sessions that can parent or seed a PR stack. Narrow it with session_type, agent or provider_account_id. An empty daemon_instance_id is this host. daemon_instance_id in the answer names the host that answered; a list that could not be answered is empty and its *_unavailable field says why. An SSH or Coder host's `usable` means it is listed as startable, not probed: a reachable-looking host can still fail the start.",
+        "Describe the choices a StartSession call can make on a host: its agents, the models of an agent or of a provider account, the provider accounts that can run a session type's harness, its SSH config hosts, its subagents, and the branches of this project's checkout there. Narrow it with session_type, agent or provider_account_id. An empty daemon_instance_id is this host. daemon_instance_id in the answer names the host that answered; a list that could not be answered is empty and its *_unavailable field says why. An SSH or Coder host's `usable` means it is listed as startable, not probed: a reachable-looking host can still fail the start.",
         json!({
             "type": "object",
             "properties": {

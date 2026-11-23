@@ -70,7 +70,6 @@ function aFormWith(values: Partial<CreateSessionFormValues>): CreateSessionFormV
     stackParent: "",
     stackNodeId: "",
     stackParentDaemonInstanceId: "",
-    prStackBaseSessionId: "",
     model: "sonnet",
     permissionMode: "auto",
     dangerouslySkipPermissions: false,
@@ -133,39 +132,6 @@ describe("create session request builder", () => {
     // start never performs
     expect(request.stackParent).to.equal("session-7");
     expect(request.stackParentDaemonInstanceId).to.equal("");
-  });
-
-  it("seeds a stack only for the recipe whose picker offered a base session", () => {
-    // Given a base session chosen while the recipe was pr-stack
-    const form = aFormWith({
-      sessionType: "tool",
-      sessionLaunch: "tddy_coder",
-      recipe: "pr-stack",
-      prStackBaseSessionId: "session-9",
-    });
-
-    // When the request is built
-    const request = buildStartSessionRequest(form, null, []);
-
-    // Then the seed goes out with it
-    expect(request.prStackBaseSessionId).to.equal("session-9");
-  });
-
-  it("drops a base session chosen before the recipe was switched away from pr-stack", () => {
-    // Given a base session still held from a pr-stack recipe the operator has since left
-    const form = aFormWith({
-      sessionType: "tool",
-      sessionLaunch: "tddy_coder",
-      recipe: "tdd",
-      prStackBaseSessionId: "session-9",
-    });
-
-    // When the request is built
-    const request = buildStartSessionRequest(form, null, []);
-
-    // Then it does not leak into the request — the daemon refuses a base session beside any other
-    // recipe, so a stale choice would turn a valid start into a refusal
-    expect(request.prStackBaseSessionId).to.equal("");
   });
 
   it("sends no codebase host for a cursor-cli session", () => {

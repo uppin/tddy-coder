@@ -461,7 +461,6 @@ export function SessionsDrawerScreen({
               onSessionCreated={handleSessionCreated}
               room={room}
               mobileShortcuts={mobileShortcuts}
-              onChildSessionStarted={handleChildSessionStarted}
               onSwitchPeer={handleSelectSession}
               traffic={selectedTraffic}
               projects={projects}
@@ -474,7 +473,6 @@ export function SessionsDrawerScreen({
               onSessionBytes={onSessionBytes}
               buildSessionExecToolClient={buildSessionExecToolClient}
               buildSessionActivityClient={buildSessionActivityClient}
-              sessionMetadataBySessionId={sessionMetadataBySessionId}
             />
             )}
           />

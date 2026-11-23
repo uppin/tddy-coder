@@ -29,7 +29,7 @@ an environment variable or a file.
 - **Wire.** `github-token` is a JSON verb on the existing toolcall service (RPC method
   `GithubToken`, `GITHUB_TOKEN_METHOD`), not a `.proto` message: nothing to regenerate. The request
   names no session, project or account. The listener's socket is bound per session and carries its
-  handlers per instance, as `spawn-child` and `spawn-conversation` do, so the socket **is** the
+  handlers per instance, as `spawn-conversation` does, so the socket **is** the
   identity: a tool can only ask about its own session.
 - **Handler.** `GithubCredentialHandler`, registered on the listener per instance. A listener with no
   handler answers with a *no credential handler* error; there is no fallback.

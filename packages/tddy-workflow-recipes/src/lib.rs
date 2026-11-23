@@ -9,11 +9,8 @@ pub mod github_pr_tools;
 pub mod github_rest_common;
 pub mod grill_me;
 pub mod merge_pr;
-pub mod orchestrate_pr_stack;
 pub mod parser;
 pub mod permissions;
-pub mod plan_pr_stack;
-pub mod pr_stack;
 pub mod recipe_resolve;
 pub mod review;
 pub mod schema;
@@ -37,9 +34,6 @@ pub use github_rest_common::{
 pub use grill_me::GrillMeRecipe;
 pub use merge_pr::merge_pr_github_tools_awareness_line;
 pub use merge_pr::MergePrRecipe;
-pub use orchestrate_pr_stack::{
-    OrchestratePrStackRecipe, STACK_STATUS_JSON_BASENAME, STACK_STATUS_MD_BASENAME,
-};
 pub use parser::{
     parse_acceptance_tests_response, parse_analyze_response, parse_demo_response,
     parse_evaluate_response, parse_green_response, parse_planning_response,
@@ -57,11 +51,6 @@ pub use permissions::{
     plan_allowlist, red_allowlist, refactor_allowlist, update_docs_allowlist,
     validate_subagents_allowlist,
 };
-pub use plan_pr_stack::{
-    planned_prs_into_stack_nodes, validate_stack_plan, PlanPrStackRecipe, PlannedPr,
-    StackPlanOutput,
-};
-pub use pr_stack::{reseed_stack_from_plan_if_unspawned, PrStackRecipe};
 pub use recipe_resolve::{
     resolve_workflow_recipe_from_cli_name, unknown_workflow_recipe_error,
     workflow_recipe_and_manifest_from_cli_name, WorkflowRecipeAndManifest,
@@ -82,15 +71,3 @@ pub use writer::{
     write_impl_session_file, write_progress_file, write_red_output_file, write_session_file,
     SESSIONS_SUBDIR,
 };
-
-/// The coordinate family P is served on, re-exported from `tddy-pr-stack`, which now defines it
-/// beside the `PrStackHandler` trait and the entry builder that registers it.
-pub use tddy_pr_stack::PR_STACK_SERVICE;
-
-#[cfg(test)]
-mod unbundle_pr_stack_entry_tests {
-    #[test]
-    fn names_the_service_family_p_moves_to() {
-        assert_eq!(super::PR_STACK_SERVICE, "pr_stack.PrStackService");
-    }
-}

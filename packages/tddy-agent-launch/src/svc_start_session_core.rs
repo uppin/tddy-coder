@@ -266,28 +266,6 @@ impl LaunchSessions {
         // no agent is spawned.
         crate::start_task::refuse_a_cancelled_start(cancel)?;
 
-        // A base session that cannot seed a stack is refused here, before the session-type dispatch
-        // and before anything is created, so the new-session form can show the reason in its error
-        // strip rather than navigating away from a session that came up unseeded.
-        if !req.pr_stack_base_session_id.trim().is_empty() {
-            let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
-                os_user,
-                Some(&self.tddy_data_dir),
-            )
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-            // The requesting project's repository, which the base session's must be. Resolved here
-            // rather than reusing the tool branch's lookup further down, because the whole value of
-            // this refusal is that it happens before any of that runs. A seeded orchestrator without
-            // a project has no repository to be scoped to, so it is refused rather than exempted.
-            let project_id = req.project_id.trim();
-            if project_id.is_empty() {
-                return Err(Status::invalid_argument(
-                    "project_id is required to seed a PR stack from a base session",
-                ));
-            }
-            self.validate_stack_seed_against_project(&req, os_user, sessions_base, project_id)?;
-        }
-
         // A requested new branch another session already owns is refused here, before the
         // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
         // so nothing has been created yet when it fires.

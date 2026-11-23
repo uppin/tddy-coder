@@ -226,7 +226,6 @@ fn every_argument_reaches_the_request_under_its_own_name() {
         "stack_parent": "parent-1",
         "stack_parent_daemon_instance_id": "host-c",
         "stack_node_id": "node-1",
-        "pr_stack_base_session_id": "base-1",
         "sandbox": true,
         "managed_codebase": true,
         "sandboxed_codebase": true,
@@ -272,7 +271,6 @@ fn every_argument_reaches_the_request_under_its_own_name() {
             stack_parent: "parent-1".to_string(),
             stack_parent_daemon_instance_id: "host-c".to_string(),
             stack_node_id: "node-1".to_string(),
-            pr_stack_base_session_id: "base-1".to_string(),
             sandbox: true,
             managed_codebase: true,
             sandboxed_codebase: true,
@@ -391,5 +389,23 @@ fn new_branch_name_says_an_agent_requiring_one_refuses_it_empty() {
             && description.contains("refuse")
             && description.contains("empty `branch_worktree_intent`"),
         "{description}"
+    );
+}
+
+/// `#workqueue` 1/14: the `pr-stack` recipe is removed, and with it the start option that seeded a
+/// stack from an existing session's branch. `StartSession` no longer offers it.
+#[test]
+fn start_session_offers_no_stack_base_session_argument() {
+    // When
+    let schema = schema();
+
+    // Then
+    let offered = schema["properties"]
+        .as_object()
+        .expect("properties")
+        .contains_key("pr_stack_base_session_id");
+    assert!(
+        !offered,
+        "StartSession still offers pr_stack_base_session_id, the removed stack seed"
     );
 }

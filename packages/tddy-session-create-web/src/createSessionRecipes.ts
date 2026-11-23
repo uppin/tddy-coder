@@ -7,5 +7,4 @@ export const WORKFLOW_RECIPES = [
   "grill-me",
   "review",
   "merge-pr",
-  "pr-stack",
 ] as const;

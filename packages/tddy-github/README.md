@@ -23,12 +23,10 @@ pull requests.
 
 These three arrived from `tddy-workflow-recipes`, where 2,124 lines of GitHub REST sat inside a
 crate about workflow recipes while the crate named after the service had no PR surface at all.
-`pr_api` was `orchestrate_pr_stack/github.rs`; it is renamed because `orchestrate_pr_stack` is a
-workflow-recipes concept with no meaning here.
-
-`tddy-workflow-recipes` keeps one-line `pub use` facades at all three old paths, so
-`tddy_workflow_recipes::github_pr::…` and `crate::orchestrate_pr_stack::github::…` still resolve and
-no caller was edited. Write new code against `tddy_github` directly.
+`tddy-workflow-recipes` keeps one-line `pub use` facades for `github_rest_common` and `github_pr`, so
+`tddy_workflow_recipes::github_pr::…` still resolves. Write new code against `tddy_github` directly.
+The client's acceptance suites live here (`tests/github_pr_acceptance.rs`,
+`github_qualified_head_acceptance.rs`, `pr_status_view_acceptance.rs`).
 
 ## Dependency rules
 

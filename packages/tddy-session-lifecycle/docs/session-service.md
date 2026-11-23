@@ -42,9 +42,8 @@ event only after the task forwarding the sink's events has drained, so a result 
 phase's end; a forwarding task that ends abnormally is logged.
 
 **Not covered.** The tool start and the split start
-report no phases and announce no worktree. Children spawned by a PR-stack orchestrator
-(`StackChildSpawnHandler`) and by a grill-me conversation (`GrillMeConversationSpawnHandler`) pass a
-discarding sink and announce nothing.
+report no phases and announce no worktree. Children spawned by a grill-me conversation (`GrillMeConversationSpawnHandler`) pass a discarding
+sink and announce nothing.
 
 ## Naming a session at its start
 

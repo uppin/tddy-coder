@@ -11,7 +11,7 @@ export const byTestId = (
   cy.get(`[data-testid='${id}']`, options);
 
 export const TEST_IDS = {
-  // Reusable Agent Chat (recipe-agnostic; the PR-Stack chat view renders it via PrStackChat)
+  // Reusable Agent Chat (recipe-agnostic; the workflow chat view renders it)
   agentChat: "agent-chat",
   agentChatMessages: "agent-chat-messages",
   agentChatInput: "agent-chat-input",

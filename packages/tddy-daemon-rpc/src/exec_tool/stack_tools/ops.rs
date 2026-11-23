@@ -11,15 +11,13 @@ use tddy_core::changeset::{PrInternalStatus, Stack};
 use tddy_core::project_stack_store::{ProjectStackStore, StackRecord};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_pr_stack::assess::assemble_views;
+use tddy_pr_stack::internal_status::{derive_internal_status, reconcile_internal_status};
 use tddy_pr_stack::pr_insight::{self, PrSearchInput};
 use tddy_pr_stack::stack_ops::{
     add_planned_pr_node, adopt_pr_into_stack, delete_planned_pr_node, sync_node_to_github_pr,
     update_planned_pr_node, AddPlannedPrInput, StackHome, StoredStack, UpdatePlannedPrInput,
 };
 use tddy_tool_engine::stack_tools::{PrAddress, StackOp};
-use tddy_workflow_recipes::orchestrate_pr_stack::{
-    derive_internal_status, reconcile_internal_status,
-};
 
 use super::github::GithubSource;
 use super::shape::{pr_comments_json, pr_read_json, pr_search_json};

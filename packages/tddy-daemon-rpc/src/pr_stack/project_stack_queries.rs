@@ -40,7 +40,7 @@ impl PrStackRpcHandler {
         let mut added: Option<StackNode> = None;
         let updated = store
             .update(&address.project_id, &address.stack_id, |stack| {
-                tddy_workflow_recipes::pr_stack::assign_missing_display_order(stack);
+                tddy_pr_stack::stack_ops::assign_missing_display_order(stack);
                 let display_order = stack
                     .nodes
                     .iter()
@@ -89,7 +89,7 @@ impl PrStackRpcHandler {
         let store = self.stack_store(sessions_base);
         let updated = store
             .update(&address.project_id, &address.stack_id, |stack| {
-                tddy_workflow_recipes::pr_stack::assign_missing_display_order(stack);
+                tddy_pr_stack::stack_ops::assign_missing_display_order(stack);
                 let order = stack.display_order();
                 let Some(position) = order.iter().position(|id| id == node_id) else {
                     return;
@@ -171,7 +171,7 @@ impl PrStackRpcHandler {
                 joins.spawn(async move {
                     let answered = routing
                         .rpc_served_by_peer::<_, ListProjectStacksResponse>(
-                            tddy_workflow_recipes::PR_STACK_SERVICE,
+                            tddy_pr_stack::PR_STACK_SERVICE,
                             "ListProjectStacks",
                             &peer,
                             &forward,

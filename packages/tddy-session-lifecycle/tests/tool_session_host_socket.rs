@@ -356,8 +356,8 @@ async fn token_over(socket: &Path, session_id: &str) -> Result<String, String> {
 
 #[tokio::test]
 async fn a_tool_session_is_given_the_host_session_socket_whatever_its_recipe() {
-    // Given recipes that spawn conversations, orchestrate stacks, and plain ones
-    for recipe in ["grill-me", "pr-stack", "tdd", "bugfix"] {
+    // Given recipes that spawn conversations and plain ones
+    for recipe in ["grill-me", "review", "tdd", "bugfix"] {
         let world = a_world_with(&[(ADA_PROJECT, Some("acct-ada"))]);
 
         // When a tool session of that recipe is started

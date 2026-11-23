@@ -143,11 +143,14 @@ impl Drop for AnAgentToolSocket {
 // The agent's process
 // ---------------------------------------------------------------------------
 
-/// `tddy-tools` with none of the session environment inherited from whoever runs this suite, so
-/// each test sets exactly the environment it is about.
+/// `tddy-tools` with none of the session inherited from whoever runs this suite — neither its
+/// environment nor the `.tddy/session.json` it would adopt from above the suite's own directory,
+/// which under a tddy session is a worktree carrying that session's pointer — so each test sets
+/// exactly the session it is about.
 fn tddy_tools_without_a_session_environment() -> Command {
     let mut cmd = cargo_bin_cmd!("tddy-tools");
-    cmd.env_remove("TDDY_SOCKET")
+    cmd.current_dir(std::env::temp_dir())
+        .env_remove("TDDY_SOCKET")
         .env_remove(notify_env::SESSION_ID)
         .env_remove(notify_env::OS_USER)
         .env_remove(notify_env::HOOK_TOKEN)

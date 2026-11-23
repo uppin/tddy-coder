@@ -1,12 +1,10 @@
-//! Acceptance tests for `tddy-tools submit` goal routing and the `write-stack-plan` contract.
+//! Acceptance tests for `tddy-tools submit` goal routing.
 //!
-//! Both behaviours come from one incident (session `01a04d4b-84f8-7fc0-b020-19ae73981175`): a
-//! pr-stack agent ran `tddy-tools submit --goal write-stack-plan` twice with a `{key, value}`
-//! payload and got `{"goal":"unknown","status":"ok"}` both times. Two defects compounded — the
-//! relayed goal is read only from the JSON body so `--goal` was silently discarded, and
-//! `write-stack-plan` has no registered schema so the wrong shape was never validated. Between
-//! them the agent got two green lights for two no-ops and spent the next ninety seconds reading
-//! `cli.rs` to work out why nothing had happened.
+//! The behaviour comes from one incident (session `01a04d4b-84f8-7fc0-b020-19ae73981175`): an agent
+//! ran `tddy-tools submit --goal <goal>` twice with a `{key, value}` payload and got
+//! `{"goal":"unknown","status":"ok"}` both times — the relayed goal is read only from the JSON body,
+//! so `--goal` was silently discarded. The agent got two green lights for two no-ops and spent the
+//! next ninety seconds reading `cli.rs` to work out why nothing had happened.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use serde_json::Value;
@@ -14,15 +12,14 @@ use serde_json::Value;
 #[path = "support/session_listener.rs"]
 mod session_listener;
 
-/// The shape the `write-stack-plan` hook actually parses into `StackPlanOutput`.
-fn a_valid_stack_plan_payload() -> String {
-    r#"{"goal":"write-stack-plan","version":1,"prs":[{"node_id":"token-store","title":"Auth token store","description":"Store tokens in the keyring, with tests","branch_suggestion":"feature/auth/token-store","parents":[]}]}"#
-        .to_string()
+/// A payload of the `plan` goal, carrying that goal in its own `goal` field.
+fn a_valid_plan_payload() -> String {
+    r##"{"goal":"plan","prd":"# PRD\n\n## Summary\nFeature X"}"##.to_string()
 }
 
 /// The shape the incident agent inferred from "using the `submit` tool with key `stack-plan`" —
-/// a plan the workflow cannot parse, which `submit` nonetheless acknowledged as ok.
-fn a_stack_plan_payload_shaped_as_key_and_value() -> String {
+/// a payload the workflow cannot parse, which `submit` nonetheless acknowledged as ok.
+fn a_payload_shaped_as_key_and_value() -> String {
     r#"{"key":"stack-plan","value":"version: 1\nprs: []\n"}"#.to_string()
 }
 
@@ -35,8 +32,8 @@ struct SubmitCall {
 
 fn a_submit() -> SubmitCall {
     SubmitCall {
-        goal_flag: Some("write-stack-plan".to_string()),
-        payload: a_valid_stack_plan_payload(),
+        goal_flag: Some("plan".to_string()),
+        payload: a_valid_plan_payload(),
     }
 }
 
@@ -119,20 +116,6 @@ impl SubmitOutcome {
         self
     }
 
-    fn assert_validation_error(&self) -> &Self {
-        assert_eq!(
-            self.code, 3,
-            "expected exit 3 (validation error), got {} (stdout={}, stderr={})",
-            self.code, self.stdout, self.stderr
-        );
-        assert!(
-            self.stdout.contains("\"status\":\"error\"") && self.stdout.contains("\"errors\""),
-            "validation failure must surface the schema errors; got {}",
-            self.stdout
-        );
-        self
-    }
-
     fn assert_reports(&self, fragment: &str) -> &Self {
         let combined = format!("{}{}", self.stdout, self.stderr);
         assert!(
@@ -192,7 +175,7 @@ fn submit_refuses_a_payload_that_names_no_goal_in_the_flag_or_the_body() {
     // Given — the incident payload, submitted with no --goal
     let call = a_submit()
         .without_goal_flag()
-        .with_payload(a_stack_plan_payload_shaped_as_key_and_value());
+        .with_payload(a_payload_shaped_as_key_and_value());
 
     // When
     let outcome = call.run();
@@ -208,89 +191,11 @@ fn submit_names_the_goal_flag_as_the_remedy_when_no_goal_resolves() {
     // Given — the incident payload, submitted with no --goal
     let call = a_submit()
         .without_goal_flag()
-        .with_payload(a_stack_plan_payload_shaped_as_key_and_value());
+        .with_payload(a_payload_shaped_as_key_and_value());
 
     // When
     let outcome = call.run();
 
     // Then
     outcome.assert_reports("--goal");
-}
-
-// ── `write-stack-plan` carries a registered schema ──────────────────────────────────────────
-
-/// `get-schema <goal>` is the discovery path the pr-stack prompt points agents at. It has to
-/// answer for `write-stack-plan` or the prompt sends them somewhere empty.
-#[test]
-fn get_schema_publishes_the_stack_plan_contract_for_write_stack_plan() {
-    // Given
-    let mut cmd = cargo_bin_cmd!("tddy-tools");
-    cmd.env_remove("TDDY_SOCKET");
-    cmd.args(["get-schema", "write-stack-plan"]);
-
-    // When
-    let output = cmd.output().expect("run tddy-tools get-schema");
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-
-    // Then
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "get-schema write-stack-plan must succeed; stdout={stdout} stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let schema: Value =
-        serde_json::from_str(stdout.trim()).expect("get-schema stdout must be JSON Schema");
-    assert_eq!(
-        schema["$id"].as_str(),
-        Some("urn:tddy:goal/write-stack-plan"),
-        "schema must carry the goal's URN id; got {stdout}"
-    );
-    let required: Vec<&str> = schema["required"]
-        .as_array()
-        .expect("schema must declare required fields")
-        .iter()
-        .filter_map(|v| v.as_str())
-        .collect();
-    assert_eq!(
-        required,
-        vec!["goal", "version", "prs"],
-        "schema must pin the fields the write-stack-plan hook parses"
-    );
-}
-
-/// The regression test for the incident: this exact payload was accepted as ok, leaving the
-/// workflow with nothing to parse. Registering the schema turns it into a validation failure the
-/// agent can act on in one turn.
-#[test]
-fn submit_rejects_a_stack_plan_shaped_as_key_and_value() {
-    // Given — the incident payload, submitted under its intended goal
-    let call = a_submit()
-        .with_goal_flag("write-stack-plan")
-        .with_payload(a_stack_plan_payload_shaped_as_key_and_value());
-
-    // When
-    let outcome = call.run();
-
-    // Then
-    outcome.assert_validation_error();
-}
-
-/// The near-miss the wholly-wrong `{key, value}` payload does not cover: a plan of the right
-/// shape whose PR entry omits `node_id`. Every `parents` reference and every stack node is keyed
-/// on it, so a plan without one cannot be turned into a DAG — the schema has to say so rather than
-/// leaving `after_write_stack_plan` to fail later on a serde error.
-#[test]
-fn submit_rejects_a_stack_plan_whose_pr_entry_omits_its_node_id() {
-    // Given — a well-formed plan missing the one field the DAG is keyed on
-    let call = a_submit().with_goal_flag("write-stack-plan").with_payload(
-        r#"{"goal":"write-stack-plan","version":1,"prs":[{"title":"Auth token store","description":"Store tokens in the keyring, with tests","branch_suggestion":"feature/auth/token-store","parents":[]}]}"#
-            .to_string(),
-    );
-
-    // When
-    let outcome = call.run();
-
-    // Then
-    outcome.assert_validation_error().assert_reports("node_id");
 }

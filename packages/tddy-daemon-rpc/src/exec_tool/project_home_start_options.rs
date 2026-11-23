@@ -2,8 +2,7 @@
 //!
 //! Each list is read from the RPC the New-session form fills its picker from, called in-process on
 //! this host: the same handler, the same code path, with no peer routing (the tool forwards a call
-//! that names another host to that host whole). The two stack pickers are the sessions this host
-//! lists, filtered as the form filters them ([`tddy_tool_engine::start_options`]).
+//! that names another host to that host whole).
 //!
 //! A list whose source this host does not have, or that its source refused, is empty and says why in
 //! its `*_unavailable` field. Any other failure of a source fails the answer.
@@ -20,12 +19,10 @@ use tddy_service::proto::host::{
     HostService, ListDerivedHostsRequest, ListSshConfigHostsRequest, ProbeOutcome,
 };
 use tddy_service::proto::project::ListProjectBranchesRequest;
-use tddy_service::proto::session::ListSessionsRequest;
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_tool_engine::start_options::{
-    models_agent, pr_stack_orchestrators, provider_harness, stack_base_session_candidates,
-    CandidateSession, DerivedHostChoice, LabelledChoice, ModelChoices, ProviderRouteChoice,
-    StartOptions, StartOptionsQuery,
+    models_agent, provider_harness, DerivedHostChoice, LabelledChoice, ModelChoices,
+    ProviderRouteChoice, StartOptions, StartOptionsQuery,
 };
 
 use super::project_home::status_error;
@@ -109,7 +106,6 @@ pub(super) async fn describe_start_options(
     let (derived_hosts, derived_hosts_unavailable) =
         derived_hosts(sources.host_service, sources.session_token).await?;
     let branches = branch_names(sources.projects, sources.session_token, project_id).await?;
-    let sessions = session_candidates(&sources).await?;
     Ok(StartOptions {
         daemon_instance_id: sources.daemon_instance_id.to_string(),
         session_types,
@@ -125,12 +121,6 @@ pub(super) async fn describe_start_options(
         derived_hosts_unavailable,
         subagents,
         branches,
-        stack_parents: pr_stack_orchestrators(&sessions),
-        pr_stack_base_candidates: stack_base_session_candidates(
-            &sessions,
-            project_id,
-            sources.daemon_instance_id,
-        ),
     })
 }
 
@@ -345,31 +335,4 @@ async fn branch_names(
         .map_err(status_error)?
         .into_inner();
     Ok(listed.branches)
-}
-
-/// Every session this host lists, as the stack pickers filter them. Each is this host's, so each
-/// carries this host's id.
-async fn session_candidates(
-    sources: &StartOptionsSources<'_>,
-) -> anyhow::Result<Vec<CandidateSession>> {
-    let listed = sources
-        .launch
-        .list_sessions_at_session_coordinate(Request::direct(ListSessionsRequest {
-            session_token: sources.session_token.to_string(),
-        }))
-        .await
-        .map_err(status_error)?
-        .into_inner();
-    Ok(listed
-        .sessions
-        .into_iter()
-        .map(|session| CandidateSession {
-            session_id: session.session_id,
-            project_id: session.project_id,
-            daemon_instance_id: sources.daemon_instance_id.to_string(),
-            branch: session.branch,
-            recipe: session.recipe,
-            orchestrator_session_id: session.orchestrator_session_id,
-        })
-        .collect())
 }

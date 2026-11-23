@@ -13,15 +13,14 @@
 
 use std::path::Path;
 
+use tddy_pr_stack::docs::{
+    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME, PR_STACK_PLAN_MD_BASENAME,
+};
 use tddy_service::proto::session::{
     session_attachment::Source, HostDocumentRef, SessionAttachment,
 };
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
-use tddy_workflow_recipes::plan_pr_stack::PR_STACK_PLAN_MD_BASENAME;
-use tddy_workflow_recipes::pr_stack::{
-    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME,
-};
 use tddy_workflow_recipes::writer::EXPLORATION_BASENAME;
 
 /// The four documents a child is offered, in listing order: the node's own pair, then the shared

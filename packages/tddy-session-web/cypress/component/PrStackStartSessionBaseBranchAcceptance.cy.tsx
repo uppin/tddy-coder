@@ -10,15 +10,12 @@
 
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
@@ -98,8 +95,7 @@ it("names the predecessor stack branch as the base in the dialog's new-branch op
   const backend = aPrStackModalBackend();
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n2").click();
 
   // Then — the base branch shown is n2's predecessor (n1's branch), not a static label. The label

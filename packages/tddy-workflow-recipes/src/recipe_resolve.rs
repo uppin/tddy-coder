@@ -8,8 +8,8 @@ use std::sync::Arc;
 use tddy_core::WorkflowRecipe;
 
 use crate::{
-    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, MergePrRecipe,
-    PrStackRecipe, ReviewRecipe, SessionArtifactManifest, TddRecipe, TddSmallRecipe,
+    approval_policy, BugfixRecipe, FreePromptingRecipe, GrillMeRecipe, MergePrRecipe, ReviewRecipe,
+    SessionArtifactManifest, TddRecipe, TddSmallRecipe,
 };
 
 /// Resolved workflow recipe plus its session-artifact manifest (same concrete type implements both).
@@ -107,14 +107,6 @@ pub fn workflow_recipe_and_manifest_from_cli_name(
                 r as Arc<dyn SessionArtifactManifest>,
             ))
         }
-        "pr-stack" | "plan-pr-stack" | "orchestrate-pr-stack" => {
-            log::info!(
-                "workflow recipe resolved: pr-stack (PrStackRecipe) [requested as {:?}]",
-                n
-            );
-            let r = PrStackRecipe;
-            Ok((Arc::new(r), Arc::new(r)))
-        }
         other => Err(unknown_workflow_recipe_error(other)),
     }
 }
@@ -177,41 +169,5 @@ mod tests {
         // Then
         assert_eq!(r.name(), "grill-me");
         assert_eq!(r.start_goal().as_str(), "grill");
-    }
-
-    // -------------------------------------------------------------------
-    // pr-stack consolidation: "pr-stack" is the canonical name; the two
-    // legacy CLI names remain accepted as aliases that resolve to the
-    // same unified recipe (docs/dev/1-WIP/pr-stack-workflow-views.md).
-    // -------------------------------------------------------------------
-
-    #[test]
-    fn resolver_resolves_the_canonical_pr_stack_name() {
-        // When
-        let result = workflow_recipe_and_manifest_from_cli_name("pr-stack");
-
-        // Then
-        let (recipe, _) = result.expect("\"pr-stack\" should resolve to the unified recipe");
-        assert_eq!(recipe.name(), "pr-stack");
-    }
-
-    #[test]
-    fn resolver_maps_the_legacy_plan_pr_stack_alias_to_the_unified_pr_stack_recipe() {
-        // When
-        let (recipe, _) = workflow_recipe_and_manifest_from_cli_name("plan-pr-stack")
-            .expect("legacy alias must still resolve");
-
-        // Then — same recipe as the canonical name, not the old PlanPrStackRecipe
-        assert_eq!(recipe.name(), "pr-stack");
-    }
-
-    #[test]
-    fn resolver_maps_the_legacy_orchestrate_pr_stack_alias_to_the_unified_pr_stack_recipe() {
-        // When
-        let (recipe, _) = workflow_recipe_and_manifest_from_cli_name("orchestrate-pr-stack")
-            .expect("legacy alias must still resolve");
-
-        // Then — same recipe as the canonical name, not the old OrchestratePrStackRecipe
-        assert_eq!(recipe.name(), "pr-stack");
     }
 }

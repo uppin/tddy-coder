@@ -15,6 +15,4 @@ pub const GOAL_SCHEMA_FILES: &[(&str, &str)] = &[
     ("changeset-workflow", "tdd/changeset-workflow.schema.json"),
     ("merge-pr-report", "tdd/merge-pr-report.schema.json"),
     ("merge-pr-analyze", "tdd/merge-pr-analyze.schema.json"),
-    ("write-stack-plan", "tdd/write-stack-plan.schema.json"),
-    ("write-stack-docs", "tdd/write-stack-docs.schema.json"),
 ];

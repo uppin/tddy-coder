@@ -276,7 +276,7 @@ impl PrStackRpcHandler {
     {
         self.peer_routing
             .rpc_served_by_peer(
-                tddy_workflow_recipes::PR_STACK_SERVICE,
+                tddy_pr_stack::PR_STACK_SERVICE,
                 rpc_name,
                 daemon_instance_id,
                 req,

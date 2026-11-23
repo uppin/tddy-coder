@@ -418,9 +418,6 @@ pub struct SpawnOptions<'a> {
     /// the only way a PR-Stack view on another host can tell this session apart from any other
     /// session of the same orchestrator (D37).
     pub stack_node_id: Option<&'a str>,
-    /// Existing session whose branch seeds a new `pr-stack` orchestrator's stack as its single root
-    /// node. Passed as `--stack-seed-base-session <id>`.
-    pub stack_seed_base_session: Option<&'a str>,
     /// Model for tool-session model selection. Passed to spawned `tddy-coder` as `--model` when set.
     pub model: Option<&'a str>,
     /// Per-session unix socket path the daemon listens on for the reverse `HostSessionService`
@@ -469,19 +466,14 @@ fn require_commit_identity_only(git_environment: &[(String, String)]) -> anyhow:
 /// The PR-stack flags a spawned `tddy-coder` is given, as a flat argument vector.
 ///
 /// One function rather than two inline `cmd.arg` sequences: a flag that is silently not passed is
-/// this feature's failure mode — the orchestrator comes up looking successful and carrying an empty
-/// stack — and an argument vector can be asserted on where a `Command` cannot.
+/// this feature's failure mode — the child comes up looking successful and unlinked from its stack —
+/// and an argument vector can be asserted on where a `Command` cannot.
 ///
 /// A blank value is treated as unset, because proto3 carries "unset" as the empty string.
-pub fn pr_stack_spawn_args(
-    stack_parent: Option<&str>,
-    stack_node_id: Option<&str>,
-    stack_seed_base_session: Option<&str>,
-) -> Vec<String> {
+pub fn pr_stack_spawn_args(stack_parent: Option<&str>, stack_node_id: Option<&str>) -> Vec<String> {
     [
         ("--stack-parent", stack_parent),
         ("--stack-node-id", stack_node_id),
-        ("--stack-seed-base-session", stack_seed_base_session),
     ]
     .into_iter()
     .filter_map(|(flag, value)| {
@@ -964,11 +956,7 @@ pub fn plan_session_child(
         }
     }
 
-    let stack_args = pr_stack_spawn_args(
-        opts.stack_parent,
-        opts.stack_node_id,
-        opts.stack_seed_base_session,
-    );
+    let stack_args = pr_stack_spawn_args(opts.stack_parent, opts.stack_node_id);
     if !stack_args.is_empty() {
         log::debug!("spawner: passing stack flags {:?}", stack_args);
         args.extend(stack_args);

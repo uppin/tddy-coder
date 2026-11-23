@@ -83,9 +83,9 @@ impl PrStackHandler for PrStackRpcHandler {
         // The appended node, so the response can *name* what this call created. The caller must not
         // infer it by diffing the returned plan: the orchestrator agent appends nodes to the same
         // stack, so a plan can come back holding several nodes the caller has never seen.
-        let added = tddy_workflow_recipes::pr_stack::add_planned_pr_node(
+        let added = tddy_pr_stack::stack_ops::add_planned_pr_node(
             &session_dir,
-            tddy_workflow_recipes::pr_stack::AddPlannedPrInput {
+            tddy_pr_stack::stack_ops::AddPlannedPrInput {
                 title: req.title.clone(),
                 description: req.description.clone(),
                 branch_suggestion,
@@ -311,7 +311,7 @@ impl PrStackHandler for PrStackRpcHandler {
         if let Some(answered) = self
             .peer_routing
             .rpc_served_by_peer(
-                tddy_workflow_recipes::PR_STACK_SERVICE,
+                tddy_pr_stack::PR_STACK_SERVICE,
                 "ResolveStackBase",
                 &req.daemon_instance_id,
                 &req,
@@ -390,7 +390,7 @@ impl PrStackHandler for PrStackRpcHandler {
         if let Some(answered) = self
             .peer_routing
             .rpc_served_by_peer(
-                tddy_workflow_recipes::PR_STACK_SERVICE,
+                tddy_pr_stack::PR_STACK_SERVICE,
                 "LinkStackNode",
                 &req.daemon_instance_id,
                 &req,
@@ -590,14 +590,10 @@ impl PrStackHandler for PrStackRpcHandler {
         tokio::task::spawn_blocking(move || {
             // A plan-only repoint reaches no GitHub call, so it holds no credential.
             let gh = match token {
-                Some(token) => tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::with_token(
-                    owner_repo, token,
-                ),
-                None => tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::without_credential(
-                    owner_repo,
-                ),
+                Some(token) => tddy_github::pr_api::RealGithubPrApi::with_token(owner_repo, token),
+                None => tddy_github::pr_api::RealGithubPrApi::without_credential(owner_repo),
             };
-            tddy_workflow_recipes::pr_stack::repoint_planned_pr_node(
+            tddy_pr_stack::stack_ops::repoint_planned_pr_node(
                 &session_dir_for_op,
                 &repo_root,
                 &node_id,
@@ -657,7 +653,7 @@ impl PrStackHandler for PrStackRpcHandler {
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
         require_a_stack(&session_dir)?;
 
-        tddy_workflow_recipes::pr_stack::move_planned_pr_node(
+        tddy_pr_stack::stack_ops::move_planned_pr_node(
             &session_dir,
             req.node_id.trim(),
             req.direction.trim(),
@@ -715,7 +711,7 @@ impl PrStackHandler for PrStackRpcHandler {
             )
         })?;
 
-        let strategy = tddy_workflow_recipes::pr_stack::BaseSyncStrategy::from_wire(&req.strategy);
+        let strategy = tddy_pr_stack::stack_ops::BaseSyncStrategy::from_wire(&req.strategy);
         let node_id = req.node_id.trim().to_string();
         let base_branch = req.base_branch.trim().to_string();
         let dirty_worktree_action = req.dirty_worktree_action.clone();
@@ -723,7 +719,7 @@ impl PrStackHandler for PrStackRpcHandler {
         let session_dir_for_op = session_dir.clone();
         let repo_root_for_op = repo_root.clone();
         let report = tokio::task::spawn_blocking(move || {
-            tddy_workflow_recipes::pr_stack::pull_base_into_node_branch(
+            tddy_pr_stack::stack_ops::pull_base_into_node_branch(
                 &session_dir_for_op,
                 &repo_root_for_op,
                 &node_id,

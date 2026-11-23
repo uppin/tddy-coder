@@ -203,9 +203,6 @@ impl LaunchSessions {
                 recipe: resume_recipe,
                 stack_parent: None,
                 stack_node_id: None,
-                // Seeding a stack is a creation-time act; a resumed orchestrator already has
-                // whatever stack it was created with.
-                stack_seed_base_session: None,
                 model: None,
                 host_session_socket,
                 git_environment,

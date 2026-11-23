@@ -50,16 +50,6 @@
       "name": "merge-pr-analyze",
       "schema": "merge-pr-analyze.schema.json",
       "proto": "merge_pr_analyze.proto"
-    },
-    {
-      "name": "write-stack-plan",
-      "schema": "write-stack-plan.schema.json",
-      "proto": "write_stack_plan.proto"
-    },
-    {
-      "name": "write-stack-docs",
-      "schema": "write-stack-docs.schema.json",
-      "proto": "write_stack_docs.proto"
     }
   ]
 }

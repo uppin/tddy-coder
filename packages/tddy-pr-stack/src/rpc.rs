@@ -195,3 +195,13 @@ where
         service: StdArc::new(PrStackServiceServer::new(service)) as StdArc<dyn RpcService>,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PR_STACK_SERVICE;
+
+    #[test]
+    fn names_the_service_family_the_stack_handler_is_registered_under() {
+        assert_eq!(PR_STACK_SERVICE, "pr_stack.PrStackService");
+    }
+}

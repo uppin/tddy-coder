@@ -14,3 +14,9 @@ form was out of its scope.
 **What would close it:** have the form read the daemon's recipe list (a per-host discovery RPC, as
 `#start-parity` 5/9 `start-options` adds for the tool) instead of a constant, and pin it in a Cypress
 spec.
+
+**Re-measured 2026-11-22 (`#workqueue` 1/14, #1002):** the form's `WORKFLOW_RECIPES`
+(`packages/tddy-session-create-web/src/createSessionRecipes.ts`) and
+`supported_workflow_recipe_cli_names()` now name the **same 7 recipes**, so no recipe is unpickable
+today. The remainder is the drift hazard: the form still lists a constant, so the next recipe the
+daemon gains is missing from the form until someone edits it. The close criterion above is unchanged.

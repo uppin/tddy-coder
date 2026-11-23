@@ -10,16 +10,15 @@
 
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
+import { createSessionPage } from "../support/pages/createSessionPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -110,8 +109,7 @@ it("opens the session-creation dialog when Start session is clicked, without sta
   const backend = aPrStackModalBackend();
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n1").click();
 
   // Then — the shared creation form appears in a dialog and no StartSession has fired.
@@ -126,10 +124,10 @@ it("pre-fills the planned PR's branch and prompt in the dialog", () => {
   // Given
   const backend = aPrStackModalBackend();
 
-  // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  // When — the stack has no session whose type the child could follow, so the operator picks one
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n1").click();
+  createSessionPage.switchToClaudeCliSession();
 
   // Then — the new-branch name is the planned branch and the prompt is the title + description.
   prStackScreenPage.dialogNewBranchNameInput().should("have.value", NODE_BRANCH);
@@ -143,9 +141,9 @@ it("keeps Create Remote Branch checked for a stack node, so its branch is pushed
   const backend = aPrStackModalBackend();
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n1").click();
+  createSessionPage.switchToClaudeCliSession();
   prStackScreenPage.dialogCreateRemoteBranchToggle().should("be.checked");
   prStackScreenPage.dialogSubmitBtn().click();
 
@@ -162,8 +160,7 @@ it("creates the stack-parented child session when the dialog is submitted", () =
   const backend = aPrStackModalBackend();
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n1").click();
   prStackScreenPage.dialogSubmitBtn().click();
 
@@ -183,8 +180,7 @@ it("names the planned node the child materializes on the StartSession it submits
   const backend = aPrStackModalBackend();
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n1").click();
   prStackScreenPage.dialogSubmitBtn().click();
 

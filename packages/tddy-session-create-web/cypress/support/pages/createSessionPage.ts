@@ -281,6 +281,16 @@ export const createSessionPage = {
   recipeSelect: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionRecipeSelect, { timeout: 5000, ...options }),
 
+  /** The recipe `<select>` offers none of `recipes` (`#workqueue` 1/14: removed recipes). */
+  expectRecipesNotOffered(recipes: string[]) {
+    byTestId(TEST_IDS.createSessionRecipeSelect, { timeout: 5000 })
+      .find("option")
+      .then(($options) => {
+        const offered = [...$options].map((option) => (option as HTMLOptionElement).value);
+        expect(offered.filter((value) => recipes.includes(value))).to.deep.equal([]);
+      });
+  },
+
   /** The recipe control is not offered — a recipe needs a repository the session does not have. */
   expectNoRecipeSelector() {
     byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
@@ -332,19 +342,6 @@ export const createSessionPage = {
   /** What the selected host's jail does not confine, stated beside an enabled toggle. */
   sandboxedCodebaseCaveat: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionSandboxedCodebaseCaveat, { timeout: 5000, ...options }),
-
-  // ---------------------------------------------------------------------------
-  // PR stack parent — the orchestrator a child session is stacked under
-  // ---------------------------------------------------------------------------
-
-  /** The "PR stack parent" `<select>`. Offered whenever the list holds an orchestrator. */
-  stackParentSelect: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.createSessionStackParentSelect, { timeout: 5000, ...options }),
-
-  /** Stack the session under `sessionId` — the empty value is "None (standalone session)". */
-  selectStackParent(sessionId: string) {
-    byTestId(TEST_IDS.createSessionStackParentSelect).select(sessionId);
-  },
 
   /** Switch the form to a Claude CLI session. */
   switchToClaudeCliSession() {

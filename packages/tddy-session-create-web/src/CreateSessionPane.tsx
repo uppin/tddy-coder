@@ -34,14 +34,12 @@ import { CreateSessionNameField } from "./CreateSessionNameField";
 import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
 import { CreateSessionActions } from "./CreateSessionActions";
 import { CreateSessionStartProgress } from "./CreateSessionStartProgress";
-import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
 import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
 import { useCreateSessionPlacement } from "./useCreateSessionPlacement";
 import { useCreateSessionModel } from "./useCreateSessionModel";
 import { useCreateSessionEffort } from "./useCreateSessionEffort";
 import { useCreateSessionSubmit } from "./useCreateSessionSubmit";
-import { useCreateSessionStack } from "./useCreateSessionStack";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import { useCreateSessionAgentSelection } from "./useCreateSessionAgentSelection";
 import { BranchConflictDialog } from "./BranchConflictDialog";
@@ -52,6 +50,7 @@ import { useCreateSessionPaneState } from "./useCreateSessionPaneState";
 import { CreateSessionLaunchFields } from "./CreateSessionLaunchFields";
 import { useOpenOnMainSessionType } from "./useOpenOnMainSessionType";
 import { useDaemons, useSelectedDaemon } from "tddy-client-web";
+import { InlineError } from "tddy-ui-web";
 
 type BranchIntent = BranchWorktreeIntent;
 
@@ -114,7 +113,6 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
     orchestratorField,
     permissionMode,
     placementWithdrawsPermissionBypass,
-    prStackBaseSessionId,
     projectId,
     projectOptions,
     projects,
@@ -150,7 +148,6 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
     setManagedCodebase,
     setNewBranchName,
     setPermissionMode,
-    setPrStackBaseSessionId,
     setProjectId,
     setProviderChoice,
     setRecipe,
@@ -160,12 +157,8 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
     setSemanticIndex,
     setSessionType,
     setSshConfigHost,
-    setStackParent,
     sshConfigHost,
     sshListDaemonId,
-    stackBaseSessionOptions,
-    stackParent,
-    stackParentOptions,
     startProgress,
     startingHostId,
     startingHostLabel,
@@ -243,9 +236,6 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
           setDaemonInstanceId: setDaemonInstanceId,
           recipe: recipe,
           setRecipe: setRecipe,
-          prStackBaseSessionId: prStackBaseSessionId,
-          setPrStackBaseSessionId: setPrStackBaseSessionId,
-          stackBaseSessionOptions: stackBaseSessionOptions,
           modelField: modelField,
           toolsError: toolsError,
         }}
@@ -298,11 +288,9 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
       {/* main's and an orchestrator's worktree, branch and stack are their project's. */}
       {!projectHome && !asOrchestrator && (
         <>
-          <CreateSessionStackParentSelect
-            stackParentOptions={stackParentOptions}
-            stackParent={stackParent}
-            setStackParent={setStackParent}
-            sessionsError={sessionsError}
+          <InlineError
+            testId="create-session-sessions-load-error"
+            message={sessionsError && `Sessions unavailable: ${sessionsError}`}
           />
 
           <CreateSessionBranchFields

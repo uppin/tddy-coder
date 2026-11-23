@@ -478,7 +478,7 @@ describe("CreateSessionPane — recipe dropdown", () => {
     byTestId(TEST_IDS.createSessionRecipeInput).should("not.exist");
   });
 
-  it("recipe select lists all 8 workflow recipes", () => {
+  it("recipe select lists all 7 workflow recipes", () => {
     mountCreateSessionPane();
     cy.wait(["@listProjects", "@listAgents", "@listTools"]);
 
@@ -490,7 +490,6 @@ describe("CreateSessionPane — recipe dropdown", () => {
       "grill-me",
       "review",
       "merge-pr",
-      "pr-stack",
     ];
 
     byTestId(TEST_IDS.createSessionRecipeSelect).within(() => {
@@ -540,114 +539,6 @@ describe("CreateSessionPane — recipe dropdown", () => {
     byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
 
     byTestId(TEST_IDS.createSessionRecipeSelect).should("not.exist");
-  });
-});
-
-describe("CreateSessionPane — stack parent picker", () => {
-  it("shows the parent picker <select> for tool sessions when orchestrators are available", () => {
-    interceptBaselineWithSessions([{ sessionId: "orch-sess-1", recipe: "orchestrate-pr-stack" }]);
-
-    mountCreateSessionPane();
-    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
-
-    byTestId(TEST_IDS.createSessionStackParentSelect).should("be.visible");
-  });
-
-  it("parent picker is hidden when no orchestrator sessions exist", () => {
-    interceptBaselineWithSessions([]); // empty list of orchestrators
-
-    mountCreateSessionPane();
-    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
-
-    byTestId(TEST_IDS.createSessionStackParentSelect).should("not.exist");
-  });
-
-  it("shows the parent picker for claude-cli sessions when PR-stack orchestrators are available", () => {
-    interceptBaselineWithSessions([{ sessionId: "orch-for-cli", recipe: "orchestrate-pr-stack" }]);
-
-    mountCreateSessionPane();
-    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
-
-    // Switch to claude-cli session type
-    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
-
-    // The parent picker must be visible for claude-cli sessions too
-    byTestId(TEST_IDS.createSessionStackParentSelect).should("be.visible");
-  });
-
-  it("hides the parent picker for both session types when only non-orchestrator sessions exist", () => {
-    // Given — a session with a plain 'tdd' recipe (not a PR-stack orchestrator)
-    interceptBaselineWithSessions([{ sessionId: "tdd-sess-1", recipe: "tdd" }]);
-
-    mountCreateSessionPane();
-    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
-
-    // Tool: no picker (only PR-stack orchestrators should appear)
-    byTestId(TEST_IDS.createSessionStackParentSelect).should("not.exist");
-
-    // Claude CLI: same — no picker for non-orchestrator sessions
-    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
-    byTestId(TEST_IDS.createSessionStackParentSelect).should("not.exist");
-  });
-
-  it("startSession sends stackParent when a parent is selected (tool session)", () => {
-    interceptBaselineWithSessions([{ sessionId: "orch-parent-123", recipe: "orchestrate-pr-stack" }]);
-    interceptStartSession("child-with-parent-sess");
-    interceptListProjectBranches();
-
-    const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
-      req.continue();
-    });
-
-    mountCreateSessionPane();
-    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
-
-    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-test");
-    byTestId(TEST_IDS.createSessionAgentSelect).select("claude");
-    byTestId(TEST_IDS.createSessionStackParentSelect).select("orch-parent-123");
-
-    byTestId(TEST_IDS.createSessionSubmitBtn).click();
-    cy.wait("@startSession");
-
-    cy.then(() => {
-      expect(capturedReqs).to.have.length.at.least(1);
-      // stackParent maps to the proto `stack_parent = 15` field on StartSessionRequest
-      expect((capturedReqs[0]! as Record<string, unknown>)["stackParent"]).to.equal("orch-parent-123");
-    });
-  });
-
-  it("startSession for claude-cli sends stackParent when a PR-stack parent is selected", () => {
-    interceptBaselineWithSessions([{ sessionId: "orch-cli-parent", recipe: "orchestrate-pr-stack" }]);
-    interceptStartSession("claude-cli-child-sess");
-    interceptListProjectBranches();
-
-    const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
-      req.continue();
-    });
-
-    mountCreateSessionPane();
-    cy.wait(["@listProjects", "@listAgents", "@listTools", "@listSessions"]);
-
-    // Switch to claude-cli and fill required fields
-    byTestId(TEST_IDS.createSessionTypeClaudeCliBtn).click();
-    byTestId(TEST_IDS.createSessionProjectSelect).select("proj-test");
-    byTestId(TEST_IDS.createSessionStackParentSelect).select("orch-cli-parent");
-
-    byTestId(TEST_IDS.createSessionSubmitBtn).click();
-    cy.wait("@startSession");
-
-    cy.then(() => {
-      expect(capturedReqs).to.have.length.at.least(1);
-      const req = capturedReqs[0]!;
-      // Claude CLI session type must be set
-      expect(req.sessionType).to.equal("claude-cli");
-      // stackParent must be included in the claude-cli StartSession call
-      expect((req as Record<string, unknown>)["stackParent"]).to.equal("orch-cli-parent");
-    });
   });
 });
 

@@ -1,11 +1,11 @@
 # PR-Stack live status & repoint
 
-**Product area:** coder (PR stacking) + web (PR-Stack Chat Screen)
-**Related:** [PR stacking](pr-stacking.md), [Session drawer § PR-Stack Chat Screen](../web/session-drawer.md#per-workflow-session-views-the-pr-stack-chat-screen)
+**Product area:** coder (PR stacking) + web (project stack view)
+**Related:** [PR stacking](pr-stacking.md), [PR stacking § Opening a project stack by id](pr-stacking.md#opening-a-project-stack-by-id)
 
 ## Summary
 
-Today a Planned PR in the PR-Stack Chat Screen is only loosely connected to the work it
+Today a Planned PR in the stack view is only loosely connected to the work it
 represents: the `branch` is populated after a worktree exists, the child session link
 (`session_id`) is set by the orchestrator agent, and the GitHub PR number/state is only
 refreshed when the orchestrator agent runs an assess pass. Operators looking at the stack
@@ -60,10 +60,10 @@ independent of whether the orchestrator agent is running:
 ## Current behavior being fixed (capability 5)
 
 When a session is started for a planned node today — from either the web **Start session** button
-or the orchestrator agent's `spawn-child` — the child worktree is branched off the project's
+or the orchestrator agent's `pr_spawn_child` — the child worktree is branched off the project's
 **default branch** (`origin/master`/`main`), regardless of the node's DAG parents:
 
-- The web (`PrStackScreen.handleStartSession`) passes `stackParent = <orchestrator session>`.
+- The web Start-session handler passes `stackParent = <orchestrator session>`.
 - `resolve_chain_base_ref` (`connection_service.rs`) sees a pr-stack orchestrator parent —
   `parent_is_pr_stack_orchestrator` returns `true` — and short-circuits to `Ok(None)` ("an
   orchestrator has no branch of its own").
@@ -82,7 +82,7 @@ respected.
 | D2 | The web resolves the in-progress session by matching `node.branch` against `SessionEntry.branch`; a new `SessionEntry.branch` proto field carries it | Keeps session resolution in the frontend (no new "which session owns this branch" backend signal), reusing the sessions list the drawer already loads. |
 | D3 | GitHub PR status comes from a new `GetPrStatus(branch)` RPC, polled on an interval | Live status without requiring the orchestrator agent to run; polling keeps the number/link/state fresh. |
 | D4 | Repoint performs DAG-parent update **and** local-branch rebase **and** GitHub base re-target | Matches the orchestrator's existing repoint semantics (`bridge::execute_stack_repoint`) so a web-triggered repoint and an agent-triggered one converge. |
-| D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `spawn-child` at once. |
+| D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `pr_spawn_child` at once. |
 | D6 | Starting a node whose non-merged parent owns **no branch** is refused | Enforces bottom-up ordering: the parent's branch must exist to base onto it. Keyed on the branch, never on the parent's session — a closed or cleaned-up child session must not wedge the nodes below it. A merged parent is skipped, not required. |
 | D7 *(2026-07-26)* — **amended by D40** | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
 | D8 *(2026-07-26)* | Restarting an orphaned node that owns a branch pre-fills `work_on_selected_branch` with that branch | The branch, worktree and remote ref already exist, so `new_branch_from_base` would fail on "branch already exists". Resuming is also what the operator means — the work on that branch is not lost, only its session. |
@@ -271,7 +271,7 @@ string branch = 28;
 **New shared message**
 
 ```proto
-// Live GitHub PR status for one head branch. Surfaced on the PR-Stack Chat Screen.
+// Live GitHub PR status for one head branch. Surfaced on the project stack view.
 message PrStatusView {
   // False when no PR (open, merged, or closed) exists for the queried head branch.
   bool exists = 1;
@@ -475,19 +475,19 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - `resolveNodeSession(node, sessions)` — returns the live session whose `branch === node.branch`.
 - `usePrStatus(client, sessionToken, orchestratorId, branches)` — polls `GetPrStatus` per branch
   on an interval, returns a `branch → PrStatusView` map.
-- `PrStackScreen` gains a `sessions` prop (all sessions) threaded from `SessionsDrawerScreen`, and
-  a `repointPlannedPr` handler.
+- The stack view receives the session list (all sessions) from `SessionsDrawerScreen`, and a
+  `repointPlannedPr` handler.
 - `PlannedPrRow` renders: an **in-progress** indicator (branch resolves to a live session), the
   **PR number as a link** + **PR state**, and a **Repoint** control when the node needs repoint
   (a predecessor merged).
 - **`useQueryBranch(client, sessionToken, orchestratorId, branches)`** *(added 2026-07-25)* —
-  per-branch polled, returning a `branch → BranchResolution` map. `PrStackScreen`
+  per-branch polled, returning a `branch → BranchResolution` map. The stack view
   threads it through `PlannedPrList` into `PlannedPrRow`, which now sources the **worktree** indicator
   (`pr-stack-worktree-<nodeId>`), **in-progress** badge (`pr-stack-session-<nodeId>`), and **PR**
   link/state from the `QueryBranch` resolution.
 - *(2026-07-26)* `usePrStatus` is **removed** (no remaining caller) and the `prStatusByBranch` /
   `prStatus` props are off `PlannedPrList` / `PlannedPrRow`: `useQueryBranch` is the screen's single
-  source. `PrStackScreen`'s poll set is `resolvedBranches` — the branches nodes own **plus** every
+  source. The stack view's poll set is `resolvedBranches` — the branches nodes own **plus** every
   node's base branch (deduplicated and sorted), because startability is a property of the base and an
   unspawned node owns no branch. Base branches add no volume of their own: a base is by definition some
   node's own `branch` and was already in the set.
@@ -499,9 +499,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   same string while only the last is unstartable. `deriveStackBaseBranch` is now a thin wrapper over
   `resolveStackBase`, unchanged in behaviour.
 - *(2026-07-26)* `CreateSessionInitialValues.selectedBranch` threads an existing branch into the
-  dialog, honoured when `branchIntent === "work_on_selected_branch"`; `PlannedPrPanel` is the
-  right-side docked/overlay container (see
-  [session-drawer.md § PR-Stack Chat Screen](../web/session-drawer.md#pr-stack-chat-screen)).
+  dialog, honoured when `branchIntent === "work_on_selected_branch"`.
 - *(2026-07-26, dead-end recovery)* `startBlockers(node, nodes, branchResolutionByBranch) ->
   StartBlocker[]` (pure module, `startBlockers.ts`) returns every reason a node cannot be started, each
   with a human-readable `message`; the empty array means startable. It replaces the boolean
@@ -510,9 +508,8 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   returns the branch a repoint would land on — the nearest ancestor branch surviving the drop of every
   unusable parent, else `defaultBranch` — and both names the Repoint control and is sent as
   `target_base_branch` (D18).
-- *(2026-07-26, dead-end recovery)* `PrStackScreen` gains a `defaultBranch` prop, threaded from
-  `SessionMainPane`'s already-loaded `projects` through `resolveWorkflowView`'s `WorkflowViewContext`
-  (matched on `session.projectId` → `ProjectEntry.mainBranchRef`, D20). It feeds both the Repoint label
+- *(2026-07-26, dead-end recovery)* The stack view takes the project's `defaultBranch`
+  (`ProjectEntry.mainBranchRef`, D20). It feeds both the Repoint label
   and `baseBranchLabel`, which previously passed the empty string and left a root node's dialog with an
   unnamed base.
 - *(2026-07-26, dead-end recovery)* `PlannedPrRow` always renders the row's full information and its
@@ -521,7 +518,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   `pr-stack-missing-branch-<nodeId>` replacement indicator is **removed** (D16). *(Amended 2026-08-30,
   D42 — the button is no longer `disabled` when `startBlockers` is non-empty. It takes the `warning`
   variant and an alert icon, `pr-stack-start-session-blocked-icon-<nodeId>`, and stays pressable.)*
-- *(2026-07-26, dead-end recovery)* `PrStackScreen.handleRepoint` records a per-node failure that the row
+- *(2026-07-26, dead-end recovery)* The stack view's repoint handler records a per-node failure that the row
   renders as `pr-stack-repoint-error-<nodeId>`. It previously `await`ed the call with no `catch`, so a
   rejection was an unhandled promise and the row looked untouched — which the new `invalid_argument`
   refusal would have made reachable.
@@ -645,7 +642,7 @@ anatomy, badges and controls as the operator meets them.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D21 *(2026-08-01)* | A row's detail is **hidden, not unmounted** | Expansion, scroll position and the branch poll set all survive a collapse — the stance `PlannedPrPanel` already takes. It also keeps D16 intact rather than reversing it: the row still renders its full information, one interaction away. Concretely, eight existing acceptance specs assert the detail lines with `exist` / `contain.text`, which pass inside a `display:none` subtree and would all break on an unmount. |
+| D21 *(2026-08-01)* | A row's detail is **hidden, not unmounted** | Expansion, scroll position and the branch poll set all survive a collapse — the stance the planned-PR list already takes. It also keeps D16 intact rather than reversing it: the row still renders its full information, one interaction away. Concretely, eight existing acceptance specs assert the detail lines with `exist` / `contain.text`, which pass inside a `display:none` subtree and would all break on an unmount. |
 | D22 *(2026-08-01)* | Blockers, refusals and errors stay **outside** the collapse boundary | These are the states that explain why an action is unavailable. A reason the operator has to expand a row to find is the dead end D16 removed. |
 | D23 *(2026-08-01)* — **extended by D39** | The bound session is resolved from the **plan first**, the branch's current owner second, and both are guarded on the session being one the drawer knows | The indicator is the *node's* recorded binding and the plan is the durable record; "who owns this branch right now" is a different question whose answer changes after a resume or a hand-off. Without the known-session guard the control would select nothing for a child deleted on another host. |
 | D24 *(2026-08-01)* | Display order is **persisted per node**, not derived from `parents` | The dependency graph and the reading order are different facts. Deriving one from the other means every merge, repoint and re-parenting silently rewrites the operator's view — a row they are reading jumps position because of an unrelated event. |
@@ -831,7 +828,7 @@ Alongside this, two adjacent gaps the same operator hits:
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D34 *(2026-08-30)* | A child spawn carries the **planned node's id** — `StartSessionRequest.stack_node_id` — rather than the daemon re-deriving the node from the branch the spawn creates | `pr_stack_node_for_spawn` matches on `new_branch_name`, which the operator can edit in the create dialog before confirming; a rename silently unlinks the node from the row that started it. And on the cross-host path the spawning daemon cannot read the orchestrator's stack *at all*, so there is nothing to derive from. The node id is the one fact the surface that rendered the button already knows exactly. Empty stays supported: the agent's own `spawn-child` runs on the orchestrator's host, where the branch-derived lookup is correct and local. |
+| D34 *(2026-08-30)* | A child spawn carries the **planned node's id** — `StartSessionRequest.stack_node_id` — rather than the daemon re-deriving the node from the branch the spawn creates | `pr_stack_node_for_spawn` matches on `new_branch_name`, which the operator can edit in the create dialog before confirming; a rename silently unlinks the node from the row that started it. And on the cross-host path the spawning daemon cannot read the orchestrator's stack *at all*, so there is nothing to derive from. The node id is the one fact the surface that rendered the button already knows exactly. Empty stays supported: a spawn that names no node runs on the orchestrator's host, where the branch-derived lookup is correct and local. |
 | D35 *(2026-08-30)* | The node link is written by a **peer-routed RPC** — `LinkStackNode`, routed through `rpc_served_by_peer` exactly as `ResolveStackBase` is — not by the spawning daemon's local disk write | This is the write half of the read `ResolveStackBase` already performs, and the same argument applies verbatim: the parent's stack lives in *its* session's `changeset.yaml`, so only the daemon holding that session can write it. Routing before authentication, as the other peer RPCs do: a token is verified by the daemon that serves the call. |
 | D36 *(2026-08-30)* | A failed link **does not fail the spawn** — it is logged, and the live association still travels in participant metadata (D37). This now covers the **local** write too: `link_stack_node_to_spawned_branch` used to be called with `?`, so an unwritable orchestrator changeset on this host failed the start | The failure lands *after* the worktree, the branch and the session exist. Failing the spawn there would leave an orphan session on host B and still no branch on host A, which is strictly worse than a node the operator can re-link by restarting it. The argument does not turn on the host: a local disk failure leaves exactly the same orphan, and the spawn that raised it is exactly as complete. Keeping the local write fatal while the routed one is not would also make the same operator action succeed or fail on where the orchestrator happens to live. The daemon's own spawn gate is unaffected: a descendant of an unlinked node is refused for the real reason. |
 | D37 *(2026-08-30)* | The session's LiveKit participant publishes its **stack association** — `session_id`, `orchestrator_session_id`, `stack_node_id`, `branch` — in the `session` metadata block, and the daemon publishes that block for **claude-cli sessions**, which previously published none | Presence is the only cross-host signal the web has: `ListSessions` does not fan out (only `ListProjects` does), and adding a fan-out would put a per-host RPC on a 2 s poll to answer a question presence already answers for free. The shape moves to `tddy_core` so the coder's publisher and the daemon's cannot drift — the merge into participant metadata is **shallow**, so a partial `session` object would erase the other publisher's keys rather than merge with them. |
@@ -876,8 +873,8 @@ message LinkStackNodeResponse {
   write already does, and is the bug.
 - The write itself is the existing `link_stack_node_to_child_session`, unchanged.
 - The spawn path calls it in place of `link_stack_node_to_spawned_branch`'s local write whenever the
-  spawn carries a `stack_node_id`; a spawn without one keeps the branch-derived local lookup, so the
-  agent's own `spawn-child` (always on the orchestrator's host) is untouched.
+  spawn carries a `stack_node_id`; a spawn without one keeps the branch-derived local lookup, so a
+  spawn on the orchestrator's own host that names no node is untouched.
 
 ### The `session` metadata block
 

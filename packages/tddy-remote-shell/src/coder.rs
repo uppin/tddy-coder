@@ -16,6 +16,7 @@ use crate::coder::one_shot::one_shot_command;
 use crate::coder::one_shot::read_noting_the_marker;
 use crate::coder::one_shot::stdin_lines;
 use crate::coder::one_shot::strip_start_marker;
+use crate::coder::one_shot::OneShotTimings;
 use crate::{
     ExecOutput, ExecRequest, InteractiveCommand, InteractiveExit, RemoteShell, RemoteShellError,
     ShellAddress, StreamedExec,
@@ -401,15 +402,14 @@ impl RemoteShell for CoderShell {
             .map_err(|error| self.spawn_error(error))?;
         let (mut stdin, mut stdout, mut stderr) = Self::take_pipes(&mut child)?;
         let coder_path = self.coder.clone();
-        let work = async move {
+        let timings = OneShotTimings::started(child.id());
+        let work = async {
             let marker_arrived = tokio::sync::Notify::new();
-            let outputs = async {
-                tokio::join!(
-                    child.wait(),
-                    read_noting_the_marker(&mut stdout, &marker_arrived),
-                    read_noting_the_marker(&mut stderr, &marker_arrived),
-                )
-            };
+            let outputs = timings.await_all(
+                child.wait(),
+                read_noting_the_marker(&mut stdout, &marker_arrived),
+                read_noting_the_marker(&mut stderr, &marker_arrived),
+            );
             // The lines go only to a command that has turned its pty's echo off, which it has
             // once its marker has arrived; a call that ends without one never sends them.
             let feed = async {
@@ -426,15 +426,16 @@ impl RemoteShell for CoderShell {
                 () = feed => outputs.await,
             }
         };
-        let (status, stdout, stderr) = match tokio::time::timeout(deadline, work).await {
-            Ok(result) => result,
-            Err(_) => {
-                return Err(RemoteShellError::TimedOut {
-                    address: self.address(),
-                    after: deadline,
-                    command: crate::redact::command_head(&request.command),
-                });
-            }
+        let finished = tokio::time::timeout(deadline, work).await;
+        let command = crate::redact::command_head(&request.command);
+        timings.log(&command, finished.is_ok());
+        let Ok((status, stdout, stderr)) = finished else {
+            let (address, after) = (self.address(), deadline);
+            return Err(RemoteShellError::TimedOut {
+                address,
+                after,
+                command,
+            });
         };
         let status = status.map_err(|error| {
             RemoteShellError::Spawn(format!("{}: {error}", coder_path.display()))

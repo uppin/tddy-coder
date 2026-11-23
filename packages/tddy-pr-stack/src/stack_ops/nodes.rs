@@ -18,21 +18,16 @@ pub struct AddPlannedPrInput {
     pub description: String,
     pub branch_suggestion: Option<String>,
     pub parents: Vec<String>,
-    /// Accepted for symmetry with the stack plan's `PlannedPr` (recipe-side, in
-    /// `tddy-workflow-recipes`) but currently unused: like the plan's
-    /// `planned_prs_into_stack_nodes`, `StackNode` has no `child_recipe`
-    /// field to carry it — the web client defaults to `"tdd"` at start-session time regardless
-    /// (see `PrStackScreen.tsx`'s `handleStartSession`).
+    /// Accepted but currently unused: `StackNode` has no `child_recipe` field to carry it — the web
+    /// client defaults to `"tdd"` at start-session time regardless.
     pub child_recipe: Option<String>,
 }
 
 /// Append one manually-created planned PR to an orchestrator session's persisted stack,
 /// choosing its ancestors (parent node ids) from the already-planned nodes.
 ///
-/// Unlike `tddy_workflow_recipes::pr_stack::reseed_stack_from_plan_if_unspawned` (agent-driven,
-/// replaces the whole plan wholesale and refuses once any node has spawned), this appends a single
-/// node and never touches existing nodes — safe to call regardless of how many nodes have already
-/// spawned child sessions.
+/// This appends a single node and never touches existing nodes — safe to call regardless of how
+/// many nodes have already spawned child sessions.
 ///
 /// The new node's `node_id` is always server-assigned (see `next_free_node_id`) — callers
 /// never supply one. Rejects (without writing) a `parents` entry that doesn't resolve to an
@@ -56,7 +51,7 @@ pub fn add_planned_pr_node(
         title: input.title,
         description: input.description,
         // A suggestion is a planned name, not a ref: `branch` stays empty until a child worktree
-        // actually creates it (same contract as [`planned_prs_into_stack_nodes`]).
+        // actually creates it.
         branch: None,
         branch_suggestion: input.branch_suggestion,
         session_id: None,
@@ -70,8 +65,8 @@ pub fn add_planned_pr_node(
     };
 
     // Defense-in-depth cycle check: parents are restricted to pre-existing node ids above, so an
-    // append alone can never actually cycle, but this keeps the same guard `validate_stack_plan`
-    // applies to a whole plan, cheaply, rather than special-casing the append path as exempt.
+    // append alone can never actually cycle, but this keeps the same guard every other writer of the
+    // stack applies, cheaply, rather than special-casing the append path as exempt.
     let mut candidate_nodes = existing.nodes.clone();
     candidate_nodes.push(new_node.clone());
     reject_if_cyclic(

@@ -16,11 +16,11 @@ export interface WorkflowChatScreenProps {
 }
 
 /**
- * Full-screen chat main-pane view for tddy-coder workflow (`tool`) sessions — every recipe except
- * `pr-stack`, which keeps its own two-pane {@link ./prstack/PrStackScreen}. Rendered in place of the
+ * Full-screen chat main-pane view for tddy-coder workflow (`tool`) sessions — every recipe,
+ * including a session still recorded with the removed `pr-stack` recipe. Rendered in place of the
  * terminal by `resolveWorkflowView`. A single pane: the reusable {@link AgentChat} driven over the
- * session's remote Presenter via the **ACP mirror** (`acp`), matching pr-stack's chat and tddy-coder's
- * ACP-agent direction. Both transports ride the same LiveKit session connection.
+ * session's remote Presenter via the **ACP mirror** (`acp`), matching tddy-coder's ACP-agent
+ * direction. Both transports ride the same LiveKit session connection.
  */
 export function WorkflowChatScreen({
   session,

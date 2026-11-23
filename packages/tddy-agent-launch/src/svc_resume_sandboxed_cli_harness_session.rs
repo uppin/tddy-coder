@@ -310,3 +310,44 @@ impl LaunchSessions {
         Ok((pid, conversation.recorded_chat_id().map(str::to_string)))
     }
 }
+
+#[cfg(test)]
+mod legacy_stack_recipe_tests {
+    //! `#workqueue` 1/14: a session recorded with the removed `pr-stack` recipe (or an alias) no
+    //! longer resumes; the refusal names the recipe so the operator knows why.
+
+    use super::recorded_managed_recipe;
+    use tddy_core::SessionMetadata;
+
+    fn a_session_recorded_with_recipe(recipe: &str) -> SessionMetadata {
+        SessionMetadata {
+            recipe: Some(recipe.to_string()),
+            ..tddy_session_split::service_util::starting_session_metadata(
+                "0190-legacy",
+                "a-project",
+                "claude-cli",
+            )
+        }
+    }
+
+    #[test]
+    fn resuming_a_session_recorded_with_the_removed_stack_recipe_is_refused_naming_it() {
+        for recipe in ["pr-stack", "plan-pr-stack", "orchestrate-pr-stack"] {
+            // Given
+            let metadata = a_session_recorded_with_recipe(recipe);
+
+            // When
+            let resolved = recorded_managed_recipe(&metadata).map(|_| ());
+
+            // Then
+            let refusal = resolved
+                .err()
+                .unwrap_or_else(|| panic!("a session recorded with {recipe:?} still resumes"));
+            assert!(
+                refusal.message.contains(recipe),
+                "the refusal names {recipe:?}: {}",
+                refusal.message
+            );
+        }
+    }
+}

@@ -19,16 +19,13 @@
 
 import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
@@ -120,8 +117,7 @@ function aPrStackBackend(opts: MountOptions) {
 }
 
 function mountAndOpen(backend: ReturnType<typeof aPrStackBackend>) {
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   return backend;
 }
 
@@ -238,7 +234,7 @@ it("merges the base into the branch when the merge control is clicked", () => {
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
-    expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
     expect(calls[0].nodeId).to.equal("n2");
     expect(calls[0].baseBranch).to.equal(ROOT_BRANCH);
     expect(calls[0].strategy).to.equal("merge");

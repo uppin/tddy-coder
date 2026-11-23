@@ -13,15 +13,12 @@
 
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
@@ -142,8 +139,7 @@ it("renders the base-branch selector with the diamond node's direct dependency b
   const backend = aBaseSelectionBackend(anAttachDocsOrchestrator());
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("attach-start").click();
 
   // Then — the selector lists attach-proto first (first in node.parents), then attach-store, then the
@@ -160,8 +156,7 @@ it("defaults the selection to the first direct dependency branch for the attach-
   const backend = aBaseSelectionBackend(anAttachDocsOrchestrator());
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("attach-start").click();
 
   // Then — the default selection is attach-proto (first in node.parents), as a remote-tracking ref.
@@ -207,8 +202,7 @@ it("orders direct dependency branches by the dependency's own depth (deepest fir
   const backend = aBaseSelectionBackend(orchestrator);
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n3").click();
 
   // Then — n2 (depth 1) precedes n1 (depth 0), even though n1 is first in node.parents, and the project
@@ -259,8 +253,7 @@ it("lists other materialized stack branches after the direct dependencies", () =
   const backend = aBaseSelectionBackend(orchestrator);
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n3").click();
 
   // Then — n1 (direct dep) first, then n2 (other materialized branch), then the project default, each as
@@ -279,8 +272,7 @@ it("sends the selected base branch as selected_integration_base_ref when the ope
   const backend = aBaseSelectionBackend(anAttachDocsOrchestrator());
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("attach-start").click();
   // The operator picks attach-store instead of the default attach-proto. The option value is the
   // `<remote>/<branch>` remote-tracking ref, which is what the dialog submits as
@@ -319,8 +311,7 @@ it("hides the base-branch selector for a root node with no other materialized br
   const backend = aBaseSelectionBackend(orchestrator);
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("n1").click();
   prStackScreenPage.dialogSubmitBtn().click();
 
@@ -373,8 +364,7 @@ it("shows the base-branch selector with the project default for a child of an ex
   const backend = aBaseSelectionBackend(orchestrator);
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("child").click();
 
   // Then — the picker is rendered and offers the project default as the escape, lifted to its
@@ -414,8 +404,7 @@ it("names the base in the 'New branch from base' caption for a child of an exter
   const backend = aBaseSelectionBackend(orchestrator);
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("child").click();
 
   // Then — the branch-mode caption names the ref, so the operator reads "New branch from base:
@@ -453,8 +442,7 @@ it("pre-selects the project default and sends it as the integration base ref for
   const backend = aBaseSelectionBackend(orchestrator);
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("child").click();
 
   // Then — the picker pre-selected the project default before the operator confirms.

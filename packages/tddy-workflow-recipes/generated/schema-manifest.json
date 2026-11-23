@@ -74,16 +74,6 @@
       "name": "merge-pr-analyze",
       "proto": "merge_pr_analyze.proto",
       "schema": "merge-pr-analyze.schema.json"
-    },
-    {
-      "name": "write-stack-plan",
-      "proto": "write_stack_plan.proto",
-      "schema": "write-stack-plan.schema.json"
-    },
-    {
-      "name": "write-stack-docs",
-      "proto": "write_stack_docs.proto",
-      "schema": "write-stack-docs.schema.json"
     }
   ],
   "version": 1

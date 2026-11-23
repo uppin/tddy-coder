@@ -33,14 +33,12 @@ import { CreateSessionHostAndProjectFields } from "./CreateSessionHostAndProject
 import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
 import { CreateSessionActions } from "./CreateSessionActions";
 import { CreateSessionStartProgress } from "./CreateSessionStartProgress";
-import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
 import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
 import { useCreateSessionPlacement } from "./useCreateSessionPlacement";
 import { useCreateSessionModel } from "./useCreateSessionModel";
 import { useCreateSessionEffort } from "./useCreateSessionEffort";
 import { useCreateSessionSubmit } from "./useCreateSessionSubmit";
-import { useCreateSessionStack } from "./useCreateSessionStack";
 import type { CreateSessionPaneProps } from "./createSessionPaneProps";
 import { useCreateSessionAgentSelection } from "./useCreateSessionAgentSelection";
 import { BranchConflictDialog } from "./BranchConflictDialog";
@@ -275,22 +273,22 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     setSelectedBranchToWorkOn,
   });
 
-  const {
-    stackParent,
-    setStackParent,
-    stackNodeId,
-    prStackBaseSessionId,
-    setPrStackBaseSessionId,
-    stackParentOptions,
-    stackParentDaemonInstanceId,
-    stackBaseSessionOptions,
-  } = useCreateSessionStack({
-    sessions,
-    projectId,
-    daemonInstanceId: sessionDaemonInstanceId,
-    initialStackParent: initialValues?.stackParent,
-    initialStackNodeId: initialValues?.stackNodeId,
-  });
+  // The stack the caller opened this form for — the orchestrator the new session is a child of and
+  // the planned node it materializes — is the caller's to name (`initialValues`); the form offers no
+  // picker for either. A node id names a node in exactly one orchestrator's plan, so the two travel
+  // together.
+  const stackParent = initialValues?.stackParent ?? "";
+  const stackNodeId = initialValues?.stackNodeId ?? "";
+  // The host that owns the stack parent. `stackParent` is a bare session id and the base it resolves
+  // to is read out of that session's own changeset, so the daemon serving this start has to be told
+  // which host holds it: the session list is fanned out across every host and routinely names a
+  // parent living on a different daemon than the child is started on. Empty when the list holds no
+  // such session — the wire default, meaning the serving daemon's own sessions tree, which is the
+  // only place it could look anyway.
+  const stackParentDaemonInstanceId = useMemo(
+    () => sessions.find((s) => s.sessionId === stackParent)?.daemonInstanceId ?? "",
+    [sessions, stackParent],
+  );
 
   // The attach rows and everything that follows from them: the effective size cap, the refusal shown
   // next to a bad row, the upload of local files on submit, and the streamed start that reports the
@@ -338,7 +336,6 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     stackParent,
     stackNodeId,
     stackParentDaemonInstanceId,
-    prStackBaseSessionId,
     model,
     effort,
     providerAccountId,
@@ -434,7 +431,6 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     orchestratorField,
     permissionMode,
     placementWithdrawsPermissionBypass,
-    prStackBaseSessionId,
     projectId,
     projectOptions,
     projects,
@@ -470,7 +466,6 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     setManagedCodebase,
     setNewBranchName,
     setPermissionMode,
-    setPrStackBaseSessionId,
     setProjectId,
     setProviderChoice,
     setRecipe,
@@ -480,12 +475,8 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     setSemanticIndex,
     setSessionType,
     setSshConfigHost,
-    setStackParent,
     sshConfigHost,
     sshListDaemonId,
-    stackBaseSessionOptions,
-    stackParent,
-    stackParentOptions,
     startProgress,
     startingHostId,
     startingHostLabel,

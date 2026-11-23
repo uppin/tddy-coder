@@ -8,13 +8,10 @@
 
 import React from "react";
 import { Code } from "@connectrpc/connect";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { SessionService } from "tddy-client-web/gen/session_pb";
 import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
@@ -52,8 +49,7 @@ function openPrStackScreen(session: ReturnType<typeof anOrchestratorSession>) {
       ]),
     }),
   );
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(session.sessionId).click();
+  openProjectStackViewOf(backend, session.sessionId);
   return backend;
 }
 
@@ -125,7 +121,7 @@ it("calls AddPlannedPr with the entered title and no parents when no ancestor is
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(PrStackService.method.addPlannedPr);
     expect(calls).to.have.length(1);
-    expect(calls[0].sessionId).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
     expect(calls[0].title).to.equal("Add auth middleware");
     expect(calls[0].parents).to.deep.equal([]);
   });
@@ -229,8 +225,7 @@ it("shows an inline error and keeps the form open when AddPlannedPr fails", () =
     Code.InvalidArgument,
     "dangling parent ref",
   );
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
 
   // When
   prStackScreenPage.openAddPlannedPrForm();

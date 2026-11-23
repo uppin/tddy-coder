@@ -17,15 +17,12 @@
 
 import React from "react";
 import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgents";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
-import { mountWithRpc } from "../support/rpc/inMemory";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
@@ -143,8 +140,7 @@ it("pre-selects the project default branch for a planned PR repointed onto it", 
   const backend = aRepointedBaseBackend(anAttachDocsOrchestratorWithRepointedUi());
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("attach-ui").click();
 
   // Then — master is selected, not the stack branch that happens to be listed first.
@@ -156,8 +152,7 @@ it("offers the project default branch alongside the stack branches for a repoint
   const backend = aRepointedBaseBackend(anAttachDocsOrchestratorWithRepointedUi());
 
   // When
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("attach-ui").click();
 
   // Then — the stack's materialized branches, then the project default: an operator who repointed onto
@@ -172,8 +167,7 @@ it("sends the project default branch as selected_integration_base_ref for a repo
   const backend = aRepointedBaseBackend(anAttachDocsOrchestratorWithRepointedUi());
 
   // When — the operator accepts the dialog as pre-filled, touching nothing.
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   prStackScreenPage.startSessionBtn("attach-ui").click();
   prStackScreenPage.dialogSubmitBtn().click();
 

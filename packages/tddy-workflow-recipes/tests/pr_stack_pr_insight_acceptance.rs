@@ -19,8 +19,8 @@ use common::{
     a_review_comment, a_search_hit, an_insight_github, an_open_node, assert_rejected, stack_of,
     write_stack, written_at, REPO,
 };
-use tddy_workflow_recipes::orchestrate_pr_stack::github::{PrFile, PrSearchQuery, PrState};
-use tddy_workflow_recipes::orchestrate_pr_stack::pr_insight::{
+use tddy_github::pr_api::{PrFile, PrSearchQuery, PrState};
+use tddy_pr_stack::pr_insight::{
     pull_number_for_node, read_pr, read_pr_comments, search_repository_prs, PrSearchInput,
     PrThreadComment, ReviewerState,
 };

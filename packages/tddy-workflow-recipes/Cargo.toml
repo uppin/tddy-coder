@@ -10,12 +10,9 @@ serde_json = "1"
 [dependencies]
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-core = { path = "../tddy-core" }
-# The GitHub REST client lives in tddy-github; `github_pr`, `github_rest_common` and
-# `orchestrate_pr_stack::github` are facades re-exporting it from their historical paths.
+# The GitHub REST client lives in tddy-github; `github_pr` and `github_rest_common` are facades
+# re-exporting it from their historical paths.
 tddy-github = { path = "../tddy-github" }
-# The PR-stack data model and its operations; `pr_stack` and `orchestrate_pr_stack` re-export it
-# from their historical paths.
-tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-workflow = { path = "../tddy-workflow" }
 log = "0.4"
 async-trait = "0.1"
@@ -30,6 +27,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "p
 uuid = { version = "1", features = ["v7"] }
 
 [dev-dependencies]
+# The suites that exercise the stack operations and the merge journal over a session's stack.
+tddy-pr-stack = { path = "../tddy-pr-stack" }
 # `stack_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 serial_test = "3"
@@ -39,6 +38,6 @@ tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-# The on-demand GitHub tests stand up a session host on a unix socket, as `tddy-toolcall`'s own
-# acceptance suite does, to count the requests the stack tasks make of it.
+# The on-demand GitHub test stands up a session host on a unix socket, as `tddy-toolcall`'s own
+# acceptance suite does, to count the requests a GitHub REST call makes of it.
 tddy-stdio = { path = "../tddy-stdio" }

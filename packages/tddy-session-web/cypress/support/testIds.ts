@@ -494,20 +494,12 @@ export const TEST_IDS = {
   screenSharingOverlay: "screen-sharing-overlay",
   screenSharingOverlayVideo: "screen-sharing-overlay-video",
   screenSharingOverlayClose: "screen-sharing-overlay-close",
-  // PR-Stack Chat Screen (per-workflow session view for the "pr-stack" recipe)
-  prStackScreen: "pr-stack-screen",
   /** The stack view — one project stack opened by its id (`#orchestrators` 9/11). */
   projectStackView: "project-stack-view",
   prStackPlannedPrList: "pr-stack-planned-pr-list",
-  // PR-Stack "Planned PRs" panel — right-side dock on desktop, full-screen overlay on mobile.
-  // Always mounted; `data-state` ∈ {closed, open} drives visibility (same contract as the
-  // Session Inspector drawer).
-  prStackPlannedPrPanel: "pr-stack-planned-pr-panel",
-  prStackPlannedPrPanelToggle: "pr-stack-planned-pr-panel-toggle",
-  prStackPlannedPrPanelClose: "pr-stack-planned-pr-panel-close",
-  // Full-screen Workflow Chat Screen (per-workflow session view for every non-"pr-stack" tool recipe)
+  // Full-screen Workflow Chat Screen (per-workflow session view for every tool recipe)
   workflowChatScreen: "workflow-chat-screen",
-  // Reusable Agent Chat (recipe-agnostic; the PR-Stack chat view renders it via PrStackChat)
+  // Reusable Agent Chat (recipe-agnostic; the workflow chat view renders it)
   agentChat: "agent-chat",
   agentChatMessages: "agent-chat-messages",
   agentChatInput: "agent-chat-input",

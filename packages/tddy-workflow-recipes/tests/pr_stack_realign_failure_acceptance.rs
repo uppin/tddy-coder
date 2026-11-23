@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use common::{a_stack_github, an_open_node, assert_rejected, parents_of, stack_of, write_stack};
-use tddy_workflow_recipes::pr_stack::set_stack_node_parents;
+use tddy_pr_stack::stack_ops::set_stack_node_parents;
 
 const BRANCH_N2: &str = "feature/stack/n2";
 const BRANCH_N3: &str = "feature/stack/n3";

@@ -10,11 +10,8 @@
  */
 
 import React from "react";
-import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
-import { mountWithRpc } from "../support/rpc/inMemory";
-import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
-import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
+import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
@@ -40,8 +37,7 @@ function anOrchestratorSession(stackPlanJson: string) {
 
 function openPrStackScreen(session: ReturnType<typeof anOrchestratorSession>) {
   const backend = aSessionsDrawerBackend([session]);
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(session.sessionId).click();
+  openProjectStackViewOf(backend, session.sessionId);
 }
 
 beforeEach(() => {

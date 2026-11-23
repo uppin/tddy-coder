@@ -1,7 +1,6 @@
 //! Agent session launch, split out of `tddy-session-lifecycle` by `#carve` 21/21.
 pub mod back_channel;
 pub mod chat;
-pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod claude_cli_tmux;
@@ -68,9 +67,7 @@ pub mod session_worktree_observer;
 pub mod slot_files_over_shell;
 pub mod spec_launch;
 pub mod split_session_pointers;
-pub mod stack_child_spawn;
 pub mod stack_parent;
-pub mod stack_seed_validation;
 mod start_cut_branch;
 pub mod start_deadline;
 pub mod start_keepalive;

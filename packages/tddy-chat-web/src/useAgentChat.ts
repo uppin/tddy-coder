@@ -115,12 +115,6 @@ export interface UseAgentChatResult {
  * connection) vanishes with no error, and the stream's response side hangs forever waiting for
  * a reply that will never come. `sendPrompt` therefore checks `room.remoteParticipants` for
  * `serverIdentity` before treating a send as accepted.
- *
- * TODO: thread a real connected LiveKit `Room` for the orchestrator session through from
- * `SessionsDrawerScreen` once a pr-stack session has its own independent attach flow (today
- * `PrStackScreen` renders before any terminal attachment exists, per the "not gated on
- * attachment.status" requirement) — until then chat has no client and cannot send/receive in
- * production.
  */
 export function useAgentChat(
   room: RoomHandle | null,

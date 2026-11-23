@@ -13,7 +13,7 @@ use std::path::Path;
 
 use tddy_core::toolcall::{request_github_token_from, SessionTokenSource};
 #[cfg(test)]
-use tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi;
+use tddy_github::pr_api::RealGithubPrApi;
 
 /// The token of the account the session's project acts as, from the host listening on `socket`.
 ///

@@ -18,6 +18,7 @@
 | 2026-09-24 | 676 | 671 on the merge-base with `origin/master` (`4e7157d2`) → 676 after #509 (`#keyring` 2/9): the `RequestTransport::UnixSocket` stamp at the listener's `from_duplex` call, wrapped by rustfmt. Grown; decomposition deferred with the developer's consent (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). First `#[cfg(test)]` now at L677 |
 | 2026-10-08 | 766 | 676 on `origin/master` → 766 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +90, the `github-token` verb's request and response dispatch in `impl ToolcallRpcService` (seam B above). Count: production lines to the first `#[cfg(test)]` |
 | 2026-10-26 | 879 | **regressed.** 766 at the base of #758 (`#start-parity` 9/9) → 879 (+113): the three universal-start methods on `ConversationSpawnHandler` (default bodies refusing), `json_answer`, and `impl ToolcallRpcService`'s `StartConversation` / `ConversationStartStatus` / `ConversationStartCancel` dispatch and handlers (seam B). Split deferred by developer instruction (code issues recorded, not solved, in the `#start-parity` stack) |
+| 2026-11-22 | 881 → 833 | **better, not clean** in #1002 (`#workqueue` 1/14): the `ChildSpawnHandler` trait, the `SpawnChild` dispatch arm and handler, and the `with_child_spawn_handler` builder deleted with the spawn-child seam |
 
 ## What would close it — candidate seams (not proven)
 

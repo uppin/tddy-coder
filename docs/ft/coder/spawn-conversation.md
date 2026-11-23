@@ -19,11 +19,10 @@ plan to a fresh agent that starts on a new branch/worktree — surfaced to the u
 
 ### Design Rationale
 
-The daemon already materializes "a new worktree + a new agent conversation tagged with a parent"
-for the **PR-stack orchestrator** via `spawn-child` (`ChildSpawnHandler` →
-`LaunchSessions::start_spawned_cli_child(stack_parent = Some(...))`). That mechanism is PR-stack-specific: it
-resolves a *planned-PR node* from the orchestrator's stack, which a grill-me session does
-not have. Rather than widen the PR-stack path (and risk its live behavior), we add a **parallel,
+The daemon materializes "a new worktree + a new agent conversation tagged with a parent"
+through `LaunchSessions::start_spawned_cli_child(stack_parent = Some(...))`. A stack's
+`pr_spawn_child` resolves a *planned-PR node* from a project stack, which a grill-me session does
+not have, so a grill-me session gets a **parallel,
 additive** capability: a generic `spawn_conversation` tool + `ConversationSpawnHandler` that takes an
 explicit **prompt** (and optional **branch**/**base_ref**) instead of a node id, reusing the same
 `start_spawned_cli_child` spawn path and the same `orchestrator_session_id` discovery contract. Either
@@ -52,8 +51,6 @@ started through `StartSession` are started sessions, not spawned conversations.
 
 - **Continuity**: a completed grill-me plan can be handed to a fresh implementation agent without the
   user manually starting a new session.
-- **No regression**: the PR-stack `spawn-child` path (tool, wire type, handler, verb) is untouched;
-  its tests keep passing.
 - **Discovery**: a spawned child appears as a tab in the parent within one `ListSessions` refresh.
 
 ## API/Library Requirements
@@ -140,9 +137,8 @@ started through `StartSession` are started sessions, not spawned conversations.
   (`LaunchSessions::managed_spawn_handlers`) →
   `prepare_managed_workflow_inner` → `set_up_managed_workflow`/`resume_managed_workflow`/
   `build_managed_workflow` → `start_session_toolcall_listener` (bound via
-  `.with_conversation_spawn_handler`). A `recipe_spawn_handlers(recipe, …)` helper selects the
-  `(child, conversation)` handler pair per recipe (`grill-me` → conversation handler; `pr-stack` →
-  child handler).
+  `.with_conversation_spawn_handler`). `LaunchSessions::managed_spawn_handler` binds the conversation handler for
+  `grill-me` and none for any other recipe.
 - **`tddy-workflow-recipes`** `grill_me/prompt.rs`: **Create plan** prompt gains a required final step
   to call `spawn_conversation` after the brief files exist (and to commit `plans/<slug>.md` first).
 - **`tddy-web`** `packages/tddy-session-web/src/`: `useChildSessions` derives child tabs from the session list;
@@ -223,6 +219,6 @@ not a gap in the shipped grill-me→child flow, which works over the stdio relay
 ## Related Documentation
 
 - [Session Participant RPC & Metadata](session-participant-rpc.md) — session-scoped RPC + terminals.
-- [PR Stacking](pr-stacking.md) — the `spawn-child` precedent this generalizes.
+- [PR Stacking](pr-stacking.md) — `pr_spawn_child`, the stack's own way of starting a child.
 - [Session Terminal Tabs](../web/session-terminal-tabs.md) — the tab bar this extends.
 - [Workflow Recipes](workflow-recipes.md) — grill-me and the managed-workflow model.

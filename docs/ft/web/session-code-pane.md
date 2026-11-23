@@ -19,8 +19,7 @@ This generalizes the existing `SessionWorkflowFilesModal`, which is a modal limi
 ### Availability across session types
 
 The toggle lives in `SessionMainPane` (next to the existing **Inspector** toggle), which wraps every
-base view — the workflow chat (`WorkflowChatScreen`, `tool`/workflow sessions), the PR-Stack screen
-(`recipe === "pr-stack"`), and the terminal runtimes (`claude-cli` / `cursor-cli`). Because the
+base view — the workflow chat (`WorkflowChatScreen`, `tool`/workflow sessions) and the terminal runtimes (`claude-cli` / `cursor-cli`). Because the
 toggle is above the base-view switch (not inside `resolveWorkflowView`, which returns `null` for
 terminals), the Code pane is available to **all** session types.
 

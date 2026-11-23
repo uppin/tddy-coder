@@ -3,7 +3,6 @@ import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { CodeNavigationService } from "tddy-client-web/gen/code_navigation_pb";
 import { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
 import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
@@ -34,7 +33,6 @@ export function useSessionsDrawerOwningHost(
   const activeActivityClient = useDaemonClientFor(ActivityService, selectedOwningHost);
   const activeCatalogClient = useDaemonClientFor(CatalogService, selectedOwningHost);
   const activeExecToolClient = useDaemonClientFor(ExecToolService, selectedOwningHost);
-  const activePrStackClient = useDaemonClientFor(PrStackService, selectedOwningHost);
   // A child session started from the selected session's view (the PR-Stack dialog) starts on this
   // host, so the start's task is cancelled here.
   const activeTaskClient = useDaemonClientFor(TaskService, selectedOwningHost);
@@ -52,7 +50,6 @@ export function useSessionsDrawerOwningHost(
     activeActivityClient,
     activeCatalogClient,
     activeExecToolClient,
-    activePrStackClient,
     activeTaskClient,
     activeHost,
   };

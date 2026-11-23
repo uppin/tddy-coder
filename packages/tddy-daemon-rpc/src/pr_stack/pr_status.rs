@@ -20,11 +20,11 @@ impl PrStackRpcHandler {
         repo_root: Option<&std::path::Path>,
         branch: &str,
     ) -> tddy_service::proto::pr_stack::PrStatusView {
+        use tddy_github::pr_api::PrLookupOutcome;
         use tddy_service::proto::pr_stack::PrStatusView;
         use tddy_session_lifecycle::github_pr_credentials::{
             pr_lookup_for_caller, retained_github_token, PrLookup,
         };
-        use tddy_workflow_recipes::orchestrate_pr_stack::github::PrLookupOutcome;
 
         // Both ways of failing to name a GitHub repository leave the lookup un-performable, so they
         // are *unavailable* with a reason — reporting `exists = false` would claim the branch has no
@@ -66,11 +66,9 @@ impl PrStackRpcHandler {
 
         let head_branch = branch.to_string();
         let outcome = tokio::task::spawn_blocking(move || {
-            use tddy_workflow_recipes::orchestrate_pr_stack::github::GithubPrApi;
-            tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::with_token(
-                owner_repo, token,
-            )
-            .get_pr_by_head(&head_branch)
+            use tddy_github::pr_api::GithubPrApi;
+            tddy_github::pr_api::RealGithubPrApi::with_token(owner_repo, token)
+                .get_pr_by_head(&head_branch)
         })
         .await;
 
@@ -163,7 +161,7 @@ pub(crate) fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<S
         return None;
     }
     let remote_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    tddy_workflow_recipes::orchestrate_pr_stack::github::owner_repo_from_remote_url(&remote_url)
+    tddy_github::pr_api::owner_repo_from_remote_url(&remote_url)
 }
 
 /// A PR status the daemon could not look up: *unavailable* with an operator-facing `reason`, never
@@ -182,10 +180,8 @@ fn pr_status_unavailable(
 }
 
 /// GitHub PR state → the lowercase label carried on the `PrStatusView.state` wire field.
-fn pr_state_label(
-    state: tddy_workflow_recipes::orchestrate_pr_stack::github::PrState,
-) -> &'static str {
-    use tddy_workflow_recipes::orchestrate_pr_stack::github::PrState;
+fn pr_state_label(state: tddy_github::pr_api::PrState) -> &'static str {
+    use tddy_github::pr_api::PrState;
     match state {
         PrState::Open => "open",
         PrState::Merged => "merged",

@@ -5,8 +5,7 @@ use serde::Deserialize;
 
 /// Wire format for `spawn-conversation` request (from tddy-tools, generic managed session).
 ///
-/// The generic sibling of [`SpawnChildRequestWire`](super::SpawnChildRequestWire): instead of resolving a planned PR-stack node
-/// id, it carries a free-form `prompt` for a brand-new interactive conversation, plus an optional
+/// It carries a free-form `prompt` for a brand-new interactive conversation, plus an optional
 /// `branch` name and `base_ref` to root the new worktree on.
 #[derive(Debug, Deserialize)]
 pub struct SpawnConversationRequestWire {

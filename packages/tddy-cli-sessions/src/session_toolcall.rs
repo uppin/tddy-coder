@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::backend::CodingBackend;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::toolcall::{
-    ChildSpawnHandler, ConversationSpawnHandler, GithubCredentialHandler, ToolCallRequest,
-    ToolcallRpcService, TransitionHandler,
+    ConversationSpawnHandler, GithubCredentialHandler, ToolCallRequest, ToolcallRpcService,
+    TransitionHandler,
 };
 use tddy_core::workflow::controller::WorkflowController;
 use tddy_core::workflow::ids::GoalId;
@@ -87,7 +87,6 @@ pub fn start_session_toolcall_listener(
     worktree_root: PathBuf,
     tddy_data_dir: PathBuf,
     controller: Arc<WorkflowController>,
-    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
     github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> std::io::Result<SessionToolcallListener> {
@@ -114,7 +113,6 @@ pub fn start_session_toolcall_listener(
                 Arc::clone(&tddy_data_dir),
                 Some(Arc::clone(&handler)),
             )
-            .with_child_spawn_handler(child_spawn_handler.clone())
             .with_conversation_spawn_handler(conversation_spawn_handler.clone())
             .with_github_credential_handler(github_credential_handler.clone());
             let (reader, writer) = stream.into_split();
@@ -147,7 +145,6 @@ pub fn set_up_managed_workflow(
     worktree_root: &Path,
     tddy_data_dir: &Path,
     socket_dir: &Path,
-    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
     github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> Result<ManagedWorkflow, String> {
@@ -160,7 +157,6 @@ pub fn set_up_managed_workflow(
         tddy_data_dir,
         socket_dir,
         start,
-        child_spawn_handler,
         conversation_spawn_handler,
         github_credential_handler,
     )
@@ -179,7 +175,6 @@ pub fn resume_managed_workflow(
     tddy_data_dir: &Path,
     socket_dir: &Path,
     resume_at: GoalId,
-    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
     github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> Result<ManagedWorkflow, String> {
@@ -191,7 +186,6 @@ pub fn resume_managed_workflow(
         tddy_data_dir,
         socket_dir,
         resume_at,
-        child_spawn_handler,
         conversation_spawn_handler,
         github_credential_handler,
     )
@@ -208,7 +202,6 @@ fn build_managed_workflow(
     tddy_data_dir: &Path,
     socket_dir: &Path,
     start: GoalId,
-    child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
     github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> Result<ManagedWorkflow, String> {
@@ -234,7 +227,6 @@ fn build_managed_workflow(
         worktree_root.to_path_buf(),
         tddy_data_dir.to_path_buf(),
         controller.clone(),
-        child_spawn_handler,
         conversation_spawn_handler,
         github_credential_handler,
     )

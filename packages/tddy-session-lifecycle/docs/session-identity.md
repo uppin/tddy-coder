@@ -105,7 +105,7 @@ forwarded source, and carry no `github-source.yaml`; see
 |---|---|---|---|
 | co-located CLI start / resume (claude-cli, cursor-cli, every session type declared with the `agent_cli` launch — one launch) | yes | yes, when the session runs a toolcall listener (a managed workflow); none otherwise | the agent's process env |
 | sandboxed CLI start and relaunch | yes | yes | `session_env` |
-| agent-spawned children (`spawn-child`, `spawn-conversation`) | yes | yes, via the child's own start | as the co-located CLI start |
+| agent-spawned children (`spawn-conversation`) | yes | yes, via the child's own start | as the co-located CLI start |
 | tool session (`tddy-coder`) start / resume | yes | yes — over the per-OS-user host-session socket | the child's environment, over the spawn wire |
 | split-agent | not applicable | none | — |
 
@@ -116,7 +116,7 @@ therefore go there, not in the runner's own env.
 **Split-agent.** The agent's working directory is a context dir, not a checkout, and every commit is
 made by the tools running on the codebase daemon, so `GIT_*` does not apply.
 
-**Agent-spawned children.** `StackChildSpawnHandler` and `GrillMeConversationSpawnHandler` hold the
+**Agent-spawned children.** `GrillMeConversationSpawnHandler` holds the
 orchestrator's `SessionAccountAccess` (vaults, subject resolver, the orchestrator's start token) and
 hand it to the child's start. A child is a session of the same owner on the same project, so it acts
 as the account that project assigns, resolved over the owner's vault the orchestrator already reads.

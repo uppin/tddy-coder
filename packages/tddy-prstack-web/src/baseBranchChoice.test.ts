@@ -23,7 +23,7 @@ import type { StackNode } from "./stackPlan";
  *      selection, and the daemon resolves the default base itself.
  *
  * The `defaultBranch` passed here is the project's `main_branch_ref` as stored — a remote-tracking
- * ref (`origin/master`) — while a stack node's `branch` is a local name. `PrStackScreen` lifts both
+ * ref (`origin/master`) — while a stack node's `branch` is a local name. `ProjectStackView` lifts both
  * into remote-tracking form (idempotently) for display; this layer keeps them as given.
  */
 

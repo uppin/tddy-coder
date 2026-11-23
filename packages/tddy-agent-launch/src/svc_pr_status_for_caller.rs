@@ -94,7 +94,7 @@ impl LaunchSessions {
     /// The spawn paths already write the *reverse* link (`orchestrator_session_id` in the child's
     /// changeset). Without this forward link the node owns no branch, and the stack wedges:
     /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] refuses every descendant ("non-merged
-    /// parent … has no branch to base onto yet"), [`StackChildSpawnHandler`]'s duplicate-spawn guard
+    /// parent … has no branch to base onto yet"), a node's duplicate-spawn guard
     /// never trips, and the orchestrator dashboard shows no child state or PR for a running child.
     ///
     /// Called once the child's branch exists (right after worktree setup) — that is precisely the
@@ -104,8 +104,8 @@ impl LaunchSessions {
     ///
     /// Writes **this** daemon's sessions tree, and is therefore only correct where the orchestrator
     /// is this daemon's own session: the branch-derived lookup it performs needs the plan on disk.
-    /// That is the orchestrator agent's own `spawn-child`, which always runs on the orchestrator's
-    /// host and names no node. A spawn that *does* name one is routed to the owner instead
+    /// That is a spawn made on the orchestrator's own host that names no node, such as a
+    /// conversation the orchestrator spawns. A spawn that *does* name one is routed to the owner instead
     /// ([`Self::record_spawn_on_stack_node`], D34/D35).
     pub fn link_stack_node_to_spawned_branch(
         sessions_base: &std::path::Path,
@@ -154,8 +154,8 @@ impl LaunchSessions {
     ///   included. This is the only path that works when the orchestrator lives one host over,
     ///   where its plan is not on this disk to be read or written at all (D35). A host never given
     ///   the port refuses with `FAILED_PRECONDITION` rather than skip the link.
-    /// - No node named keeps the branch-derived local write. That is the orchestrator agent's own
-    ///   `spawn-child`, which runs in the orchestrator's own process on the orchestrator's host.
+    /// - No node named keeps the branch-derived local write. That is a spawn the orchestrator makes
+    ///   on its own host, such as a conversation.
     ///
     /// The node is never derived from the branch on the routed path (D34): `new_branch_name` is the
     /// operator's to edit in the create dialog before confirming, so a rename would silently link
@@ -245,7 +245,6 @@ impl LaunchSessions {
             prompt_dir,
             tddy_tools_path,
             resume_at,
-            None,
             conversation_spawn_handler,
             github_credential_handler,
         )

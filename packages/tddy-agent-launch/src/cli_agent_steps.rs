@@ -74,7 +74,6 @@ pub(crate) struct SessionWiringInputs<'a> {
 /// A session's managed workflow: its recipe and the handlers its toolcall listener is bound to.
 pub(crate) struct ManagedWiring {
     pub recipe: Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,
-    pub child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     pub conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
 }
 
@@ -149,7 +148,6 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
     let mut workflow = None;
     if let Some(ManagedWiring {
         recipe,
-        child_spawn_handler,
         conversation_spawn_handler,
     }) = managed
     {
@@ -162,7 +160,6 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
             session_dir,
             tddy_tools_path,
             None,
-            child_spawn_handler,
             conversation_spawn_handler,
             github_credential_handler,
         )?;

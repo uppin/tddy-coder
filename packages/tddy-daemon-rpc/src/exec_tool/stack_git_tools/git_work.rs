@@ -417,7 +417,7 @@ fn journal_path(env: &GitEnv) -> PathBuf {
 
 fn write_journal(
     env: &GitEnv,
-    journal: &tddy_workflow_recipes::orchestrate_pr_stack::StackOpJournal,
+    journal: &tddy_pr_stack::op_journal::StackOpJournal,
 ) -> Result<(), String> {
     let path = journal_path(env);
     if let Some(parent) = path.parent() {

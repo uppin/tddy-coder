@@ -64,8 +64,8 @@ passes no `startCancel`.
 `taskClient` is the TaskService on the host the form starts on. `useSessionsDrawerClients` gives the
 selected daemon's, and `useSessionsDrawerOwningHost` the owning host's (`activeTaskClient`).
 `SessionsDrawerScreen` hands `SessionMainPane` one of them by mode, like its other clients, and
-`SessionMainPane` passes it on to `CreateSessionPane` and, through the workflow-view context, to
-`PrStackScreen` → `CreateSessionDialog`.
+`SessionMainPane` passes it on to `CreateSessionPane`, and the project stack view passes it to its
+`CreateSessionDialog`.
 
 ## Keep-alive events
 

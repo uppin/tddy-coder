@@ -15,6 +15,4 @@ pub const EXPECTED_PROTO_BASENAMES: &[&str] = &[
     "changeset_workflow.proto",
     "merge_pr_report.proto",
     "merge_pr_analyze.proto",
-    "write_stack_plan.proto",
-    "write_stack_docs.proto",
 ];

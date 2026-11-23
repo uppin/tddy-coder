@@ -20,6 +20,7 @@
 | 2026-11-12 | 819 → 818 | **Touched, not grown** by #879 (`#orchestrators` 2/11): four RPCs re-read `stack_plan_json` through one `stack_plan_json_of` helper, offsetting the store call-site swaps (`read_session_stack`). Not split: unchanged size, alert-only |
 | 2026-11-14 | 818 → 868 | **Regressed** by #886 (`#orchestrators` 9/11): the six `session_id`-addressed handlers resolve a `StackAddress` (or forward it) beside the session path. Not split here: this file is stack-shared (n10 also edits it), so the split is deferred to the post-stack sweep per the stack-branch rule. The new RPCs themselves live in `pr_stack/project_stacks.rs` / `project_stack_queries.rs`, kept under budget |
 | 2026-11-20 | 878 → 880 | **Regressed by 2** in #958 (`#session-liveness` 1/4): two `let live = self.terminals.live_sessions().await;` reads, one before each of the two branch-owner scans (`QueryBranch`, `PullBaseIntoBranch`). Not split: the file is stack-shared with n2–n4 of that stack |
+| 2026-11-22 | 880 → 876 | **Touched, slightly better** in #1002 (`#workqueue` 1/14): the stack calls name `tddy_pr_stack` / `tddy_github` directly instead of the recipe facades. Not split: the file is stack-shared with later `#workqueue` nodes |
 
 ## What would close it — candidate seams (not proven)
 

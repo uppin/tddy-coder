@@ -62,9 +62,6 @@ impl LaunchSessions {
         // The planned node the surface that rendered Start-session named. Carried to the child as
         // `--stack-node-id`, which is what puts the association in its participant metadata (D37).
         let stack_node_id_for_spawn = trim_to_option(&req.stack_node_id);
-        // Already validated above; the orchestrator's own process is what seeds the stack, because
-        // the session that owns a `changeset.yaml` is the process that writes it.
-        let stack_seed_base_session_for_spawn = trim_to_option(&req.pr_stack_base_session_id);
         let model_for_spawn = trim_to_option(&req.model);
         // The route the session runs on, resolved before anything is created: a refusal (a locked
         // vault, an agent that cannot run on an account) starts nothing.
@@ -152,7 +149,6 @@ impl LaunchSessions {
                 recipe: recipe_for_spawn,
                 stack_parent: stack_parent_for_spawn,
                 stack_node_id: stack_node_id_for_spawn,
-                stack_seed_base_session: stack_seed_base_session_for_spawn,
                 model: model_for_spawn,
                 host_session_socket,
                 git_environment,

@@ -1,5 +1,5 @@
-//! Per-PR documents: the payload the `write-stack-docs` goal submits, its validator, and where the
-//! documents live on disk.
+//! Per-PR documents: a node's document pair, its validator and writer, and where the documents
+//! live on disk. No goal or tool submits a pass today (see `docs/ft/coder/pr-stack-docs.md`).
 //!
 //! PRD: `docs/ft/coder/pr-stack-docs.md`.
 //!
@@ -10,8 +10,8 @@
 //! the diff the node has yet to produce — and stays prompt-carried, exactly as the PR boundary
 //! contract does.
 //!
-//! Paths are derived from `node_id` by convention rather than recorded on `StackNode`: the docs pass
-//! writes every node at once, so they are predictable by construction.
+//! Paths are derived from `node_id` by convention rather than recorded on `StackNode`, so they are
+//! predictable by construction.
 
 use std::path::{Path, PathBuf};
 
@@ -26,6 +26,10 @@ pub const NODE_PRD_BASENAME: &str = "PRD.md";
 
 /// The technical document: responsibility, boundaries, dependencies, draft-PR contract.
 pub const NODE_CHANGESET_BASENAME: &str = "changeset.md";
+
+/// The human-readable rendering of a stack plan. A persisted artifact name, so it is renamed only
+/// with a migration.
+pub const PR_STACK_PLAN_MD_BASENAME: &str = "pr-stack-plan.md";
 
 /// Sections every per-PR changeset must carry.
 ///
@@ -56,13 +60,7 @@ pub struct NodeDocs {
     pub changeset: String,
 }
 
-/// The `write-stack-docs` submit payload, mirroring `StackPlanOutput`.
-///
-/// The goal is registered (`goals.json` → `write-stack-docs.schema.json`), so `tddy-tools submit`
-/// has already checked the shape — including the `goal` discriminator every registered payload
-/// carries — before the hook sees it. Neither struct declares `goal`: it names the task the
-/// submission is routed on, not part of the plan or the documents, and serde ignores it on the way
-/// in exactly as it does for the plan.
+/// A pass of document pairs over a stack: one entry per planned node.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StackDocsOutput {
     #[serde(default)]
