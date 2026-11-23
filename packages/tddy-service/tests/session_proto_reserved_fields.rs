@@ -1,4 +1,4 @@
-//! `#workqueue` 1/14: `StartSessionRequest.pr_stack_base_session_id` (field 31) seeded a stack from
+//! `#workqueue` 1/14: `StartSessionRequest.work_queue_base_session_id` (field 31) seeded a stack from
 //! an existing session's branch for the removed `pr-stack` recipe. Its number is reserved, never
 //! reused, so an old client's field 31 can never be read as something else.
 
@@ -38,8 +38,8 @@ fn start_session_request_reserves_the_removed_stack_seed_field() {
 
     // Then
     assert!(
-        !request.contains("pr_stack_base_session_id"),
-        "StartSessionRequest still declares pr_stack_base_session_id"
+        !request.contains("work_queue_base_session_id"),
+        "StartSessionRequest still declares work_queue_base_session_id"
     );
     assert!(
         request

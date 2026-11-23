@@ -11,12 +11,12 @@
 import React from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson, type StackNodeFixture } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson, type WorkItemFixture } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -25,18 +25,18 @@ import { aPlannedNode, aStackPlanJson, type StackNodeFixture } from "../support/
 const ORCHESTRATOR_SESSION_ID = "pr-stack-session-7300-0000-0000-0000-000000000073";
 
 /** Three independent roots, so nothing about the DAG can explain the order they render in. */
-function anOrderedStack(order: string[]): StackNodeFixture[] {
+function anOrderedStack(order: string[]): WorkItemFixture[] {
   const titles: Record<string, string> = {
     n1: "Add token store",
     n2: "Add auth middleware",
     n3: "Add login screen",
   };
-  return ["n1", "n2", "n3"].map((nodeId) =>
-    aPlannedNode({ nodeId, title: titles[nodeId], displayOrder: order.indexOf(nodeId) }),
+  return ["n1", "n2", "n3"].map((itemId) =>
+    aPlannedNode({ itemId, title: titles[itemId], displayOrder: order.indexOf(itemId) }),
   );
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -45,7 +45,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: "proj-pr-stack",
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -58,7 +58,7 @@ interface MountOptions {
 
 function aPrStackBackend(opts: MountOptions) {
   return aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, anOrderedStack(opts.order))),
+    anOrchestratorSession(aWorkQueueJson(1, anOrderedStack(opts.order))),
   ]).onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
 
@@ -67,19 +67,19 @@ function mountAndOpen(backend: ReturnType<typeof aPrStackBackend>) {
   return backend;
 }
 
-/** Open the screen with a `ReorderPlannedPr` that succeeds and returns the reordered plan. */
+/** Open the screen with a `ReorderWorkItem` that succeeds and returns the reordered plan. */
 function openPrStackScreen(opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(PrStackService.method.reorderPlannedPr, () => ({
-      stackPlanJson: aStackPlanJson(1, anOrderedStack(opts.reorderedTo ?? opts.order)),
+    aPrStackBackend(opts).onUnary(WorkQueueService.method.reorderWorkItem, () => ({
+      workQueueJson: aWorkQueueJson(1, anOrderedStack(opts.reorderedTo ?? opts.order)),
     })),
   );
 }
 
-/** Open the screen with a `ReorderPlannedPr` the daemon refuses, carrying `message` as its reason. */
+/** Open the screen with a `ReorderWorkItem` the daemon refuses, carrying `message` as its reason. */
 function openPrStackScreenWithRefusedReorder(message: string, opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(PrStackService.method.reorderPlannedPr, () => {
+    aPrStackBackend(opts).onUnary(WorkQueueService.method.reorderWorkItem, () => {
       throw new ConnectError(message, Code.InvalidArgument);
     }),
   );
@@ -109,7 +109,7 @@ it("moves a row one position earlier when its move-up control is clicked", () =>
   prStackScreenPage.clickMoveUp("n2");
 
   // Then — the list re-renders from the plan the daemon returned
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n2", "n1", "n3"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n2", "n1", "n3"]);
 });
 
 it("moves a row one position later when its move-down control is clicked", () => {
@@ -121,7 +121,7 @@ it("moves a row one position later when its move-down control is clicked", () =>
   prStackScreenPage.clickMoveDown("n1");
 
   // Then
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n2", "n1", "n3"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n2", "n1", "n3"]);
 });
 
 it("names the row and the direction it is being moved", () => {
@@ -134,10 +134,10 @@ it("names the row and the direction it is being moved", () => {
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.reorderPlannedPr);
+    const calls = b.callsTo(WorkQueueService.method.reorderWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
-    expect(calls[0].nodeId).to.equal("n2");
+    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
+    expect(calls[0].itemId).to.equal("n2");
     expect(calls[0].direction).to.equal("down");
   });
 });
@@ -181,7 +181,7 @@ it("leaves the rows where they were when the daemon refuses the reorder", () => 
   prStackScreenPage.clickMoveUp("n2");
 
   // Then — nothing was persisted, so nothing may appear to have moved
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n1", "n2", "n3"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2", "n3"]);
 });
 
 it("states the daemon's reason when it refuses the reorder", () => {

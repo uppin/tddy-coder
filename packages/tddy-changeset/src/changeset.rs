@@ -9,9 +9,9 @@
 pub mod io;
 pub mod merge;
 pub mod model;
-pub mod stack;
+pub mod work_queue;
 
 pub use io::*;
 pub use merge::*;
 pub use model::*;
-pub use stack::*;
+pub use work_queue::*;

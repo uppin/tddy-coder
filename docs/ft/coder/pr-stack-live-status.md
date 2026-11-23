@@ -60,12 +60,12 @@ independent of whether the orchestrator agent is running:
 ## Current behavior being fixed (capability 5)
 
 When a session is started for a planned node today — from either the web **Start session** button
-or the orchestrator agent's `pr_spawn_child` — the child worktree is branched off the project's
+or the orchestrator agent's `work_item_spawn_session` — the child worktree is branched off the project's
 **default branch** (`origin/master`/`main`), regardless of the node's DAG parents:
 
 - The web Start-session handler passes `stackParent = <orchestrator session>`.
 - `resolve_chain_base_ref` (`connection_service.rs`) sees a pr-stack orchestrator parent —
-  `parent_is_pr_stack_orchestrator` returns `true` — and short-circuits to `Ok(None)` ("an
+  `parent_owns_a_work_queue` returns `true` — and short-circuits to `Ok(None)` ("an
   orchestrator has no branch of its own").
 - With no chain base, the worktree is created from `project.main_branch_ref` (the default branch).
 
@@ -78,11 +78,11 @@ respected.
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D1 | `StackNode.branch` is recorded when a child worktree creates the branch; planning only sets `branch_suggestion` | The branch is the link key *and* the spawn gate — descendants base onto `origin/<branch>`. Pre-filling it from the suggestion would unblock a spawn onto a ref nothing created. The suggestion is the derivation source and the name the child is asked to create. |
+| D1 | `WorkItem.branch` is recorded when a child worktree creates the branch; planning only sets `branch_suggestion` | The branch is the link key *and* the spawn gate — descendants base onto `origin/<branch>`. Pre-filling it from the suggestion would unblock a spawn onto a ref nothing created. The suggestion is the derivation source and the name the child is asked to create. |
 | D2 | The web resolves the in-progress session by matching `node.branch` against `SessionEntry.branch`; a new `SessionEntry.branch` proto field carries it | Keeps session resolution in the frontend (no new "which session owns this branch" backend signal), reusing the sessions list the drawer already loads. |
 | D3 | GitHub PR status comes from a new `GetPrStatus(branch)` RPC, polled on an interval | Live status without requiring the orchestrator agent to run; polling keeps the number/link/state fresh. |
 | D4 | Repoint performs DAG-parent update **and** local-branch rebase **and** GitHub base re-target | Matches the orchestrator's existing repoint semantics (`bridge::execute_stack_repoint`) so a web-triggered repoint and an agent-triggered one converge. |
-| D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `pr_spawn_child` at once. |
+| D5 | The spawn-time base is resolved in the daemon (`resolve_chain_base_ref`), the single point both the web and agent spawn paths funnel through | One source of truth; the fix lands for both `Start session` and `work_item_spawn_session` at once. |
 | D6 | Starting a node whose non-merged parent owns **no branch** is refused | Enforces bottom-up ordering: the parent's branch must exist to base onto it. Keyed on the branch, never on the parent's session — a closed or cleaned-up child session must not wedge the nodes below it. A merged parent is skipped, not required. |
 | D7 *(2026-07-26)* — **amended by D40** | A node is **orphaned** when it records a `session_id` **and** its branch resolution has arrived with `session.exists = false` | Server-authoritative and already polled — `QueryBranch` scans sessions by changeset branch. Deriving it from the web's `sessions` list would misread a node as orphaned whenever its host is merely offline. Requiring the resolution to have *arrived* keeps the first render deterministic: an absent resolution is "unknown", never "orphaned". |
 | D8 *(2026-07-26)* | Restarting an orphaned node that owns a branch pre-fills `work_on_selected_branch` with that branch | The branch, worktree and remote ref already exist, so `new_branch_from_base` would fail on "branch already exists". Resuming is also what the operator means — the work on that branch is not lost, only its session. |
@@ -95,8 +95,8 @@ respected.
 | D15 *(2026-07-26)* | `head` is qualified as `owner:branch` in both `get_open_pr` and `get_pr_by_head` | GitHub **ignores** an unqualified `head` and returns every PR, so `arr.first()` yields an arbitrary one (verified live: 30 PRs returned for a bare branch name vs 1 for `owner:branch`). Fixing only the display path would leave the orchestrator able to repoint or merge the wrong PR. |
 | D16 *(2026-07-26)* — **reverses D10**, **amended by D42** | A blocked row keeps its **full information and its Start-session button (disabled)**, with a separate warning naming every blocking issue | D10 traded one dead end for another: the operator learned *why* the node was blocked but the row stopped showing what the node *was*, and there was still no action to take. The row is the only place a planned PR's title, description, planned branch, base and PR live; suppressing all of it to render one amber chip is strictly less information at the moment the operator most needs it. With Repoint beside it (D17) the disabled button is no longer a dead end — it is the thing that becomes enabled. |
 | D17 *(2026-07-26)* | Repoint is offered whenever the node's base **cannot be resolved right now**, not only when a parent merged | "Merged predecessor" is one cause of a dead end among several — the base branch deleted after its PR merged, deleted without merging, or never pushed — and the plan's own `pr_status` is written by the orchestrator agent, so a merged predecessor frequently *is not* recorded as merged. Gating on the recorded phase is why the reported case (PR merged, branch deleted, plan still says open) had no recovery at all. All of these causes are indistinguishable to the operator and all are resolved identically: re-base onto the default branch. |
-| D18 *(2026-07-26)* | The web computes the repoint **target** and **sends it** — `RepointPlannedPrRequest.target_base_branch` — and the daemon applies one rule: **retain exactly the parents that own that branch, drop the rest** | The button must promise exactly what the daemon will do, so the target has to be decided once, by the side that rendered the label. Having the daemon re-derive "which parents are dead" from git instead was rejected: `remote_branch_ref_sha` collapses every failure to `None`, so "absent from `origin`" and "could not tell" are indistinguishable, and the daemon would drop a real dependency whenever a probe failed or `repo_path` was not a working repo. The web is not inventing the fact either — it reads `BranchResolution.remote`, which the daemon itself resolved. **A repoint therefore collapses the node to a single parent** — the one owning the target, or none when no parent owns it. That is the intent, not a limitation of carrying one branch name: repointing is a decision to stack on one predecessor, so a multi-parent node comes out of it single-parent and its other edges are dropped. |
-| D19 *(2026-07-26)* | Repointing a node that owns **no branch** is a **plan-only** edit — no rebase, no force-push, no PR re-target | `repoint_planned_pr_node` refused with `node '<id>' has no branch to repoint`, which rejected precisely the node this recovery exists for: planned, never started, wedged behind a base that no longer exists. A node with no branch has nothing to rebase and no PR to re-target; dropping the dead parents *is* the whole repoint. |
+| D18 *(2026-07-26)* | The web computes the repoint **target** and **sends it** — `RepointWorkItemRequest.target_base_branch` — and the daemon applies one rule: **retain exactly the parents that own that branch, drop the rest** | The button must promise exactly what the daemon will do, so the target has to be decided once, by the side that rendered the label. Having the daemon re-derive "which parents are dead" from git instead was rejected: `remote_branch_ref_sha` collapses every failure to `None`, so "absent from `origin`" and "could not tell" are indistinguishable, and the daemon would drop a real dependency whenever a probe failed or `repo_path` was not a working repo. The web is not inventing the fact either — it reads `BranchResolution.remote`, which the daemon itself resolved. **A repoint therefore collapses the node to a single parent** — the one owning the target, or none when no parent owns it. That is the intent, not a limitation of carrying one branch name: repointing is a decision to stack on one predecessor, so a multi-parent node comes out of it single-parent and its other edges are dropped. |
+| D19 *(2026-07-26)* | Repointing a node that owns **no branch** is a **plan-only** edit — no rebase, no force-push, no PR re-target | `repoint_work_item` refused with `node '<id>' has no branch to repoint`, which rejected precisely the node this recovery exists for: planned, never started, wedged behind a base that no longer exists. A node with no branch has nothing to rebase and no PR to re-target; dropping the dead parents *is* the whole repoint. |
 | D20 *(2026-07-26)* | The default-branch **name** reaches the row from `ProjectEntry.main_branch_ref`, the project list the drawer already loads — not a new RPC and not a live git probe | The label is rendered on every poll tick, and the authoritative resolver (`resolve_default_integration_base_ref`) runs `git fetch origin`. A legacy project with no stored default yields an empty name, in which case the button reads "Repoint to default branch" and **the daemon substitutes its own resolved default branch for the empty target**. That substitution is load-bearing, not a nicety: without it the empty string reaches the recipe as "no target named" and selects the drop-merged-parents rule, which in the dead-end case drops nothing and returns success against an unchanged plan — no error, no change. The recipe's no-target mode is in-process only. This is also what finally gives the Start-session dialog a named base for a root node (it passed `""`). |
 
 ## Orphaned-node recovery *(added 2026-07-26)*
@@ -188,7 +188,7 @@ right now — *any* cause — as well as in its original merged-parent case (D17
   none remains, so the button reads "Repoint to `origin/master`".
 - The default branch's *name* comes from `ProjectEntry.main_branch_ref` (D20). A legacy project that has
   none renders "Repoint to default branch"; the daemon still resolves the real ref when clicked.
-- The target is **sent** with the click as `RepointPlannedPrRequest.target_base_branch` (D18), so the
+- The target is **sent** with the click as `RepointWorkItemRequest.target_base_branch` (D18), so the
   daemon does exactly what the label promised rather than re-deriving it from a git probe that cannot
   distinguish "absent" from "could not tell". An **empty** target on the wire means "the project's
   default branch", which the daemon substitutes from its own resolution — a client cannot always name
@@ -305,12 +305,12 @@ message GetPrStatusResponse {
 }
 ```
 
-**New RPC — `RepointPlannedPr`**
+**New RPC — `RepointWorkItem`**
 
 ```proto
-rpc RepointPlannedPr(RepointPlannedPrRequest) returns (RepointPlannedPrResponse);
+rpc RepointWorkItem(RepointWorkItemRequest) returns (RepointWorkItemResponse);
 
-message RepointPlannedPrRequest {
+message RepointWorkItemRequest {
   string session_token = 1;
   // The "pr-stack" orchestrator session whose stack holds the node.
   string session_id = 2;
@@ -323,9 +323,9 @@ message RepointPlannedPrRequest {
   // branch nor any parent's branch. Empty keeps the original behaviour: drop merged parents only.
   string target_base_branch = 4;
 }
-message RepointPlannedPrResponse {
-  // Updated JSON-serialized Stack, same wire shape as SessionEntry.stack_plan_json (field 23).
-  string stack_plan_json = 1;
+message RepointWorkItemResponse {
+  // Updated JSON-serialized Stack, same wire shape as SessionEntry.work_queue_json (field 23).
+  string work_queue_json = 1;
 }
 ```
 
@@ -396,9 +396,9 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 
 ### Rust (`tddy-core`, `tddy-workflow-recipes`, `tddy-daemon`)
 
-- **`StackNode.branch` on materialization** — `pr_stack::add_planned_pr_node` and
+- **`WorkItem.branch` on materialization** — `work_queue::add_work_item` and
   `plan_pr_stack::planned_prs_into_stack_nodes` leave `branch = None` and record the canonical name
-  in `branch_suggestion`. `ConnectionServiceImpl::link_stack_node_to_spawned_branch` writes
+  in `branch_suggestion`. `ConnectionServiceImpl::link_work_item_to_spawned_branch` writes
   `branch` (plus `session_id`, as a fallback route back to the branch) once the child worktree has
   created it; a later session claiming the same branch repoints the fallback, last writer wins.
   `changeset::resolve_stack_node_branch` reads a node's branch, falling back to the branch recorded
@@ -411,7 +411,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   pub enum PrState { Open, Merged, Closed, Draft }
   fn get_pr_by_head(&self, head_branch: &str) -> Result<Option<PrView>, WorkflowError>;
   ```
-- **`pr_stack::repoint_planned_pr_node`** — repoints a single node: drops merged parents from
+- **`work_queue::repoint_work_item`** — repoints a single node: drops merged parents from
   `node.parents` (persisted via `update_stack_atomic`), computes the effective base via
   `Stack::effective_base_refs`, rebases the node's local branch onto it, and calls
   `patch_pr_base` on the open PR. Reuses the `git_ops` + `github` primitives behind
@@ -420,8 +420,8 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   original drop-merged-parents behaviour. A node with `branch = None` is a plan-only repoint — the
   rebase, force-push and `patch_pr_base` are skipped rather than erroring (D19).)*
 - **Daemon handlers** — `get_pr_status` (resolve `owner/repo` from the orchestrator session's
-  repo remote, call `get_pr_by_head`) and `repoint_planned_pr` (call
-  `repoint_planned_pr_node`, return re-serialized `stack_plan_json`).
+  repo remote, call `get_pr_by_head`) and `repoint_work_item` (call
+  `repoint_work_item`, return re-serialized `work_queue_json`).
 - **Repoint target validation (added 2026-07-26)** — `connection_service::validate_repoint_target(target,
   default_branch, parent_branches) -> Result<Option<String>, String>`, a pure helper in the same shape as
   `effective_spawn_branch`. Empty or whitespace-only → `Ok(None)` (the drop-merged-parents rule). The
@@ -446,7 +446,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - **Effective spawn branch (added 2026-07-26)** — `connection_service::effective_spawn_branch(intent,
   new_branch_name, selected_branch_to_work_on)` returns `local_branch_name(selected_branch_to_work_on)`
   under `work_on_selected_branch` and the trimmed `new_branch_name` otherwise, and feeds the
-  **node-link** sites in both spawn paths that take a `stack_parent`. `resolve_chain_base_ref`
+  **node-link** sites in both spawn paths that take a `work_queue_parent`. `resolve_chain_base_ref`
   deliberately still keys on `new_branch_name`: under `work_on_selected_branch` a `Some(chain_base)`
   makes worktree setup run a real `fetch_chain_pr_integration_base`, which can fail and is pointless
   for a resume that creates nothing. See
@@ -461,7 +461,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   token by login and returns a `PrStatusView` value rather than a `Status`. *(Superseded 2026-09-24
   by `#keyring` 3/9, [#510](https://github.com/uppin/tddy-coder/pull/510): the trait, the file
   store and `github-tokens.json` are deleted; the token lives in `tddy-credentials`' per-user
-  encrypted vault, and the PR-status read is `tddy-daemon-rpc`'s `pr_stack/pr_status.rs` through
+  encrypted vault, and the PR-status read is `tddy-daemon-rpc`'s `work_queue/pr_status.rs` through
   `tddy-daemon-auth`'s `github_pr_credentials::retained_github_token`.)*
   `tddy-workflow-recipes` adds `RealGithubPrApi::with_token` (never falling back to the process
   environment — an explicit-token instance authenticating as the host's ambient token would be a silent
@@ -470,34 +470,34 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 
 ### Web (`tddy-web`)
 
-- `SessionEntry.branch`, `GetPrStatus*`, `RepointPlannedPr*`, `PrStatusView` regenerated into
+- `SessionEntry.branch`, `GetPrStatus*`, `RepointWorkItem*`, `PrStatusView` regenerated into
   `gen/connection_pb.ts`.
 - `resolveNodeSession(node, sessions)` — returns the live session whose `branch === node.branch`.
 - `usePrStatus(client, sessionToken, orchestratorId, branches)` — polls `GetPrStatus` per branch
   on an interval, returns a `branch → PrStatusView` map.
 - The stack view receives the session list (all sessions) from `SessionsDrawerScreen`, and a
-  `repointPlannedPr` handler.
-- `PlannedPrRow` renders: an **in-progress** indicator (branch resolves to a live session), the
+  `repointWorkItem` handler.
+- `WorkItemRow` renders: an **in-progress** indicator (branch resolves to a live session), the
   **PR number as a link** + **PR state**, and a **Repoint** control when the node needs repoint
   (a predecessor merged).
 - **`useQueryBranch(client, sessionToken, orchestratorId, branches)`** *(added 2026-07-25)* —
   per-branch polled, returning a `branch → BranchResolution` map. The stack view
-  threads it through `PlannedPrList` into `PlannedPrRow`, which now sources the **worktree** indicator
+  threads it through `WorkItemList` into `WorkItemRow`, which now sources the **worktree** indicator
   (`pr-stack-worktree-<nodeId>`), **in-progress** badge (`pr-stack-session-<nodeId>`), and **PR**
   link/state from the `QueryBranch` resolution.
 - *(2026-07-26)* `usePrStatus` is **removed** (no remaining caller) and the `prStatusByBranch` /
-  `prStatus` props are off `PlannedPrList` / `PlannedPrRow`: `useQueryBranch` is the screen's single
+  `prStatus` props are off `WorkItemList` / `WorkItemRow`: `useQueryBranch` is the screen's single
   source. The stack view's poll set is `resolvedBranches` — the branches nodes own **plus** every
   node's base branch (deduplicated and sorted), because startability is a property of the base and an
   unspawned node owns no branch. Base branches add no volume of their own: a base is by definition some
   node's own `branch` and was already in the set.
 - *(2026-07-26)* `isNodeOrphaned(node, resolution)` (pure module) decides the recovered state;
-  `resolveStackBase(node, nodes) -> StackBase` (`default-branch` | `ancestor-branch` |
+  `resolveWorkItemBase(node, nodes) -> WorkItemBase` (`default-branch` | `ancestor-branch` |
   `no-ancestor-branch`) and `branchlessNonMergedParent(node, nodes)` in `deriveStackBaseBranch.ts`
   decide startability — the discriminated and flat-direct-parent forms of the daemon's own gate, since
   the flattened label collapses a root, an all-merged chain and a chain with no ancestor branch to the
   same string while only the last is unstartable. `deriveStackBaseBranch` is now a thin wrapper over
-  `resolveStackBase`, unchanged in behaviour.
+  `resolveWorkItemBase`, unchanged in behaviour.
 - *(2026-07-26)* `CreateSessionInitialValues.selectedBranch` threads an existing branch into the
   dialog, honoured when `branchIntent === "work_on_selected_branch"`.
 - *(2026-07-26, dead-end recovery)* `startBlockers(node, nodes, branchResolutionByBranch) ->
@@ -512,7 +512,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   (`ProjectEntry.mainBranchRef`, D20). It feeds both the Repoint label
   and `baseBranchLabel`, which previously passed the empty string and left a root node's dialog with an
   unnamed base.
-- *(2026-07-26, dead-end recovery)* `PlannedPrRow` always renders the row's full information and its
+- *(2026-07-26, dead-end recovery)* `WorkItemRow` always renders the row's full information and its
   Start-session button beside a warning (`pr-stack-start-warning-<nodeId>`) listing those blockers;
   the base branch gets its own line (`pr-stack-base-branch-<nodeId>`). The
   `pr-stack-missing-branch-<nodeId>` replacement indicator is **removed** (D16). *(Amended 2026-08-30,
@@ -554,7 +554,7 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
   | Stub / demo login (D13) | nothing — identical to "no PR"; never an error |
   | Lookup unavailable | "PR status unavailable" with the reason as a tooltip |
 - **Repoint availability** *(revised 2026-07-26, D17)*. The Repoint control appears when the node has at
-  least one parent whose PR is merged (`StackNode::is_skipped` — the derived `needs-repoint` condition)
+  least one parent whose PR is merged (`WorkItem::is_skipped` — the derived `needs-repoint` condition)
   **or** when the node's base cannot be resolved right now, for any cause.
 - **Repoint label** *(2026-07-26, D18/D20)*. The control reads **"Repoint to `<target>`"**, where
   `<target>` is the nearest ancestor branch that survives dropping the unusable parents, else the
@@ -647,36 +647,36 @@ anatomy, badges and controls as the operator meets them.
 | D23 *(2026-08-01)* — **extended by D39** | The bound session is resolved from the **plan first**, the branch's current owner second, and both are guarded on the session being one the drawer knows | The indicator is the *node's* recorded binding and the plan is the durable record; "who owns this branch right now" is a different question whose answer changes after a resume or a hand-off. Without the known-session guard the control would select nothing for a child deleted on another host. |
 | D24 *(2026-08-01)* | Display order is **persisted per node**, not derived from `parents` | The dependency graph and the reading order are different facts. Deriving one from the other means every merge, repoint and re-parenting silently rewrites the operator's view — a row they are reading jumps position because of an unrelated event. |
 | D25 *(2026-08-01)* | A plan carrying only *some* positions falls back to topological order **wholesale** | A half-numbered plan has no coherent total order, and interleaving real positions with invented ones can render a child above its parent — a worse lie than one render of a correct derived order. The next write numbers every node, after which the fallback stops applying. |
-| D26 *(2026-08-01)* | Base sync is computed with a **non-mutating** probe, and never fetches | It runs on the 5 s poll against worktrees that may have a live agent in them, which disqualifies the existing `pr_resolve_conflicts_action` (`git merge --no-commit` then `--abort` — it mutates the index). Fetching is disqualified on cost: the authoritative default-branch resolver runs `git fetch origin`. |
+| D26 *(2026-08-01)* | Base sync is computed with a **non-mutating** probe, and never fetches | It runs on the 5 s poll against worktrees that may have a live agent in them, which disqualifies the existing `work_item_resolve_conflicts_action` (`git merge --no-commit` then `--abort` — it mutates the index). Fetching is disqualified on cost: the authoritative default-branch resolver runs `git fetch origin`. |
 | D27 *(2026-08-01)* | An unavailable comparison is **never** rendered as clean | A failed comparison arrives with no commits behind and no conflicts — byte-identical to a healthy branch. This is [D12](#authenticated-pr-status-added-2026-07-26) restated one level down, and it exists for the same reason: conflating "could not tell" with "nothing to report" is how a live open PR stayed invisible for a day. |
 | D28 *(2026-08-01)* | The **base actually compared is reported back**, and is what the row names | The counts are meaningless without the ref they came from, and the base may resolve locally rather than remotely. The row states what was compared, not what it asked for — the same discipline as [D18](#repointing-a-dead-end-planned-pr-added-2026-07-26). |
-| D29 *(2026-08-01)* | An **unnamed base is unavailable**, not substituted | `RepointPlannedPr` substitutes the resolved default for an empty target (D20) because it is a mutation the operator asked for. This is a display: the number beside a row must describe the same base the row's own base line shows, and substituting a different one answers a question the row is not asking. The authoritative resolver also fetches. |
-| D30 *(2026-08-01)* | Pull **defaults to merge**; rebase is offered beside it | Merge preserves the open PR's review anchors and needs no force-push — it is what the stack's own `pr_resolve_conflicts` already does. Rebase rewrites history and force-pushes, which is the right trade only when the operator picks it. |
+| D29 *(2026-08-01)* | An **unnamed base is unavailable**, not substituted | `RepointWorkItem` substitutes the resolved default for an empty target (D20) because it is a mutation the operator asked for. This is a display: the number beside a row must describe the same base the row's own base line shows, and substituting a different one answers a question the row is not asking. The authoritative resolver also fetches. |
+| D30 *(2026-08-01)* | Pull **defaults to merge**; rebase is offered beside it | Merge preserves the open PR's review anchors and needs no force-push — it is what the stack's own `work_item_resolve_conflicts` already does. Rebase rewrites history and force-pushes, which is the right trade only when the operator picks it. |
 | D31 *(2026-08-01)* | A **dirty worktree prompts** to commit and push first | Refusing outright leaves a permanently dead button in any worktree an agent is working in; auto-stashing can conflict on the pop and would leave a child session's checkout in a state nobody asked for. Committing is the one resolution that is explicit, recoverable through git, and leaves the child's work safe. |
 | D32 *(2026-08-01)* | A pull **pushes**; a failed push is reported, not rolled back | Without the push the GitHub PR still reports itself behind and the row contradicts the reviewer's view. That the local merge or rebase landed is a fact worth reporting truthfully — undoing it would be strictly worse. |
-| D33 *(2026-08-01)* | Conflicts **abort**, and the node is not stamped `has-conflicts` | Leaving `MERGE_HEAD` and conflict markers in a worktree an agent may be mid-turn in would corrupt that turn. (The agent-facing `pr_resolve_conflicts` deliberately leaves them, because it runs *inside* the child's own workflow where the agent is about to be prompted to resolve them.) And with conflicts now a live fact on every poll, a persisted stamp can only go stale — clearing it later would risk stomping an agent's own `source: "override"`. |
+| D33 *(2026-08-01)* | Conflicts **abort**, and the node is not stamped `has-conflicts` | Leaving `MERGE_HEAD` and conflict markers in a worktree an agent may be mid-turn in would corrupt that turn. (The agent-facing `work_item_resolve_conflicts` deliberately leaves them, because it runs *inside* the child's own workflow where the agent is about to be prompted to resolve them.) And with conflicts now a live fact on every poll, a persisted stamp can only go stale — clearing it later would risk stomping an agent's own `source: "override"`. |
 
 ### Persisted display order
 
-`StackNode.display_order: Option<u32>` (additive, omitted when unset). `Stack::display_order()` sits beside
+`WorkItem.display_order: Option<u32>` (additive, omitted when unset). `Stack::display_order()` sits beside
 `topo_order` and sorts on `(display_order.unwrap_or(u32::MAX), topo_index, node_id)`. It **never errors** —
 it is on a render path, so a cycle degrades `topo_index` to declaration order rather than failing, and no
 node is ever dropped.
 
-Assignment is on write, not on read: `pr_stack::assign_missing_display_order` is the first statement of
+Assignment is on write, not on read: `work_queue::assign_missing_display_order` is the first statement of
 every mutator's `update_stack_atomic` closure, so a legacy stack is numbered the next time anything writes
 it. Backfilling inside `read_changeset` was rejected — it would make the value returned differ from the
-bytes on disk, breaking the roundtrip contract `pr_stack_data_model_acceptance.rs` pins, and would rewrite
+bytes on disk, breaking the roundtrip contract `work_queue_data_model_acceptance.rs` pins, and would rewrite
 meaning on a path with no write.
 
 - `planned_prs_into_stack_nodes` numbers from the plan's **array index** — the order the agent emitted is
   the intended reading order, and it may legitimately differ from the DAG.
-- `add_planned_pr_node` / `adopt_pr_as_stack_node` take `max + 1`; neither renumbers the rows above.
-- `delete_planned_pr_node` leaves survivors alone. Gaps are harmless in a sort key, and renumbering would
+- `add_work_item` / `adopt_pr_as_stack_node` take `max + 1`; neither renumbers the rows above.
+- `delete_work_item` leaves survivors alone. Gaps are harmless in a sort key, and renumbering would
   be a write across every surviving node purely to make the numbers tidy.
 - `reseed_stack_from_plan_if_unspawned` takes the new plan's order wholesale — it already refuses once any
   node owns a branch or a session, so nothing has spawned and no operator has been working against those rows.
-- `pr_stack::move_planned_pr_node(session_dir, node_id, "up" | "down")` swaps a node with its neighbour.
+- `work_queue::move_work_item(session_dir, node_id, "up" | "down")` swaps a node with its neighbour.
   Past either end is a **no-op success**; an unknown node id is refused without writing.
 
 ### Base sync
@@ -719,7 +719,7 @@ would make the pull control permanently dead in any real agent worktree.
 
 ### Pulling the base into a branch
 
-`pr_stack::pull_base_into_node_branch` operates in the node's **own worktree**. The ordering is the safety
+`work_queue::pull_base_into_node_branch` operates in the node's **own worktree**. The ordering is the safety
 design:
 
 1. node absent, node owns no `branch`, or no base named → refused.
@@ -750,8 +750,8 @@ Proto (`packages/tddy-service/proto/connection.proto`):
   conflicted_paths, unavailable, unavailable_reason, base_ref, head_ref }`. `base_branch` carries the ref
   actually compared (D28).
 - `BranchWorktree.dirty = 3`, `dirty_paths = 4`.
-- `rpc ReorderPlannedPr` — `{session_id, node_id, direction}` → `{stack_plan_json}`, the same wire shape
-  `AddPlannedPr` and `RepointPlannedPr` already return, so the web reuses `parseStackPlan`.
+- `rpc ReorderWorkItem` — `{session_id, node_id, direction}` → `{work_queue_json}`, the same wire shape
+  `AddWorkItem` and `RepointWorkItem` already return, so the web reuses `parseWorkQueue`.
 - `rpc PullBaseIntoBranch` — `{session_id, node_id, base_branch, strategy, dirty_worktree_action,
   commit_message}` → `{resolution, strategy, changed, pushed, push_error}`. It returns a **fresh
   `BranchResolution`** so the row repaints without waiting for the next poll tick.
@@ -760,10 +760,10 @@ Both handlers carry the standard prologue ending in `require_pr_stack_orchestrat
 **non-erroring like every other `QueryBranch` leg** — an absent base, an unknown repo root, a probe failure
 or a `spawn_blocking` timeout all degrade that leg alone and the RPC still succeeds.
 
-Web (`tddy-prstack-web` since #850; was `tddy-web`'s `src/components/sessions/prstack/`), all under `packages/tddy-prstack-web/src/`:
+Web (`tddy-workqueue-web` since #850; was `tddy-web`'s `src/components/sessions/prstack/`), all under `packages/tddy-workqueue-web/src/`:
 
-- `orderStackNodes` — persisted order when every node has one, else `topoSortStackNodes` wholesale (D25).
-  `topoSortStackNodes` is unchanged and remains the legacy fallback.
+- `orderWorkItems` — persisted order when every node has one, else `topoSortWorkItems` wholesale (D25).
+  `topoSortWorkItems` is unchanged and remains the legacy fallback.
 - `parentTitles` — parent ids to titles, skipping dangling ids.
 - `boundChildSession` — the session the indicator opens (D23).
 - `branchQueries` — `buildBranchQueries(nodes, defaultBranch)` pairs each owned branch with its base. This
@@ -790,7 +790,7 @@ to offering **Start session** for work that was already running.
 
 Three separate mechanisms produce that one symptom.
 
-**The node link is written on the wrong host.** `link_stack_node_to_spawned_branch`
+**The node link is written on the wrong host.** `link_work_item_to_spawned_branch`
 (`connection_service.rs`) records `session_id` + `branch` on the planned node by writing the
 orchestrator's `changeset.yaml` **on the spawning daemon's own sessions tree**. When the child spawns
 on host B and the orchestrator lives on host A, host B has no such session, the lookup returns
@@ -828,25 +828,25 @@ Alongside this, two adjacent gaps the same operator hits:
 
 | # | Decision | Rationale |
 |---|----------|-----------|
-| D34 *(2026-08-30)* | A child spawn carries the **planned node's id** — `StartSessionRequest.stack_node_id` — rather than the daemon re-deriving the node from the branch the spawn creates | `pr_stack_node_for_spawn` matches on `new_branch_name`, which the operator can edit in the create dialog before confirming; a rename silently unlinks the node from the row that started it. And on the cross-host path the spawning daemon cannot read the orchestrator's stack *at all*, so there is nothing to derive from. The node id is the one fact the surface that rendered the button already knows exactly. Empty stays supported: a spawn that names no node runs on the orchestrator's host, where the branch-derived lookup is correct and local. |
-| D35 *(2026-08-30)* | The node link is written by a **peer-routed RPC** — `LinkStackNode`, routed through `rpc_served_by_peer` exactly as `ResolveStackBase` is — not by the spawning daemon's local disk write | This is the write half of the read `ResolveStackBase` already performs, and the same argument applies verbatim: the parent's stack lives in *its* session's `changeset.yaml`, so only the daemon holding that session can write it. Routing before authentication, as the other peer RPCs do: a token is verified by the daemon that serves the call. |
-| D36 *(2026-08-30)* | A failed link **does not fail the spawn** — it is logged, and the live association still travels in participant metadata (D37). This now covers the **local** write too: `link_stack_node_to_spawned_branch` used to be called with `?`, so an unwritable orchestrator changeset on this host failed the start | The failure lands *after* the worktree, the branch and the session exist. Failing the spawn there would leave an orphan session on host B and still no branch on host A, which is strictly worse than a node the operator can re-link by restarting it. The argument does not turn on the host: a local disk failure leaves exactly the same orphan, and the spawn that raised it is exactly as complete. Keeping the local write fatal while the routed one is not would also make the same operator action succeed or fail on where the orchestrator happens to live. The daemon's own spawn gate is unaffected: a descendant of an unlinked node is refused for the real reason. |
-| D37 *(2026-08-30)* | The session's LiveKit participant publishes its **stack association** — `session_id`, `orchestrator_session_id`, `stack_node_id`, `branch` — in the `session` metadata block, and the daemon publishes that block for **claude-cli sessions**, which previously published none | Presence is the only cross-host signal the web has: `ListSessions` does not fan out (only `ListProjects` does), and adding a fan-out would put a per-host RPC on a 2 s poll to answer a question presence already answers for free. The shape moves to `tddy_core` so the coder's publisher and the daemon's cannot drift — the merge into participant metadata is **shallow**, so a partial `session` object would erase the other publisher's keys rather than merge with them. |
-| D38 *(2026-08-30)* | The view joins on a **domain type of its own** — `StackChildSession { sessionId, orchestratorSessionId, stackNodeId, branch, isActive }` — assembled from the session list plus the parsed metadata the drawer already keeps (`sessionMetadataBySessionId`). **No new `SessionEntry` field.** `mergeActiveAndFetchedSessions` hydrates `branch` and `orchestrator_session_id`, which the row shape already has | The two facts the synthesized row was missing are existing proto fields; only `stack_node_id` is new, and it is needed exactly where a participant is live — which is exactly where the metadata map has an entry. A same-host child with no participant needs none: the node's own link was written correctly on its own host. Keeping the join off the proto row also stops the PR-stack join from being coupled to the `ListSessions` shape, which is what made it untestable without a protobuf message. |
-| D39 *(2026-08-30)* | A node's live child resolves **by `stack_node_id` first**, then the plan's recorded `session_id`, then branch ownership | Extends D23's ordering rather than replacing it. The node id is an exact identity that survives a branch rename and a host boundary; the plan's record is the durable second-best; "who owns this branch right now" stays last, as D23 already argued. |
+| D34 *(2026-08-30)* | A child spawn carries the **planned node's id** — `StartSessionRequest.work_item_id` — rather than the daemon re-deriving the node from the branch the spawn creates | `work_item_for_spawn` matches on `new_branch_name`, which the operator can edit in the create dialog before confirming; a rename silently unlinks the node from the row that started it. And on the cross-host path the spawning daemon cannot read the orchestrator's stack *at all*, so there is nothing to derive from. The node id is the one fact the surface that rendered the button already knows exactly. Empty stays supported: a spawn that names no node runs on the orchestrator's host, where the branch-derived lookup is correct and local. |
+| D35 *(2026-08-30)* | The node link is written by a **peer-routed RPC** — `LinkWorkItem`, routed through `rpc_served_by_peer` exactly as `ResolveWorkItemBase` is — not by the spawning daemon's local disk write | This is the write half of the read `ResolveWorkItemBase` already performs, and the same argument applies verbatim: the parent's stack lives in *its* session's `changeset.yaml`, so only the daemon holding that session can write it. Routing before authentication, as the other peer RPCs do: a token is verified by the daemon that serves the call. |
+| D36 *(2026-08-30)* | A failed link **does not fail the spawn** — it is logged, and the live association still travels in participant metadata (D37). This now covers the **local** write too: `link_work_item_to_spawned_branch` used to be called with `?`, so an unwritable orchestrator changeset on this host failed the start | The failure lands *after* the worktree, the branch and the session exist. Failing the spawn there would leave an orphan session on host B and still no branch on host A, which is strictly worse than a node the operator can re-link by restarting it. The argument does not turn on the host: a local disk failure leaves exactly the same orphan, and the spawn that raised it is exactly as complete. Keeping the local write fatal while the routed one is not would also make the same operator action succeed or fail on where the orchestrator happens to live. The daemon's own spawn gate is unaffected: a descendant of an unlinked node is refused for the real reason. |
+| D37 *(2026-08-30)* | The session's LiveKit participant publishes its **stack association** — `session_id`, `orchestrator_session_id`, `work_item_id`, `branch` — in the `session` metadata block, and the daemon publishes that block for **claude-cli sessions**, which previously published none | Presence is the only cross-host signal the web has: `ListSessions` does not fan out (only `ListProjects` does), and adding a fan-out would put a per-host RPC on a 2 s poll to answer a question presence already answers for free. The shape moves to `tddy_core` so the coder's publisher and the daemon's cannot drift — the merge into participant metadata is **shallow**, so a partial `session` object would erase the other publisher's keys rather than merge with them. |
+| D38 *(2026-08-30)* | The view joins on a **domain type of its own** — `StackChildSession { sessionId, orchestratorSessionId, workItemId, branch, isActive }` — assembled from the session list plus the parsed metadata the drawer already keeps (`sessionMetadataBySessionId`). **No new `SessionEntry` field.** `mergeActiveAndFetchedSessions` hydrates `branch` and `orchestrator_session_id`, which the row shape already has | The two facts the synthesized row was missing are existing proto fields; only `work_item_id` is new, and it is needed exactly where a participant is live — which is exactly where the metadata map has an entry. A same-host child with no participant needs none: the node's own link was written correctly on its own host. Keeping the join off the proto row also stops the PR-stack join from being coupled to the `ListSessions` shape, which is what made it untestable without a protobuf message. |
+| D39 *(2026-08-30)* | A node's live child resolves **by `work_item_id` first**, then the plan's recorded `session_id`, then branch ownership | Extends D23's ordering rather than replacing it. The node id is an exact identity that survives a branch rename and a host boundary; the plan's record is the durable second-best; "who owns this branch right now" stays last, as D23 already argued. |
 | D40 *(2026-08-30)* — **amends D7** | A live participant claiming the node **suppresses the orphan verdict** | D7 called `QueryBranch` the authority because it "scans sessions by their changeset branch" — true, and it scans exactly **one host's**. `session.exists = false` therefore means "not on the daemon I asked", which is precisely the cross-host case, so on its own it would render every remote child as a deleted one and offer a duplicate spawn for a session that is mid-turn. Presence is the one signal that *positively* proves the session exists; absence of presence still falls through to D7 unchanged. |
 | D41 *(2026-08-30)* | A node that owns **no branch** is additionally polled on its `branch_suggestion`, and **only the `pr` leg of that resolution is read** | The `pr` leg is the one leg of `QueryBranch` that is host-independent, so it is the one leg that can answer for a branch this daemon cannot see. Reading any other leg off a suggestion would violate D1: a suggestion is a planned name, not a ref, and letting it feed base resolution or the spawn gate would unblock a spawn onto a ref nothing created — the exact failure D1 exists to prevent. The row therefore gains a PR link and state; its base line, its blockers and its `branch` line are untouched. |
 | D42 *(2026-08-30)* — **amends D16** | **Start session is never disabled.** A blocked node renders it in a warning colour with an alert icon and a tooltip naming every blocker; the row keeps its warning box (D22) | D16 established that a blocked row keeps its information and its button, and that Repoint is what re-enables the button. That reasoning assumed the blockers were *true*. Two of the three are now known to be derivable from local-only false negatives — `remote.exists` reads absent for any branch pushed from another host until this clone fetches, and `parent-has-no-branch` is true for every parent whose link was written on the wrong host — so the gate refuses spawns that would in fact succeed, and no repoint fixes them. A gate that cannot see half the fleet must **advise, not refuse**. The daemon still enforces its own gate: a genuinely impossible spawn fails there, with the real reason, which is strictly more informative than a button that cannot be pressed. |
 | D43 *(2026-08-30)* | Force start needs **no extra confirmation step** | `CreateSessionDialog` already stands between the click and the spawn, showing the base branch, the branch name and the prompt the child will be started with. A confirm dialog in front of a review dialog is a click, not a safeguard. |
 
-### `LinkStackNode`
+### `LinkWorkItem`
 
-Mirrors `ResolveStackBase` in shape, routing and refusal semantics:
+Mirrors `ResolveWorkItemBase` in shape, routing and refusal semantics:
 
 ```proto
-rpc LinkStackNode(LinkStackNodeRequest) returns (LinkStackNodeResponse);
+rpc LinkWorkItem(LinkWorkItemRequest) returns (LinkWorkItemResponse);
 
-message LinkStackNodeRequest {
+message LinkWorkItemRequest {
   string session_token = 1;
   // The daemon whose sessions tree holds `orchestrator_session_id`. Empty or matching the local
   // instance = this daemon answers from its own disk.
@@ -861,9 +861,9 @@ message LinkStackNodeRequest {
   // node's descendants spawnable.
   string branch = 6;
 }
-message LinkStackNodeResponse {
+message LinkWorkItemResponse {
   // The plan as it stands after the link, so a caller that renders it does not re-read.
-  string stack_plan_json = 1;
+  string work_queue_json = 1;
 }
 ```
 
@@ -871,9 +871,9 @@ message LinkStackNodeResponse {
 - `require_pr_stack_orchestrator` on the resolved session; an unknown `node_id` is
   `not_found`, never a silent success — a link that quietly does nothing is what the current local
   write already does, and is the bug.
-- The write itself is the existing `link_stack_node_to_child_session`, unchanged.
-- The spawn path calls it in place of `link_stack_node_to_spawned_branch`'s local write whenever the
-  spawn carries a `stack_node_id`; a spawn without one keeps the branch-derived local lookup, so a
+- The write itself is the existing `link_work_item_to_session`, unchanged.
+- The spawn path calls it in place of `link_work_item_to_spawned_branch`'s local write whenever the
+  spawn carries a `work_item_id`; a spawn without one keeps the branch-derived local lookup, so a
   spawn on the orchestrator's own host that names no node is untouched.
 
 ### The `session` metadata block
@@ -885,14 +885,14 @@ all tolerated as absent by older participants:
 { "session": { "workflow_goal": "", "workflow_state": "", "agent": "", "model": "",
                "activity_status": "", "recipe": "", "repo_path": "", "elapsed_display": "",
                "pending_elicitation": false,
-               "session_id": "", "orchestrator_session_id": "", "stack_node_id": "", "branch": "" } }
+               "session_id": "", "orchestrator_session_id": "", "work_item_id": "", "branch": "" } }
 ```
 
 `tddy-coder` publishes it as today, seeded with the new fields from its CLI args
 (`--stack-parent`, the new `--stack-node-id`) and its changeset's `branch`. The daemon publishes it
 for a claude-cli session by handing the terminal exposure the session's metadata block — carrying the **static**
 identity and association fields the daemon knows at spawn (`session_id`, `orchestrator_session_id`,
-`stack_node_id`, `branch`, `agent`, `recipe`, `model`, `repo_path`). The live workflow fields stay
+`work_item_id`, `branch`, `agent`, `recipe`, `model`, `repo_path`). The live workflow fields stay
 empty for such a session, exactly as they are today; nothing that renders is lost, and the cross-host
 drawer row gains a real name where it previously had only a short session id.
 

@@ -31,12 +31,12 @@ A participant publishes a **`session`** object (sibling of **`owned_project_coun
 | `repo_path` | string | session worktree / repo path |
 | `pending_elicitation` | bool | true when the workflow blocks on operator input |
 | `orchestrator_session_id` | string | the pr-stack orchestrator that spawned this session; empty when it is nobody's stack child |
-| `stack_node_id` | string | the planned node this session materializes; empty is **no association**, never a wildcard |
+| `work_item_id` | string | the planned node this session materializes; empty is **no association**, never a wildcard |
 | `branch` | string | the branch this session created — the branch that exists, not a planned name |
 
 The key is **tolerated as absent** on older participants; consumers treat missing/empty/invalid JSON as no overlay. Field shapes mirror the daemon's **`SessionListStatusDisplay`** enrichment so the web renders them identically whether sourced from presence or from `ListSessions`.
 
-The last three fields are the session's **stack association**, and presence is the only signal carrying them across a host boundary: `ListSessions` answers for one daemon's own sessions tree and does not fan out. They are what lets the PR-Stack view join a child running on another host back to the planned PR it is working — see [PR-Stack live status § Cross-host planned PRs](../../../../docs/ft/coder/pr-stack-live-status.md). `stack_node_id` exists **only** here: it is deliberately not a `SessionEntry` field, because it is needed exactly where a participant is live.
+The last three fields are the session's **stack association**, and presence is the only signal carrying them across a host boundary: `ListSessions` answers for one daemon's own sessions tree and does not fan out. They are what lets the PR-Stack view join a child running on another host back to the planned PR it is working — see [PR-Stack live status § Cross-host planned PRs](../../../../docs/ft/coder/pr-stack-live-status.md). `work_item_id` exists **only** here: it is deliberately not a `SessionEntry` field, because it is needed exactly where a participant is live.
 
 A daemon-published block carries the identity, the association and the static fields (`agent`, `model`, `recipe`, `repo_path`); the live workflow fields stay empty for such a session. A **sandboxed** claude-cli session joins no LiveKit room at all, so it publishes no block.
 

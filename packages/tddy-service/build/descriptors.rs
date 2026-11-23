@@ -63,7 +63,7 @@ pub(super) fn compile_descriptors_2() -> Result<(), Box<dyn std::error::Error>> 
                 "proto/activity.proto",
                 "proto/catalog.proto",
                 "proto/exec_tools.proto",
-                "proto/pr_stack.proto",
+                "proto/work_queue.proto",
                 "proto/session.proto",
                 "proto/project.proto",
                 "proto/demo_vm.proto",

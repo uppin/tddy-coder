@@ -11,7 +11,7 @@ use tddy_service::proto::session::start_phase::Step as StartStep;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::hooks_and_urls::{effective_spawn_branch, spawned_branch_of_session};
-use crate::stack_parent::SpawnStackParent;
+use crate::work_queue_parent::SpawnWorkQueueParent;
 use crate::worktree_source::{session_worktree_source, WorktreeSource};
 
 /// What a start needs to provision its worktree.
@@ -56,7 +56,7 @@ pub(crate) struct CliWorktree {
 /// daemon-managed; never removed on session end).
 pub(crate) async fn provision_cli_worktree(
     start: &CliWorktreeStart<'_>,
-    stack_parent: &SpawnStackParent<'_>,
+    work_queue_parent: &SpawnWorkQueueParent<'_>,
     progress: &AttachmentProgressSink,
 ) -> Result<CliWorktree, Status> {
     let session_type = start.session_type;
@@ -74,7 +74,7 @@ pub(crate) async fn provision_cli_worktree(
                     &pid,
                 )?;
             let repo_root = tddy_session_split::service_util::project_repo_root(&project)?;
-            let chain_base_ref = stack_parent
+            let chain_base_ref = work_queue_parent
                 .chain_base_ref(
                     &pid,
                     start.sessions_base,
@@ -95,12 +95,12 @@ pub(crate) async fn provision_cli_worktree(
             progress.end_phase(StartStep::Worktree);
             // The child's branch now exists, so the planned node it materializes can record it —
             // which is what makes that node's descendants spawnable at all, since they base onto
-            // `<remote>/<branch>` (`Stack::base_ref_for_spawn`).
+            // `<remote>/<branch>` (`WorkQueue::base_ref_for_spawn`).
             //
             // Keyed on the branch the session's changeset records rather than on the requested name
             // — it may carry a collision suffix — and a failed link is logged, not raised (D36).
             let spawned_branch = spawned_branch(start, &pid, &projects_dir, &repo_root)?;
-            stack_parent
+            work_queue_parent
                 .link_spawned_branch_without_failing_the_spawn(
                     start.sessions_base,
                     &spawned_branch,
@@ -857,7 +857,7 @@ mod provision_tests {
     use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
     use super::{provision_cli_worktree, CliWorktree, CliWorktreeStart};
-    use crate::stack_parent::SpawnStackParent;
+    use crate::work_queue_parent::SpawnWorkQueueParent;
 
     /// The directories a start is made in: its session directory, the sessions base and the
     /// daemon's data directory.
@@ -904,7 +904,7 @@ mod provision_tests {
     async fn provisioned(start: &CliWorktreeStart<'_>) -> Result<CliWorktree, tddy_rpc::Status> {
         provision_cli_worktree(
             start,
-            &SpawnStackParent::NoParent,
+            &SpawnWorkQueueParent::NoParent,
             &AttachmentProgressSink::discarding(),
         )
         .await

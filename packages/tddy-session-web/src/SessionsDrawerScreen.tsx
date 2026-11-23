@@ -22,14 +22,14 @@ import {
   sessionsDrawerPathForSession,
   sessionsProjectNewPath,
   sessionsProjectSettingsPath,
-  sessionsProjectStackPath,
+  sessionsProjectQueuePath,
   SESSIONS_DRAWER_ROUTE,
   SESSIONS_NEW_ROUTE,
 } from "tddy-client-web";
 import { useNavigationPort } from "tddy-client-web";
 import { ActiveTabMemoryProvider } from "./lib/ActiveTabMemory";
-import { ProjectStackView, type ProjectStackAddress } from "tddy-prstack-web";
-import type { ProjectStackSummary } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueView, type WorkQueueAddress } from "tddy-workqueue-web";
+import type { WorkQueueSummary } from "tddy-client-web/gen/work_queue_pb";
 import { resolveShortcutsForSession } from "tddy-terminal-web";
 import { AGENT_CLI_LAUNCH, knownSessionLaunch } from "tddy-session-create-web";
 import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
@@ -153,9 +153,9 @@ export function SessionsDrawerScreen({
     [location, navigateRaw, navigationPort],
   );
   // The stack view's address: the route carries project and stack, the owning host comes from the
-  // drawer's `ListProjectStacks` row — resolved here by listing the route's project, unless the
+  // drawer's `ListProjectWorkQueues` row — resolved here by listing the route's project, unless the
   // row that was clicked already handed its address over.
-  const [stackAddress, setStackAddress] = useState<ProjectStackAddress | null>(null);
+  const [workQueueAddress, setStackAddress] = useState<WorkQueueAddress | null>(null);
   // Default closed on mobile (the open 280px panel would cover the main pane);
   // open on desktop.
   const [sessionListOpen, setSessionListOpen] = useState(() => !detectIsMobile());
@@ -401,7 +401,7 @@ export function SessionsDrawerScreen({
             onSetUpProjectHome={openProjectHomeSetup}
             onOpenProjectSettings={handleOpenProjectSettings}
             onNewOrchestrator={handleNewOrchestrator}
-            prStackClient={drawerClients.prStackClient}
+            workQueueClient={drawerClients.workQueueClient}
             sessionToken={sessionToken}
             onOpenProjectStack={handleOpenProjectStack}
           />
@@ -414,9 +414,9 @@ export function SessionsDrawerScreen({
           <SessionsDrawerDetailPane
             location={location}
             setup={setup}
-            stackAddress={stackAddress}
+            workQueueAddress={workQueueAddress}
             setStackAddress={setStackAddress}
-            prStackClient={drawerClients.prStackClient}
+            workQueueClient={drawerClients.workQueueClient}
             sessionToken={sessionToken}
             sortedSessions={sortedSessions}
             sessionMetadataBySessionId={sessionMetadataBySessionId}

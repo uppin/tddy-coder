@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::stack_parent;
+use crate::work_queue_parent;
 use tddy_session_split::service_util;
 
 use tddy_service::proto::types::BranchSession;
@@ -15,9 +15,9 @@ use crate::managed_launch::ManagedLaunch;
 
 use std::sync::Arc;
 
-use tddy_service::proto::pr_stack::LinkStackNodeRequest;
+use tddy_service::proto::work_queue::LinkWorkItemRequest;
 
-use tddy_service::proto::pr_stack::ResolveStackBaseRequest;
+use tddy_service::proto::work_queue::ResolveWorkItemBaseRequest;
 
 use tddy_rpc::Request;
 
@@ -30,12 +30,12 @@ use std::path::Path;
 use crate::launch_ports::LaunchSessions;
 
 impl LaunchSessions {
-    /// Resolve what a spawn's worktree is cut from, on the daemon that owns its `stack_parent`.
+    /// Resolve what a spawn's worktree is cut from, on the daemon that owns its `work_queue_parent`.
     ///
     /// The parent's base is read out of the parent's own `changeset.yaml` — its stack, or its
     /// branch — so only the daemon holding that session can produce it. A parent this daemon owns
     /// (no host named, or its own) is resolved straight off its disk, exactly as before. A parent
-    /// another daemon owns travels as a `ResolveStackBase` call, taken through this daemon's own
+    /// another daemon owns travels as a `ResolveWorkItemBase` call, taken through this daemon's own
     /// PR-stack handler so a forwarded resolution follows precisely the path a client's would, peer
     /// routing and refusals included. That handler lives above this crate and is reached through
     /// the [`DaemonRpcFamilies`](crate::DaemonRpcFamilies) port, so a host never given it refuses
@@ -46,39 +46,43 @@ impl LaunchSessions {
     /// refusal, reported with the owner's own message.
     pub(crate) async fn resolve_chain_base_ref_status(
         &self,
-        lookup: &stack_parent::StackBaseLookup<'_>,
+        lookup: &work_queue_parent::WorkItemBaseLookup<'_>,
     ) -> Result<Option<String>, Status> {
         if !lookup.selected_integration_base_ref.trim().is_empty() {
             return Ok(None);
         }
         match tddy_core::classify_stack_parent_route(
             &local_instance_id_for_config(&self.config),
-            lookup.stack_parent,
-            lookup.stack_parent_daemon_instance_id,
+            lookup.work_queue_parent,
+            lookup.work_queue_parent_daemon_instance_id,
         ) {
-            tddy_core::StackParentRoute::NoParent => Ok(None),
-            tddy_core::StackParentRoute::Local => tddy_core::resolve_chain_base_ref(
+            tddy_core::WorkQueueParentRoute::NoParent => Ok(None),
+            tddy_core::WorkQueueParentRoute::Local => tddy_core::resolve_chain_base_ref(
                 lookup.sessions_base,
-                lookup.stack_parent,
+                lookup.work_queue_parent,
                 lookup.repo_root,
-                lookup.stack_node_id,
+                lookup.work_item_id,
                 lookup.new_branch_name,
             )
             .map_err(Status::failed_precondition),
-            tddy_core::StackParentRoute::OwnedByPeer { daemon_instance_id } => {
+            tddy_core::WorkQueueParentRoute::OwnedByPeer { daemon_instance_id } => {
                 let base_ref = self
                     .host
-                    .pr_stack()?
-                    .resolve_stack_base(Request::direct(ResolveStackBaseRequest {
+                    .work_queue()?
+                    .resolve_work_item_base(Request::direct(ResolveWorkItemBaseRequest {
                         session_token: lookup.session_token.to_string(),
                         daemon_instance_id,
-                        stack_parent: lookup.stack_parent.unwrap_or_default().trim().to_string(),
+                        work_queue_parent: lookup
+                            .work_queue_parent
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
                         project_id: lookup.project_id.trim().to_string(),
                         new_branch_name: lookup.new_branch_name.trim().to_string(),
                         // Travels with the question: the owner runs the same node-keyed lookup this
                         // daemon would, so a renamed branch does not lose the node one host over
                         // either (D34).
-                        stack_node_id: lookup.stack_node_id.trim().to_string(),
+                        work_item_id: lookup.work_item_id.trim().to_string(),
                     }))
                     .await?
                     .into_inner()
@@ -93,7 +97,7 @@ impl LaunchSessions {
     ///
     /// The spawn paths already write the *reverse* link (`orchestrator_session_id` in the child's
     /// changeset). Without this forward link the node owns no branch, and the stack wedges:
-    /// [`tddy_core::changeset::Stack::base_ref_for_spawn`] refuses every descendant ("non-merged
+    /// [`tddy_core::changeset::WorkQueue::base_ref_for_spawn`] refuses every descendant ("non-merged
     /// parent … has no branch to base onto yet"), a node's duplicate-spawn guard
     /// never trips, and the orchestrator dashboard shows no child state or PR for a running child.
     ///
@@ -107,21 +111,21 @@ impl LaunchSessions {
     /// That is a spawn made on the orchestrator's own host that names no node, such as a
     /// conversation the orchestrator spawns. A spawn that *does* name one is routed to the owner instead
     /// ([`Self::record_spawn_on_stack_node`], D34/D35).
-    pub fn link_stack_node_to_spawned_branch(
+    pub fn link_work_item_to_spawned_branch(
         sessions_base: &std::path::Path,
-        stack_parent: Option<&str>,
+        work_queue_parent: Option<&str>,
         new_branch_name: &str,
         child_session_id: &str,
     ) -> Result<(), Status> {
-        let Some(sp) = stack_parent else {
+        let Some(sp) = work_queue_parent else {
             return Ok(());
         };
         let Some((parent_dir, _stack, node_id)) =
-            tddy_core::pr_stack_node_for_spawn(sessions_base, sp, "", new_branch_name)
+            tddy_core::work_item_for_spawn(sessions_base, sp, "", new_branch_name)
         else {
             return Ok(());
         };
-        tddy_core::changeset::link_stack_node_to_child_session(
+        tddy_core::changeset::link_work_item_to_session(
             &parent_dir,
             &node_id,
             child_session_id,
@@ -148,7 +152,7 @@ impl LaunchSessions {
     ///
     /// Two paths, and which one applies is decided by whether the caller **named a node**:
     ///
-    /// - A named node travels as a `LinkStackNode` call, taken through this daemon's own PR-stack
+    /// - A named node travels as a `LinkWorkItem` call, taken through this daemon's own PR-stack
     ///   handler — reached through the [`DaemonRpcFamilies`](crate::DaemonRpcFamilies) port — so a
     ///   forwarded link follows precisely the path a client's would, peer routing and refusals
     ///   included. This is the only path that works when the orchestrator lives one host over,
@@ -162,11 +166,11 @@ impl LaunchSessions {
     /// nothing — or link the wrong node.
     pub(crate) async fn record_spawn_on_stack_node(
         &self,
-        link: &stack_parent::StackNodeLink<'_>,
+        link: &work_queue_parent::WorkItemLink<'_>,
     ) -> Result<(), Status> {
         let node_id = link.node_id.trim();
         if node_id.is_empty() {
-            return Self::link_stack_node_to_spawned_branch(
+            return Self::link_work_item_to_spawned_branch(
                 link.sessions_base,
                 Some(link.orchestrator_session_id),
                 link.branch,
@@ -174,12 +178,12 @@ impl LaunchSessions {
             );
         }
         self.host
-            .pr_stack()?
-            .link_stack_node(Request::direct(LinkStackNodeRequest {
+            .work_queue()?
+            .link_work_item(Request::direct(LinkWorkItemRequest {
                 session_token: link.session_token.to_string(),
                 daemon_instance_id: link.orchestrator_daemon_instance_id.trim().to_string(),
                 orchestrator_session_id: link.orchestrator_session_id.trim().to_string(),
-                node_id: node_id.to_string(),
+                item_id: node_id.to_string(),
                 child_session_id: link.child_session_id.trim().to_string(),
                 branch: link.branch.trim().to_string(),
             }))

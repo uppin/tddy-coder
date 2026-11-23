@@ -1456,7 +1456,7 @@ mod snapshot_replay_acceptance {
         let snapshot = a_presenter_state()
             .with_goal("Analyze stack")
             .with_mode(AppMode::Running)
-            .with_agent_output("PR Stack Analysis: 'hi' cannot be decomposed")
+            .with_agent_output("PR WorkQueue Analysis: 'hi' cannot be decomposed")
             .build();
 
         // When building the replay a newly-connected remote View receives on stream open
@@ -1465,7 +1465,7 @@ mod snapshot_replay_acceptance {
         // Then the prior agent output is replayed to the View
         assert_eq!(
             agent_output_texts(&events),
-            vec!["PR Stack Analysis: 'hi' cannot be decomposed".to_string()],
+            vec!["PR WorkQueue Analysis: 'hi' cannot be decomposed".to_string()],
             "stream open must replay prior agent output to a late-connecting View, got: {:?}",
             events
         );

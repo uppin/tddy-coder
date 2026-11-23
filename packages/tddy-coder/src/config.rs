@@ -399,9 +399,9 @@ github:
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
             tddy_data_dir: Some(cli_base.clone()),
         };
         // When
@@ -462,9 +462,9 @@ github:
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
             tddy_data_dir: None,
         };
         // When
@@ -528,9 +528,9 @@ github:
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
             tddy_data_dir: None,
         };
         // When
@@ -591,9 +591,9 @@ github:
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
             tddy_data_dir: None,
         };
         // When
@@ -721,9 +721,9 @@ log:
             remote_daemon_url: None,
             remote_session_token: None,
             remote_daemon_id: None,
-            stack_parent: None,
-            stack_node_id: None,
-            stack_base: None,
+            work_queue_parent: None,
+            work_item_id: None,
+            work_item_base: None,
             tddy_data_dir: None,
         };
         merge_config_into_args(&mut args, config);

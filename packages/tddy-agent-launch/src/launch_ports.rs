@@ -34,12 +34,12 @@ use tddy_task::TaskRegistry;
 use crate::host_session_socket::HostSessionSockets;
 use crate::session_worktree_observer::SessionWorktreeObserver;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
-use tddy_pr_stack::rpc::PrStackHandler;
 use tddy_session_activity::presenter_observer_spawn::PresenterObserverDeps;
 use tddy_session_agents::agent_host_callbacks::AgentRoster;
 use tddy_session_files::attachment_progress::AttachmentMaterialization;
 use tddy_session_files::svc_materialize_staged_attachment::AttachmentState;
 use tddy_session_split::split_ports::SplitSessions;
+use tddy_work_queue::rpc::WorkQueueHandler;
 
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::session_acting_identity::SessionIdentity;
@@ -58,7 +58,7 @@ pub trait LaunchHost: Send + Sync {
 
     /// This daemon's PR-stack handler, which a stack base or a stack link owned by a peer is asked
     /// of, or `FAILED_PRECONDITION` when the host was never given the RPC families.
-    fn pr_stack(&self) -> Result<Arc<dyn PrStackHandler>, Status>;
+    fn work_queue(&self) -> Result<Arc<dyn WorkQueueHandler>, Status>;
 
     /// What a session's vault reads go through: this daemon's vaults, how a session token names
     /// its owner, and the token the session was started with.

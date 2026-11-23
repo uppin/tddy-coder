@@ -2,7 +2,7 @@ import React from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionAttachmentHint } from "tddy-client-web/connections/session";
 import { sessionPaneIsWorkflowView } from "./attachClaim";
-import { WorkflowChatScreen } from "tddy-prstack-web";
+import { WorkflowChatScreen } from "tddy-workqueue-web";
 
 /** Extra context a custom workflow view may need beyond the selected session itself. */
 export interface WorkflowViewContext {

@@ -297,7 +297,7 @@ export function CreateSessionPane(props: CreateSessionPaneProps) {
             branchIntent={branchIntent}
             setBranchIntent={setBranchIntent}
             baseBranchLabel={initialValues?.baseBranchLabel}
-            initialStackParent={initialValues?.stackParent}
+            initialStackParent={initialValues?.workQueueParent}
             baseBranchOptions={baseBranchOptions}
             selectedBaseBranch={selectedBaseBranch}
             setSelectedBaseBranch={setSelectedBaseBranch}

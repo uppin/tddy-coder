@@ -182,7 +182,7 @@ async fn a_project_home_mains_notify_operator_publishes_one_agent_attention_noti
         .notifies(
             &world.home,
             serde_json::json!({
-                "title": "Stack green",
+                "title": "WorkQueue green",
                 "body_markdown": "**3 of 4** nodes merged; `n4` waits on review",
                 "level": "success",
                 "sound": true,
@@ -209,14 +209,14 @@ async fn a_project_home_mains_notify_operator_publishes_one_agent_attention_noti
         (
             world.home.as_str(),
             SessionNotificationKind::AttentionRequired,
-            "Stack green",
+            "WorkQueue green",
         ),
         "the notification: {notification:#?}"
     );
     assert_eq!(
         notification.agent,
         Some(AgentNotification {
-            title: "Stack green".to_string(),
+            title: "WorkQueue green".to_string(),
             body_markdown: "**3 of 4** nodes merged; `n4` waits on review".to_string(),
             level: NotificationLevel::Success,
             sound: true,
@@ -277,7 +277,7 @@ async fn a_main_with_no_hook_token_is_refused_naming_the_tool_and_why_and_publis
     let refused = world
         .notifies(
             &world.home_without_hooks,
-            serde_json::json!({ "title": "Stack green", "body_markdown": "" }),
+            serde_json::json!({ "title": "WorkQueue green", "body_markdown": "" }),
         )
         .await;
 
@@ -305,7 +305,7 @@ async fn a_main_naming_another_session_still_notifies_as_itself() {
         .notifies(
             &world.home,
             serde_json::json!({
-                "title": "Stack green",
+                "title": "WorkQueue green",
                 "body_markdown": "",
                 "session_id": world.ordinary,
             }),

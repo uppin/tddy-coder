@@ -67,9 +67,9 @@ function aFormWith(values: Partial<CreateSessionFormValues>): CreateSessionFormV
     toolPath: "",
     selectedAgentId: "",
     recipe: "tdd",
-    stackParent: "",
-    stackNodeId: "",
-    stackParentDaemonInstanceId: "",
+    workQueueParent: "",
+    workItemId: "",
+    workQueueParentDaemonInstanceId: "",
     model: "sonnet",
     permissionMode: "auto",
     dangerouslySkipPermissions: false,
@@ -122,7 +122,7 @@ describe("create session request builder", () => {
   it("names no owning host for a tool session's stack parent", () => {
     // Given a tool session parented to an orchestrator
     const form = aFormWith({ sessionType: "tool",
-      sessionLaunch: "tddy_coder", stackParent: "session-7" });
+      sessionLaunch: "tddy_coder", workQueueParent: "session-7" });
 
     // When the request is built
     const request = buildStartSessionRequest(form, null, []);
@@ -130,8 +130,8 @@ describe("create session request builder", () => {
     // Then the host is left empty: a tool session's chain base is resolved by the tddy-coder the
     // daemon spawns, against that process's own sessions tree, so a host here names a routing the
     // start never performs
-    expect(request.stackParent).to.equal("session-7");
-    expect(request.stackParentDaemonInstanceId).to.equal("");
+    expect(request.workQueueParent).to.equal("session-7");
+    expect(request.workQueueParentDaemonInstanceId).to.equal("");
   });
 
   it("sends no codebase host for a cursor-cli session", () => {

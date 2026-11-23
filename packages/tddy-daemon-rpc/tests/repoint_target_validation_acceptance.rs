@@ -1,6 +1,6 @@
 //! Acceptance: which repoint targets the daemon accepts from a client.
 //!
-//! `RepointPlannedPrRequest.target_base_branch` is the branch the operator's "Repoint to <target>"
+//! `RepointWorkItemRequest.target_base_branch` is the branch the operator's "Repoint to <target>"
 //! control named, and the daemon retains exactly the parents that own it — so a target no parent owns
 //! means **every** parent is dropped and the node detaches onto the default branch. That makes an
 //! unvalidated target a silent plan rewrite: a stale label, a typo, or a client that has drifted from
@@ -17,7 +17,7 @@
 //! PRD: docs/ft/coder/pr-stack-live-status.md § Repointing a dead-end planned PR (D18).
 //! Changeset: docs/dev/changesets/2026-07-26-pr-stack-repoint-dead-end.md.
 
-use tddy_daemon_rpc::pr_stack::validate_repoint_target;
+use tddy_daemon_rpc::work_queue::validate_repoint_target;
 
 const DEFAULT_BRANCH: &str = "origin/master";
 const PARENT_BRANCH: &str = "feature/attach-docs/attach-proto";

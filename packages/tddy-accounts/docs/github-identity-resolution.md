@@ -43,7 +43,7 @@ the commit pairs and the handler that answers the agent's tools' `github-token` 
 the agent's process environment (co-located), to the host-side relay environment (jailed), or to the
 child's environment over the spawn wire (tool sessions). The token is **asked for, per call**, over a
 socket the session's host serves — never an environment variable, never a file. Daemon-side
-operations (`RepointPlannedPr`) call `project_github_token` directly.
+operations (`RepointWorkItem`) call `project_github_token` directly.
 
 `tddy-accounts` names `tddy-credentials`, `tddy-rpc` and `tddy-service` and nothing about sessions or
 LiveKit: the crate deciding which account a project acts as does not know who asks.

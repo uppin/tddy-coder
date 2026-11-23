@@ -17,7 +17,7 @@
 mod common;
 
 use common::{a_planned_node, an_insight_github, an_open_node, assert_rejected, write_stack};
-use tddy_pr_stack::stack_ops::sync_node_to_github_pr;
+use tddy_work_queue::item_ops::sync_node_to_github_pr;
 
 const BRANCH_N1: &str = "feature/stack/n1";
 const PR_OF_N1: u64 = 42;
@@ -25,7 +25,7 @@ const PR_OF_N1: u64 = 42;
 #[test]
 fn syncing_a_node_patches_its_prs_title_and_body() {
     // Given — n1 owns an open PR #42, recorded in its pr_status url
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR_OF_N1, &[])]);
     let gh = an_insight_github();
@@ -55,7 +55,7 @@ fn syncing_a_node_patches_its_prs_title_and_body() {
 #[test]
 fn syncing_only_a_title_patches_the_pull_request_the_node_records_and_leaves_its_body_alone() {
     // Given — n1's PR is #1234, so a hardcoded or index-derived number would be visible
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, 1234, &[])]);
     let gh = an_insight_github();
@@ -75,7 +75,7 @@ fn syncing_only_a_title_patches_the_pull_request_the_node_records_and_leaves_its
 #[test]
 fn syncing_a_node_that_records_no_pr_is_rejected() {
     // Given — n1 was never started, so it has no PR to publish to
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![a_planned_node("n1", &[])]);
     let gh = an_insight_github();
@@ -94,7 +94,7 @@ fn syncing_a_node_that_records_no_pr_is_rejected() {
 #[test]
 fn syncing_an_unknown_node_is_rejected() {
     // Given — a stack that has no node called n9
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR_OF_N1, &[])]);
     let gh = an_insight_github();
@@ -113,7 +113,7 @@ fn syncing_an_unknown_node_is_rejected() {
 #[test]
 fn syncing_a_node_without_naming_a_title_or_a_body_is_rejected() {
     // Given — n1 owns an open PR #42, so the only thing wrong with the call is that it names no field
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR_OF_N1, &[])]);
     let gh = an_insight_github();
@@ -132,7 +132,7 @@ fn syncing_a_node_without_naming_a_title_or_a_body_is_rejected() {
 #[test]
 fn syncing_a_blank_title_is_rejected_instead_of_sent_for_github_to_refuse() {
     // Given — n1 owns an open PR #42, so the only thing wrong with the call is the title it names
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR_OF_N1, &[])]);
     let gh = an_insight_github();
@@ -152,7 +152,7 @@ fn syncing_a_blank_title_is_rejected_instead_of_sent_for_github_to_refuse() {
 #[test]
 fn syncing_a_blank_body_clears_the_pull_requests_description() {
     // Given — n1 owns an open PR whose description has gone stale
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(dir, vec![an_open_node("n1", BRANCH_N1, PR_OF_N1, &[])]);
     let gh = an_insight_github();

@@ -3,7 +3,7 @@
 **Category:** Future enhancement
 **Source:** `#orchestrators` 13/13 (stack-node-reads), `Boundaries` of its changeset
 
-A session bound to a node of a PR stack is served `pr_stack_status` and `pr_read` by
+A session bound to a node of a PR stack is served `work_queue_status` and `work_pr_read` by
 the host that holds that stack, even when the session itself is held on another host:
 the holding host checks its own store for a node bound to the caller. But the session's
 **own** host does not *list* the two reads in its `ListExecTools` answer. Its

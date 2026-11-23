@@ -11,7 +11,7 @@
  *
  * Presence is the signal that survives the host boundary. A session's coder participant joins the
  * common room as `daemon-<instance>-<sessionId>` and now publishes its stack association —
- * `orchestrator_session_id`, `stack_node_id`, `branch` — in its `session` metadata block, which the
+ * `orchestrator_session_id`, `work_item_id`, `branch` — in its `session` metadata block, which the
  * drawer already hydrates onto the synthesized cross-host row. The PR-Stack view joins on that.
  *
  * The orphan rule is narrowed rather than dropped: a live participant claiming the node positively
@@ -25,7 +25,7 @@ import { SessionsDrawerScreen } from "../../src/SessionsDrawerScreen";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import {
   aFakeCommonRoomWithMetadata,
@@ -40,10 +40,10 @@ import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
   aStackChildParticipant,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ const REMOTE_CHILD_PARTICIPANT = aStackChildParticipant({
   sessionId: REMOTE_CHILD_SESSION_ID,
   daemonInstanceId: HOST_B.instanceId,
   orchestratorSessionId: ORCHESTRATOR_SESSION_ID,
-  stackNodeId: "n1",
+  workItemId: "n1",
   branch: NODE_BRANCH,
 });
 
@@ -84,15 +84,15 @@ const REMOTE_CHILD_PARTICIPANT = aStackChildParticipant({
  * A node the orchestrator's host knows nothing about: the child spawned on host B, so the link was
  * never written here and the node records neither a branch nor a session.
  */
-const AN_UNLINKED_NODE: StackNodeFixture = aPlannedNode({
-  nodeId: "n1",
+const AN_UNLINKED_NODE: WorkItemFixture = aPlannedNode({
+  itemId: "n1",
   title: "Session attachment storage",
   branchSuggestion: NODE_BRANCH,
 });
 
 /** The same node after the link landed — it records its child and its branch. */
-const A_LINKED_NODE: StackNodeFixture = aPlannedNode({
-  nodeId: "n1",
+const A_LINKED_NODE: WorkItemFixture = aPlannedNode({
+  itemId: "n1",
   title: "Session attachment storage",
   branch: NODE_BRANCH,
   sessionId: REMOTE_CHILD_SESSION_ID,
@@ -107,7 +107,7 @@ const INVISIBLE_FROM_HOST_A: BranchResolutionFixture = {
   remote: { exists: false },
 };
 
-function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry> {
+function anOrchestratorSession(nodes: WorkItemFixture[]): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-30T09:00:00Z",
@@ -119,7 +119,7 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
     projectId: PROJECT_ID,
     daemonInstanceId: HOST_A.instanceId,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, nodes),
+    workQueueJson: aWorkQueueJson(1, nodes),
   };
 }
 
@@ -128,18 +128,18 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
  * `ListSessions` returns the orchestrator only — a session on host B is never in it.
  */
 function openPrStackScreen(
-  nodes: StackNodeFixture[],
+  nodes: WorkItemFixture[],
   participants: ReadonlyArray<{ identity: string; metadata: string }>,
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ) {
   const orchestrator = anOrchestratorSession(nodes);
   const backend = aSessionsDrawerBackend([orchestrator])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
-  serveProjectStack(backend, orchestrator.stackPlanJson ?? "", ORCHESTRATOR_SESSION_ID);
+  serveProjectStack(backend, orchestrator.workQueueJson ?? "", ORCHESTRATOR_SESSION_ID);
 
   mountWithRecordingLiveKitRpc(
     withSelectedDaemonRoom(
@@ -237,7 +237,7 @@ it("offers Start session when the node's recorded child is gone and another sess
     sessionId: "ffffffff-0000-4000-8000-000000000006",
     daemonInstanceId: HOST_B.instanceId,
     orchestratorSessionId: ORCHESTRATOR_SESSION_ID,
-    stackNodeId: "",
+    workItemId: "",
     branch: NODE_BRANCH,
   });
 
@@ -259,7 +259,7 @@ it("ignores a live participant working another orchestrator's node of the same i
     sessionId: "eeeeeeee-0000-4000-8000-000000000005",
     daemonInstanceId: HOST_B.instanceId,
     orchestratorSessionId: "pr-stack-session-0000-0000-0000-0000-000000000000",
-    stackNodeId: "n1",
+    workItemId: "n1",
     branch: "feature/some-other-stack/n1",
   });
 

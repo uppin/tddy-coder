@@ -17,7 +17,7 @@ client changed.
 
 Permanent docs: [tddy-daemon-rpc architecture](../../../packages/tddy-daemon-rpc/docs/architecture.md),
 [session-service.md § RPC families served above this crate](../../../packages/tddy-session-lifecycle/docs/session-service.md#rpc-families-served-above-this-crate),
-[tddy-pr-stack architecture § `rpc.rs`](../../../packages/tddy-pr-stack/docs/architecture.md#rpcrs--the-pr-stack-rpc-family),
+[tddy-pr-stack architecture § `rpc.rs`](../../../packages/tddy-work-queue/docs/architecture.md#rpcrs--the-pr-stack-rpc-family),
 [daemon-endpoint.md](../../../packages/tddy-daemon/docs/daemon-endpoint.md),
 [session-room.md § The hosting task](../../../packages/tddy-daemon-livekit/docs/session-room.md#the-hosting-task).
 

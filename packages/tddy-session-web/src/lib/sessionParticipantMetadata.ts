@@ -3,7 +3,7 @@
  *
  * The publisher (`tddy-coder`, and the daemon for a claude-cli session) publishes
  * `{ "session": { workflow_goal, workflow_state, elapsed_display, agent, model, activity_status,
- * recipe, repo_path, pending_elicitation, session_id, orchestrator_session_id, stack_node_id,
+ * recipe, repo_path, pending_elicitation, session_id, orchestrator_session_id, work_item_id,
  * branch } }` on its participant metadata (shallow-merged with `owned_project_count` /
  * `codex_oauth`). This parser tolerates missing keys and older participants that carry no `session`
  * block at all.
@@ -31,7 +31,7 @@ export interface SessionMetadata {
   /** The pr-stack orchestrator that spawned it, or empty when the session is nobody's stack child. */
   orchestratorSessionId: string;
   /** The planned node it materializes, unique within its orchestrator's plan and nowhere else. */
-  stackNodeId: string;
+  workItemId: string;
   /** The branch it created — the join key every same-host PR-stack lookup already uses. */
   branch: string;
 }
@@ -79,7 +79,7 @@ export function parseSessionParticipantMetadata(metadataJson: string): SessionMe
     pendingElicitation: bool(s.pending_elicitation),
     sessionId: str(s.session_id),
     orchestratorSessionId: str(s.orchestrator_session_id),
-    stackNodeId: str(s.stack_node_id),
+    workItemId: str(s.work_item_id),
     branch: str(s.branch),
   };
 }

@@ -96,7 +96,7 @@ fn the_session_host_no_longer_implements_any_of_the_four_families() {
         "ProjectService",
         "CatalogHandler",
         "ExecToolHandler",
-        "PrStackHandler",
+        "WorkQueueHandler",
     ];
 
     // When the lifecycle crate is searched for their impls on the host
@@ -160,7 +160,7 @@ fn no_handler_holds_the_session_host() {
 #[test]
 fn each_handler_holds_no_more_fields_than_its_budget() {
     // Given each handler's measured transitive field set
-    // `ProjectRpcHandler` and `PrStackRpcHandler` each gained one field in `#session-liveness` 1/4:
+    // `ProjectRpcHandler` and `WorkQueueRpcHandler` each gained one field in `#session-liveness` 1/4:
     // `terminals`, the store whose live set says which sessions are active. Both read it (project
     // listing and delete, PR-stack node and session checks); there is no existing field it could
     // be folded into without hiding the dependency.
@@ -168,7 +168,7 @@ fn each_handler_holds_no_more_fields_than_its_budget() {
         ("project.rs", "ProjectRpcHandler", 7),
         ("catalog.rs", "CatalogRpcHandler", 5),
         ("exec_tool.rs", "ExecToolRpcHandler", 10),
-        ("pr_stack.rs", "PrStackRpcHandler", 8),
+        ("work_queue.rs", "WorkQueueRpcHandler", 8),
     ];
     let src = package("tddy-daemon-rpc").join("src");
 
@@ -200,30 +200,30 @@ fn the_pr_stack_handler_trait_is_defined_by_the_pr_stack_crate() {
     let defines_it = |crate_name: &str| {
         rust_files_under(&package(crate_name).join("src"))
             .into_iter()
-            .any(|path| source_of(&path).contains("pub trait PrStackHandler"))
+            .any(|path| source_of(&path).contains("pub trait WorkQueueHandler"))
     };
 
-    // Then the trait is `tddy-pr-stack`'s, and the lifecycle crate keeps only a facade
+    // Then the trait is `tddy-work-queue`'s, and the lifecycle crate keeps only a facade
     assert!(
-        defines_it("tddy-pr-stack"),
-        "`tddy-pr-stack` does not define `PrStackHandler`"
+        defines_it("tddy-work-queue"),
+        "`tddy-work-queue` does not define `WorkQueueHandler`"
     );
     assert!(
         !defines_it("tddy-session-lifecycle"),
-        "`tddy-session-lifecycle` still defines `PrStackHandler` rather than re-exporting it"
+        "`tddy-session-lifecycle` still defines `WorkQueueHandler` rather than re-exporting it"
     );
 }
 
 #[test]
 fn the_pr_stack_crate_serves_its_own_rpc_family() {
     // Given the PR-stack crate's normal dependencies
-    let dependencies = normal_dependencies_of("tddy-pr-stack");
+    let dependencies = normal_dependencies_of("tddy-work-queue");
 
     // Then it names the transport and the proto types its service adapter is built from
     for needed in ["tddy-rpc", "tddy-service"] {
         assert!(
             dependencies.contains(needed),
-            "`tddy-pr-stack` does not depend on `{needed}`, so it cannot hold `PrStackServiceImpl`"
+            "`tddy-work-queue` does not depend on `{needed}`, so it cannot hold `WorkQueueServiceImpl`"
         );
     }
 }
@@ -231,13 +231,13 @@ fn the_pr_stack_crate_serves_its_own_rpc_family() {
 #[test]
 fn the_pr_stack_crate_depends_on_neither_the_lifecycle_crate_nor_the_recipes() {
     // Given the PR-stack crate's normal dependencies
-    let dependencies = normal_dependencies_of("tddy-pr-stack");
+    let dependencies = normal_dependencies_of("tddy-work-queue");
 
     // Then neither crate it sits beneath is among them — either edge would close a cycle
     for forbidden in ["tddy-session-lifecycle", "tddy-workflow-recipes"] {
         assert!(
             !dependencies.contains(forbidden),
-            "`tddy-pr-stack` depends on `{forbidden}`"
+            "`tddy-work-queue` depends on `{forbidden}`"
         );
     }
 }
@@ -280,7 +280,7 @@ fn the_binary_runtime_serves_the_four_families_through_their_own_handlers() {
         "ProjectRpcHandler",
         "CatalogRpcHandler",
         "ExecToolRpcHandler",
-        "PrStackRpcHandler",
+        "WorkQueueRpcHandler",
     ] {
         assert!(
             bundle.contains(handler),

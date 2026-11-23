@@ -1,0 +1,74 @@
+//! The refusals a PR-stack mutation runs before it touches an orchestrator's plan.
+
+use tddy_rpc::Status;
+
+// (The recipe guard that stood here was deleted in `#orchestrators` 12/12, B9: a
+// `session_id`-addressed mutation now requires the session to name a stack — see
+// `project_stacks::require_a_stack` — whatever its recipe.)
+
+/// The GitHub token a repoint runs with: `Ok(None)` when the repoint touches no GitHub state,
+/// `Ok(Some(token))` when it does and `resolve` yields one, and a precondition failure carrying
+/// `resolve`'s reason when it does and there is none.
+///
+/// Only a node that owns a branch has a pull request to re-target; a plan-only repoint rewrites the
+/// plan and nothing else, so it is never refused for want of an account — and never asks the vault
+/// for one. The refusal comes **before** the plan is rewritten, so a refused repoint changes
+/// nothing. `resolve` is the project's account (`tddy_accounts::acting_identity`); there is no
+/// other source, the process environment included.
+pub(crate) fn token_for_repoint(
+    node_owns_branch: bool,
+    resolve: impl FnOnce() -> Result<String, String>,
+) -> Result<Option<String>, Status> {
+    if !node_owns_branch {
+        return Ok(None);
+    }
+    resolve().map(Some).map_err(Status::failed_precondition)
+}
+
+/// The repoint target a client may act on: `Ok(None)` for "no target named", `Ok(Some(target))`
+/// for an accepted one, `Err(reason)` for a target the daemon refuses.
+///
+/// `RepointWorkItemRequest.target_base_branch` is applied by `repoint_work_item` as a
+/// **retain** rule — the parents that own that branch stay and the rest are dropped — so a target
+/// no parent owns *is* the instruction to detach the node onto the default branch. Validation is
+/// therefore not politeness: a stale label, a typo, or a client that has drifted from the daemon's
+/// view of the repo would each read as "detach this node" and silently rewrite the plan. An
+/// accepted target must name either the resolved default branch or one of the node's parents'
+/// branches; nothing else is a meaningful thing to be based onto.
+///
+/// An empty or whitespace-only target is not a rejection: it names no target at all and selects the
+/// original drop-merged-parents rule (`None`).
+///
+/// The default branch is compared with the remote prefix stripped from both sides.
+/// `tddy_core::resolve_default_integration_base_ref` returns a remote-tracking ref
+/// (`<remote>/<branch>`), while a node's `branch` and a GitHub PR base are plain names, so the label
+/// a client renders can legitimately carry either form. The remote is parsed off `default_branch`
+/// (the segment before its first `/`) so a non-`origin` default is normalized correctly. The
+/// accepted value returned is the caller's own trimmed input, not the normalized form, so the
+/// recipe matches parent branches as recorded.
+pub fn validate_repoint_target(
+    target_base_branch: &str,
+    default_branch: &str,
+    parent_branches: &[&str],
+) -> Result<Option<String>, String> {
+    let target = target_base_branch.trim();
+    if target.is_empty() {
+        return Ok(None);
+    }
+
+    let remote = default_branch
+        .split_once('/')
+        .map(|(r, _)| r)
+        .unwrap_or("origin");
+    let names_default = tddy_core::worktree::local_branch_name_for_remote(target, remote)
+        == tddy_core::worktree::local_branch_name_for_remote(default_branch, remote);
+    let names_parent = parent_branches.contains(&target);
+
+    if names_default || names_parent {
+        Ok(Some(target.to_string()))
+    } else {
+        Err(format!(
+            "target_base_branch '{target}' names neither the default branch '{default_branch}' nor any parent's branch"
+        ))
+    }
+}

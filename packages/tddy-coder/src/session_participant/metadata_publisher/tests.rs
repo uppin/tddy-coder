@@ -128,7 +128,7 @@ fn a_seed_of_a_planned_prs_child() -> super::SessionMetadataSeed {
     super::SessionMetadataSeed {
         session_id: "019f9fdb-cf83-70d2-aef5-0000000000b2".to_string(),
         orchestrator_session_id: "019f9dd5-716d-7071-96ac-464ff7b98c2a".to_string(),
-        stack_node_id: "attach-store".to_string(),
+        work_item_id: "attach-store".to_string(),
         branch: "feature/attach-docs/attach-store".to_string(),
         ..a_seed()
     }
@@ -148,7 +148,7 @@ fn a_default_session_metadata_carries_the_stack_association_the_session_was_star
         (
             meta.session_id.as_str(),
             meta.orchestrator_session_id.as_str(),
-            meta.stack_node_id.as_str(),
+            meta.work_item_id.as_str(),
             meta.branch.as_str()
         ),
         (
@@ -182,7 +182,7 @@ fn a_workflow_transition_keeps_the_stack_association_it_says_nothing_about() {
             next.state.as_str(),
             next.session_id.as_str(),
             next.orchestrator_session_id.as_str(),
-            next.stack_node_id.as_str(),
+            next.work_item_id.as_str(),
             next.branch.as_str()
         ),
         (

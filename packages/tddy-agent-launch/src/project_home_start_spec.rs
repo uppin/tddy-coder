@@ -136,9 +136,9 @@ pub(crate) fn on_home_worktree(
         selected_integration_base_ref: String::new(),
         create_remote_branch: false,
         on_branch_conflict: String::new(),
-        stack_parent: String::new(),
-        stack_parent_daemon_instance_id: String::new(),
-        stack_node_id: String::new(),
+        work_queue_parent: String::new(),
+        work_queue_parent_daemon_instance_id: String::new(),
+        work_item_id: String::new(),
         ..spec
     }
 }

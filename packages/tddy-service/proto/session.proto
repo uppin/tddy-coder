@@ -352,7 +352,7 @@ message SessionEntry {
   // sessions that have a plan. Empty string when this session is not a pr-stack orchestrator,
   // or the plan has not been written yet. Powers the PR-Stack Chat Screen's planned-PR list
   // (docs/ft/web/session-drawer.md § Per-Workflow Session Views).
-  string stack_plan_json = 23;
+  string work_queue_json = 23;
   // Cumulative bytes received over the session's transport (LiveKit for tddy-coder sessions with
   // a participant; the gRPC terminal stream for claude-cli / cursor-cli / workspace sessions the
   // daemon owns). Populated by the daemon `ListSessions` for sessions it can observe; zero for
@@ -419,10 +419,10 @@ message SessionEntry {
   // `#orchestrators` 5/11.
   OrchestrationMark orchestration_mark = 37;
   // The id, in its project's stack store, of the PR stack this session's changeset names
-  // (`Changeset.stack_id`); empty when it names none (`#orchestrators` 9/11). With `project_id` and
-  // `daemon_instance_id` it is the stack's address (`pr_stack.StackAddress`), which is how the
+  // (`Changeset.work_queue_id`); empty when it names none (`#orchestrators` 9/11). With `project_id` and
+  // `daemon_instance_id` it is the stack's address (`work_queue.WorkQueueAddress`), which is how the
   // PR-stack chat screen loads and edits its plan.
-  string stack_id = 38;
+  string work_queue_id = 38;
   // The name an operator or an orchestrator gave the session (`RenameSession`, or
   // `StartSessionRequest.display_name`), from its `.session.yaml`; empty for a session never named.
   // When set it is the session's label everywhere — the drawer row, a Telegram alert — ahead of the
@@ -683,7 +683,7 @@ message StartSessionRequest {
   string permission_mode = 14;
   // Optional: session ID of the orchestrating PR-stack session. When set, the spawned tddy-coder
   // receives `--stack-parent <id>` so it can back-reference the orchestrator.
-  string stack_parent = 15;
+  string work_queue_parent = 15;
   // When true with session_type = "claude-cli", spawn claude inside a platform sandbox (darwin Seatbelt).
   bool sandbox = 16;
   // Managed-codebase mode (see docs/ft/coder/managed-codebase-subagents.md): the sandboxed jail does
@@ -786,19 +786,19 @@ message StartSessionRequest {
   // tools is refused on it rather than accepted unenforced. See
   // docs/ft/daemon/session-agent-roster.md § Enforced at two layers.
   SplitAgentPlacement split_agent = 35;
-  // Daemon whose sessions tree holds `stack_parent`. Empty or matching the local instance = this
+  // Daemon whose sessions tree holds `work_queue_parent`. Empty or matching the local instance = this
   // daemon resolves the parent from its own disk, which is what every single-host deployment sends.
   //
-  // It exists because `stack_parent` is a bare session id and the base it resolves to is read out
+  // It exists because `work_queue_parent` is a bare session id and the base it resolves to is read out
   // of the parent's own `changeset.yaml`. The new-session form's orchestrator picker is fed by a
   // fanned-out, all-host `ListSessions`, so the orchestrator it offers routinely lives on a
   // different daemon than the child is started on — and resolved against this daemon's sessions
   // tree that parent reads as a missing file rather than as a session one host over, which refuses
-  // the spawn. Named here, the base is resolved by `ResolveStackBase` on the daemon that owns it.
+  // the spawn. Named here, the base is resolved by `ResolveWorkItemBase` on the daemon that owns it.
   //
   // Routing only: the child session itself is still created by the daemon this request names in
-  // `daemon_instance_id`, and still records `stack_parent` as its orchestrator.
-  string stack_parent_daemon_instance_id = 36;
+  // `daemon_instance_id`, and still records `work_queue_parent` as its orchestrator.
+  string work_queue_parent_daemon_instance_id = 36;
   // The planned pr-stack node this child materializes, sent by the surface that rendered the
   // Start-session control. The daemon records the spawn on exactly this node instead of re-deriving
   // one from the branch (D34): the branch is `new_branch_name`, which the operator can edit in the
@@ -807,8 +807,8 @@ message StartSessionRequest {
   //
   // Empty keeps the branch-derived local lookup, which is what the orchestrator agent's own
   // `spawn-child` uses: it always runs on the orchestrator's host, where that lookup is correct.
-  // Meaningful only together with `stack_parent`, which names the orchestrator holding the node.
-  string stack_node_id = 37;
+  // Meaningful only together with `work_queue_parent`, which names the orchestrator holding the node.
+  string work_item_id = 37;
   // OpenSSH `Host` alias on the code-managing daemon. Empty = LocalShell (today's host FS).
   // When set, that daemon materializes the session worktree on the SSH target and every
   // exec-catalog tool runs there via RemoteShell (`ssh -o BatchMode=yes <alias>`). Implies
@@ -844,7 +844,7 @@ message StartSessionRequest {
   // The session that started this one as its orchestrator, recorded in the new session's changeset
   // (`Changeset.orchestrator_session_id`) by the daemon that creates it — so a session an
   // orchestrator starts on another host is linked to it there, not on the orchestrator's host.
-  // Empty = no orchestrator. Unlike `stack_parent`, it resolves no stack base and records no stack
+  // Empty = no orchestrator. Unlike `work_queue_parent`, it resolves no stack base and records no stack
   // node. Set by the `StartSession` exec tool from its caller (`#start-parity` 2/9).
   string orchestrator_session_id = 45;
   // The daemon running `orchestrator_session_id`. Empty or the creating daemon = that daemon;

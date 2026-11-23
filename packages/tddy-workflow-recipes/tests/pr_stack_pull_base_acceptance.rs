@@ -10,7 +10,7 @@
 //!   *before* the fetch, so a refusal leaves not just the tree but the repository's remote-tracking
 //!   refs exactly as they were — which is what `a_dirty_worktree_is_refused_before_anything_is_
 //!   fetched_or_merged` asserts by watching `refs/remotes/origin/<base>` across the call.
-//! - A **conflict aborts** (D33). Unlike the agent-facing `pr_resolve_conflicts`, which deliberately
+//! - A **conflict aborts** (D33). Unlike the agent-facing `work_item_resolve_conflicts`, which deliberately
 //!   leaves markers in the tree for an agent that is about to be prompted to resolve them, nobody is
 //!   in scope here — so `MERGE_HEAD`, `rebase-merge` and a modified `HEAD` are all failures.
 //! - A **failed push is `Ok`, not `Err`** (D32). The local merge or rebase landed; reporting that
@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use common::{a_planned_node, an_open_node, assert_rejected, write_stack};
-use tddy_pr_stack::stack_ops::{pull_base_into_node_branch, BaseSyncStrategy, PullBaseReport};
+use tddy_work_queue::item_ops::{pull_base_into_node_branch, BaseSyncStrategy, PullBaseReport};
 
 const BASE_BRANCH: &str = "master";
 const NODE: &str = "n1";
@@ -89,11 +89,11 @@ fn write_file(path: &Path, contents: &str) {
 /// the subject, in which case the commit is made from [`StackedRepo::another_clone`] and the local
 /// remote-tracking ref is deliberately left stale.
 struct StackedRepo {
-    tmp: tddy_changeset::stack_fixtures::ASessionDir,
+    tmp: tddy_changeset::work_queue_fixtures::ASessionDir,
 }
 
 fn a_stacked_repo() -> StackedRepo {
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let repo = StackedRepo { tmp };
 
     fs::create_dir_all(repo.session_dir()).unwrap();

@@ -31,7 +31,7 @@ describe("parseSessionParticipantMetadata", () => {
         pending_elicitation: false,
         session_id: "dddddddd-0000-4000-8000-000000000004",
         orchestrator_session_id: "pr-stack-session-1",
-        stack_node_id: "n2",
+        work_item_id: "n2",
         branch: "feature/attach-docs/attach-store",
       },
     });
@@ -52,7 +52,7 @@ describe("parseSessionParticipantMetadata", () => {
       pendingElicitation: false,
       sessionId: "dddddddd-0000-4000-8000-000000000004",
       orchestratorSessionId: "pr-stack-session-1",
-      stackNodeId: "n2",
+      workItemId: "n2",
       branch: "feature/attach-docs/attach-store",
     });
   });
@@ -102,7 +102,7 @@ describe("parseSessionParticipantMetadata", () => {
     // Then — empty is "no association", never a partial one that could match a node by accident
     expect(parsed?.sessionId).toBe("");
     expect(parsed?.orchestratorSessionId).toBe("");
-    expect(parsed?.stackNodeId).toBe("");
+    expect(parsed?.workItemId).toBe("");
     expect(parsed?.branch).toBe("");
   });
 
@@ -114,7 +114,7 @@ describe("parseSessionParticipantMetadata", () => {
         repo_path: "/home/dev/feature",
         session_id: "dddddddd-0000-4000-8000-000000000004",
         orchestrator_session_id: "pr-stack-session-1",
-        stack_node_id: "n2",
+        work_item_id: "n2",
         branch: "feature/attach-docs/attach-store",
       },
     });
@@ -124,7 +124,7 @@ describe("parseSessionParticipantMetadata", () => {
 
     // Then
     expect(parsed?.sessionId).toBe("dddddddd-0000-4000-8000-000000000004");
-    expect(parsed?.stackNodeId).toBe("n2");
+    expect(parsed?.workItemId).toBe("n2");
     expect(parsed?.orchestratorSessionId).toBe("pr-stack-session-1");
     expect(parsed?.branch).toBe("feature/attach-docs/attach-store");
     expect(parsed?.workflowGoal).toBe("");

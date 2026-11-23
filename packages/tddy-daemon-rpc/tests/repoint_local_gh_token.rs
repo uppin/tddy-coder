@@ -1,4 +1,4 @@
-//! Acceptance: which credential a `RepointPlannedPr` of a started node reads.
+//! Acceptance: which credential a `RepointWorkItem` of a started node reads.
 //!
 //! Re-targeting a node's PR needs a GitHub token. A **Local gh** session reads the host's own `gh`
 //! login, as the session's OS user; a vault session reads the account its project is assigned from
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
-use tddy_core::changeset::{Changeset, Stack, StackNode};
+use tddy_core::changeset::{Changeset, WorkItem, WorkQueue};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::{write_session_github_source, SessionGithubSource};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
@@ -23,7 +23,7 @@ use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::GithubCli;
 use tddy_projects::project_storage::{self, ProjectData};
 use tddy_rpc::{Code, Request, Status};
-use tddy_service::proto::pr_stack::{PrStackService, RepointPlannedPrRequest};
+use tddy_service::proto::work_queue::{RepointWorkItemRequest, WorkQueueService};
 use tddy_session_lifecycle::cli_session_manager::CliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_testing_commons::builders::a_session_metadata;
@@ -93,19 +93,19 @@ fn a_repoint_of_a_started_node_in_a_project(local_gh: bool) -> World {
             .build(),
     )
     .unwrap();
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
             repo_path: Some(root.to_string_lossy().into_owned()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
-                nodes: vec![StackNode {
+                nodes: vec![WorkItem {
                     node_id: NODE.to_string(),
                     title: "n1 title".to_string(),
                     branch: Some(NODE_BRANCH.to_string()),
                     session_id: Some("session-for-n1".to_string()),
-                    ..StackNode::default()
+                    ..WorkItem::default()
                 }],
             }),
             ..Changeset::default()
@@ -197,10 +197,10 @@ impl World {
 
 async fn repoint(daemon: &TestDaemon) -> Result<(), Status> {
     daemon
-        .repoint_planned_pr(Request::direct(RepointPlannedPrRequest {
+        .repoint_work_item(Request::direct(RepointWorkItemRequest {
             session_token: TOKEN.to_string(),
             session_id: ORCHESTRATOR.to_string(),
-            node_id: NODE.to_string(),
+            item_id: NODE.to_string(),
             target_base_branch: String::new(),
             stack: None,
         }))

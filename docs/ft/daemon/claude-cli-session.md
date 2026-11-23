@@ -304,7 +304,7 @@ Known limitations:
   client's exit, so an agent that ends while detached leaves the history as of that moment — see
   [`docs/dev/todo/2026-11-03-detached-tmux-agent-output-is-not-recorded.md`](../../dev/todo/2026-11-03-detached-tmux-agent-output-is-not-recorded.md).
 - A re-attach does not re-register the LiveKit exposure: a client's exit on the same daemon keeps it,
-  and a restarted daemon has nothing to rebuild it from (`stack_parent` is not persisted).
+  and a restarted daemon has nothing to rebuild it from (`work_queue_parent` is not persisted).
 - The tmux control commands (`new-session`, `kill-session`, `display-message`) drop privilege through
   the kernel's `run_output_as_user`, the client through the PTY runtime — the same split as tmux tabs,
   see [`docs/dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md`](../../dev/todo/2026-11-02-tmux-listing-and-tab-use-two-privilege-drops.md).

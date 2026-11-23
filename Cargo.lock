@@ -12260,7 +12260,6 @@ dependencies = [
  "tddy-daemon-sandbox",
  "tddy-discovery",
  "tddy-host-service",
- "tddy-pr-stack",
  "tddy-projects",
  "tddy-pty",
  "tddy-remote-shell",
@@ -12283,6 +12282,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-usage",
+ "tddy-work-queue",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tddy-worktree-service",
@@ -12795,7 +12795,6 @@ dependencies = [
  "tddy-lsp",
  "tddy-lsp-executor",
  "tddy-model-registry",
- "tddy-pr-stack",
  "tddy-projects",
  "tddy-room-testkit",
  "tddy-rpc",
@@ -12815,6 +12814,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-vm",
+ "tddy-work-queue",
  "tddy-worktree-service",
  "teloxide",
  "tempfile",
@@ -12978,7 +12978,6 @@ dependencies = [
  "tddy-livekit",
  "tddy-lsp",
  "tddy-model-registry",
- "tddy-pr-stack",
  "tddy-projects",
  "tddy-room-testkit",
  "tddy-rpc",
@@ -12993,6 +12992,7 @@ dependencies = [
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
+ "tddy-work-queue",
  "tddy-workflow-recipes",
  "tddy-worktree-service",
  "tempfile",
@@ -13565,27 +13565,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tddy-pr-stack"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "log",
- "pretty_assertions",
- "rstest 0.24.0",
- "serde",
- "serde_json",
- "tddy-changeset",
- "tddy-core",
- "tddy-git",
- "tddy-github",
- "tddy-rpc",
- "tddy-service",
- "tddy-workflow",
- "tempfile",
- "uuid",
-]
-
-[[package]]
 name = "tddy-presenter"
 version = "0.1.0"
 dependencies = [
@@ -14059,7 +14038,6 @@ dependencies = [
  "tddy-daemon-sandbox",
  "tddy-discovery",
  "tddy-github",
- "tddy-pr-stack",
  "tddy-projects",
  "tddy-rpc",
  "tddy-service",
@@ -14067,6 +14045,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-usage",
+ "tddy-work-queue",
  "tddy-workflow",
  "tddy-worktree-service",
  "tempfile",
@@ -14170,10 +14149,10 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-host-service",
  "tddy-livekit",
- "tddy-pr-stack",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
+ "tddy-work-queue",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tddy-worktree-service",
@@ -14226,7 +14205,6 @@ dependencies = [
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-model-registry",
- "tddy-pr-stack",
  "tddy-projects",
  "tddy-remote-shell",
  "tddy-rpc",
@@ -14251,6 +14229,7 @@ dependencies = [
  "tddy-testing-commons",
  "tddy-tool-engine",
  "tddy-usage",
+ "tddy-work-queue",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tddy-worktree-service",
@@ -14902,6 +14881,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-work-queue"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "tddy-changeset",
+ "tddy-core",
+ "tddy-git",
+ "tddy-github",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-workflow",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-workflow"
 version = "0.1.0"
 dependencies = [
@@ -14949,10 +14949,10 @@ dependencies = [
  "tddy-changeset",
  "tddy-core",
  "tddy-github",
- "tddy-pr-stack",
  "tddy-rpc",
  "tddy-stdio",
  "tddy-testing-commons",
+ "tddy-work-queue",
  "tddy-workflow",
  "tempfile",
  "tokio",

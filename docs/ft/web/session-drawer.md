@@ -117,7 +117,7 @@ by grouping.
 
 ### Stacks row
 
-Each project group's body carries a **Stacks** row (`sessions-drawer-project-stacks-<projectId>`, `ProjectStacksRow` in `packages/tddy-session-web/src/`) listing the project's stacks from `ListProjectStacks` — one entry per stack (`sessions-drawer-project-stack-<stackId>`), across hosts. A host that did not answer is named in the row's unreachable list rather than silently dropped. Selecting a stack opens the **stack view** in the detail area at `#/sessions/project/<projectId>/stack/<stackId>` (see [PR stacking § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id)).
+Each project group's body carries a **Stacks** row (`sessions-drawer-project-queues-<projectId>`, `ProjectWorkQueuesRow` in `packages/tddy-session-web/src/`) listing the project's stacks from `ListProjectWorkQueues` — one entry per stack (`sessions-drawer-project-queue-<stackId>`), across hosts. A host that did not answer is named in the row's unreachable list rather than silently dropped. Selecting a stack opens the **stack view** in the detail area at `#/sessions/project/<projectId>/stack/<stackId>` (see [PR stacking § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id)).
 
 ### Orchestrator composer
 
@@ -671,14 +671,14 @@ when multiple tools are available.
 The recipe `<select>` lists the workflow recipes (constant `WORKFLOW_RECIPES` in
 `packages/tddy-session-create-web/src/createSessionRecipes.ts`): `tdd`, `tdd-small`, `bugfix`,
 `free-prompting`, `grill-me`, `review`, `merge-pr`. Defaults to `tdd`. No stack recipe is offered: a
-stack is a project record, planned in the [project stack view](#project-stack-view).
+stack is a project record, planned in the [project stack view](#work-queue-view).
 
 ### Stack parent
 
 The form offers no stack picker of its own. A child of a planned PR is started from that PR's row in
-the [project stack view](#project-stack-view), which opens the form with `initialValues.stackParent`
-and `stackNodeId` already named; `StartSession` carries them as `stackParent` (proto field 15) and
-`stackNodeId`. The host that owns the stack parent is found from the session list
+the [project stack view](#work-queue-view), which opens the form with `initialValues.stackParent`
+and `workItemId` already named; `StartSession` carries them as `stackParent` (proto field 15) and
+`workItemId`. The host that owns the stack parent is found from the session list
 (`stackParentDaemonInstanceId`); a failed session-list read is shown as
 `create-session-sessions-load-error`.
 
@@ -1067,19 +1067,19 @@ its planned PRs rendered full width. Lets the operator plan the stack ("+ New pl
 stack"), read each PR's live state, and start, repoint, reorder and pull-base its nodes. See
 [PR stacking § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id).
 
-**Component:** `ProjectStackView` (`packages/tddy-prstack-web/src/ProjectStackView.tsx`,
-`data-testid="project-stack-view"`), with `PlannedPrList` / `PlannedPrRow` subcomponents.
+**Component:** `WorkQueueView` (`packages/tddy-workqueue-web/src/WorkQueueView.tsx`,
+`data-testid="work-queue-view"`), with `WorkItemList` / `WorkItemRow` subcomponents.
 
 ### Planned-PR list
 
 Reads the stack's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
-from `GetProjectStack`'s `stack_plan_json` (a JSON-serialized `Stack`) and renders one row per
-`StackNode`.
+from `GetWorkQueue`'s `work_queue_json` (a JSON-serialized `Stack`) and renders one row per
+`WorkItem`.
 
-> **Updated 2026-08-01** — rows render in the order the plan **persists** (`StackNode.display_order`),
+> **Updated 2026-08-01** — rows render in the order the plan **persists** (`WorkItem.display_order`),
 > not in `Stack::topo_order`. The reading order and the dependency graph are different facts, and
 > deriving one from the other meant a merge, a repoint or a re-parenting silently moved a row the
-> operator was reading. `orderStackNodes` falls back to `topoSortStackNodes` **wholesale** for a plan
+> operator was reading. `orderWorkItems` falls back to `topoSortWorkItems` **wholesale** for a plan
 > that carries no positions at all (a plan authored before this existed); a half-numbered plan takes
 > the same fallback, since interleaving real positions with invented ones can render a child above its
 > parent. See [PR-Stack live status § Persisted display order](../coder/pr-stack-live-status.md#persisted-display-order).
@@ -1137,14 +1137,14 @@ otherwise a healthy row and a row whose poll has not answered would look identic
 **Row controls in the detail** *(2026-08-01)*:
 
 - **Reorder** — `pr-stack-move-up-<nodeId>` / `pr-stack-move-down-<nodeId>`, disabled at the ends of the
-  rendered order and while a reorder is in flight, backed by `ReorderPlannedPr`.
+  rendered order and while a reorder is in flight, backed by `ReorderWorkItem`.
 - **Pull from base** — `pr-stack-sync-merge-<nodeId>` ("Merge N commits from `<base>`", singular at 1) and
   `pr-stack-sync-rebase-<nodeId>`, backed by `PullBaseIntoBranch`. Offered **only** when the row is cleanly
   behind and owns a branch: not at zero commits, not on conflicts, not on an unavailable or unarrived
   comparison. Both disable together while either runs — a concurrent merge and rebase of one branch is
   destructive, not merely wasteful. Merge is the default; rebase is the operator's explicit choice.
 - **Dirty worktree** — when the branch's worktree holds uncommitted tracked changes, clicking a pull
-  control opens `pr-stack-dirty-worktree-dialog` naming those paths, offering to commit and push them
+  control opens `work-item-dirty-worktree-dialog` naming those paths, offering to commit and push them
   first. Cancelling calls nothing at all.
 
 **The CTA slot holds exactly one of two things**, and a blocked row carries its warning *beside* the
@@ -1159,7 +1159,7 @@ CTA rather than in place of it:
 
 > **Added 2026-07-26** — a node that already owns a branch is never blocked (its spawn resumes that
 > branch and fetches nothing), and a base whose resolution has not arrived is *unknown*, never missing.
-> `isNodeOrphaned` / `branchlessNonMergedParent` / `resolveStackBase` are the pure modules behind those
+> `isNodeOrphaned` / `branchlessNonMergedParent` / `resolveWorkItemBase` are the pure modules behind those
 > states; see
 > [PR-Stack live status § Startability before the spawn](../coder/pr-stack-live-status.md#startability-before-the-spawn-added-2026-07-26).
 
@@ -1172,12 +1172,12 @@ CTA rather than in place of it:
 > its call is in flight, and reports a refusal inline as `pr-stack-repoint-error-<nodeId>`.
 
 **"+ New planned PR" can start the node's session too** *(2026-08-13)*. The add form
-(`pr-stack-add-planned-pr-form`) carries two submits: **"Add planned PR"**
-(`pr-stack-add-planned-pr-submit-btn`), which only appends the node, and **"Add & start session"**
-(`pr-stack-add-planned-pr-start-btn`), which appends it and then opens the same
+(`work-item-add-form`) carries two submits: **"Add planned PR"**
+(`work-item-add-submit-btn`), which only appends the node, and **"Add & start session"**
+(`work-item-add-start-btn`), which appends it and then opens the same
 [Start session](#start-session-cta) dialog the new row's CTA would open — pre-filled identically —
 so adding a PR and starting work on it is one action rather than a hunt for the row that was just
-added. The node is identified by `AddPlannedPrResponse.node_id`, named by the daemon rather than
+added. The node is identified by `AddWorkItemResponse.node_id`, named by the daemon rather than
 inferred by diffing the returned plan: the orchestrator agent appends to the same stack, so one
 response can carry several ids the panel has never seen. A response whose plan does not contain the
 node it named still updates the list — the node was appended — but starts nothing and says so in the
@@ -1210,14 +1210,14 @@ orchestrator, so the operator can review and adjust before spawning:
 - Initial prompt = the node's title + description.
 
 Submitting issues the existing `ConnectionService.StartSession` RPC (no new RPC surface — `recipe`
-and `stack_parent` were already added for the [parent picker](#pr-stack-parent-picker) in #246) and
+and `work_queue_parent` were already added for the [parent picker](#pr-stack-parent-picker) in #246) and
 fires `onChildSessionStarted` so the drawer optimistically shows the child row.
 
 The daemon's existing chain-base-ref resolution (`resolve_chain_integration_base_ref_from_parent_session`)
 derives the child's base branch from the node's *parents* in the stack — `origin/<parent-branch>`
 when the node has an unmerged parent, collapsing to the default branch once all parents are
 merged (`effective_base_ref`, [PR stacking § assess decision algorithm](../coder/pr-stacking.md#assess-decision-algorithm-priority-order)).
-After the child is spawned, the node is linked via `link_stack_node_to_child_session` and the
+After the child is spawned, the node is linked via `link_work_item_to_session` and the
 row updates from CTA to status chip on the next session-list refresh.
 
 ## Workflow Chat Screen
@@ -1227,7 +1227,7 @@ The custom screen for every tddy-coder `tool` workflow session (`tdd`, `tdd-smal
 full-screen chat window — no second pane. The operator drives the workflow entirely by prompting and
 answering clarifications.
 
-**Component:** `WorkflowChatScreen` (`packages/tddy-prstack-web/src/WorkflowChatScreen.tsx`) — a thin
+**Component:** `WorkflowChatScreen` (`packages/tddy-workqueue-web/src/WorkflowChatScreen.tsx`) — a thin
 single-pane wrapper that derives its own presenter LiveKit room from the session's attachment
 (the media port's `usePresenterRoom`) and mounts the reusable [`AgentChat`](#agent-chat)
 over the **ACP mirror** (`acp`), matching tddy-coder's ACP-agent direction. Root
@@ -1266,9 +1266,9 @@ the identical `UseAgentChatResult` — `messages`, `elicitations`, `sendPrompt`,
 
 ### New RPCs / proto fields used
 
-- `GetProjectStack` `stack_plan_json` — JSON-serialized `Stack` for the planned-PR list.
+- `GetWorkQueue` `work_queue_json` — JSON-serialized `Stack` for the planned-PR list.
 - `TddyRemote.Stream` (existing) — chat window transport.
-- `ConnectionService.StartSession` (existing, `recipe` + `stack_parent`) — the Start session CTA.
+- `ConnectionService.StartSession` (existing, `recipe` + `work_queue_parent`) — the Start session CTA.
 
 ## Session Traffic Strip
 

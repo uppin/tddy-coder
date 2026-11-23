@@ -3,7 +3,7 @@ use crate::harness_from_spec::CliSessionType;
 use crate::project_home_launch::StartRole;
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::spec_launch::HostAgent;
-use crate::stack_parent::SpawnStackParent;
+use crate::work_queue_parent::SpawnWorkQueueParent;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
@@ -38,7 +38,7 @@ pub(crate) struct CliSessionStart<'a> {
     pub new_branch_name: &'a str,
     pub selected_integration_base_ref: &'a str,
     pub selected_branch_to_work_on: &'a str,
-    pub stack_parent: SpawnStackParent<'a>,
+    pub work_queue_parent: SpawnWorkQueueParent<'a>,
     /// The orchestrator that started the session, recorded in its first changeset. Absent, the
     /// stack parent (if any) is the orchestrator recorded.
     pub orchestrator: Option<OrchestratorLink>,

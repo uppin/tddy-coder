@@ -43,8 +43,8 @@ pub struct ToolSpawnPlan {
     /// as `--provider-route-path`.
     pub provider_route_json: Option<String>,
     pub recipe: Option<String>,
-    pub stack_parent: Option<String>,
-    pub stack_node_id: Option<String>,
+    pub work_queue_parent: Option<String>,
+    pub work_item_id: Option<String>,
     pub model: Option<String>,
     pub host_session_socket: Option<String>,
     /// The commit identity pairs the child's agent authors under — the project's account, from
@@ -63,8 +63,8 @@ impl ToolSpawnPlan {
             provider_route_json: self.provider_route_json.as_deref(),
             mouse,
             recipe: self.recipe.as_deref(),
-            stack_parent: self.stack_parent.as_deref(),
-            stack_node_id: self.stack_node_id.as_deref(),
+            work_queue_parent: self.work_queue_parent.as_deref(),
+            work_item_id: self.work_item_id.as_deref(),
             model: self.model.as_deref(),
             host_session_socket: self.host_session_socket.as_deref(),
             git_environment: &self.git_environment,

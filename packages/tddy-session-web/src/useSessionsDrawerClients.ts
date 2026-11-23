@@ -4,7 +4,7 @@ import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import { AccountsService } from "tddy-client-web/gen/accounts_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { SessionAgentService } from "tddy-client-web/gen/session_agents_pb";
 import { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import { TerminalSessionService } from "tddy-client-web/gen/terminal_session_pb";
@@ -47,7 +47,7 @@ export function useSessionsDrawerClients() {
   // them for the harness it is about to start.
   const accountsClient = useDaemonClient(AccountsService);
   const execToolClient = useDaemonClient(ExecToolService);
-  const prStackClient = useDaemonClient(PrStackService);
+  const workQueueClient = useDaemonClient(WorkQueueService);
   // A start in progress is a task on the host doing it; the create form cancels it through this.
   const taskClient = useDaemonClient(TaskService);
 
@@ -62,7 +62,7 @@ export function useSessionsDrawerClients() {
     catalogClient,
     accountsClient,
     execToolClient,
-    prStackClient,
+    workQueueClient,
     taskClient,
   };
 }

@@ -1,14 +1,14 @@
 //! PRD acceptance: orchestrate-pr-stack merge+repoint — execute_stack_merge writes the
-//! crash-safe journal through Planned→PrMerged, marks the node merged in the Stack,
+//! crash-safe journal through Planned→PrMerged, marks the node merged in the WorkQueue,
 //! and execute_stack_repoint repoints all dependents then clears the journal.
 
 use std::sync::Mutex;
 
-use tddy_core::changeset::{Changeset, GithubPrStatus, Stack, StackNode};
+use tddy_core::changeset::{Changeset, GithubPrStatus, WorkItem, WorkQueue};
 use tddy_core::WorkflowError;
 use tddy_github::pr_api::{GithubPrApi, PrLookupOutcome, PrRef, PrState, PrView};
-use tddy_pr_stack::merge_repoint::{execute_stack_merge, execute_stack_repoint};
-use tddy_pr_stack::op_journal::{recover_in_flight_stack_op, MergePhase};
+use tddy_work_queue::merge_repoint::{execute_stack_merge, execute_stack_repoint};
+use tddy_work_queue::op_journal::{recover_in_flight_stack_op, MergePhase};
 
 // ---------------------------------------------------------------------------
 // Test-only mock of GithubPrApi
@@ -81,12 +81,12 @@ impl GithubPrApi for MockGithubPrApi {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<StackNode>) {
+fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<WorkItem>) {
     let cs = Changeset {
-        stack: Some(Stack { version: 1, nodes }),
+        stack: Some(WorkQueue { version: 1, nodes }),
         ..Default::default()
     };
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(session_dir, cs);
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(session_dir, cs);
 }
 
 // ---------------------------------------------------------------------------
@@ -96,11 +96,11 @@ fn init_orchestrator_with_stack(session_dir: &std::path::Path, nodes: Vec<StackN
 #[test]
 fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
     // Given — orchestrator session dir with stack node n1 (PR #1 open)
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     init_orchestrator_with_stack(
         session_dir,
-        vec![StackNode {
+        vec![WorkItem {
             node_id: "n1".into(),
             title: "Auth store".into(),
             description: String::new(),
@@ -128,7 +128,7 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
     assert_eq!(mock_gh.merged_pr_numbers(), vec![1u64]);
 
     // …and the stack node n1 has pr_status.phase == "merged"
-    let stack = tddy_changeset::stack_fixtures::stack_on_disk(session_dir);
+    let stack = tddy_changeset::work_queue_fixtures::stack_on_disk(session_dir);
     let n1 = stack
         .nodes
         .iter()
@@ -154,12 +154,12 @@ fn merge_task_writes_prmerged_journal_then_marks_node_merged() {
 #[test]
 fn repoint_task_repoints_each_dependent_and_clears_journal() {
     // Given — orchestrator session dir with a merged n1 and two dependents n2, n3
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let session_dir = tmp.path();
     init_orchestrator_with_stack(
         session_dir,
         vec![
-            StackNode {
+            WorkItem {
                 node_id: "n1".into(),
                 title: "Auth store".into(),
                 description: String::new(),
@@ -176,7 +176,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                 internal_status: None,
                 display_order: None,
             },
-            StackNode {
+            WorkItem {
                 node_id: "n2".into(),
                 title: "Login API".into(),
                 description: String::new(),
@@ -193,7 +193,7 @@ fn repoint_task_repoints_each_dependent_and_clears_journal() {
                 internal_status: None,
                 display_order: None,
             },
-            StackNode {
+            WorkItem {
                 node_id: "n3".into(),
                 title: "Dashboard".into(),
                 description: String::new(),

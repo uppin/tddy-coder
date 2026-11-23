@@ -9,9 +9,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_changeset::changeset::{Stack, StackNode};
+use tddy_changeset::changeset::{WorkItem, WorkQueue};
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
-use tddy_changeset::stack_fixtures::write_changeset_with_stack;
+use tddy_changeset::work_queue_fixtures::write_changeset_with_stack;
 use tddy_changeset::Changeset;
 use tddy_session_worktree::session_chain::{
     resolve_chain_base_for_session_spawn, resolve_chain_base_ref,
@@ -70,8 +70,8 @@ fn write_parent_changeset(sessions_base: &Path, session_id: &str, cs: Changeset)
     write_changeset_with_stack(&dir, cs);
 }
 
-fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -86,8 +86,8 @@ fn a_materialized_node(node_id: &str, branch: &str, parents: &[&str]) -> StackNo
     }
 }
 
-fn a_planned_child_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_planned_child_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -123,7 +123,7 @@ fn resolve_chain_base_ref_returns_stack_node_base_for_pr_stack_orchestrator_pare
         orchestrator_id,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
@@ -169,7 +169,7 @@ fn resolve_chain_base_ref_returns_none_for_branchless_pr_stack_orchestrator() {
         "orchestrator-1",
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![],
             }),
@@ -263,14 +263,14 @@ fn spawn_returns_none_when_no_stack_parent_and_no_persisted_field() {
     assert_eq!(
         result.expect("no stack parent and no persisted field must resolve to None"),
         None,
-        "absence of both stack_parent and persisted field must yield None (default base)"
+        "absence of both work_queue_parent and persisted field must yield None (default base)"
     );
 
     let _ = fs::remove_dir_all(&base);
 }
 
 /// **spawn_returns_persisted_field_when_no_stack_parent** — When a persisted
-/// `worktree_integration_base_ref` is present and no stack_parent, the
+/// `worktree_integration_base_ref` is present and no work_queue_parent, the
 /// persisted field wins (Telegram / workflow-recipe compatibility).
 #[test]
 fn spawn_returns_persisted_field_when_no_stack_parent() {
@@ -294,17 +294,17 @@ fn spawn_returns_persisted_field_when_no_stack_parent() {
     assert_eq!(
         result.expect("persisted field with no stack parent must resolve"),
         Some("origin/feature/persisted".to_string()),
-        "persisted field must be honored when no stack_parent is supplied"
+        "persisted field must be honored when no work_queue_parent is supplied"
     );
 
     let _ = fs::remove_dir_all(&base);
 }
 
-/// **spawn_stack_parent_takes_precedence_over_persisted_field** — When both a
-/// stack_parent and a persisted field are present, the stack_parent resolution
+/// **spawn_work_queue_parent_takes_precedence_over_persisted_field** — When both a
+/// work_queue_parent and a persisted field are present, the work_queue_parent resolution
 /// wins (it's the freshest runtime request).
 #[test]
-fn spawn_stack_parent_takes_precedence_over_persisted_field() {
+fn spawn_work_queue_parent_takes_precedence_over_persisted_field() {
     // Given
     let base = scratch("spawn-precedence");
     let repo = base.join("repo");
@@ -320,7 +320,7 @@ fn spawn_stack_parent_takes_precedence_over_persisted_field() {
         orchestrator_id,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
@@ -331,7 +331,7 @@ fn spawn_stack_parent_takes_precedence_over_persisted_field() {
         },
     );
 
-    // When — both stack_parent and a persisted field are supplied.
+    // When — both work_queue_parent and a persisted field are supplied.
     let result = resolve_chain_base_for_session_spawn(
         &sessions_base,
         Some(orchestrator_id),
@@ -341,11 +341,11 @@ fn spawn_stack_parent_takes_precedence_over_persisted_field() {
         Some("origin/feature/stale-persisted"),
     );
 
-    // Then — stack_parent wins.
+    // Then — work_queue_parent wins.
     assert_eq!(
         result.expect("both inputs must resolve"),
         Some(format!("origin/{parent_branch}")),
-        "stack_parent resolution must take precedence over the persisted field"
+        "work_queue_parent resolution must take precedence over the persisted field"
     );
 
     let _ = fs::remove_dir_all(&base);
@@ -373,7 +373,7 @@ fn bases_a_child_on_the_node_named_by_id_when_the_operator_renamed_its_branch() 
         "orchestrator-1",
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
@@ -421,7 +421,7 @@ fn bases_a_child_on_the_node_named_by_id_when_the_branch_still_matches_it() {
         "orchestrator-1",
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),
@@ -470,7 +470,7 @@ fn resolves_no_base_for_a_node_id_the_plan_does_not_hold() {
         "orchestrator-1",
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_materialized_node("bottom", parent_branch, &[]),

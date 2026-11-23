@@ -19,10 +19,10 @@ use tddy_service::proto::accounts::{
 };
 use tddy_session_lifecycle::connection_service::launch_ports::LaunchSessions;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
-use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler, PrStackServiceImpl};
+use tddy_session_lifecycle::{DaemonRpcFamilies, WorkQueueHandler, WorkQueueServiceImpl};
 use tddy_tool_engine::ExecToolServiceImpl;
 
-use crate::{CatalogRpcHandler, ExecToolRpcHandler, PrStackRpcHandler, ProjectRpcHandler};
+use crate::{CatalogRpcHandler, ExecToolRpcHandler, ProjectRpcHandler, WorkQueueRpcHandler};
 
 /// What `DescribeSessionStartOptions` reads from a host's credential vaults (`#start-parity` 5/9):
 /// the provider accounts that can run a harness, and the models of one account. Both are answered
@@ -91,7 +91,7 @@ pub struct RpcHandlers {
     project: Arc<ProjectRpcHandler>,
     catalog: Arc<CatalogRpcHandler>,
     exec_tool: Arc<ExecToolRpcHandler>,
-    pr_stack: Arc<PrStackRpcHandler>,
+    work_queue: Arc<WorkQueueRpcHandler>,
     /// The launch snapshot the exec-tool handler late-binds to, set by
     /// [`DaemonRpcFamilies::attach_session_start`] when the host is given these families.
     session_launch: Arc<OnceLock<LaunchSessions>>,
@@ -116,7 +116,7 @@ impl RpcHandlers {
             project: Arc::new(ProjectRpcHandler::from_host(host)),
             catalog: Arc::new(CatalogRpcHandler::from_host(host)),
             exec_tool,
-            pr_stack: Arc::new(PrStackRpcHandler::from_host(host)),
+            work_queue: Arc::new(WorkQueueRpcHandler::from_host(host)),
             session_launch,
             provider_accounts,
         }
@@ -136,9 +136,14 @@ impl RpcHandlers {
     /// attach keeps the first.
     pub fn attach_stack_github(
         &self,
-        clients: Arc<dyn crate::exec_tool::stack_tools::StackGithubClients>,
+        clients: Arc<dyn crate::exec_tool::work_queue_tools::WorkQueueGithubClients>,
     ) {
-        if self.exec_tool.stack_github_cell().set(clients).is_err() {
+        if self
+            .exec_tool
+            .work_queue_github_cell()
+            .set(clients)
+            .is_err()
+        {
             log::error!("the stack tools' GitHub was attached twice; keeping the first attachment");
         }
     }
@@ -188,10 +193,10 @@ impl RpcHandlers {
         ExecToolServiceImpl::new(Arc::clone(&self.exec_tool))
     }
 
-    /// `pr_stack.PrStackService`, answered by the shared [`PrStackRpcHandler`].
+    /// `work_queue.WorkQueueService`, answered by the shared [`WorkQueueRpcHandler`].
     #[must_use]
-    pub fn pr_stack_service(&self) -> PrStackServiceImpl<PrStackRpcHandler> {
-        PrStackServiceImpl::new(Arc::clone(&self.pr_stack))
+    pub fn work_queue_service(&self) -> WorkQueueServiceImpl<WorkQueueRpcHandler> {
+        WorkQueueServiceImpl::new(Arc::clone(&self.work_queue))
     }
 
     /// The transport entries of every family served from this crate.
@@ -201,14 +206,14 @@ impl RpcHandlers {
             tddy_discovery::build_catalog_entry(self.catalog_service()),
             tddy_tool_engine::build_exec_tool_entry(self.exec_tool_service()),
             tddy_projects::build_project_entry(self.project_service()),
-            tddy_session_lifecycle::build_pr_stack_entry(self.pr_stack_service()),
+            tddy_session_lifecycle::build_pr_stack_entry(self.work_queue_service()),
         ]
     }
 }
 
 impl DaemonRpcFamilies for RpcHandlers {
-    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
-        Arc::clone(&self.pr_stack) as Arc<dyn PrStackHandler>
+    fn work_queue_handler(&self) -> Arc<dyn WorkQueueHandler> {
+        Arc::clone(&self.work_queue) as Arc<dyn WorkQueueHandler>
     }
 
     fn service_entries(&self) -> Vec<ServiceEntry> {

@@ -1,7 +1,7 @@
 //! Acceptance: every PR-stack tool the registry names is actually reachable.
 //!
 //! A tool has to be registered in independent places to work: the registry in `tddy-tool-engine`
-//! (`STACK_TOOL_NAMES` and `STACK_GIT_TOOL_NAMES`), the definitions `tddy-tools` advertises over MCP,
+//! (`WORK_QUEUE_TOOL_NAMES` and `WORK_ITEM_GIT_TOOL_NAMES`), the definitions `tddy-tools` advertises over MCP,
 //! and the `call_tool_by_name` dispatch mirror used by `tddy-tools call-tool` and the web Inspector.
 //! No single owner enforces the agreement, so a tool present in the registry but not in the other two
 //! is silently unreachable — named but not advertised, or advertised but not dispatchable.
@@ -13,8 +13,8 @@
 //! hence the cardinality guard there, and the count assertion on the dispatch loop.
 //!
 //! Since `#orchestrators` 7/11 the plan and read tools are not methods of this crate at all: they
-//! are the daemon's exec tools, addressed by `stack_id`
-//! ([`tddy_tool_engine::stack_tools`]). The third test pins that move — registered only where there
+//! are the daemon's exec tools, addressed by `queue_id`
+//! ([`tddy_tool_engine::work_queue_tools`]). The third test pins that move — registered only where there
 //! is a daemon to dispatch to, advertised only when the daemon admits them for the session, and a
 //! call by name forwarded to the daemon rather than run against `TDDY_SESSION_DIR` here.
 //!
@@ -23,8 +23,8 @@
 //! Changeset: docs/dev/1-WIP/2026-11-10-stack-plan-tools.md.
 
 use serial_test::serial;
-use tddy_tool_engine::stack_git_tools::STACK_GIT_TOOL_NAMES;
-use tddy_tool_engine::stack_tools::STACK_TOOL_NAMES;
+use tddy_tool_engine::work_item_git_tools::WORK_ITEM_GIT_TOOL_NAMES;
+use tddy_tool_engine::work_queue_tools::WORK_QUEUE_TOOL_NAMES;
 use tddy_tools::server::{PermissionServer, UNKNOWN_TOOL_REJECTION};
 
 /// The registry's tool names, bare: the router and the dispatch mirror both key off the bare tool
@@ -34,14 +34,14 @@ use tddy_tools::server::{PermissionServer, UNKNOWN_TOOL_REJECTION};
 /// express their expectation as "nothing is missing": a gather that silently dropped every name
 /// would leave them comparing two empty collections and passing while checking nothing.
 fn registered_tool_names() -> Vec<String> {
-    let names: Vec<String> = STACK_TOOL_NAMES
+    let names: Vec<String> = WORK_QUEUE_TOOL_NAMES
         .iter()
-        .chain(STACK_GIT_TOOL_NAMES.iter())
+        .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
         .map(|name| name.to_string())
         .collect();
     assert_eq!(
         names.len(),
-        STACK_TOOL_NAMES.len() + STACK_GIT_TOOL_NAMES.len(),
+        WORK_QUEUE_TOOL_NAMES.len() + WORK_ITEM_GIT_TOOL_NAMES.len(),
         "every registered PR-stack name must be gathered, or these tests have nothing left to \
          check; registry: {names:?}"
     );
@@ -117,11 +117,11 @@ fn clear_session_tool_transport_env() {
 }
 
 /// The stack tools among `tools`, sorted: a router lists its tools in no promised order.
-fn stack_tools_among(tools: Vec<rmcp::model::Tool>) -> Vec<String> {
+fn work_queue_tools_among(tools: Vec<rmcp::model::Tool>) -> Vec<String> {
     let mut names: Vec<String> = tools
         .into_iter()
         .map(|tool| tool.name.to_string())
-        .filter(|name| STACK_TOOL_NAMES.contains(&name.as_str()))
+        .filter(|name| WORK_QUEUE_TOOL_NAMES.contains(&name.as_str()))
         .collect();
     names.sort();
     names
@@ -139,18 +139,20 @@ async fn the_plan_and_read_stack_tools_are_dispatched_to_the_daemon() {
     );
     let with_a_daemon = PermissionServer::new();
     clear_session_tool_transport_env();
-    let mut every_stack_tool: Vec<String> =
-        STACK_TOOL_NAMES.iter().map(|n| n.to_string()).collect();
+    let mut every_stack_tool: Vec<String> = WORK_QUEUE_TOOL_NAMES
+        .iter()
+        .map(|n| n.to_string())
+        .collect();
     every_stack_tool.sort();
 
     // When each is asked what it offers, and the one with no daemon is asked to run each stack tool
-    let offered_without_a_daemon = stack_tools_among(without_a_daemon.advertised_tools());
+    let offered_without_a_daemon = work_queue_tools_among(without_a_daemon.advertised_tools());
     let offered_when_admitted =
-        stack_tools_among(with_a_daemon.advertised_tools_admitting(&every_stack_tool));
+        work_queue_tools_among(with_a_daemon.advertised_tools_admitting(&every_stack_tool));
     let offered_when_not_admitted =
-        stack_tools_among(with_a_daemon.advertised_tools_admitting(&[]));
+        work_queue_tools_among(with_a_daemon.advertised_tools_admitting(&[]));
     let mut not_forwarded = Vec::new();
-    for name in STACK_TOOL_NAMES {
+    for name in WORK_QUEUE_TOOL_NAMES {
         let outcome = without_a_daemon
             .call_tool_by_name(name, serde_json::json!({}))
             .await;

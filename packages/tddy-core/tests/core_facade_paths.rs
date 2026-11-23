@@ -8,7 +8,7 @@
 
 use tddy_core::agent_skills::DiscoveredSkill;
 use tddy_core::backend::CodingBackend;
-use tddy_core::changeset::{read_changeset, Changeset, Stack};
+use tddy_core::changeset::{read_changeset, Changeset, WorkQueue};
 use tddy_core::log_backend::{init_tddy_logger, LogConfig};
 use tddy_core::presenter::{Presenter, PresenterEvent};
 use tddy_core::session_action_jobs::{invoke_session_action, SessionActionInvokeOptions};
@@ -36,7 +36,7 @@ fn the_public_paths_consumers_use_still_resolve() {
     names_type::<DiscoveredSkill>();
     names_type::<dyn CodingBackend>();
     names_type::<Changeset>();
-    names_type::<Stack>();
+    names_type::<WorkQueue>();
     names_type::<LogConfig>();
     names_type::<Presenter>();
     names_type::<PresenterEvent>();
@@ -56,7 +56,7 @@ fn the_public_paths_consumers_use_still_resolve() {
     names_type::<TaskResult>();
     names_type::<tddy_core::ProgressEvent>();
     names_type::<tddy_core::WorkflowEngine>();
-    names_type::<tddy_core::StackParentRoute>();
+    names_type::<tddy_core::WorkQueueParentRoute>();
     names_type::<tddy_core::SessionActivityStatus>();
     resolves(read_changeset);
     resolves(init_tddy_logger);

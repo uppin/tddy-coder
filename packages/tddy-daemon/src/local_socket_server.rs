@@ -33,9 +33,6 @@ use tddy_service::proto::host::HostService as RpcHostService;
 use tddy_service::proto::livekit::{
     LiveKitService as RpcLiveKitService, LiveKitServiceTonicAdapter,
 };
-use tddy_service::proto::pr_stack::{
-    PrStackService as RpcPrStackService, PrStackServiceTonicAdapter,
-};
 use tddy_service::proto::project::{
     ProjectService as RpcProjectService, ProjectServiceTonicAdapter,
 };
@@ -51,10 +48,13 @@ use tddy_service::proto::tonic_demo_vm::demo_vm_service_server::DemoVmServiceSer
 use tddy_service::proto::tonic_exec_tools::exec_tool_service_server::ExecToolServiceServer;
 use tddy_service::proto::tonic_livekit::live_kit_service_server::LiveKitServiceServer;
 use tddy_service::proto::tonic_local_token::local_token_service_server::LocalTokenServiceServer;
-use tddy_service::proto::tonic_pr_stack::pr_stack_service_server::PrStackServiceServer;
 use tddy_service::proto::tonic_project::project_service_server::ProjectServiceServer;
 use tddy_service::proto::tonic_session::session_service_server::SessionServiceServer;
 use tddy_service::proto::tonic_session_agents::session_agent_service_server::SessionAgentServiceServer;
+use tddy_service::proto::tonic_work_queue::work_queue_service_server::WorkQueueServiceServer;
+use tddy_service::proto::work_queue::{
+    WorkQueueService as RpcPrStackService, WorkQueueServiceTonicAdapter,
+};
 use tddy_service::proto::worktree::WorktreeService as RpcWorktreeService;
 use tddy_service::tonic_host::host_service_server::HostServiceServer;
 use tddy_service::tonic_worktree::worktree_service_server::WorktreeServiceServer;
@@ -117,7 +117,7 @@ pub struct LocalSocketServices<Sess, Proj, Dm, Lk, H, W, T, Sa, A, Cat, E, P> {
     pub activity: ActivityServiceTonicAdapter<A>,
     pub catalog: CatalogServiceTonicAdapter<Cat>,
     pub exec_tools: ExecToolServiceTonicAdapter<E>,
-    pub pr_stack: PrStackServiceTonicAdapter<P>,
+    pub work_queue: WorkQueueServiceTonicAdapter<P>,
 }
 
 /// Bind `socket_path` and serve the local-socket services until `shutdown` resolves.
@@ -217,7 +217,7 @@ where
         .add_service(ActivityServiceServer::new(services.activity))
         .add_service(CatalogServiceServer::new(services.catalog))
         .add_service(ExecToolServiceServer::new(services.exec_tools))
-        .add_service(PrStackServiceServer::new(services.pr_stack))
+        .add_service(WorkQueueServiceServer::new(services.work_queue))
         .serve_with_incoming_shutdown(UnixListenerStream::new(listener), shutdown)
         .await
         .context("serve the local-socket services")?;

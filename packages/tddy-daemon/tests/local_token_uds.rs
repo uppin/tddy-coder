@@ -42,7 +42,6 @@ use tddy_service::proto::exec_tools::ExecToolServiceTonicAdapter;
 use tddy_service::proto::host::{ListEligibleDaemonsRequest, StreamHostStatsRequest};
 use tddy_service::proto::livekit::LiveKitServiceTonicAdapter;
 use tddy_service::proto::local_token::MintLocalTokenRequest;
-use tddy_service::proto::pr_stack::PrStackServiceTonicAdapter;
 use tddy_service::proto::project::ProjectServiceTonicAdapter;
 use tddy_service::proto::session::SessionServiceTonicAdapter;
 use tddy_service::proto::session_agents_svc::{
@@ -51,6 +50,7 @@ use tddy_service::proto::session_agents_svc::{
 use tddy_service::proto::tonic_activity::activity_service_client::ActivityServiceClient;
 use tddy_service::proto::tonic_local_token::local_token_service_client::LocalTokenServiceClient;
 use tddy_service::proto::tonic_session_agents::session_agent_service_client::SessionAgentServiceClient;
+use tddy_service::proto::work_queue::WorkQueueServiceTonicAdapter;
 use tddy_service::proto::worktree::{
     ListWorktreesForProjectRequest, StreamWorktreeStatsRequest, WorktreeRow,
 };
@@ -154,8 +154,8 @@ fn start_local_socket_server(
     let catalog_adapter = CatalogServiceTonicAdapter::new(Arc::new(rpc_handlers.catalog_service()));
     let exec_tool_adapter =
         ExecToolServiceTonicAdapter::new(Arc::new(rpc_handlers.exec_tool_service()));
-    let pr_stack_adapter =
-        PrStackServiceTonicAdapter::new(Arc::new(rpc_handlers.pr_stack_service()));
+    let work_queue_adapter =
+        WorkQueueServiceTonicAdapter::new(Arc::new(rpc_handlers.work_queue_service()));
 
     struct NoLiveKitRooms;
     #[async_trait::async_trait]
@@ -192,7 +192,7 @@ fn start_local_socket_server(
                 activity: activity_adapter,
                 catalog: catalog_adapter,
                 exec_tools: exec_tool_adapter,
-                pr_stack: pr_stack_adapter,
+                work_queue: work_queue_adapter,
             },
             shutdown,
         )

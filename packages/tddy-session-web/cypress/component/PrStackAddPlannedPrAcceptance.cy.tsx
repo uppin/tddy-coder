@@ -9,11 +9,11 @@
 import React from "react";
 import { Code } from "@connectrpc/connect";
 import { SessionService } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -21,7 +21,7 @@ import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
 const ORCHESTRATOR_SESSION_ID = "pr-stack-session-3333-0000-0000-0000-000000000030";
 
-function anOrchestratorSession(stackPlanJson: string) {
+function anOrchestratorSession(workQueueJson: string) {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-03T09:00:00Z",
@@ -35,17 +35,17 @@ function anOrchestratorSession(stackPlanJson: string) {
     pendingElicitation: false,
     orchestratorSessionId: "",
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
 function openPrStackScreen(session: ReturnType<typeof anOrchestratorSession>) {
   const backend = aSessionsDrawerBackend([session]).onUnary(
-    PrStackService.method.addPlannedPr,
+    WorkQueueService.method.addWorkItem,
     () => ({
-      stackPlanJson: aStackPlanJson(1, [
-        aPlannedNode({ nodeId: "n1", title: "Add token store" }),
-        aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"] }),
+      workQueueJson: aWorkQueueJson(1, [
+        aPlannedNode({ itemId: "n1", title: "Add token store" }),
+        aPlannedNode({ itemId: "n2", title: "Add auth middleware", parents: ["n1"] }),
       ]),
     }),
   );
@@ -70,33 +70,33 @@ beforeEach(() => {
 
 it("shows a New planned PR entry point on the planned-PR list", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
 
   // When
   openPrStackScreen(anOrchestratorSession(plan));
 
   // Then
-  prStackScreenPage.addPlannedPrBtn().should("exist");
+  prStackScreenPage.addWorkItemBtn().should("exist");
 });
 
 it("opens the New planned PR form when the entry point is clicked", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   openPrStackScreen(anOrchestratorSession(plan));
 
   // When
   prStackScreenPage.openAddPlannedPrForm();
 
   // Then
-  prStackScreenPage.addPlannedPrForm().should("exist");
-  prStackScreenPage.addPlannedPrTitleInput().should("exist");
+  prStackScreenPage.addWorkItemForm().should("exist");
+  prStackScreenPage.addWorkItemTitleInput().should("exist");
 });
 
 it("lists every existing planned PR as an ancestor checkbox option", () => {
   // Given — two existing nodes to choose as ancestors
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store" }),
-    aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"] }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store" }),
+    aPlannedNode({ itemId: "n2", title: "Add auth middleware", parents: ["n1"] }),
   ]);
   openPrStackScreen(anOrchestratorSession(plan));
 
@@ -104,13 +104,13 @@ it("lists every existing planned PR as an ancestor checkbox option", () => {
   prStackScreenPage.openAddPlannedPrForm();
 
   // Then
-  prStackScreenPage.addPlannedPrAncestorCheckbox("n1").should("exist");
-  prStackScreenPage.addPlannedPrAncestorCheckbox("n2").should("exist");
+  prStackScreenPage.addWorkItemAncestorCheckbox("n1").should("exist");
+  prStackScreenPage.addWorkItemAncestorCheckbox("n2").should("exist");
 });
 
-it("calls AddPlannedPr with the entered title and no parents when no ancestor is checked", () => {
+it("calls AddWorkItem with the entered title and no parents when no ancestor is checked", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   const backend = openPrStackScreen(anOrchestratorSession(plan));
 
   // When
@@ -119,19 +119,19 @@ it("calls AddPlannedPr with the entered title and no parents when no ancestor is
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.addPlannedPr);
+    const calls = b.callsTo(WorkQueueService.method.addWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
+    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
     expect(calls[0].title).to.equal("Add auth middleware");
     expect(calls[0].parents).to.deep.equal([]);
   });
 });
 
-it("calls AddPlannedPr with the checked ancestor node ids as parents", () => {
+it("calls AddWorkItem with the checked ancestor node ids as parents", () => {
   // Given
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store" }),
-    aPlannedNode({ nodeId: "n2", title: "Add auth middleware" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store" }),
+    aPlannedNode({ itemId: "n2", title: "Add auth middleware" }),
   ]);
   const backend = openPrStackScreen(anOrchestratorSession(plan));
 
@@ -144,15 +144,15 @@ it("calls AddPlannedPr with the checked ancestor node ids as parents", () => {
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.addPlannedPr);
+    const calls = b.callsTo(WorkQueueService.method.addWorkItem);
     expect(calls).to.have.length(1);
     expect(calls[0].parents).to.deep.equal(["n1", "n2"]);
   });
 });
 
-it("passes the optional description and branch suggestion through to AddPlannedPr", () => {
+it("passes the optional description and branch suggestion through to AddWorkItem", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   const backend = openPrStackScreen(anOrchestratorSession(plan));
 
   // When
@@ -166,15 +166,15 @@ it("passes the optional description and branch suggestion through to AddPlannedP
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.addPlannedPr);
+    const calls = b.callsTo(WorkQueueService.method.addWorkItem);
     expect(calls[0].description).to.equal("Validates the bearer token on every request.");
     expect(calls[0].branchSuggestion).to.equal("feature/auth-middleware");
   });
 });
 
-it("renders the newly added planned PR in the list once AddPlannedPr succeeds", () => {
+it("renders the newly added planned PR in the list once AddWorkItem succeeds", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   openPrStackScreen(anOrchestratorSession(plan));
 
   // When — the stubbed backend responds with a stack that now includes "n2"
@@ -185,12 +185,12 @@ it("renders the newly added planned PR in the list once AddPlannedPr succeeds", 
   });
 
   // Then
-  prStackScreenPage.plannedPrRow("n2").should("exist").and("contain.text", "Add auth middleware");
+  prStackScreenPage.workItemRow("n2").should("exist").and("contain.text", "Add auth middleware");
 });
 
-it("closes the form after AddPlannedPr succeeds", () => {
+it("closes the form after AddWorkItem succeeds", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   openPrStackScreen(anOrchestratorSession(plan));
 
   // When
@@ -198,30 +198,30 @@ it("closes the form after AddPlannedPr succeeds", () => {
   prStackScreenPage.fillAndSubmitAddPlannedPrForm({ title: "Add auth middleware" });
 
   // Then
-  prStackScreenPage.addPlannedPrForm().should("not.exist");
+  prStackScreenPage.addWorkItemForm().should("not.exist");
 });
 
-it("does not call AddPlannedPr when the title is left blank", () => {
+it("does not call AddWorkItem when the title is left blank", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   const backend = openPrStackScreen(anOrchestratorSession(plan));
 
   // When
   prStackScreenPage.openAddPlannedPrForm();
-  prStackScreenPage.addPlannedPrSubmitBtn().click();
+  prStackScreenPage.addWorkItemSubmitBtn().click();
 
   // Then
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(PrStackService.method.addPlannedPr)).to.have.length(0);
+    expect(b.callsTo(WorkQueueService.method.addWorkItem)).to.have.length(0);
   });
-  prStackScreenPage.addPlannedPrForm().should("exist");
+  prStackScreenPage.addWorkItemForm().should("exist");
 });
 
-it("shows an inline error and keeps the form open when AddPlannedPr fails", () => {
+it("shows an inline error and keeps the form open when AddWorkItem fails", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   const backend = aSessionsDrawerBackend([anOrchestratorSession(plan)]).failWith(
-    PrStackService.method.addPlannedPr,
+    WorkQueueService.method.addWorkItem,
     Code.InvalidArgument,
     "dangling parent ref",
   );
@@ -232,22 +232,22 @@ it("shows an inline error and keeps the form open when AddPlannedPr fails", () =
   prStackScreenPage.fillAndSubmitAddPlannedPrForm({ title: "Add auth middleware" });
 
   // Then
-  prStackScreenPage.addPlannedPrError().should("exist").and("contain.text", "dangling parent ref");
-  prStackScreenPage.addPlannedPrForm().should("exist");
+  prStackScreenPage.addWorkItemError().should("exist").and("contain.text", "dangling parent ref");
+  prStackScreenPage.addWorkItemForm().should("exist");
 });
 
 it("closes the form without adding a planned PR when Cancel is clicked", () => {
   // Given
-  const plan = aStackPlanJson(1, [aPlannedNode({ nodeId: "n1", title: "Add token store" })]);
+  const plan = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })]);
   const backend = openPrStackScreen(anOrchestratorSession(plan));
 
   // When
   prStackScreenPage.openAddPlannedPrForm();
-  prStackScreenPage.addPlannedPrCancelBtn().click();
+  prStackScreenPage.addWorkItemCancelBtn().click();
 
   // Then
-  prStackScreenPage.addPlannedPrForm().should("not.exist");
+  prStackScreenPage.addWorkItemForm().should("not.exist");
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(PrStackService.method.addPlannedPr)).to.have.length(0);
+    expect(b.callsTo(WorkQueueService.method.addWorkItem)).to.have.length(0);
   });
 });

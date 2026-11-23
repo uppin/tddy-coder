@@ -70,7 +70,7 @@ impl LaunchSessions {
         }
         Some(Arc::new(GrillMeConversationSpawnHandler {
             service: self.clone(),
-            stack_parent_host: Arc::new(self.clone()),
+            work_queue_parent_host: Arc::new(self.clone()),
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
             cli_manager: Arc::clone(&self.cli_manager),
@@ -125,7 +125,7 @@ impl LaunchSessions {
                 let sessions_base = self.tddy_data_dir.clone();
                 Arc::new(GrillMeConversationSpawnHandler {
                     service: self.clone(),
-                    stack_parent_host: Arc::new(self.clone()),
+                    work_queue_parent_host: Arc::new(self.clone()),
                     config: self.config.clone(),
                     tddy_data_dir: self.tddy_data_dir.clone(),
                     cli_manager: Arc::clone(&self.cli_manager),

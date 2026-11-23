@@ -36,12 +36,12 @@ pub mod session_file_tools;
 pub mod session_follow;
 pub mod session_message_tools;
 pub mod shell;
-pub mod stack_git_tools;
-pub mod stack_tools;
 pub mod start_ledger;
 pub mod start_options;
 pub mod start_session_args;
 pub mod terminal_keys;
+pub mod work_item_git_tools;
+pub mod work_queue_tools;
 
 pub use catalog::{tool_catalog, ToolDef};
 pub use edited_region::EDITED_REGION_CONTEXT_LINES;

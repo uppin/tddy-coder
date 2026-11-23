@@ -223,9 +223,9 @@ fn every_argument_reaches_the_request_under_its_own_name() {
         "initial_prompt": "do the thing",
         "permission_mode": "plan",
         "dangerously_skip_permissions": true,
-        "stack_parent": "parent-1",
-        "stack_parent_daemon_instance_id": "host-c",
-        "stack_node_id": "node-1",
+        "work_queue_parent": "parent-1",
+        "work_queue_parent_daemon_instance_id": "host-c",
+        "work_item_id": "node-1",
         "sandbox": true,
         "managed_codebase": true,
         "sandboxed_codebase": true,
@@ -268,9 +268,9 @@ fn every_argument_reaches_the_request_under_its_own_name() {
             initial_prompt: "do the thing".to_string(),
             permission_mode: "plan".to_string(),
             dangerously_skip_permissions: true,
-            stack_parent: "parent-1".to_string(),
-            stack_parent_daemon_instance_id: "host-c".to_string(),
-            stack_node_id: "node-1".to_string(),
+            work_queue_parent: "parent-1".to_string(),
+            work_queue_parent_daemon_instance_id: "host-c".to_string(),
+            work_item_id: "node-1".to_string(),
             sandbox: true,
             managed_codebase: true,
             sandboxed_codebase: true,
@@ -403,9 +403,9 @@ fn start_session_offers_no_stack_base_session_argument() {
     let offered = schema["properties"]
         .as_object()
         .expect("properties")
-        .contains_key("pr_stack_base_session_id");
+        .contains_key("work_queue_base_session_id");
     assert!(
         !offered,
-        "StartSession still offers pr_stack_base_session_id, the removed stack seed"
+        "StartSession still offers work_queue_base_session_id, the removed stack seed"
     );
 }

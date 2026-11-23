@@ -1,7 +1,7 @@
 /**
  * Acceptance tests: the PR-Stack Chat Screen's planned-PR list.
  *
- * Renders one row per `StackNode` in the orchestrator session's `Stack` (topo order),
+ * Renders one row per `WorkItem` in the orchestrator session's `Stack` (topo order),
  * showing a "Start session" CTA for unspawned nodes and a status chip for spawned ones.
  *
  * PRD: docs/ft/coder/pr-stacking.md (unified pr-stack recipe), docs/ft/web/session-drawer.md
@@ -12,7 +12,7 @@ import React from "react";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -20,7 +20,7 @@ import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
 
 const ORCHESTRATOR_SESSION_ID = "pr-stack-session-1111-0000-0000-0000-000000000010";
 
-function anOrchestratorSession(stackPlanJson: string) {
+function anOrchestratorSession(workQueueJson: string) {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-01T09:00:00Z",
@@ -34,7 +34,7 @@ function anOrchestratorSession(stackPlanJson: string) {
     pendingElicitation: false,
     orchestratorSessionId: "",
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -60,24 +60,24 @@ beforeEach(() => {
 
 it("shows a planned-PR row with a Start session CTA for a node that has not been spawned", () => {
   // Given
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store" }),
   ]);
 
   // When
   openPrStackScreen(anOrchestratorSession(plan));
 
   // Then
-  prStackScreenPage.plannedPrRow("n1").should("exist").and("contain.text", "Add token store");
+  prStackScreenPage.workItemRow("n1").should("exist").and("contain.text", "Add token store");
   prStackScreenPage.startSessionBtn("n1").should("exist");
   prStackScreenPage.statusChip("n1").should("not.exist");
 });
 
 it("shows a status chip instead of a Start session CTA once a node has a spawned child session", () => {
   // Given
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: "feature/token-store",
       sessionId: "child-session-abc",
@@ -97,16 +97,16 @@ it("renders planned-PR rows in topological order, roots before their dependents"
   // Given — n2 depends on n1; the plan lists them out of order to prove sorting, not fixture order.
   // Neither node carries a persisted position, which is what a plan authored before display order
   // existed looks like — so this is also the legacy fallback case.
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"] }),
-    aPlannedNode({ nodeId: "n1", title: "Add token store" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n2", title: "Add auth middleware", parents: ["n1"] }),
+    aPlannedNode({ itemId: "n1", title: "Add token store" }),
   ]);
 
   // When
   openPrStackScreen(anOrchestratorSession(plan));
 
   // Then
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n1", "n2"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -115,33 +115,33 @@ it("renders planned-PR rows in topological order, roots before their dependents"
 
 it("renders planned-PR rows in the order the plan persists", () => {
   // Given — the persisted positions contradict both the fixture order and the dependency graph
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", displayOrder: 2 }),
-    aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"], displayOrder: 0 }),
-    aPlannedNode({ nodeId: "n3", title: "Add login screen", parents: ["n2"], displayOrder: 1 }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", displayOrder: 2 }),
+    aPlannedNode({ itemId: "n2", title: "Add auth middleware", parents: ["n1"], displayOrder: 0 }),
+    aPlannedNode({ itemId: "n3", title: "Add login screen", parents: ["n2"], displayOrder: 1 }),
   ]);
 
   // When
   openPrStackScreen(anOrchestratorSession(plan));
 
   // Then — the operator's reading order and the dependency graph are allowed to differ
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n2", "n3", "n1"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n2", "n3", "n1"]);
 });
 
 it("keeps a row in its persisted position when a predecessor merges under it", () => {
   // Given — n1 has merged, which collapses n2's effective base and would re-layer a derived order.
   // The positions say otherwise, and a merge is exactly the kind of unrelated event that used to
   // make a row the operator was reading jump.
-  const plan = aStackPlanJson(1, [
+  const plan = aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: "feature/auth/token-store",
       prStatus: { phase: "merged" },
       displayOrder: 1,
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Add auth middleware",
       parents: ["n1"],
       displayOrder: 0,
@@ -152,21 +152,21 @@ it("keeps a row in its persisted position when a predecessor merges under it", (
   openPrStackScreen(anOrchestratorSession(plan));
 
   // Then
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n2", "n1"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n2", "n1"]);
 });
 
 it("falls back to topological order when only some rows carry a persisted position", () => {
   // Given — a half-numbered plan has no coherent total order. Interleaving real positions with
   // invented ones can render a child above its parent, which is a worse lie than one render of a
   // correct derived order; the next write to the stack numbers everything.
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n2", title: "Add auth middleware", parents: ["n1"], displayOrder: 0 }),
-    aPlannedNode({ nodeId: "n1", title: "Add token store" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n2", title: "Add auth middleware", parents: ["n1"], displayOrder: 0 }),
+    aPlannedNode({ itemId: "n1", title: "Add token store" }),
   ]);
 
   // When
   openPrStackScreen(anOrchestratorSession(plan));
 
   // Then
-  prStackScreenPage.plannedPrRowNodeIds().should("deep.equal", ["n1", "n2"]);
+  prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);
 });

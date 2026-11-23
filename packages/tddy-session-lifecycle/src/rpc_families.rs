@@ -4,7 +4,7 @@
 //! depends on this crate. Two things here still need them:
 //!
 //! - a session start whose stack parent is owned by a peer, or which names a stack node, asks the
-//!   PR-stack handler — the same path a client's `ResolveStackBase` / `LinkStackNode` takes, peer
+//!   PR-stack handler — the same path a client's `ResolveWorkItemBase` / `LinkWorkItem` takes, peer
 //!   routing and refusals included;
 //! - a session room serves every family a room's agents may call, these four among them.
 //!
@@ -20,14 +20,14 @@ use tddy_agent_launch::launch_ports::LaunchSessions;
 use tddy_rpc::Status;
 
 use crate::connection_service::DaemonSessionHost;
-use crate::PrStackHandler;
+use crate::WorkQueueHandler;
 
 /// The RPC families a [`DaemonSessionHost`] reaches without depending on the crate that serves
 /// them.
 pub trait DaemonRpcFamilies: Send + Sync {
     /// The PR-stack handler a session start routes its stack-base and stack-link questions
     /// through.
-    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler>;
+    fn work_queue_handler(&self) -> Arc<dyn WorkQueueHandler>;
 
     /// The families' transport entries, as a session room serves them.
     fn service_entries(&self) -> Vec<tddy_rpc::ServiceEntry>;
@@ -95,8 +95,8 @@ impl WeakRpcFamilies {
 }
 
 impl DaemonRpcFamilies for WeakRpcFamilies {
-    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
-        self.installed().pr_stack_handler()
+    fn work_queue_handler(&self) -> Arc<dyn WorkQueueHandler> {
+        self.installed().work_queue_handler()
     }
 
     fn service_entries(&self) -> Vec<tddy_rpc::ServiceEntry> {

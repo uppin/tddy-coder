@@ -544,7 +544,7 @@ async fn start_session_rpc_threads_permission_mode_to_pty() {
             selected_branch_to_work_on: String::new(),
             initial_prompt: String::new(),
             permission_mode: "bypassPermissions".to_string(), // NEW FIELD — does not exist yet
-            stack_parent: String::new(),
+            work_queue_parent: String::new(),
             sandbox: false,
             managed_codebase: false,
             specialized_agents: vec![],

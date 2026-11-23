@@ -59,7 +59,6 @@ pub use proto::livekit::LiveKitServiceServer;
 pub use proto::local_token::LocalTokenServiceServer;
 pub use proto::loopback_tunnel::LoopbackTunnelServiceServer;
 pub use proto::models::{ModelRegistryService, ModelRegistryServiceServer};
-pub use proto::pr_stack::PrStackServiceServer;
 pub use proto::project::ProjectServiceServer;
 pub use proto::reflection::ServerReflectionServer;
 pub use proto::remote::TddyRemoteServer;
@@ -74,6 +73,7 @@ pub use proto::terminal::TerminalServiceServer;
 pub use proto::test::{EchoServiceServer, EchoServiceTonicAdapter};
 pub use proto::token::{TokenServiceServer, TokenServiceTonicAdapter};
 pub use proto::vm::VmServiceServer;
+pub use proto::work_queue::WorkQueueServiceServer;
 pub use proto::worktree::WorktreeServiceServer;
 pub use reflection_service::{
     reflection_entry_from, reflection_entry_from_with_supplements, ServerReflectionImpl,
@@ -212,11 +212,11 @@ pub mod proto {
     pub mod exec_tools {
         include!(concat!(env!("OUT_DIR"), "/exec_tools.rs"));
     }
-    /// `PrStackService`: planning, querying and repointing a stack of dependent pull requests.
+    /// `WorkQueueService`: planning, querying and repointing a stack of dependent pull requests.
     /// Served from `tddy-workflow-recipes`, which already owns the recipes and the MCP tools.
     #[allow(unused_imports, unused_variables)]
-    pub mod pr_stack {
-        include!(concat!(env!("OUT_DIR"), "/pr_stack.rs"));
+    pub mod work_queue {
+        include!(concat!(env!("OUT_DIR"), "/work_queue.rs"));
     }
 
     /// Tonic-generated gRPC / Connect-HTTP server and client for `catalog.proto`.
@@ -231,10 +231,10 @@ pub mod proto {
         include!(concat!(env!("OUT_DIR"), "/tonic_exec_tools/exec_tools.rs"));
     }
 
-    /// Tonic-generated gRPC / Connect-HTTP server and client for `pr_stack.proto`.
-    pub mod tonic_pr_stack {
+    /// Tonic-generated gRPC / Connect-HTTP server and client for `work_queue.proto`.
+    pub mod tonic_work_queue {
         #![allow(unused_imports, clippy::all)]
-        include!(concat!(env!("OUT_DIR"), "/tonic_pr_stack/pr_stack.rs"));
+        include!(concat!(env!("OUT_DIR"), "/tonic_work_queue/work_queue.rs"));
     }
 
     /// Tonic-generated gRPC / Connect-HTTP server and client for `session.proto`.

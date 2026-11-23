@@ -278,7 +278,7 @@ pub use session_worktree_observer::SessionWorktreeObserver;
 
 pub use seed_codebase::*;
 
-pub use stack_parent::*;
+pub use work_queue_parent::*;
 
 pub use seeded_clone_guard::*;
 
@@ -306,10 +306,11 @@ pub use tddy_agent_launch::{
     claude_cli_spawn, conversation_spawn, conversation_spawn_handler, conversation_worktree_op,
     family_proto_bridge, hooks_and_urls, host_session_socket, jail_relaunch, launch_ports,
     managed_launch, session_acting_identity, session_coordinate_handlers,
-    session_worktree_observer, stack_parent, svc_ensure_project_available_for_start,
+    session_worktree_observer, svc_ensure_project_available_for_start,
     svc_index_workspace_worktree, svc_pr_status_for_caller, svc_relaunch_sandboxed_runner,
     svc_resume_claude_cli_session, svc_start_claude_cli_session,
-    svc_start_sandboxed_claude_cli_session, svc_start_session_core, worktree_source,
+    svc_start_sandboxed_claude_cli_session, svc_start_session_core, work_queue_parent,
+    worktree_source,
 };
 
 mod svc_launch_delegators;

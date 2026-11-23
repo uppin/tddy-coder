@@ -25,7 +25,7 @@ import { servedAgentWire, withDeclaredSessionTypes } from "../support/servedAgen
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { SessionService, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
@@ -33,10 +33,10 @@ import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -58,15 +58,15 @@ const PROJECT: Partial<ProjectEntry> = {
 };
 
 /** `n1` owns a created branch; `n2` depends on it and has not been started. */
-const A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT: StackNodeFixture[] = [
+const A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT: WorkItemFixture[] = [
   aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Start-session attachment proto",
     branch: BASE_BRANCH,
     sessionId: "child-n1",
   }),
   aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Copy attachments during StartSession",
     branchSuggestion: "feature/attach-docs/attach-start",
     parents: ["n1"],
@@ -77,27 +77,27 @@ const A_SPAWNED_PREDECESSOR_AND_ITS_DEPENDENT: StackNodeFixture[] = [
  * `n3` is blocked twice over: one parent owns no branch, and the branch the other one owns — which
  * is what its base resolves to — is absent from this host's `origin`.
  */
-const TWO_BLOCKERS_AT_ONCE: StackNodeFixture[] = [
+const TWO_BLOCKERS_AT_ONCE: WorkItemFixture[] = [
   aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Start-session attachment proto",
     branch: BASE_BRANCH,
     sessionId: "child-n1",
   }),
   aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Session attachment storage",
     branchSuggestion: "feature/attach-docs/attach-store",
   }),
   aPlannedNode({
-    nodeId: "n3",
+    itemId: "n3",
     title: "Copy attachments during StartSession",
     branchSuggestion: "feature/attach-docs/attach-copy",
     parents: ["n1", "n2"],
   }),
 ];
 
-function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry> {
+function anOrchestratorSession(nodes: WorkItemFixture[]): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-30T09:00:00Z",
@@ -108,7 +108,7 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
     // A pr-stack orchestrator is a tddy-coder session; its children start as the same kind.
     sessionType: "tool",
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, nodes),
+    workQueueJson: aWorkQueueJson(1, nodes),
   };
 }
 
@@ -121,11 +121,11 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
  * Create cannot state what a force start actually sends.
  */
 function openPrStackScreen(
-  nodes: StackNodeFixture[],
+  nodes: WorkItemFixture[],
   resolutionByBranch: Record<string, BranchResolutionFixture>,
 ) {
   const backend = aSessionsDrawerBackend([anOrchestratorSession(nodes)])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(resolutionByBranch[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))

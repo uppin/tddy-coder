@@ -7,7 +7,7 @@
 //! keys are the whole of the association's cross-host half (D37).
 //!
 //! The block is built by a named function rather than inline at the `spawn_livekit_bridge` call so
-//! that what it carries can be asserted at all — the same reason `pr_stack_spawn_args` exists.
+//! that what it carries can be asserted at all — the same reason `work_queue_spawn_args` exists.
 //!
 //! What is deliberately **not** here: that the block reaches a room. That needs a LiveKit server,
 //! and the serialization it travels as is pinned by
@@ -19,8 +19,8 @@ use std::path::Path;
 
 use tddy_rpc::Status;
 use tddy_session_lifecycle::connection_service::{
-    claude_cli_participant_metadata, SpawnStackParent, StackBaseLookup, StackNodeLink,
-    StackParentHost, StartingClaudeCliSession,
+    claude_cli_participant_metadata, SpawnWorkQueueParent, StartingClaudeCliSession,
+    WorkItemBaseLookup, WorkItemLink, WorkQueueParentHost,
 };
 
 const SESSION: &str = "019f9fdb-cf83-70d2-aef5-0000000000b2";
@@ -29,7 +29,9 @@ const NODE: &str = "attach-store";
 const BRANCH: &str = "feature/attach-docs/attach-store";
 
 /// A starting claude-cli session that materializes a planned node of a pr-stack orchestrator.
-fn a_starting_child_of<'a>(stack_parent: &'a SpawnStackParent<'a>) -> StartingClaudeCliSession<'a> {
+fn a_starting_child_of<'a>(
+    work_queue_parent: &'a SpawnWorkQueueParent<'a>,
+) -> StartingClaudeCliSession<'a> {
     StartingClaudeCliSession {
         agent: "claude",
         session_id: SESSION,
@@ -37,38 +39,38 @@ fn a_starting_child_of<'a>(stack_parent: &'a SpawnStackParent<'a>) -> StartingCl
         recipe: "tdd",
         worktree_path: Path::new("/home/dev/worktrees/attach-store"),
         branch: BRANCH,
-        stack_parent,
+        work_queue_parent,
     }
 }
 
 /// The orchestrator's own daemon, as a spawn addresses it. Its `host` is never called here — this
 /// block is built from what the spawn already knows, and asks nobody.
 fn an_orchestrator_that_planned_the_node<'a>(
-    host: &'a dyn StackParentHost,
-) -> SpawnStackParent<'a> {
-    SpawnStackParent::OwnedBy {
+    host: &'a dyn WorkQueueParentHost,
+) -> SpawnWorkQueueParent<'a> {
+    SpawnWorkQueueParent::OwnedBy {
         session_id: ORCHESTRATOR,
         daemon_instance_id: "host-a",
-        stack_node_id: NODE,
+        work_item_id: NODE,
         session_token: "valid-session-token",
         host,
     }
 }
 
-/// A [`StackParentHost`] that answers nothing: the block is built from what the spawn already
+/// A [`WorkQueueParentHost`] that answers nothing: the block is built from what the spawn already
 /// knows, so resolving a base or writing a link here would be a question nobody asked.
 struct AnUnaskedOwner;
 
 #[async_trait::async_trait]
-impl StackParentHost for AnUnaskedOwner {
+impl WorkQueueParentHost for AnUnaskedOwner {
     async fn chain_base_ref(
         &self,
-        _lookup: &StackBaseLookup<'_>,
+        _lookup: &WorkItemBaseLookup<'_>,
     ) -> Result<Option<String>, Status> {
         panic!("building the participant block must ask the orchestrator's daemon nothing")
     }
 
-    async fn link_spawned_branch(&self, _link: &StackNodeLink<'_>) -> Result<(), Status> {
+    async fn link_spawned_branch(&self, _link: &WorkItemLink<'_>) -> Result<(), Status> {
         panic!("building the participant block must ask the orchestrator's daemon nothing")
     }
 }
@@ -77,17 +79,17 @@ impl StackParentHost for AnUnaskedOwner {
 fn names_the_session_its_orchestrator_the_planned_node_and_the_branch_it_created() {
     // Given
     let owner = AnUnaskedOwner;
-    let stack_parent = an_orchestrator_that_planned_the_node(&owner);
+    let work_queue_parent = an_orchestrator_that_planned_the_node(&owner);
 
     // When
-    let block = claude_cli_participant_metadata(&a_starting_child_of(&stack_parent));
+    let block = claude_cli_participant_metadata(&a_starting_child_of(&work_queue_parent));
 
     // Then — these four are what a PR-Stack view one host over joins the synthesized row on
     assert_eq!(
         (
             block.session_id.as_str(),
             block.orchestrator_session_id.as_str(),
-            block.stack_node_id.as_str(),
+            block.work_item_id.as_str(),
             block.branch.as_str()
         ),
         (SESSION, ORCHESTRATOR, NODE, BRANCH)
@@ -98,10 +100,10 @@ fn names_the_session_its_orchestrator_the_planned_node_and_the_branch_it_created
 fn names_the_agent_the_model_and_the_checkout_the_session_runs_in() {
     // Given
     let owner = AnUnaskedOwner;
-    let stack_parent = an_orchestrator_that_planned_the_node(&owner);
+    let work_queue_parent = an_orchestrator_that_planned_the_node(&owner);
 
     // When
-    let block = claude_cli_participant_metadata(&a_starting_child_of(&stack_parent));
+    let block = claude_cli_participant_metadata(&a_starting_child_of(&work_queue_parent));
 
     // Then — a cross-host row previously showed only a short session id
     assert_eq!(
@@ -123,12 +125,12 @@ fn names_the_agent_the_model_and_the_checkout_the_session_runs_in() {
 #[test]
 fn publishes_the_association_of_a_session_that_belongs_to_no_stack_as_empty_rather_than_absent() {
     // Given — an ordinary claude-cli session, started under no orchestrator
-    let stack_parent = SpawnStackParent::NoParent;
+    let work_queue_parent = SpawnWorkQueueParent::NoParent;
 
     // When
     let block = claude_cli_participant_metadata(&StartingClaudeCliSession {
         branch: "feature/standalone",
-        ..a_starting_child_of(&stack_parent)
+        ..a_starting_child_of(&work_queue_parent)
     });
 
     // Then — empty is a fact ("this session is nobody's stack child"), and the merge into
@@ -136,7 +138,7 @@ fn publishes_the_association_of_a_session_that_belongs_to_no_stack_as_empty_rath
     assert_eq!(
         (
             block.orchestrator_session_id.as_str(),
-            block.stack_node_id.as_str()
+            block.work_item_id.as_str()
         ),
         ("", "")
     );
@@ -146,10 +148,10 @@ fn publishes_the_association_of_a_session_that_belongs_to_no_stack_as_empty_rath
 fn leaves_the_live_workflow_fields_empty_because_the_daemon_taps_no_workflow() {
     // Given
     let owner = AnUnaskedOwner;
-    let stack_parent = an_orchestrator_that_planned_the_node(&owner);
+    let work_queue_parent = an_orchestrator_that_planned_the_node(&owner);
 
     // When
-    let block = claude_cli_participant_metadata(&a_starting_child_of(&stack_parent));
+    let block = claude_cli_participant_metadata(&a_starting_child_of(&work_queue_parent));
 
     // Then — exactly as they were when a claude-cli session published nothing at all; filling them
     // needs a workflow tap the way `tddy-coder` has one

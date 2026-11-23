@@ -18,10 +18,10 @@ mod result_frames;
 mod role_guard;
 mod session_files;
 mod session_messages;
-mod stack_git_tools;
-pub mod stack_tools;
 mod watch_events;
 pub mod watch_wake;
+mod work_item_git_tools;
+pub mod work_queue_tools;
 
 pub use result_frames::EXEC_TOOL_FRAME_BYTES;
 
@@ -120,7 +120,7 @@ pub(crate) struct ProjectHomeHost {
     /// How the stack tools reach GitHub (`#orchestrators` 7/11), late-bound by
     /// [`RpcHandlers::attach_stack_github`](crate::RpcHandlers::attach_stack_github); the GitHub REST
     /// API itself when nothing is attached.
-    pub(crate) stack_github: Arc<OnceLock<Arc<dyn stack_tools::StackGithubClients>>>,
+    pub(crate) work_queue_github: Arc<OnceLock<Arc<dyn work_queue_tools::WorkQueueGithubClients>>>,
 }
 
 impl ExecToolRpcHandler {
@@ -156,7 +156,7 @@ impl ExecToolRpcHandler {
                 notification_bus: host.session_notification_bus(),
                 session_watches: host.session_watches(),
                 activity: Arc::new(host.activity_service()),
-                stack_github: Arc::new(OnceLock::new()),
+                work_queue_github: Arc::new(OnceLock::new()),
             },
         }
     }
@@ -207,10 +207,10 @@ impl ExecToolRpcHandler {
     }
 
     /// The late-bound stack-tools GitHub cell, shared with the families that attach it.
-    pub(crate) fn stack_github_cell(
+    pub(crate) fn work_queue_github_cell(
         &self,
-    ) -> Arc<OnceLock<Arc<dyn stack_tools::StackGithubClients>>> {
-        Arc::clone(&self.project_home_host.stack_github)
+    ) -> Arc<OnceLock<Arc<dyn work_queue_tools::WorkQueueGithubClients>>> {
+        Arc::clone(&self.project_home_host.work_queue_github)
     }
 
     /// The late-bound provider-account cell, shared with the families that attach it.

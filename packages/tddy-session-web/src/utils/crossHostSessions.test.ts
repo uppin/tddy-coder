@@ -41,7 +41,7 @@ function aSessionMetadata(overrides: Partial<SessionMetadata> = {}): SessionMeta
     pendingElicitation: false,
     sessionId: SID_B,
     orchestratorSessionId: "",
-    stackNodeId: "",
+    workItemId: "",
     branch: "",
     ...overrides,
   };

@@ -1,8 +1,8 @@
 /**
  * Acceptance tests: the planned node a spawn materializes travels with the spawn, as
- * `StartSessionRequest.stack_node_id`.
+ * `StartSessionRequest.work_item_id`.
  *
- * The daemon used to re-derive the node from the branch the spawn creates (`pr_stack_node_for_spawn`
+ * The daemon used to re-derive the node from the branch the spawn creates (`work_item_for_spawn`
  * matches on `new_branch_name`), which the operator can rename in this very form before confirming —
  * and which the spawning daemon cannot look up at all when the orchestrator lives on another host.
  * The node id is the one fact the surface that opened the form already knows exactly (D34).
@@ -11,7 +11,7 @@
  * picker for it. Both come from the surface that opened the form and travel together, because a node
  * id names a node in the parent's plan and in no other.
  *
- * All three session types carry it. The daemon threads `stack_node_id` to the cursor-cli and tool
+ * All three session types carry it. The daemon threads `work_item_id` to the cursor-cli and tool
  * spawn paths as well, so omitting it there would silently re-open the same hole for those.
  *
  * PRD: docs/ft/coder/pr-stack-live-status.md § Cross-host planned PRs (D34, D36).
@@ -117,8 +117,8 @@ function mountPaneForPlannedNode(backend: ReturnType<typeof aCreateSessionBacken
         initialValues={{
           sessionType: "claude-cli",
           projectId: PROJECT_ID,
-          stackParent: ORCHESTRATOR,
-          stackNodeId: NODE_ID,
+          workQueueParent: ORCHESTRATOR,
+          workItemId: NODE_ID,
           newBranchName: PLANNED_BRANCH,
         }}
       />,
@@ -129,12 +129,12 @@ function mountPaneForPlannedNode(backend: ReturnType<typeof aCreateSessionBacken
 
 function theSubmittedStart(
   backend: ReturnType<typeof aCreateSessionBackend>,
-  assertion: (call: { stackParent: string; stackNodeId: string }) => void,
+  assertion: (call: { workQueueParent: string; workItemId: string }) => void,
 ) {
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
-    assertion(calls[0] as { stackParent: string; stackNodeId: string });
+    assertion(calls[0] as { workQueueParent: string; workItemId: string });
   });
 }
 
@@ -163,8 +163,8 @@ it("sends the planned node id beside the orchestrator the form was opened for", 
 
   // Then
   theSubmittedStart(backend, (call) => {
-    expect(call.stackParent).to.equal(ORCHESTRATOR);
-    expect(call.stackNodeId).to.equal(NODE_ID);
+    expect(call.workQueueParent).to.equal(ORCHESTRATOR);
+    expect(call.workItemId).to.equal(NODE_ID);
   });
 });
 
@@ -179,8 +179,8 @@ it("sends the planned node id for a cursor-cli child", () => {
 
   // Then
   theSubmittedStart(backend, (call) => {
-    expect(call.stackParent).to.equal(ORCHESTRATOR);
-    expect(call.stackNodeId).to.equal(NODE_ID);
+    expect(call.workQueueParent).to.equal(ORCHESTRATOR);
+    expect(call.workItemId).to.equal(NODE_ID);
   });
 });
 
@@ -196,7 +196,7 @@ it("sends the planned node id for a tool child", () => {
 
   // Then
   theSubmittedStart(backend, (call) => {
-    expect(call.stackParent).to.equal(ORCHESTRATOR);
-    expect(call.stackNodeId).to.equal(NODE_ID);
+    expect(call.workQueueParent).to.equal(ORCHESTRATOR);
+    expect(call.workItemId).to.equal(NODE_ID);
   });
 });

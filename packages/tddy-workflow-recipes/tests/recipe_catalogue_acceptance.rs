@@ -50,7 +50,7 @@ fn the_recipes_crate_holds_no_stack_module() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
 
     // When
-    let present: Vec<&str> = ["pr_stack", "plan_pr_stack", "orchestrate_pr_stack"]
+    let present: Vec<&str> = ["work_queue", "plan_pr_stack", "orchestrate_pr_stack"]
         .into_iter()
         .filter(|module| src.join(module).exists() || src.join(format!("{module}.rs")).exists())
         .collect();

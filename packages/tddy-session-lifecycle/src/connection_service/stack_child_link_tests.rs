@@ -1,11 +1,11 @@
 use super::*;
-use tddy_core::changeset::{Stack, StackNode};
+use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::{write_changeset, Changeset};
 
 /// A planned node: it carries the branch name the planner proposed, but nothing created it yet.
-fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> StackNode {
-    StackNode {
+fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> WorkItem {
+    WorkItem {
         node_id: node_id.to_string(),
         title: node_id.to_string(),
         description: String::new(),
@@ -24,11 +24,11 @@ fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> S
 fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> PathBuf {
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
                     a_planned_node("bottom", "feature/bottom", &[]),
@@ -45,14 +45,14 @@ fn an_orchestrator_with_a_two_node_stack(sessions_base: &std::path::Path) -> Pat
 fn an_orchestrator_with_a_renamed_bottom_branch(sessions_base: &std::path::Path) -> PathBuf {
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
-                    StackNode {
+                    WorkItem {
                         branch: Some("feature/bottom-renamed".to_string()),
                         ..a_planned_node("bottom", "feature/bottom", &[])
                     },
@@ -73,14 +73,14 @@ fn an_orchestrator_whose_bottom_node_lost_its_child_session(
 ) -> PathBuf {
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
-                    StackNode {
+                    WorkItem {
                         branch: Some("feature/bottom".to_string()),
                         session_id: Some("deleted-child".to_string()),
                         ..a_planned_node("bottom", "feature/bottom", &[])
@@ -112,14 +112,14 @@ fn an_orchestrator_whose_bottom_branch_only_its_session_knows(
 
     let dir = unified_session_dir_path(sessions_base, "orchestrator-1");
     std::fs::create_dir_all(&dir).expect("create orchestrator session dir");
-    tddy_changeset::stack_fixtures::write_changeset_with_stack(
+    tddy_changeset::work_queue_fixtures::write_changeset_with_stack(
         &dir,
         Changeset {
             recipe: Some("pr-stack".to_string()),
-            stack: Some(Stack {
+            stack: Some(WorkQueue {
                 version: 1,
                 nodes: vec![
-                    StackNode {
+                    WorkItem {
                         session_id: Some("child-1".to_string()),
                         ..a_planned_node("bottom", "feature/bottom", &[])
                     },
@@ -140,7 +140,7 @@ fn spawning_bases_a_node_on_a_parent_branch_only_its_child_session_recorded() {
 
     // When — `top` is spawned and the daemon resolves the node it materializes
     let (_dir, stack, node_id) =
-        tddy_core::pr_stack_node_for_spawn(tmp.path(), "orchestrator-1", "", "feature/top")
+        tddy_core::work_item_for_spawn(tmp.path(), "orchestrator-1", "", "feature/top")
             .expect("the planned node for the spawned branch must resolve");
 
     // Then — the session fallback supplies the parent's branch, so `top` is not blocked
@@ -153,8 +153,8 @@ fn spawning_bases_a_node_on_a_parent_branch_only_its_child_session_recorded() {
     );
 }
 
-fn stack_of(orchestrator_dir: &std::path::Path) -> Stack {
-    tddy_changeset::stack_fixtures::stack_on_disk(orchestrator_dir)
+fn stack_of(orchestrator_dir: &std::path::Path) -> WorkQueue {
+    tddy_changeset::work_queue_fixtures::stack_on_disk(orchestrator_dir)
 }
 
 #[test]
@@ -164,7 +164,7 @@ fn linking_records_the_branch_a_child_created_on_the_planned_node_it_materialize
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
 
     // When — a child creates the branch the bottom node was planned to own
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -193,7 +193,7 @@ fn linking_records_the_child_session_as_a_fallback_route_to_the_branch() {
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
 
     // When — a child creates the bottom node's branch
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -226,7 +226,7 @@ fn linking_a_planned_node_unblocks_spawning_its_dependent_node() {
     );
 
     // When — `bottom`'s branch is created and linked
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -249,14 +249,14 @@ fn linking_is_a_no_op_when_the_spawn_materializes_no_planned_node() {
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
 
     // No stack parent at all, and a branch no planned node claims: both are ordinary sessions.
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         None,
         "feature/bottom",
         "child-1",
     )
     .expect("a parentless spawn must not error");
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/unplanned",
@@ -276,7 +276,7 @@ fn linking_repoints_a_node_to_the_child_session_that_now_owns_its_branch() {
     // Given — the bottom node's branch was first created by child-1
     let tmp = tempfile::tempdir().expect("temp dir");
     let orchestrator_dir = an_orchestrator_with_a_two_node_stack(tmp.path());
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -285,7 +285,7 @@ fn linking_repoints_a_node_to_the_child_session_that_now_owns_its_branch() {
     .expect("first link must succeed");
 
     // When — that session is replaced by a new one on the same branch (restart, re-attach)
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom",
@@ -313,7 +313,7 @@ fn a_spawn_resuming_an_existing_branch_relinks_the_node_that_owns_it() {
     let orchestrator_dir = an_orchestrator_whose_bottom_node_lost_its_child_session(tmp.path());
 
     // When — the spawn links its node on the branch it actually operates on
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         effective_spawn_branch("work_on_selected_branch", "", "feature/bottom", "origin"),
@@ -341,7 +341,7 @@ fn a_spawn_resuming_a_remote_tracking_branch_relinks_the_node_that_owns_it() {
     let orchestrator_dir = an_orchestrator_whose_bottom_node_lost_its_child_session(tmp.path());
 
     // When
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         effective_spawn_branch(
@@ -373,7 +373,7 @@ fn linking_matches_a_node_by_the_branch_it_recorded_rather_than_its_suggestion()
     let orchestrator_dir = an_orchestrator_with_a_renamed_bottom_branch(tmp.path());
 
     // When — a session attaches to the branch the node actually owns
-    DaemonSessionHost::link_stack_node_to_spawned_branch(
+    DaemonSessionHost::link_work_item_to_spawned_branch(
         tmp.path(),
         Some("orchestrator-1"),
         "feature/bottom-renamed",

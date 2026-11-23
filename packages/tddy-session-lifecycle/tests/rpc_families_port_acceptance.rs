@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use tddy_rpc::{Code, ServiceEntry};
 use tddy_session_lifecycle::test_util::test_service;
-use tddy_session_lifecycle::{DaemonRpcFamilies, PrStackHandler};
+use tddy_session_lifecycle::{DaemonRpcFamilies, WorkQueueHandler};
 
 /// Families that are only ever handed back, never called: what is under test is which ones the
 /// host holds.
 struct SomeRpcFamilies;
 
 impl DaemonRpcFamilies for SomeRpcFamilies {
-    fn pr_stack_handler(&self) -> Arc<dyn PrStackHandler> {
+    fn work_queue_handler(&self) -> Arc<dyn WorkQueueHandler> {
         unreachable!("the port is only inspected here, never routed through")
     }
 

@@ -19,7 +19,7 @@ import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { createSessionPage } from "../support/pages/createSessionPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -48,9 +48,9 @@ const ORCHESTRATOR_SESSION: Partial<SessionEntry> = {
   recipe: "pr-stack",
   // The child runs as the same kind of session as its orchestrator parent.
   sessionType: "claude-cli",
-  stackPlanJson: aStackPlanJson(1, [
+  workQueueJson: aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: NODE_TITLE,
       description: NODE_DESCRIPTION,
       branchSuggestion: NODE_BRANCH,
@@ -169,7 +169,7 @@ it("creates the stack-parented child session when the dialog is submitted", () =
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
-    expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].workQueueParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].newBranchName).to.equal(NODE_BRANCH);
   });
   sessionsDrawerPage.drawerItem(CHILD_SESSION_ID).should("exist");
@@ -190,6 +190,6 @@ it("names the planned node the child materializes on the StartSession it submits
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
-    expect(calls[0].stackNodeId).to.equal("n1");
+    expect(calls[0].workItemId).to.equal("n1");
   });
 });

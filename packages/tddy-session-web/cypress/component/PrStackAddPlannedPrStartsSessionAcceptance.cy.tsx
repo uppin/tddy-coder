@@ -4,10 +4,10 @@
  * Adding a node and starting its session are the same intent in the common case — the operator wants
  * the next PR in the stack to exist and be worked on — but they were two controls in two places: the
  * "New planned PR" form, then hunting the new row for its own CTA. "Add & start session" is the same
- * `AddPlannedPr` call followed by the same Start-session dialog, opened on the node that call just
+ * `AddWorkItem` call followed by the same Start-session dialog, opened on the node that call just
  * appended.
  *
- * Which node that is, the **response says**: `AddPlannedPrResponse.node_id` names the node the call
+ * Which node that is, the **response says**: `AddWorkItemResponse.node_id` names the node the call
  * created. It cannot be inferred by diffing the returned plan against the one held before the call —
  * the orchestrator agent appends nodes to the same stack, and the screen's own view of it only
  * refreshes when the session list is refetched, so the plan that comes back can hold several ids this
@@ -21,15 +21,15 @@
 
 import React from "react";
 import { SessionService } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import { createSessionPage } from "../support/pages/createSessionPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
-  type StackNodeFixture,
+  aWorkQueueJson,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ const ORCHESTRATOR_SESSION_ID = "pr-stack-session-4444-0000-0000-0000-0000000000
 
 /** The node the orchestrator already has: the stack's base, bound to a real branch. */
 const BASE_NODE = aPlannedNode({
-  nodeId: "n1",
+  itemId: "n1",
   title: "Add token store",
   branch: "feat/auth-store",
   sessionId: "session-auth-store",
@@ -62,15 +62,15 @@ const NORMALIZED_BRANCH_SUGGESTION = "feature/auth/middleware-2";
 /** The base branch the added node's child is stacked onto, as the dialog submits it. */
 const BASE_NODE_BASE_REF = "origin/feat/auth-store";
 
-/** The node `AddPlannedPr` appends, as the daemon assigns it. */
+/** The node `AddWorkItem` appends, as the daemon assigns it. */
 const ADDED_NODE = aPlannedNode({
-  nodeId: "n2",
+  itemId: "n2",
   title: "Add auth middleware",
   branchSuggestion: NORMALIZED_BRANCH_SUGGESTION,
   parents: ["n1"],
 });
 
-function anOrchestratorSession(stackPlanJson: string) {
+function anOrchestratorSession(workQueueJson: string) {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-13T09:00:00Z",
@@ -84,32 +84,32 @@ function anOrchestratorSession(stackPlanJson: string) {
     pendingElicitation: false,
     orchestratorSessionId: "",
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
 /** How the daemon answers the add: the plan it re-read, and the node it says this call created. */
-interface AddPlannedPrAnswer {
+interface AddWorkItemAnswer {
   /** The plan the response carries. Defaults to the base node plus the operator's added node. */
-  nodes?: StackNodeFixture[];
+  nodes?: WorkItemFixture[];
   /** The `node_id` the response names as the one it appended. Defaults to the added node's. */
   createdNodeId?: string;
 }
 
 /**
- * The screen open on an orchestrator holding just the base node, with `AddPlannedPr` answering as
+ * The screen open on an orchestrator holding just the base node, with `AddWorkItem` answering as
  * `answer` describes. The default is the plan grown by exactly one node, named as created — the quiet
  * case; a scenario overrides either half to describe a plan the screen cannot read positionally, or a
  * response whose two halves disagree.
  */
-function openPrStackScreen(answer: AddPlannedPrAnswer = {}) {
+function openPrStackScreen(answer: AddWorkItemAnswer = {}) {
   const nodes = answer.nodes ?? [BASE_NODE, ADDED_NODE];
-  const nodeId = answer.createdNodeId ?? ADDED_NODE.nodeId;
+  const itemId = answer.createdNodeId ?? ADDED_NODE.itemId;
   const backend = aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, [BASE_NODE])),
-  ]).onUnary(PrStackService.method.addPlannedPr, () => ({
-    stackPlanJson: aStackPlanJson(1, nodes),
-    nodeId,
+    anOrchestratorSession(aWorkQueueJson(1, [BASE_NODE])),
+  ]).onUnary(WorkQueueService.method.addWorkItem, () => ({
+    workQueueJson: aWorkQueueJson(1, nodes),
+    itemId,
   }));
   openProjectStackViewOf(backend, ORCHESTRATOR_SESSION_ID);
   return backend;
@@ -138,7 +138,7 @@ it("offers an Add & start session action on the New planned PR form", () => {
   prStackScreenPage.openAddPlannedPrForm();
 
   // Then
-  prStackScreenPage.addPlannedPrStartBtn().should("exist");
+  prStackScreenPage.addWorkItemStartBtn().should("exist");
 });
 
 it("opens the start-session dialog for the node it just added", () => {
@@ -157,7 +157,7 @@ it("opens the start-session dialog for the node it just added", () => {
   prStackScreenPage.createSessionDialog().should("be.visible");
 });
 
-it("still calls AddPlannedPr exactly once with the entered fields", () => {
+it("still calls AddWorkItem exactly once with the entered fields", () => {
   // Given
   const backend = openPrStackScreen();
   prStackScreenPage.openAddPlannedPrForm();
@@ -171,9 +171,9 @@ it("still calls AddPlannedPr exactly once with the entered fields", () => {
 
   // Then the one-step action adds the node the same way "Add" does — it only continues further
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.addPlannedPr);
+    const calls = b.callsTo(WorkQueueService.method.addWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
+    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
     expect(calls[0].title).to.equal("Add auth middleware");
     expect(calls[0].branchSuggestion).to.equal(TYPED_BRANCH_SUGGESTION);
     expect(calls[0].parents).to.deep.equal(["n1"]);
@@ -232,7 +232,7 @@ it("adds the node without opening the dialog when only Add is used", () => {
   });
 
   // Then the node is on the list — the add landed — and nothing was started
-  prStackScreenPage.plannedPrRow("n2").should("exist");
+  prStackScreenPage.workItemRow("n2").should("exist");
   prStackScreenPage.createSessionDialog().should("not.exist");
 });
 
@@ -250,26 +250,26 @@ it("adds the node without opening the dialog when only Add is used", () => {
 it("opens the dialog on the node the server named, not another new node in the plan", () => {
   // Given a plan that came back with the agent's nodes surrounding the operator's
   const AGENT_NODE_BEFORE = aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Agent: split the token store",
     branchSuggestion: "feature/agent/token-store-split",
     parents: ["n1"],
   });
   const OPERATORS_NODE = aPlannedNode({
-    nodeId: "n3",
+    itemId: "n3",
     title: "Add auth middleware",
     branchSuggestion: NORMALIZED_BRANCH_SUGGESTION,
     parents: ["n1"],
   });
   const AGENT_NODE_AFTER = aPlannedNode({
-    nodeId: "n4",
+    itemId: "n4",
     title: "Agent: rotate the signing key",
     branchSuggestion: "feature/agent/rotate-signing-key",
     parents: ["n1"],
   });
   openPrStackScreen({
     nodes: [BASE_NODE, AGENT_NODE_BEFORE, OPERATORS_NODE, AGENT_NODE_AFTER],
-    createdNodeId: OPERATORS_NODE.nodeId,
+    createdNodeId: OPERATORS_NODE.itemId,
   });
   prStackScreenPage.openAddPlannedPrForm();
 
@@ -289,7 +289,7 @@ it("reports the failure and starts nothing when the named node is absent from th
   // Given a daemon whose response names a node its own plan does not contain — the two halves
   // disagree, so there is nothing trustworthy to open the dialog on, and guessing would start a
   // session for the wrong branch
-  openPrStackScreen({ nodes: [BASE_NODE], createdNodeId: ADDED_NODE.nodeId });
+  openPrStackScreen({ nodes: [BASE_NODE], createdNodeId: ADDED_NODE.itemId });
   prStackScreenPage.openAddPlannedPrForm();
 
   // When
@@ -301,7 +301,7 @@ it("reports the failure and starts nothing when the named node is absent from th
 
   // Then the form says why and stays open, and no session-creation dialog appears
   prStackScreenPage
-    .addPlannedPrError()
+    .addWorkItemError()
     .should(
       "have.text",
       "The added planned PR is missing from the returned stack plan — no session was started.",

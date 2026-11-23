@@ -97,8 +97,8 @@ describe("buildOrchestratorComposerRequest", () => {
       "managedCodebase",
       "codebaseDaemonInstanceId",
       "sshConfigHost",
-      "stackParent",
-      "stackNodeId",
+      "workQueueParent",
+      "workItemId",
     ]) {
       expect(request, daemonOwned).not.toHaveProperty(daemonOwned);
     }

@@ -1,12 +1,12 @@
 //! Acceptance: moving a node to a new place in the stack DAG.
 //!
-//! `set_stack_node_parents` is the plan-level move, distinct from `repoint_planned_pr_node`.
+//! `set_work_item_parents` is the plan-level move, distinct from `repoint_work_item`.
 //! Repointing answers "the base branch drifted — retain the parent that owns this target"; this
 //! answers "the plan changed — this node belongs *here* now", with the caller naming the complete
 //! new parent set. Since a stack's order is derived entirely from `parents`, this is also the only
 //! reorder primitive there is.
 //!
-//! Validation is not politeness. `Stack::topo_order` counts in-degree only over parents that
+//! Validation is not politeness. `WorkQueue::topo_order` counts in-degree only over parents that
 //! resolve to a node, so an unknown parent id would be silently ignored by every existing check and
 //! the stack would quietly describe an edge that does not exist. A rejected call must therefore
 //! leave the stack on disk byte-for-byte unchanged, which is what each rejection test asserts.
@@ -24,7 +24,7 @@ use common::{
     a_planned_node, a_stack_github, an_open_node, assert_rejected, parents_of, write_stack,
     A_STACK_PR, DEFAULT_BRANCH,
 };
-use tddy_pr_stack::stack_ops::set_stack_node_parents;
+use tddy_work_queue::item_ops::set_work_item_parents;
 
 const BRANCH_N1: &str = "feature/stack/n1";
 const BRANCH_N2: &str = "feature/stack/n2";
@@ -49,7 +49,7 @@ fn assert_github_untouched(gh: &common::FakeStackGithub) {
 #[test]
 fn setting_parents_on_a_plan_only_node_rewrites_the_dag_without_calling_github() {
     // Given — n3 was never started, so it owns no branch and has no PR of its own
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -62,7 +62,7 @@ fn setting_parents_on_a_plan_only_node_rewrites_the_dag_without_calling_github()
     let gh = a_stack_github();
 
     // When — the operator moves it under n2 instead
-    set_stack_node_parents(dir, dir, "n3", &parents(&["n2"]), DEFAULT_BRANCH, &gh)
+    set_work_item_parents(dir, dir, "n3", &parents(&["n2"]), DEFAULT_BRANCH, &gh)
         .expect("moving a plan-only node should succeed");
 
     // Then — the plan changed and nothing was asked of GitHub
@@ -74,7 +74,7 @@ fn setting_parents_on_a_plan_only_node_rewrites_the_dag_without_calling_github()
 #[test]
 fn setting_parents_on_a_branch_owning_node_patches_its_open_prs_base_to_the_new_effective_base() {
     // Given — n3 owns a branch and an open PR, and currently stacks on n1
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -87,7 +87,7 @@ fn setting_parents_on_a_branch_owning_node_patches_its_open_prs_base_to_the_new_
     let gh = a_stack_github();
 
     // When — the operator moves it under n2
-    set_stack_node_parents(dir, dir, "n3", &parents(&["n2"]), DEFAULT_BRANCH, &gh)
+    set_work_item_parents(dir, dir, "n3", &parents(&["n2"]), DEFAULT_BRANCH, &gh)
         .expect("moving a branch-owning node should succeed");
 
     // Then — the PR now targets n2's branch
@@ -102,7 +102,7 @@ fn setting_parents_on_a_branch_owning_node_patches_its_open_prs_base_to_the_new_
 #[test]
 fn emptying_a_nodes_parents_makes_it_base_off_the_stack_bottom() {
     // Given — n3 stacks on n1 and owns an open PR
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -114,7 +114,7 @@ fn emptying_a_nodes_parents_makes_it_base_off_the_stack_bottom() {
     let gh = a_stack_github();
 
     // When — the operator detaches it entirely
-    set_stack_node_parents(dir, dir, "n3", &[], DEFAULT_BRANCH, &gh)
+    set_work_item_parents(dir, dir, "n3", &[], DEFAULT_BRANCH, &gh)
         .expect("detaching a node should succeed");
 
     // Then — it is a root, and its PR targets the stack's default branch
@@ -128,7 +128,7 @@ fn emptying_a_nodes_parents_makes_it_base_off_the_stack_bottom() {
 #[test]
 fn naming_an_unknown_parent_is_rejected_and_the_dag_on_disk_is_unchanged() {
     // Given — a two-node stack with no node called n9
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -140,7 +140,7 @@ fn naming_an_unknown_parent_is_rejected_and_the_dag_on_disk_is_unchanged() {
     let gh = a_stack_github();
 
     // When
-    let result = set_stack_node_parents(dir, dir, "n3", &parents(&["n9"]), DEFAULT_BRANCH, &gh);
+    let result = set_work_item_parents(dir, dir, "n3", &parents(&["n9"]), DEFAULT_BRANCH, &gh);
 
     // Then — refused by name, and n3 still stacks where it did
     assert_rejected(result).with_reason_containing("n9");
@@ -151,7 +151,7 @@ fn naming_an_unknown_parent_is_rejected_and_the_dag_on_disk_is_unchanged() {
 #[test]
 fn naming_the_node_itself_as_its_own_parent_is_rejected() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -163,7 +163,7 @@ fn naming_the_node_itself_as_its_own_parent_is_rejected() {
     let gh = a_stack_github();
 
     // When
-    let result = set_stack_node_parents(dir, dir, "n3", &parents(&["n3"]), DEFAULT_BRANCH, &gh);
+    let result = set_work_item_parents(dir, dir, "n3", &parents(&["n3"]), DEFAULT_BRANCH, &gh);
 
     // Then
     assert_rejected(result).with_reason_containing("n3");
@@ -174,7 +174,7 @@ fn naming_the_node_itself_as_its_own_parent_is_rejected() {
 #[test]
 fn a_parent_change_that_would_close_a_cycle_is_rejected_and_the_dag_on_disk_is_unchanged() {
     // Given — a straight chain n1 → n2 → n3
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -187,7 +187,7 @@ fn a_parent_change_that_would_close_a_cycle_is_rejected_and_the_dag_on_disk_is_u
     let gh = a_stack_github();
 
     // When — the operator tries to stack the chain's root on its own descendant
-    let result = set_stack_node_parents(dir, dir, "n1", &parents(&["n3"]), DEFAULT_BRANCH, &gh);
+    let result = set_work_item_parents(dir, dir, "n1", &parents(&["n3"]), DEFAULT_BRANCH, &gh);
 
     // Then
     assert_rejected(result).with_reason_containing("cycle");
@@ -198,7 +198,7 @@ fn a_parent_change_that_would_close_a_cycle_is_rejected_and_the_dag_on_disk_is_u
 #[test]
 fn a_repeated_parent_id_is_rejected() {
     // Given
-    let tmp = tddy_changeset::stack_fixtures::a_stack_session_dir();
+    let tmp = tddy_changeset::work_queue_fixtures::a_stack_session_dir();
     let dir = tmp.path();
     write_stack(
         dir,
@@ -211,7 +211,7 @@ fn a_repeated_parent_id_is_rejected() {
 
     // When
     let result =
-        set_stack_node_parents(dir, dir, "n3", &parents(&["n1", "n1"]), DEFAULT_BRANCH, &gh);
+        set_work_item_parents(dir, dir, "n3", &parents(&["n1", "n1"]), DEFAULT_BRANCH, &gh);
 
     // Then — a repeated edge is a caller mistake, not a two-parent diamond
     assert_rejected(result).with_reason_containing("n1");

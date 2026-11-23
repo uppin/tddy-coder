@@ -33,7 +33,7 @@ fn a_stack_child_block() -> SessionParticipantMetadata {
         pending_elicitation: false,
         session_id: "dddddddd-0000-4000-8000-000000000004".to_string(),
         orchestrator_session_id: "pr-stack-session-1".to_string(),
-        stack_node_id: "n1".to_string(),
+        work_item_id: "n1".to_string(),
         branch: "feature/attach-docs/attach-store".to_string(),
     }
 }
@@ -171,7 +171,7 @@ fn the_daemon_can_publish_the_association_before_any_workflow_event_has_landed()
         repo_path: "/home/dev/pr-stack-project".to_string(),
         session_id: "dddddddd-0000-4000-8000-000000000004".to_string(),
         orchestrator_session_id: "pr-stack-session-1".to_string(),
-        stack_node_id: "n1".to_string(),
+        work_item_id: "n1".to_string(),
         branch: "feature/attach-docs/attach-store".to_string(),
         ..SessionParticipantMetadata::default()
     };

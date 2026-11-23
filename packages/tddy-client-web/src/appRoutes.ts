@@ -131,36 +131,36 @@ export function parseSessionsProjectSettings(location: {
 }
 
 /**
- * The segment before a stack id in the **stack view**'s path, `/sessions/project/:projectId/stack/:stackId`
+ * The segment before a stack id in the **stack view**'s path, `/sessions/project/:projectId/queue/:queueId`
  * — a project's PR stack opened from the drawer's Stacks row (`#orchestrators` 9/11). Four segments,
  * so it can never be read as a session id or as the composer.
  */
-export const PROJECT_STACK_SEGMENT = "stack";
+export const PROJECT_QUEUE_SEGMENT = "queue";
 
-/** Builds the `/sessions/project/:projectId/stack/:stackId` path that opens one of a project's stacks. */
-export function sessionsProjectStackPath(projectId: string, stackId: string): string {
-  return `${SESSIONS_PROJECT_ROUTE}/${encodeURIComponent(projectId)}/${PROJECT_STACK_SEGMENT}/${encodeURIComponent(stackId)}`;
+/** Builds the `/sessions/project/:projectId/queue/:queueId` path that opens one of a project's stacks. */
+export function sessionsProjectQueuePath(projectId: string, queueId: string): string {
+  return `${SESSIONS_PROJECT_ROUTE}/${encodeURIComponent(projectId)}/${PROJECT_QUEUE_SEGMENT}/${encodeURIComponent(queueId)}`;
 }
 
 /** Which project stack the stack view is open on. */
 export interface SessionsProjectStackRoute {
   projectId: string;
-  stackId: string;
+  queueId: string;
 }
 
 /**
  * Which project stack the stack view is open on — read from
- * `/sessions/project/:projectId/stack/:stackId`; `null` for any other path.
+ * `/sessions/project/:projectId/queue/:queueId`; `null` for any other path.
  */
 export function parseSessionsProjectStack(pathname: string): SessionsProjectStackRoute | null {
   const prefix = `${SESSIONS_PROJECT_ROUTE}/`;
   if (!pathname.startsWith(prefix)) return null;
   const segments = pathname.slice(prefix.length).split("/");
-  if (segments.length !== 3 || segments[1] !== PROJECT_STACK_SEGMENT) return null;
+  if (segments.length !== 3 || segments[1] !== PROJECT_QUEUE_SEGMENT) return null;
   const projectId = decodeSegment(segments[0] === "" ? null : segments[0]);
-  const stackId = decodeSegment(segments[2] === "" ? null : segments[2]);
-  if (projectId === null || stackId === null) return null;
-  return { projectId, stackId };
+  const queueId = decodeSegment(segments[2] === "" ? null : segments[2]);
+  if (projectId === null || queueId === null) return null;
+  return { projectId, queueId };
 }
 
 /** Builds a `/sessions/:id` deep-link path for the given session id. */

@@ -158,7 +158,7 @@ pub(crate) fn ensure_worktree_for_session(
     }
 
     let repo_root = find_git_root(&output_dir);
-    // No stack_parent in the workflow-recipe path: the chain base is the operator-selected
+    // No work_queue_parent in the workflow-recipe path: the chain base is the operator-selected
     // persisted field (or the default base when unset). Routing through
     // resolve_chain_base_for_session_spawn would require a real sessions_base (two levels above
     // session_dir); the direct read is correct and avoids a misleading unused argument.

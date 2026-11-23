@@ -64,7 +64,7 @@ login rather than a vault account ([per-project GitHub identity](github-identity
 ## Storage
 
 - **Projects registry:** `~/.tddy/projects/projects.yaml` (list of projects).
-- **PR stacks:** `<projects dir>/<project_id>/stacks/<stack_id>.yaml`, one record per stack the project holds, beside the registry. A stack belongs to its project, not to the session that planned it. See [PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives).
+- **PR stacks:** `<projects dir>/<project_id>/stacks/<queue_id>.yaml`, one record per stack the project holds, beside the registry. A stack belongs to its project, not to the session that planned it. See [PR stacking § Where a stack lives](../coder/pr-stacking.md#where-a-stack-lives).
 - **Clone location (default):** `{home}/{repos_base_path}/{name}/` where `repos_base_path` comes from daemon config (default: `repos`).
 - **Optional override:** `CreateProject` may set **`user_relative_path`** (POSIX path relative to the user’s home, e.g. `Code/my-app` or `~/Code/my-app`). When set, the clone destination is that path instead of `{repos_base}/{name}/`.
 
@@ -452,10 +452,10 @@ own worktree.
 ### Project-home tools
 
 A session holding an orchestrator role is also offered the eleven stack plan and read tools
-(`pr_stack_list`, `pr_stack_create`, `pr_stack_status`, `pr_read`, `pr_search`, `pr_comments`,
-`pr_add_planned`, `pr_update_planned`, `pr_delete_planned`, `pr_set_status`, `pr_adopt`) as daemon
-exec tools addressing a project stack by `stack_id`; a session bound to a node of a stack is
-offered `pr_stack_status` and `pr_read` for its stack alone. See
+(`work_queue_list`, `work_queue_create`, `work_queue_status`, `work_pr_read`, `work_pr_search`, `work_pr_comments`,
+`work_item_add`, `work_item_update`, `work_item_delete`, `work_item_set_status`, `work_item_adopt`) as daemon
+exec tools addressing a project stack by `queue_id`; a session bound to a node of a stack is
+offered `work_queue_status` and `work_pr_read` for its stack alone. See
 [PR stacking § PR-management tools](../../coder/pr-stacking.md#pr-management-tools).
 
 The exec tools below give the read-only main its reach over **its own project's** sessions. Only a
@@ -469,7 +469,7 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | Tool | Arguments | Answers |
 |---|---|---|
 | `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id, display_name, delivery_route}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, the status the web's session list shows, the name it was given (`null` when it has none; see [Session names](../web/session-drawer.md#session-names)), and how it is best messaged (`delivery_route`; see [Sending a session a turn § Which route](#which-route)). A host from before session names lists every session with `null`. A split session's agent half carries the branch its codebase half works on, recorded in its changeset at start, with no worktree of its own. A CLI agent session carries the orchestrator and recipe its changeset records. A host that does not answer is named in `unreachable_hosts`, never silently left out |
-| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `stack_parent`, `stack_parent_daemon_instance_id`, `stack_node_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `target` (a derived-host id from `DescribeSessionStartOptions.derived_hosts`), `semantic_index`, `specialized_agents`, `attachments` (host documents), `display_name` (the session's name: one line, at most 80 characters; refused for a tool session type) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
+| `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `work_queue_parent`, `work_queue_parent_daemon_instance_id`, `work_item_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `target` (a derived-host id from `DescribeSessionStartOptions.derived_hosts`), `semantic_index`, `specialized_agents`, `attachments` (host documents), `display_name` (the session's name: one line, at most 80 characters; refused for a tool session type) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `DescribeSessionStartOptions` | `daemon_instance_id?`, `session_type?`, `agent?`, `provider_account_id?` | the choices a `StartSession` on that host can make, from the RPCs the New-session form fills its pickers from. See [Start options](#start-options) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
 | `DiffSessionWorktree` | `session_id`, `daemon_instance_id?` | `{session_id, base_ref, diff}`: the worktree's diff against its integration base (the session's recorded base, else the project's main branch ref), including uncommitted and untracked files. Taken over a temporary index; the worktree's own index is never written |
@@ -656,7 +656,7 @@ orchestrator too, limited to starting sessions:
   start recorded — so a start on another host and its cancel carry it. A session holding no token
   starts nothing.
 - **No defaults inherited.** A `claude-cli` conversation names its own `model`; the orchestrator link
-  is `orchestrator_session_id`, not `stack_parent`.
+  is `orchestrator_session_id`, not `work_queue_parent`.
 - **Known limitation.** A spawner's tool call forwarded from a host that does not hold the session is
   refused: the owning daemon's `ListSessions` row carries the role, not the recipe, so the capability
   cannot be confirmed there

@@ -1,10 +1,11 @@
-//! PRD acceptance: PR-stack data model — `Stack`, `StackNode`, serde roundtrip, DAG methods.
+//! PRD acceptance: PR-stack data model — `WorkQueue`, `WorkItem`, serde roundtrip, DAG methods.
 
 use std::fs;
 use std::path::PathBuf;
 
 use tddy_changeset::changeset::{
-    read_changeset, write_changeset, Changeset, GithubPrStatus, PrInternalStatus, Stack, StackNode,
+    read_changeset, write_changeset, Changeset, GithubPrStatus, PrInternalStatus, WorkItem,
+    WorkQueue,
 };
 
 fn scratch(label: &str) -> PathBuf {
@@ -22,10 +23,10 @@ fn scratch(label: &str) -> PathBuf {
 fn stack_roundtrip_linear_and_dag() {
     // Given — build a Changeset with a 3-node DAG (n1 <- n2, n1 <- n3 also depends on n2)
     let dir = scratch("roundtrip");
-    let stack = Stack {
+    let stack = WorkQueue {
         version: 1,
         nodes: vec![
-            StackNode {
+            WorkItem {
                 node_id: "n1".into(),
                 title: "Auth store".into(),
                 description: "JWT token storage".into(),
@@ -38,7 +39,7 @@ fn stack_roundtrip_linear_and_dag() {
                 internal_status: None,
                 display_order: None,
             },
-            StackNode {
+            WorkItem {
                 node_id: "n2".into(),
                 title: "Login API".into(),
                 description: "Login endpoint".into(),
@@ -51,7 +52,7 @@ fn stack_roundtrip_linear_and_dag() {
                 internal_status: None,
                 display_order: None,
             },
-            StackNode {
+            WorkItem {
                 node_id: "n3".into(),
                 title: "Dashboard".into(),
                 description: "Dashboard UI".into(),
@@ -94,10 +95,10 @@ fn stack_roundtrip_linear_and_dag() {
 #[test]
 fn effective_base_refs_skips_merged_ancestor() {
     // Given — n1 merged; n2 depends on n1; effective base of n2 should collapse to stack_bottom_base
-    let stack = Stack {
+    let stack = WorkQueue {
         version: 1,
         nodes: vec![
-            StackNode {
+            WorkItem {
                 node_id: "n1".into(),
                 title: "Base PR".into(),
                 description: String::new(),
@@ -114,7 +115,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                 internal_status: None,
                 display_order: None,
             },
-            StackNode {
+            WorkItem {
                 node_id: "n2".into(),
                 title: "Child PR".into(),
                 description: String::new(),
@@ -148,10 +149,10 @@ fn effective_base_refs_skips_merged_ancestor() {
 #[test]
 fn topo_order_rejects_cycle() {
     // Given — cycle: n1 depends on n2, n2 depends on n1
-    let stack = Stack {
+    let stack = WorkQueue {
         version: 1,
         nodes: vec![
-            StackNode {
+            WorkItem {
                 node_id: "n1".into(),
                 title: "A".into(),
                 description: String::new(),
@@ -164,7 +165,7 @@ fn topo_order_rejects_cycle() {
                 internal_status: None,
                 display_order: None,
             },
-            StackNode {
+            WorkItem {
                 node_id: "n2".into(),
                 title: "B".into(),
                 description: String::new(),
@@ -200,9 +201,9 @@ fn internal_status_roundtrips_through_changeset_yaml() {
     // Given — a spawned node whose PR needs repointing (an action-needed signal that is
     // orthogonal to `pr_status`, which mirrors GitHub reality)
     let dir = scratch("internal-status");
-    let stack = Stack {
+    let stack = WorkQueue {
         version: 1,
-        nodes: vec![StackNode {
+        nodes: vec![WorkItem {
             node_id: "n2".into(),
             title: "Login API".into(),
             description: String::new(),

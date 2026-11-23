@@ -18,17 +18,17 @@ import React from "react";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -47,18 +47,18 @@ const CHILD_BRANCH = "feature/auth/middleware";
  * A chain whose middle node has merged, which is what makes the last node both repointable *and*
  * behind the base it is still stacked on — the state in which both controls are offered at once.
  */
-function aStackWithAMergedMiddleNode(): StackNodeFixture[] {
+function aStackWithAMergedMiddleNode(): WorkItemFixture[] {
   return [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Rotate session cookies",
       branch: MERGED_BRANCH,
       parents: ["n1"],
       prStatus: { phase: "merged" },
     }),
     aPlannedNode({
-      nodeId: "n3",
+      itemId: "n3",
       title: "Add auth middleware",
       branch: CHILD_BRANCH,
       parents: ["n2"],
@@ -66,7 +66,7 @@ function aStackWithAMergedMiddleNode(): StackNodeFixture[] {
   ];
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -75,7 +75,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -112,9 +112,9 @@ const neverAnswers = () => new Promise<never>(() => undefined);
 
 function aPrStackBackend() {
   return aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, aStackWithAMergedMiddleNode())),
+    anOrchestratorSession(aWorkQueueJson(1, aStackWithAMergedMiddleNode())),
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(RESOLUTION_BY_BRANCH[req.branch] ?? { branch: req.branch }),
     )
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
@@ -143,7 +143,7 @@ beforeEach(() => {
 it("disables the repoint control while a pull into the same branch is in flight", () => {
   // Given — the pull is merging the base into exactly the branch a repoint would rebase
   openPrStackScreen(
-    aPrStackBackend().onUnary(PrStackService.method.pullBaseIntoBranch, neverAnswers),
+    aPrStackBackend().onUnary(WorkQueueService.method.pullBaseIntoBranch, neverAnswers),
   );
   prStackScreenPage.expandRow("n3");
 
@@ -157,7 +157,7 @@ it("disables the repoint control while a pull into the same branch is in flight"
 it("disables both pull controls while a repoint of the same branch is in flight", () => {
   // Given — the repoint is rebasing and force-pushing exactly the branch a pull would merge into
   openPrStackScreen(
-    aPrStackBackend().onUnary(PrStackService.method.repointPlannedPr, neverAnswers),
+    aPrStackBackend().onUnary(WorkQueueService.method.repointWorkItem, neverAnswers),
   );
   prStackScreenPage.expandRow("n3");
 
@@ -172,7 +172,7 @@ it("disables both pull controls while a repoint of the same branch is in flight"
 it("leaves another node's pull controls enabled while one node's branch is being mutated", () => {
   // Given — mutations of different nodes touch different branches and may legitimately overlap
   openPrStackScreen(
-    aPrStackBackend().onUnary(PrStackService.method.repointPlannedPr, neverAnswers),
+    aPrStackBackend().onUnary(WorkQueueService.method.repointWorkItem, neverAnswers),
   );
   prStackScreenPage.expandRow("n3");
   prStackScreenPage.expandRow("n1");

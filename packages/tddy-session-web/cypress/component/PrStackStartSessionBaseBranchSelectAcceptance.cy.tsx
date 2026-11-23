@@ -20,7 +20,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -65,29 +65,29 @@ function anAttachDocsOrchestrator(): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "attach-proto",
+        itemId: "attach-proto",
         title: "Start-session attachment proto",
         branch: ATTACH_PROTO_BRANCH,
         sessionId: "child-attach-proto",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "attach-store",
+        itemId: "attach-store",
         title: "Session attachment storage and context docs",
         branch: ATTACH_STORE_BRANCH,
         sessionId: "child-attach-store",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "attach-start",
+        itemId: "attach-start",
         title: "Copy attachments during StartSession",
         branchSuggestion: "feature/session-attach-docs/attach-start",
         parents: ["attach-proto", "attach-store"],
       }),
       aPlannedNode({
-        nodeId: "attach-ui",
+        itemId: "attach-ui",
         title: "Create Session attach UI",
         branchSuggestion: "feature/session-attach-docs/attach-ui",
         parents: ["attach-start"],
@@ -174,16 +174,16 @@ it("orders direct dependency branches by the dependency's own depth (deepest fir
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "n1",
+        itemId: "n1",
         title: "root",
         branch: "feature/stack/n1",
         sessionId: "child-n1",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "n2",
+        itemId: "n2",
         title: "mid",
         branch: "feature/stack/n2",
         sessionId: "child-n2",
@@ -191,7 +191,7 @@ it("orders direct dependency branches by the dependency's own depth (deepest fir
         parents: ["n1"],
       }),
       aPlannedNode({
-        nodeId: "n3",
+        itemId: "n3",
         title: "diamond top",
         branchSuggestion: "feature/stack/n3",
         // n2 is listed second in parents but is deeper, so it must come first in the selector.
@@ -227,23 +227,23 @@ it("lists other materialized stack branches after the direct dependencies", () =
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "n1",
+        itemId: "n1",
         title: "dep",
         branch: "feature/stack/n1",
         sessionId: "child-n1",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "n2",
+        itemId: "n2",
         title: "sibling",
         branch: "feature/stack/n2",
         sessionId: "child-n2",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "n3",
+        itemId: "n3",
         title: "child",
         branchSuggestion: "feature/stack/n3",
         parents: ["n1"],
@@ -285,7 +285,7 @@ it("sends the selected base branch as selected_integration_base_ref when the ope
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
-    expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].workQueueParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].selectedIntegrationBaseRef).to.equal(ATTACH_STORE_REF);
   });
 });
@@ -300,9 +300,9 @@ it("hides the base-branch selector for a root node with no other materialized br
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "n1",
+        itemId: "n1",
         title: "root",
         branchSuggestion: "feature/stack/n1",
       }),
@@ -345,16 +345,16 @@ it("shows the base-branch selector with the project default for a child of an ex
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "bottom",
+        itemId: "bottom",
         title: "bottom",
         branchSuggestion: "feature/stack/bottom",
         sessionId: "child-bottom",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "child",
+        itemId: "child",
         title: "child",
         branchSuggestion: "feature/stack/child",
         parents: ["bottom"],
@@ -385,16 +385,16 @@ it("names the base in the 'New branch from base' caption for a child of an exter
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "bottom",
+        itemId: "bottom",
         title: "bottom",
         branchSuggestion: "feature/stack/bottom",
         sessionId: "child-bottom",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "child",
+        itemId: "child",
         title: "child",
         branchSuggestion: "feature/stack/child",
         parents: ["bottom"],
@@ -423,16 +423,16 @@ it("pre-selects the project default and sends it as the integration base ref for
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, [
+    workQueueJson: aWorkQueueJson(1, [
       aPlannedNode({
-        nodeId: "bottom",
+        itemId: "bottom",
         title: "bottom",
         branchSuggestion: "feature/stack/bottom",
         sessionId: "child-bottom",
         prStatus: { phase: "open" },
       }),
       aPlannedNode({
-        nodeId: "child",
+        itemId: "child",
         title: "child",
         branchSuggestion: "feature/stack/child",
         parents: ["bottom"],
@@ -456,7 +456,7 @@ it("pre-selects the project default and sends it as the integration base ref for
   cy.wrap(backend).should((b) => {
     const calls = b.callsTo(SessionService.method.startSession);
     expect(calls).to.have.length(1);
-    expect(calls[0].stackParent).to.equal(ORCHESTRATOR_SESSION_ID);
+    expect(calls[0].workQueueParent).to.equal(ORCHESTRATOR_SESSION_ID);
     expect(calls[0].selectedIntegrationBaseRef).to.equal(DEFAULT_BRANCH_REF);
   });
 });

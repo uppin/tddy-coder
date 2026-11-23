@@ -47,7 +47,7 @@ prost = "0.13"
 prost-types = "0.13"
 futures-util = "0.3"
 pretty_assertions = { workspace = true }
-# `stack_fixtures`: the sessions layout a PR stack lives in (`stack_tools::caller_records`).
+# `work_queue_fixtures`: the sessions layout a PR stack lives in (`work_queue_tools::caller_records`).
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
 # `InMemoryShell`: the remote-shell port an exec-catalog tool is run through in tests.

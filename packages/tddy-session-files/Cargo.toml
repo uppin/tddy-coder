@@ -37,7 +37,7 @@ tddy-workflow = { path = "../tddy-workflow" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 # The per-PR document basenames `session_context_docs.rs` lists and `stack_doc_attachments.rs`
 # offers a child: `docs::{NODE_PRD_BASENAME, …, PR_STACK_PLAN_MD_BASENAME}`.
-tddy-pr-stack = { path = "../tddy-pr-stack" }
+tddy-work-queue = { path = "../tddy-work-queue" }
 # `async_trait` on the generated `SessionFilesService` trait the service implements.
 async-trait = "0.1"
 # `spawn_blocking` for the hashing and reading passes, the unbounded channels behind the four

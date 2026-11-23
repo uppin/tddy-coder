@@ -25,8 +25,8 @@ pub fn is_project_home_allowed_tool(name: &str) -> bool {
     is_read_only_tool(name)
         || crate::project_home_tools::is_project_home_tool(name)
         || crate::project_home_git_tools::is_project_home_git_tool(name)
-        || crate::stack_tools::is_stack_tool(name)
-        || crate::stack_git_tools::is_stack_git_tool(name)
+        || crate::work_queue_tools::is_stack_tool(name)
+        || crate::work_item_git_tools::is_stack_git_tool(name)
         || crate::session_message_tools::is_session_message_tool(name)
         || crate::session_file_tools::is_session_file_tool(name)
         || crate::base_freshness_tools::is_base_freshness_tool(name)
@@ -149,23 +149,23 @@ mod tests {
                 "mcp__tddy-tools__ResetSessionWorktree",
                 "mcp__tddy-tools__CheckoutSessionWorktree",
                 "mcp__tddy-tools__CleanSessionWorktree",
-                "mcp__tddy-tools__pr_stack_list",
-                "mcp__tddy-tools__pr_stack_create",
-                "mcp__tddy-tools__pr_stack_status",
-                "mcp__tddy-tools__pr_read",
-                "mcp__tddy-tools__pr_search",
-                "mcp__tddy-tools__pr_comments",
-                "mcp__tddy-tools__pr_add_planned",
-                "mcp__tddy-tools__pr_update_planned",
-                "mcp__tddy-tools__pr_delete_planned",
-                "mcp__tddy-tools__pr_set_status",
-                "mcp__tddy-tools__pr_adopt",
-                "mcp__tddy-tools__pr_merge",
-                "mcp__tddy-tools__pr_close",
-                "mcp__tddy-tools__pr_repoint",
-                "mcp__tddy-tools__pr_set_parents",
-                "mcp__tddy-tools__pr_resolve_conflicts",
-                "mcp__tddy-tools__pr_spawn_child",
+                "mcp__tddy-tools__work_queue_list",
+                "mcp__tddy-tools__work_queue_create",
+                "mcp__tddy-tools__work_queue_status",
+                "mcp__tddy-tools__work_pr_read",
+                "mcp__tddy-tools__work_pr_search",
+                "mcp__tddy-tools__work_pr_comments",
+                "mcp__tddy-tools__work_item_add",
+                "mcp__tddy-tools__work_item_update",
+                "mcp__tddy-tools__work_item_delete",
+                "mcp__tddy-tools__work_item_set_status",
+                "mcp__tddy-tools__work_item_adopt",
+                "mcp__tddy-tools__work_item_merge",
+                "mcp__tddy-tools__work_item_close",
+                "mcp__tddy-tools__work_item_repoint",
+                "mcp__tddy-tools__work_item_set_parents",
+                "mcp__tddy-tools__work_item_resolve_conflicts",
+                "mcp__tddy-tools__work_item_spawn_session",
                 // Offered to every role (`#activity-wake` 5/5).
                 "mcp__tddy-tools__PostSessionMessage",
                 "mcp__tddy-tools__ReadSessionMessages",

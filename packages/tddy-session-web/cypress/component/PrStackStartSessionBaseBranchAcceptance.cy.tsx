@@ -17,7 +17,7 @@ import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
-import { aPlannedNode, aStackPlanJson } from "../support/rpc/prStackFixtures";
+import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -36,16 +36,16 @@ const ORCHESTRATOR_SESSION: Partial<SessionEntry> = {
   projectId: PROJECT_ID,
   recipe: "pr-stack",
   // n1 (predecessor, spawned) → n2 depends on n1 and is still unspawned.
-  stackPlanJson: aStackPlanJson(1, [
+  workQueueJson: aWorkQueueJson(1, [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Add token store",
       branch: PREDECESSOR_BRANCH,
       sessionId: "child-n1",
       prStatus: { phase: "open" },
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Add middleware",
       branchSuggestion: "feature/auth/middleware",
       parents: ["n1"],

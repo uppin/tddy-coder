@@ -50,7 +50,7 @@ pub struct SessionParticipantMetadata {
     pub orchestrator_session_id: String,
     /// The planned node in that orchestrator's stack this session materializes. The exact identity:
     /// it survives a branch rename and it survives the host boundary.
-    pub stack_node_id: String,
+    pub work_item_id: String,
     /// The branch this session works on.
     pub branch: String,
 }
@@ -70,7 +70,8 @@ struct SessionMetadataJson {
     pending_elicitation: bool,
     session_id: String,
     orchestrator_session_id: String,
-    stack_node_id: String,
+    #[serde(rename = "stack_node_id")]
+    work_item_id: String,
     branch: String,
 }
 
@@ -88,7 +89,7 @@ impl From<&SessionParticipantMetadata> for SessionMetadataJson {
             pending_elicitation: m.pending_elicitation,
             session_id: m.session_id.clone(),
             orchestrator_session_id: m.orchestrator_session_id.clone(),
-            stack_node_id: m.stack_node_id.clone(),
+            work_item_id: m.work_item_id.clone(),
             branch: m.branch.clone(),
         }
     }

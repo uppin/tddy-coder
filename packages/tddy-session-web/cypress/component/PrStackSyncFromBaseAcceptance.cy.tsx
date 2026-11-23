@@ -7,7 +7,7 @@
  * are and take what the base has.
  *
  * Merge is the default: it adds a merge commit, rewrites no history, and disturbs no review anchors
- * on the open PR — the same operation the stack's own `pr_resolve_conflicts` performs. Rebase is
+ * on the open PR — the same operation the stack's own `work_item_resolve_conflicts` performs. Rebase is
  * offered beside it as an explicit choice, because it rewrites history and force-pushes.
  *
  * The control is offered **only** when the pull is meaningful and safe to name: not at zero commits,
@@ -22,18 +22,18 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   aPullBaseIntoBranchResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -48,11 +48,11 @@ const ROOT_BRANCH = "feature/auth/token-store";
 const CHILD_BRANCH = "feature/auth/middleware";
 const CHILD_WORKTREE_PATH = "/home/dev/worktrees/middleware";
 
-function aTwoNodeStack(): StackNodeFixture[] {
+function aTwoNodeStack(): WorkItemFixture[] {
   return [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Add auth middleware",
       branch: CHILD_BRANCH,
       parents: ["n1"],
@@ -60,7 +60,7 @@ function aTwoNodeStack(): StackNodeFixture[] {
   ];
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -69,7 +69,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -97,7 +97,7 @@ function behindBy(behind: number, worktree?: { dirty: boolean; dirtyPaths?: stri
 }
 
 interface MountOptions {
-  nodes?: StackNodeFixture[];
+  nodes?: WorkItemFixture[];
   resolutionByBranch?: Record<string, BranchResolutionFixture>;
   /** The resolution the daemon returns after a successful pull. */
   afterPull?: BranchResolutionFixture;
@@ -105,9 +105,9 @@ interface MountOptions {
 
 function aPrStackBackend(opts: MountOptions) {
   return aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, opts.nodes ?? aTwoNodeStack())),
+    anOrchestratorSession(aWorkQueueJson(1, opts.nodes ?? aTwoNodeStack())),
   ])
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(
         opts.resolutionByBranch?.[req.branch] ?? { branch: req.branch },
       ),
@@ -130,7 +130,7 @@ const PULLED_IN: BranchResolutionFixture = {
 /** Open the screen with a `PullBaseIntoBranch` that succeeds and returns a fresh resolution. */
 function openPrStackScreen(opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(PrStackService.method.pullBaseIntoBranch, () =>
+    aPrStackBackend(opts).onUnary(WorkQueueService.method.pullBaseIntoBranch, () =>
       aPullBaseIntoBranchResponse({ resolution: opts.afterPull ?? PULLED_IN }),
     ),
   );
@@ -142,7 +142,7 @@ function openPrStackScreen(opts: MountOptions) {
  */
 function openPrStackScreenWithUnpushedPull(pushError: string, opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(PrStackService.method.pullBaseIntoBranch, () =>
+    aPrStackBackend(opts).onUnary(WorkQueueService.method.pullBaseIntoBranch, () =>
       aPullBaseIntoBranchResponse({ resolution: PULLED_IN, pushed: false, pushError }),
     ),
   );
@@ -151,7 +151,7 @@ function openPrStackScreenWithUnpushedPull(pushError: string, opts: MountOptions
 /** Open the screen with a `PullBaseIntoBranch` the daemon refuses, carrying `message` as its reason. */
 function openPrStackScreenWithRefusedPull(message: string, opts: MountOptions) {
   return mountAndOpen(
-    aPrStackBackend(opts).onUnary(PrStackService.method.pullBaseIntoBranch, () => {
+    aPrStackBackend(opts).onUnary(WorkQueueService.method.pullBaseIntoBranch, () => {
       throw new ConnectError(message, Code.FailedPrecondition);
     }),
   );
@@ -161,7 +161,7 @@ function openPrStackScreenWithRefusedPull(message: string, opts: MountOptions) {
 function openPrStackScreenWithPullInFlight(opts: MountOptions) {
   return mountAndOpen(
     aPrStackBackend(opts).onUnary(
-      PrStackService.method.pullBaseIntoBranch,
+      WorkQueueService.method.pullBaseIntoBranch,
       () => new Promise<never>(() => undefined),
     ),
   );
@@ -232,10 +232,10 @@ it("merges the base into the branch when the merge control is clicked", () => {
 
   // Then — the daemon is asked for exactly the base the control named, by the default strategy
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
+    const calls = b.callsTo(WorkQueueService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
-    expect(calls[0].nodeId).to.equal("n2");
+    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
+    expect(calls[0].itemId).to.equal("n2");
     expect(calls[0].baseBranch).to.equal(ROOT_BRANCH);
     expect(calls[0].strategy).to.equal("merge");
   });
@@ -251,7 +251,7 @@ it("rebases the branch onto the base when the rebase control is clicked", () => 
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
+    const calls = b.callsTo(WorkQueueService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
     expect(calls[0].strategy).to.equal("rebase");
   });
@@ -365,9 +365,9 @@ it("offers no pull when the base comparison could not be made", () => {
 it("offers no pull for a planned PR that owns no branch yet", () => {
   // Given — nothing to merge into
   const nodes = [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Add auth middleware",
       branchSuggestion: CHILD_BRANCH,
       parents: ["n1"],
@@ -418,7 +418,7 @@ it("commits and pushes the outstanding work before pulling when the operator con
 
   // Then
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.pullBaseIntoBranch);
+    const calls = b.callsTo(WorkQueueService.method.pullBaseIntoBranch);
     expect(calls).to.have.length(1);
     expect(calls[0].dirtyWorktreeAction).to.equal("commit");
     expect(calls[0].commitMessage).to.equal("wip: auth middleware");
@@ -442,7 +442,7 @@ it("leaves the worktree alone when the operator cancels the prompt", () => {
   // Then
   prStackScreenPage.dirtyWorktreeDialog().should("not.exist");
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(PrStackService.method.pullBaseIntoBranch)).to.have.length(0);
+    expect(b.callsTo(WorkQueueService.method.pullBaseIntoBranch)).to.have.length(0);
   });
 });
 
@@ -471,7 +471,7 @@ it("clears a previous failure when a new pull is started", () => {
   const backend = aPrStackBackend({ resolutionByBranch: { [CHILD_BRANCH]: behindBy(3) } });
   let attempt = 0;
   mountAndOpen(
-    backend.onUnary(PrStackService.method.pullBaseIntoBranch, () => {
+    backend.onUnary(WorkQueueService.method.pullBaseIntoBranch, () => {
       attempt += 1;
       if (attempt === 1) throw new ConnectError("git fetch failed", Code.Internal);
       return aPullBaseIntoBranchResponse({ resolution: PULLED_IN });

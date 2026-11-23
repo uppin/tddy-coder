@@ -1,6 +1,6 @@
-# PR-stack package (`tddy-prstack-web`)
+# PR-stack package (`tddy-workqueue-web`)
 
-**Package:** `packages/tddy-prstack-web`
+**Package:** `packages/tddy-workqueue-web`
 **Applies to:** the PR-Stack screen and its chat, and the workflow chat screen in the session drawer
 **Added:** 2026-11-07 (#web-split 14/17, PR #850)
 
@@ -17,17 +17,17 @@ the web app or on LiveKit.
 - PR-stack behaviour is as before ([pr-stacking.md](../coder/pr-stacking.md),
   [pr-stack-live-status.md](../coder/pr-stack-live-status.md),
   [session-drawer.md § PR-Stack Chat Screen](session-drawer.md)).
-- The stack view (`ProjectStackView`) carries a **"New stack"** action: it calls
-  `CreateProjectStack` for the view's project, then acts on the created stack's address —
+- The stack view (`WorkQueueView`) carries a **"New stack"** action: it calls
+  `CreateWorkQueue` for the view's project, then acts on the created stack's address —
   planned PRs are added to the new stack by that address. A stack is made explicitly this way,
   never as a side effect of a session's first planned-PR write; a `session_id`-addressed
-  mutation from a session naming no stack is refused and points at `pr_stack_create` or this
+  mutation from a session naming no stack is refused and points at `work_queue_create` or this
   action ([pr-stacking.md § Opening a project stack by id](../coder/pr-stacking.md#opening-a-project-stack-by-id)).
 
 ## Acceptance criteria
 
-- [x] PR-stack lives in `tddy-prstack-web` and imports nothing from `tddy-web` or LiveKit (rule test).
+- [x] PR-stack lives in `tddy-workqueue-web` and imports nothing from `tddy-web` or LiveKit (rule test).
 - [x] Its specs pass from the package (`web.yml` runs them; `Web lint` typechecks it).
 - [x] The drawer renders PR-stack sessions as before (`tddy-web`'s drawer-driven PR-stack specs pass).
 
-Technical reference: [packages/tddy-prstack-web/docs/README.md](../../../packages/tddy-prstack-web/docs/README.md).
+Technical reference: [packages/tddy-workqueue-web/docs/README.md](../../../packages/tddy-workqueue-web/docs/README.md).

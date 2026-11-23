@@ -39,9 +39,9 @@ tddy-code-restructuring = { path = "../tddy-code-restructuring" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-projects = { path = "../tddy-projects" }
-# The stack tools' operations (`stack_ops`, `pr_insight`, `assess`) run over the host's stack store
+# The stack tools' operations (`item_ops`, `pr_insight`, `assess`) run over the host's stack store
 # (`#orchestrators` 7/11); already in this crate's tree through `tddy-agent-launch`.
-tddy-pr-stack = { path = "../tddy-pr-stack" }
+tddy-work-queue = { path = "../tddy-work-queue" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 tddy-spawn = { path = "../tddy-spawn" }
@@ -67,7 +67,7 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 # `start_session_tool_acceptance` reads the recipe names the start-options catalogue offers.
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
-# `stack_fixtures`: the sessions layout a PR stack lives in.
+# `work_queue_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # The acceptance suites stand up the plugin's own peer and room wiring; dev edges are not counted by
 # the LiveKit ratchet, which only bounds what the crate builds with.

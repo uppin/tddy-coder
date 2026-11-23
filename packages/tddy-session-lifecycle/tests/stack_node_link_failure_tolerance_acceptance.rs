@@ -16,7 +16,7 @@ use std::sync::Mutex;
 
 use tddy_rpc::Status;
 use tddy_session_lifecycle::connection_service::{
-    SpawnStackParent, StackBaseLookup, StackNodeLink, StackParentHost,
+    SpawnWorkQueueParent, WorkItemBaseLookup, WorkItemLink, WorkQueueParentHost,
 };
 
 const ORCHESTRATOR: &str = "orchestrator-1";
@@ -46,15 +46,15 @@ impl AnOwnerThatRefusesEveryLink {
 }
 
 #[async_trait::async_trait]
-impl StackParentHost for AnOwnerThatRefusesEveryLink {
+impl WorkQueueParentHost for AnOwnerThatRefusesEveryLink {
     async fn chain_base_ref(
         &self,
-        _lookup: &StackBaseLookup<'_>,
+        _lookup: &WorkItemBaseLookup<'_>,
     ) -> Result<Option<String>, Status> {
         Ok(None)
     }
 
-    async fn link_spawned_branch(&self, link: &StackNodeLink<'_>) -> Result<(), Status> {
+    async fn link_spawned_branch(&self, link: &WorkItemLink<'_>) -> Result<(), Status> {
         self.asked.lock().expect("record the link").push((
             link.node_id.to_string(),
             link.child_session_id.to_string(),
@@ -68,11 +68,11 @@ fn a_sessions_base() -> PathBuf {
     Path::new("/var/lib/tddy/u/sessions").to_path_buf()
 }
 
-fn a_spawn_of_the_planned_node(host: &dyn StackParentHost) -> SpawnStackParent<'_> {
-    SpawnStackParent::OwnedBy {
+fn a_spawn_of_the_planned_node(host: &dyn WorkQueueParentHost) -> SpawnWorkQueueParent<'_> {
+    SpawnWorkQueueParent::OwnedBy {
         session_id: ORCHESTRATOR,
         daemon_instance_id: "host-a",
-        stack_node_id: NODE,
+        work_item_id: NODE,
         session_token: "valid-session-token",
         host,
     }

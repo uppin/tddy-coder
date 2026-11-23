@@ -4,7 +4,7 @@
 Cross-package entry: [`docs/dev/changesets/2026-09-23-carve-pr-stack-crate.md`](../../../../docs/dev/changesets/2026-09-23-carve-pr-stack-crate.md)
 
 The stack operations, `pr_stack/docs.rs` and `orchestrate_pr_stack/{assess,git_ops,pr_insight}.rs`
-move to [`tddy-pr-stack`](../../../tddy-pr-stack/docs/architecture.md); this crate gains that
+move to [`tddy-pr-stack`](../../../tddy-work-queue/docs/architecture.md); this crate gains that
 dependency and re-exports every item from its historical path — `pr_stack` glob re-exports
 `tddy_pr_stack::stack_ops` and `docs`; `orchestrate_pr_stack` re-exports `assess` (private),
 `git_ops` (`pub(crate)`) and `pr_insight` (`pub`); `bridge.rs` re-exports

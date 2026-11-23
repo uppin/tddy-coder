@@ -83,10 +83,10 @@ use tddy_tool_engine::project_home_watch_tools::{
 };
 use tddy_tool_engine::session_file_tools::is_session_file_tool;
 use tddy_tool_engine::session_message_tools::is_session_message_tool;
-use tddy_tool_engine::stack_git_tools::is_stack_git_tool;
-use tddy_tool_engine::stack_tools::caller_records::stack_and_git_tools_offered_to;
-use tddy_tool_engine::stack_tools::is_stack_tool;
 use tddy_tool_engine::start_ledger::StartLedger;
+use tddy_tool_engine::work_item_git_tools::is_stack_git_tool;
+use tddy_tool_engine::work_queue_tools::caller_records::stack_and_git_tools_offered_to;
+use tddy_tool_engine::work_queue_tools::is_stack_tool;
 use tddy_worktree_service::session_target::HomeCaller;
 use tddy_worktree_service::worktrees::WorktreeSizeCalculator;
 
@@ -106,7 +106,7 @@ use crate::exec_tool::project_home::caller::record_call;
 use crate::exec_tool::project_home::caller::refuse_a_spawner_outside_its_own_sessions;
 use crate::exec_tool::project_home::listing::session_rows;
 use crate::exec_tool::project_home::listing::SessionRow;
-use crate::exec_tool::stack_tools::stack_caller_of;
+use crate::exec_tool::work_queue_tools::work_queue_caller_of;
 use crate::families::ProviderAccountsPort;
 use crate::{CatalogRpcHandler, ProjectRpcHandler};
 
@@ -308,7 +308,7 @@ impl ExecToolRpcHandler {
         // A project-home session's catalogue already carries the stack tools; a session bound to a
         // node of a stack is offered the two reads, which only its own records can tell.
         if session_tool_role(&metadata) != SessionToolRole::ProjectHome {
-            let caller = stack_caller_of(&sessions_base, session_id)?;
+            let caller = work_queue_caller_of(&sessions_base, session_id)?;
             tools.extend(stack_and_git_tools_offered_to(
                 caller.as_ref().map(|c| &c.role),
             ));

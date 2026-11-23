@@ -10,13 +10,13 @@
 
 import React from "react";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackView } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
 } from "../support/rpc/prStackFixtures";
@@ -31,7 +31,7 @@ const ORCHESTRATOR_SESSION_ID = "pr-stack-session-4444-0000-0000-0000-0000000000
 const POLL_INTERVAL_MS = 5000;
 
 interface MountOptions {
-  /** The stack's plan, as `GetProjectStack` answers it. */
+  /** The stack's plan, as `GetWorkQueue` answers it. */
   plan: string;
   /** The sessions the drawer lists — the children a planned node resolves to. */
   sessions?: Partial<SessionEntry>[];
@@ -43,7 +43,7 @@ interface MountOptions {
 
 function openStackView(opts: MountOptions) {
   const backend = aSessionsDrawerBackend(opts.sessions ?? []).onUnary(
-    PrStackService.method.queryBranch,
+    WorkQueueService.method.queryBranch,
     (req: { branch: string }) => {
       const fx = opts.resolutionFactory
         ? opts.resolutionFactory(req.branch)
@@ -71,8 +71,8 @@ beforeEach(() => {
 
 it("shows the on-disk worktree path for a node whose branch has a worktree", () => {
   // Given — n1 owns feature/x/n1, resolved to a worktree on disk
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -94,8 +94,8 @@ it("shows the on-disk worktree path for a node whose branch has a worktree", () 
 
 it("shows no worktree indicator when the branch has no worktree on disk", () => {
   // Given — n1's branch resolves with no worktree
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -114,8 +114,8 @@ it("shows no worktree indicator when the branch has no worktree on disk", () => 
 
 it("marks a row in progress when QueryBranch resolves an active session for its branch", () => {
   // Given — n1's branch resolves to an active child session
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -135,8 +135,8 @@ it("marks a row in progress when QueryBranch resolves an active session for its 
 
 it("shows no in-progress indicator when QueryBranch resolves no session for the branch", () => {
   // Given — n1's branch resolves to no session
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -155,8 +155,8 @@ it("shows no in-progress indicator when QueryBranch resolves no session for the 
 
 it("shows the GitHub PR number as a link resolved by QueryBranch", () => {
   // Given
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
 
   // When
@@ -180,8 +180,8 @@ it("shows the GitHub PR number as a link resolved by QueryBranch", () => {
 it("updates the resolution on the polling interval without user action", () => {
   // Given — the branch has no worktree on the first poll and one on every subsequent poll
   cy.clock();
-  const plan = aStackPlanJson(1, [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: "feature/x/n1" }),
+  const plan = aWorkQueueJson(1, [
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: "feature/x/n1" }),
   ]);
   let polls = 0;
   openStackView({
@@ -201,7 +201,7 @@ it("updates the resolution on the polling interval without user action", () => {
   // Then — the first poll has been answered, and shows no worktree. The row alone does not prove it:
   // the row renders from the stack before the poll starts, and the poll's interval is registered with
   // it, so a tick before the first poll would advance a clock nothing is scheduled on yet.
-  prStackScreenPage.plannedPrRow("n1").should("exist");
+  prStackScreenPage.workItemRow("n1").should("exist");
   cy.wrap(null).should(() => expect(polls, "QueryBranch polls answered").to.be.greaterThan(0));
   prStackScreenPage.worktree("n1").should("not.exist");
 

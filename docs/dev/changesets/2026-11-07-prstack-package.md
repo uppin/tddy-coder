@@ -11,6 +11,6 @@ every other PR-stack spec drives the session drawer, which stays in `tddy-web` u
 `PrStackInspector` and a `WorkflowChat` module did not exist; the passphrase scope and the session
 metadata type were cut as upward reaches.
 Measured: `PrStackScreen.tsx` 702 → 701 lines (record open, moved with the file).
-Package detail: [tddy-prstack-web](../../packages/tddy-prstack-web/docs/changesets/2026-11-07-prstack-package.md),
+Package detail: [tddy-prstack-web](../../packages/tddy-workqueue-web/docs/changesets/2026-11-07-prstack-package.md),
 [tddy-web](../../packages/tddy-web/docs/changesets/2026-11-07-prstack-package.md).
 Product description: [prstack-package.md](../ft/web/prstack-package.md).

@@ -42,13 +42,13 @@ use crate::session_follow::{
     session_follow_tool_defs, READ_SESSION_ACTIVITY, READ_SESSION_TRANSCRIPT,
 };
 use crate::session_message_tools::session_message_tool_defs;
-use crate::stack_git_tools::stack_git_tool_defs;
-use crate::stack_tools::stack_tool_defs;
 use crate::start_ledger::{CANCEL_SESSION_START, GET_SESSION_START};
 use crate::start_options::{start_options_tool_def, DESCRIBE_SESSION_START_OPTIONS};
 use crate::start_session_args::{
     start_session_schema, start_session_schema_without_choices, StartChoices, START_SESSION,
 };
+use crate::work_item_git_tools::stack_git_tool_defs;
+use crate::work_queue_tools::stack_tool_defs;
 use serde_json::{json, Value};
 
 use crate::project_home_target_host::target_host_property;

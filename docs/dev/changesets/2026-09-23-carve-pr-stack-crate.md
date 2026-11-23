@@ -15,7 +15,7 @@ bridges stay, behind re-exports at every historical path. Behaviour-preserving: 
 changes, no consumer edited.
 
 The crate's layout, dependencies, seam tests and the recipe-side remainder are documented in
-[`packages/tddy-pr-stack/docs/architecture.md`](../../../packages/tddy-pr-stack/docs/architecture.md);
+[`packages/tddy-pr-stack/docs/architecture.md`](../../../packages/tddy-work-queue/docs/architecture.md);
 product behaviour is unchanged in [pr-stacking.md](../../ft/coder/pr-stacking.md) and
 [pr-stack-docs.md](../../ft/coder/pr-stack-docs.md), whose code locations now name
 `tddy-pr-stack`.

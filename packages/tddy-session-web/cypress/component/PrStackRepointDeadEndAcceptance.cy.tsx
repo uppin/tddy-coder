@@ -25,7 +25,7 @@
  */
 
 import React from "react";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
@@ -35,10 +35,10 @@ import { THE_STACK, openProjectStackViewOf } from "../support/rpc/openProjectSta
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -58,16 +58,16 @@ const LIVE_BASE_BRANCH = "feature/attach-docs/attach-store";
  * The reported stack: `n1`'s PR was merged and its branch deleted, but the plan still records
  * `phase: "open"`, so nothing in the stored plan reveals that `n2` is stranded.
  */
-const A_STRANDED_DEPENDENT: StackNodeFixture[] = [
+const A_STRANDED_DEPENDENT: WorkItemFixture[] = [
   aPlannedNode({
-    nodeId: "n1",
+    itemId: "n1",
     title: "Start-session attachment proto",
     branch: DELETED_BASE_BRANCH,
     sessionId: "child-n1",
     prStatus: { phase: "open" },
   }),
   aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Copy attachments during StartSession",
     description: "Copies every attachment into the child session directory.",
     branchSuggestion: "feature/attach-docs/attach-start",
@@ -76,10 +76,10 @@ const A_STRANDED_DEPENDENT: StackNodeFixture[] = [
 ];
 
 /** The same plan after a repoint dropped `n1` from `n2`'s parents — `n2` is a root now. */
-const A_REPOINTED_DEPENDENT: StackNodeFixture[] = [
+const A_REPOINTED_DEPENDENT: WorkItemFixture[] = [
   A_STRANDED_DEPENDENT[0],
   aPlannedNode({
-    nodeId: "n2",
+    itemId: "n2",
     title: "Copy attachments during StartSession",
     description: "Copies every attachment into the child session directory.",
     branchSuggestion: "feature/attach-docs/attach-start",
@@ -87,7 +87,7 @@ const A_REPOINTED_DEPENDENT: StackNodeFixture[] = [
   }),
 ];
 
-function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry> {
+function anOrchestratorSession(nodes: WorkItemFixture[]): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-07-26T09:50:00Z",
@@ -96,7 +96,7 @@ function anOrchestratorSession(nodes: StackNodeFixture[]): Partial<SessionEntry>
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson: aStackPlanJson(1, nodes),
+    workQueueJson: aWorkQueueJson(1, nodes),
   };
 }
 
@@ -126,20 +126,20 @@ const A_DELETED_BASE: Record<string, BranchResolutionFixture> = {
 };
 
 interface PrStackScreenOptions {
-  nodes: StackNodeFixture[];
+  nodes: WorkItemFixture[];
   resolutionByBranch: Record<string, BranchResolutionFixture>;
   mainBranchRef?: string;
-  /** The plan `RepointPlannedPr` returns; defaults to the plan the screen opened with. */
-  repointedNodes?: StackNodeFixture[];
+  /** The plan `RepointWorkItem` returns; defaults to the plan the screen opened with. */
+  repointedNodes?: WorkItemFixture[];
 }
 
-/** Everything but `RepointPlannedPr`, which is what the two openers differ on. */
+/** Everything but `RepointWorkItem`, which is what the two openers differ on. */
 function aPrStackBackend(options: PrStackScreenOptions) {
   return aSessionsDrawerBackend([anOrchestratorSession(options.nodes)])
     .onUnary(ProjectService.method.listProjects, () => ({
       projects: [aProject(options.mainBranchRef ?? DEFAULT_BRANCH)],
     }))
-    .onUnary(PrStackService.method.queryBranch, (req: { branch: string }) =>
+    .onUnary(WorkQueueService.method.queryBranch, (req: { branch: string }) =>
       aBranchResolutionResponse(options.resolutionByBranch[req.branch] ?? { branch: req.branch }),
     );
 }
@@ -149,19 +149,19 @@ function mountAndOpenPrStackSession(backend: ReturnType<typeof aPrStackBackend>)
   return backend;
 }
 
-/** Open the screen with a `RepointPlannedPr` that succeeds and returns the repointed plan. */
+/** Open the screen with a `RepointWorkItem` that succeeds and returns the repointed plan. */
 function openPrStackScreen(options: PrStackScreenOptions) {
   return mountAndOpenPrStackSession(
-    aPrStackBackend(options).onUnary(PrStackService.method.repointPlannedPr, () => ({
-      stackPlanJson: aStackPlanJson(1, options.repointedNodes ?? options.nodes),
+    aPrStackBackend(options).onUnary(WorkQueueService.method.repointWorkItem, () => ({
+      workQueueJson: aWorkQueueJson(1, options.repointedNodes ?? options.nodes),
     })),
   );
 }
 
-/** Open the screen with a `RepointPlannedPr` the daemon refuses, carrying `message` as its reason. */
+/** Open the screen with a `RepointWorkItem` the daemon refuses, carrying `message` as its reason. */
 function openPrStackScreenWithRefusedRepoint(message: string, options: PrStackScreenOptions) {
   return mountAndOpenPrStackSession(
-    aPrStackBackend(options).onUnary(PrStackService.method.repointPlannedPr, () => {
+    aPrStackBackend(options).onUnary(WorkQueueService.method.repointWorkItem, () => {
       throw new ConnectError(message, Code.InvalidArgument);
     }),
   );
@@ -203,10 +203,10 @@ it("sends the named target branch when Repoint is clicked", () => {
 
   // Then — the daemon is asked for exactly what the label promised
   cy.wrap(backend).should((b) => {
-    const calls = b.callsTo(PrStackService.method.repointPlannedPr);
+    const calls = b.callsTo(WorkQueueService.method.repointWorkItem);
     expect(calls).to.have.length(1);
-    expect(calls[0].stack?.stackId).to.equal(THE_STACK.stackId);
-    expect(calls[0].nodeId).to.equal("n2");
+    expect(calls[0].stack?.queueId).to.equal(THE_STACK.queueId);
+    expect(calls[0].itemId).to.equal("n2");
     expect(calls[0].targetBaseBranch).to.equal(DEFAULT_BRANCH);
   });
 });
@@ -232,19 +232,19 @@ it("names the surviving predecessor's branch as the Repoint target when only one
   // Given — n3 depends on n1 (branch gone from origin) and n2 (open, still pushed)
   const nodes = [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Start-session attachment proto",
       branch: DELETED_BASE_BRANCH,
       prStatus: { phase: "open" },
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Session attachment storage",
       branch: LIVE_BASE_BRANCH,
       prStatus: { phase: "open" },
     }),
     aPlannedNode({
-      nodeId: "n3",
+      itemId: "n3",
       title: "Copy attachments during StartSession",
       parents: ["n1", "n2"],
     }),
@@ -306,7 +306,7 @@ it("keeps its title, description, planned branch and base branch on a row that c
   // Then — being blocked must never cost the operator the information they need to act. The row is
   // the whole card, so `contain.text`: it also holds the base line, the CTA and the warning.
   prStackScreenPage
-    .plannedPrRow("n2")
+    .workItemRow("n2")
     .should("contain.text", "Copy attachments during StartSession")
     .and("contain.text", "Copies every attachment into the child session directory.");
   prStackScreenPage
@@ -342,18 +342,18 @@ it("warns with every reason at once when a row is blocked for two of them", () =
   // Given — n3 depends on n1 (branch gone from origin) and n2 (planned only, so it owns no ref)
   const nodes = [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Start-session attachment proto",
       branch: DELETED_BASE_BRANCH,
       prStatus: { phase: "open" },
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Session attachment storage",
       branchSuggestion: LIVE_BASE_BRANCH,
     }),
     aPlannedNode({
-      nodeId: "n3",
+      itemId: "n3",
       title: "Copy attachments during StartSession",
       parents: ["n1", "n2"],
     }),
@@ -376,12 +376,12 @@ it("offers a Repoint control on a node blocked by a predecessor that owns no bra
   // Given — nothing has merged and no branch was deleted; n1 was simply never started
   const nodes = [
     aPlannedNode({
-      nodeId: "n1",
+      itemId: "n1",
       title: "Start-session attachment proto",
       branchSuggestion: DELETED_BASE_BRANCH,
     }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Copy attachments during StartSession",
       parents: ["n1"],
     }),
@@ -400,7 +400,7 @@ it("shows no start warning on a node whose child session already exists", () => 
   const nodes = [
     A_STRANDED_DEPENDENT[0],
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Copy attachments during StartSession",
       sessionId: "child-n2",
       parents: ["n1"],

@@ -118,8 +118,8 @@ impl LaunchHost for DaemonSessionHost {
         DaemonSessionHost::sandbox_rpc_handler(self, session_id, session_dir)
     }
 
-    fn pr_stack(&self) -> Result<Arc<dyn crate::PrStackHandler>, Status> {
-        Ok(self.rpc_families()?.pr_stack_handler())
+    fn work_queue(&self) -> Result<Arc<dyn crate::WorkQueueHandler>, Status> {
+        Ok(self.rpc_families()?.work_queue_handler())
     }
 
     fn session_account_access(&self, session_token: &str) -> SessionAccountAccess {

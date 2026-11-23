@@ -118,8 +118,8 @@ pub mod session_dir_recorded_history;
 
 pub mod terminal_session_adapter;
 pub use tddy_tool_engine::tool_call_log;
-pub mod pr_stack_rpc;
-pub use pr_stack_rpc::{build_pr_stack_entry, PrStackHandler, PrStackServiceImpl};
+pub mod work_queue_rpc;
+pub use work_queue_rpc::{build_pr_stack_entry, WorkQueueHandler, WorkQueueServiceImpl};
 pub mod rpc_families;
 pub use rpc_families::DaemonRpcFamilies;
 

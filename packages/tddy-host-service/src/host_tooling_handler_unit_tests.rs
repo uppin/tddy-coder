@@ -286,7 +286,7 @@ async fn host_tooling_runs_the_probe_as_the_hosts_os_user() {
 /// The operator here has no `users[]` entry on the relay their browser is talking to; their
 /// entry lives on `server-2`, the host they are asking about. Authenticating first would refuse
 /// them with `permission_denied` from a daemon the question was never about — and that is
-/// exactly the ordering `attach_session_agent` and `resolve_stack_base` already establish.
+/// exactly the ordering `attach_session_agent` and `resolve_work_item_base` already establish.
 ///
 /// The refusal that comes back is what proves it: this daemon got as far as forwarding to the
 /// peer and failed only on the transport, because the common room in this test holds no

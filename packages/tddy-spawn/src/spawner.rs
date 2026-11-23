@@ -412,12 +412,12 @@ pub struct SpawnOptions<'a> {
     /// Passed to spawned `tddy-coder` as `--recipe` when non-empty (e.g. `bugfix`).
     pub recipe: Option<&'a str>,
     /// Back-reference to the orchestrating PR-stack session. Passed as `--stack-parent <id>`.
-    pub stack_parent: Option<&'a str>,
+    pub work_queue_parent: Option<&'a str>,
     /// The planned node of that orchestrator's stack this session materializes. Passed as
     /// `--stack-node-id <id>`, and published by the child in its participant metadata — which is
     /// the only way a PR-Stack view on another host can tell this session apart from any other
     /// session of the same orchestrator (D37).
-    pub stack_node_id: Option<&'a str>,
+    pub work_item_id: Option<&'a str>,
     /// Model for tool-session model selection. Passed to spawned `tddy-coder` as `--model` when set.
     pub model: Option<&'a str>,
     /// Per-session unix socket path the daemon listens on for the reverse `HostSessionService`
@@ -470,10 +470,13 @@ fn require_commit_identity_only(git_environment: &[(String, String)]) -> anyhow:
 /// and an argument vector can be asserted on where a `Command` cannot.
 ///
 /// A blank value is treated as unset, because proto3 carries "unset" as the empty string.
-pub fn pr_stack_spawn_args(stack_parent: Option<&str>, stack_node_id: Option<&str>) -> Vec<String> {
+pub fn work_queue_spawn_args(
+    work_queue_parent: Option<&str>,
+    work_item_id: Option<&str>,
+) -> Vec<String> {
     [
-        ("--stack-parent", stack_parent),
-        ("--stack-node-id", stack_node_id),
+        ("--stack-parent", work_queue_parent),
+        ("--stack-node-id", work_item_id),
     ]
     .into_iter()
     .filter_map(|(flag, value)| {
@@ -956,7 +959,7 @@ pub fn plan_session_child(
         }
     }
 
-    let stack_args = pr_stack_spawn_args(opts.stack_parent, opts.stack_node_id);
+    let stack_args = work_queue_spawn_args(opts.work_queue_parent, opts.work_item_id);
     if !stack_args.is_empty() {
         log::debug!("spawner: passing stack flags {:?}", stack_args);
         args.extend(stack_args);
@@ -1609,25 +1612,25 @@ mod grpc_listen_port_tests {
 }
 
 #[cfg(test)]
-mod stack_parent_spawn_tests {
+mod work_queue_parent_spawn_tests {
     use super::SpawnOptions;
 
-    /// `spawn_options_has_stack_parent_field` — `SpawnOptions` must expose a `stack_parent` field
+    /// `spawn_options_has_stack_parent_field` — `SpawnOptions` must expose a `work_queue_parent` field
     /// so that the daemon can forward a parent orchestrator session id to the spawned child
     /// `tddy-coder` process as `--stack-parent <id>`.
     ///
-    /// This test will **fail to compile** until `stack_parent: Option<&'a str>` is added to
+    /// This test will **fail to compile** until `work_queue_parent: Option<&'a str>` is added to
     /// `SpawnOptions`. That compile failure is the intended red-phase signal for Layer 3.
     #[test]
     fn spawn_options_has_stack_parent_field() {
         let opts = SpawnOptions {
-            stack_parent: Some("orch-session-id-42"),
+            work_queue_parent: Some("orch-session-id-42"),
             ..Default::default()
         };
         assert_eq!(
-            opts.stack_parent,
+            opts.work_queue_parent,
             Some("orch-session-id-42"),
-            "SpawnOptions::stack_parent must round-trip correctly"
+            "SpawnOptions::work_queue_parent must round-trip correctly"
         );
     }
 }

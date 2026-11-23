@@ -20,17 +20,17 @@ import React from "react";
 import { type ProjectEntry } from "tddy-client-web/gen/project_pb";
 import { ProjectService } from "tddy-client-web/gen/project_pb";
 import { type SessionEntry } from "tddy-client-web/gen/session_pb";
-import { PrStackService } from "tddy-client-web/gen/pr_stack_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackViewOf } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
 import {
   aPlannedNode,
-  aStackPlanJson,
+  aWorkQueueJson,
   aBranchResolutionResponse,
   type BranchResolutionFixture,
-  type StackNodeFixture,
+  type WorkItemFixture,
 } from "../support/rpc/prStackFixtures";
 
 // ---------------------------------------------------------------------------
@@ -51,18 +51,18 @@ const CHILD_BRANCH = "feature/auth/middleware";
  * stacked on (`ROOT_BRANCH`, the nearest non-merged ancestor's branch) and repointable onto the
  * project's default branch — the two situations these tests need from one plan.
  */
-function aStackWithAMergedMiddleNode(): StackNodeFixture[] {
+function aStackWithAMergedMiddleNode(): WorkItemFixture[] {
   return [
-    aPlannedNode({ nodeId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
+    aPlannedNode({ itemId: "n1", title: "Add token store", branch: ROOT_BRANCH }),
     aPlannedNode({
-      nodeId: "n2",
+      itemId: "n2",
       title: "Rotate session cookies",
       branch: MERGED_BRANCH,
       parents: ["n1"],
       prStatus: { phase: "merged" },
     }),
     aPlannedNode({
-      nodeId: "n3",
+      itemId: "n3",
       title: "Add auth middleware",
       branch: CHILD_BRANCH,
       parents: ["n2"],
@@ -71,13 +71,13 @@ function aStackWithAMergedMiddleNode(): StackNodeFixture[] {
 }
 
 /** The same plan after a repoint of n3: it is stacked on nothing, so its base is the default branch. */
-function aStackWithN3Repointed(): StackNodeFixture[] {
+function aStackWithN3Repointed(): WorkItemFixture[] {
   return aStackWithAMergedMiddleNode().map((node) =>
-    node.nodeId === "n3" ? { ...node, parents: [] } : node,
+    node.itemId === "n3" ? { ...node, parents: [] } : node,
   );
 }
 
-function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
+function anOrchestratorSession(workQueueJson: string): Partial<SessionEntry> {
   return {
     sessionId: ORCHESTRATOR_SESSION_ID,
     createdAt: "2026-08-01T09:00:00Z",
@@ -86,7 +86,7 @@ function anOrchestratorSession(stackPlanJson: string): Partial<SessionEntry> {
     isActive: false,
     projectId: PROJECT_ID,
     recipe: "pr-stack",
-    stackPlanJson,
+    workQueueJson,
   };
 }
 
@@ -129,9 +129,9 @@ type QueryBranchHandler = (req: {
 
 function aPrStackBackend(queryBranch: QueryBranchHandler) {
   return aSessionsDrawerBackend([
-    anOrchestratorSession(aStackPlanJson(1, aStackWithAMergedMiddleNode())),
+    anOrchestratorSession(aWorkQueueJson(1, aStackWithAMergedMiddleNode())),
   ])
-    .onUnary(PrStackService.method.queryBranch, queryBranch)
+    .onUnary(WorkQueueService.method.queryBranch, queryBranch)
     .onUnary(ProjectService.method.listProjects, () => ({ projects: [PROJECT] }))
     .onUnary(CatalogService.method.listTools, () => ({ tools: [] }));
 }
@@ -197,7 +197,7 @@ it("keeps a completed pull's result when the poll it overtook finally answers", 
     withheld: { [CHILD_BRANCH]: CHILD_BEHIND_ITS_BASE, [ROOT_BRANCH]: ROOT_WITH_AN_OPEN_PR },
   });
   openPrStackScreen(
-    aPrStackBackend(polls.handler).onUnary(PrStackService.method.pullBaseIntoBranch, () =>
+    aPrStackBackend(polls.handler).onUnary(WorkQueueService.method.pullBaseIntoBranch, () =>
       aBranchResolutionResponse(CHILD_IN_SYNC_AFTER_THE_PULL),
     ),
   );
@@ -241,8 +241,8 @@ it("stops offering a pull against the base a repoint just moved the node off", (
   openPrStackScreen(
     aPrStackBackend(
       aQueryBranchAnsweringOnly({ [`${CHILD_BRANCH} ${ROOT_BRANCH}`]: CHILD_BEHIND_ITS_BASE }),
-    ).onUnary(PrStackService.method.repointPlannedPr, () => ({
-      stackPlanJson: aStackPlanJson(2, aStackWithN3Repointed()),
+    ).onUnary(WorkQueueService.method.repointWorkItem, () => ({
+      workQueueJson: aWorkQueueJson(2, aStackWithN3Repointed()),
     })),
   );
   prStackScreenPage.expandRow("n3");

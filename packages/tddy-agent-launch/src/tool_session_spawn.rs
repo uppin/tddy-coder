@@ -58,10 +58,10 @@ impl LaunchSessions {
             .transpose()
             .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?;
         let recipe_for_spawn = trim_to_option(&req.recipe);
-        let stack_parent_for_spawn = trim_to_option(&req.stack_parent);
+        let work_queue_parent_for_spawn = trim_to_option(&req.work_queue_parent);
         // The planned node the surface that rendered Start-session named. Carried to the child as
         // `--stack-node-id`, which is what puts the association in its participant metadata (D37).
-        let stack_node_id_for_spawn = trim_to_option(&req.stack_node_id);
+        let work_item_id_for_spawn = trim_to_option(&req.work_item_id);
         let model_for_spawn = trim_to_option(&req.model);
         // The route the session runs on, resolved before anything is created: a refusal (a locked
         // vault, an agent that cannot run on an account) starts nothing.
@@ -147,8 +147,8 @@ impl LaunchSessions {
                 agent_def_json: agent_def_for_spawn,
                 provider_route_json,
                 recipe: recipe_for_spawn,
-                stack_parent: stack_parent_for_spawn,
-                stack_node_id: stack_node_id_for_spawn,
+                work_queue_parent: work_queue_parent_for_spawn,
+                work_item_id: work_item_id_for_spawn,
                 model: model_for_spawn,
                 host_session_socket,
                 git_environment,

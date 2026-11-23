@@ -48,7 +48,7 @@ pub fn parse_pr_detail(pr: &Value) -> Result<PrDetail, String> {
         .get("number")
         .and_then(Value::as_u64)
         .ok_or_else(|| format!("a pull request has no number: {pr}"))?;
-    // No default: `state` decides what `pr_read` reports and what phase an adopted node is created
+    // No default: `state` decides what `work_pr_read` reports and what phase an adopted node is created
     // at, so reading a missing field as "open" would present a merged or closed PR as in play.
     let state = pr
         .get("state")

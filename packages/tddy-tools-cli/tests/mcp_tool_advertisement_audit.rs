@@ -265,7 +265,7 @@ async fn initialize_mcp_session(stdin: &mut ChildStdin, stdout: &mut BufReader<C
 /// when they all lived in one, plus `subagent_end`, `subagent_diff` and `subagent_pull`, and
 /// `spawn_conversation_status` and `spawn_conversation_cancel` (`#start-parity` 9/9) — minus
 /// the nine stack plan and read tools that are the daemon's now (`#orchestrators` 7/11; the
-/// two it adds, `pr_stack_list` and `pr_stack_create`, were never this server's own) and
+/// two it adds, `work_queue_list` and `work_queue_create`, were never this server's own) and
 /// minus the six stack git tools that are the daemon's now (`#orchestrators` 10/11).
 #[tokio::test]
 async fn advertises_all_thirty_four_tool_names_where_the_host_serves_the_action_tools() {

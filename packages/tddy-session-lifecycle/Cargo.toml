@@ -40,8 +40,8 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 tddy-github = { path = "../tddy-github" }
 tddy-github-inbox = { path = "../tddy-github-inbox" }
-# Defines `PrStackHandler`, which session start names for the stack paths it serves.
-tddy-pr-stack = { path = "../tddy-pr-stack" }
+# Defines `WorkQueueHandler`, which session start names for the stack paths it serves.
+tddy-work-queue = { path = "../tddy-work-queue" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-rpc = { path = "../tddy-rpc" }
@@ -120,7 +120,7 @@ http = "1"
 tokio-stream = "0.1"
 
 [dev-dependencies]
-# `stack_fixtures`: the sessions layout a PR stack lives in.
+# `work_queue_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # `usage_context_acceptance` reads back the context a launch records (`#usage-binding 2/5`).
 tddy-usage = { path = "../tddy-usage" }

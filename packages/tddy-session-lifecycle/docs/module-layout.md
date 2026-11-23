@@ -84,7 +84,7 @@ and those crates deliberately do not grow a transport.
 | `session_dir_recorded_history.rs` | `SessionDirRecordedHistory`, the daemon's `RecordedTerminalHistory`: a stopped session's `main` answered from `<data dir>/sessions/<id>/terminals/main.capture` (any other terminal id, a missing file and an unreadable one — logged — are `None`); re-exports `main_capture_recording_path` / `MAIN_CAPTURE_RECORDING` from `tddy-cli-sessions` |
 | `session_agent_clone.rs` | `clone_worktree_path`, plus a re-export of `tddy_session_agents::session_agent_clone`; the function is unreferenced |
 | `session_notifications.rs` | a facade over `tddy_session_activity::session_notifications` and `session_notification_publishing` |
-| `claude_cli_session.rs`, `pr_stack_rpc.rs` | historical-path re-exports of `cli_session_manager` and `tddy_pr_stack::rpc` |
+| `claude_cli_session.rs`, `work_queue_rpc.rs` | historical-path re-exports of `cli_session_manager` and `tddy_work_queue::rpc` |
 | `test_util.rs` | the shared fixtures of the integration suites (ungated; see above). Its tool hosts are `tddy_test_hosts::a_tool_host()` — `tddy-test-hosts` is a normal dependency because this module is public, which is why that crate carries no sandbox dependency |
 
 ## What stays, and why
@@ -117,7 +117,7 @@ The value and its methods are defined in the receiver, so an inherent `impl` mov
 
 The three callback traits are implemented once, in `svc_agent_host_ports.rs`:
 `AgentHostCallbacks` (the agent topic's), `SplitHost: AgentHostCallbacks` (`start_workspace_session`,
-`delete_session`, `session_files`, `session_agents`) and `LaunchHost` (`sandbox_rpc_handler`, `pr_stack`,
+`delete_session`, `session_files`, `session_agents`) and `LaunchHost` (`sandbox_rpc_handler`, `work_queue`,
 `session_account_access`, `session_identity`).
 
 ## Modules that live below this crate, and their facades

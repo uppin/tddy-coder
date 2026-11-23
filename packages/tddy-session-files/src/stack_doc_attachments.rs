@@ -2,7 +2,7 @@
 //!
 //! PRD: `docs/ft/coder/pr-stack-docs.md` § Attaching documents to the child session.
 //!
-//! One helper feeds both spawn paths — the agent's `pr_spawn_child` and the web Start-session
+//! One helper feeds both spawn paths — the agent's `work_item_spawn_session` and the web Start-session
 //! dialog. A child that differs by how it was started is a bug the operator cannot see.
 //!
 //! Every document is attached **by reference**: a `HostDocumentRef` naming the orchestrator's own
@@ -13,13 +13,13 @@
 
 use std::path::Path;
 
-use tddy_pr_stack::docs::{
-    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME, PR_STACK_PLAN_MD_BASENAME,
-};
 use tddy_service::proto::session::{
     session_attachment::Source, HostDocumentRef, SessionAttachment,
 };
 use tddy_service::proto::types::HostDocumentScope;
+use tddy_work_queue::docs::{
+    NODE_CHANGESET_BASENAME, NODE_DOCS_SUBDIR, NODE_PRD_BASENAME, PR_STACK_PLAN_MD_BASENAME,
+};
 use tddy_workflow::{session_artifacts_root, SESSION_ATTACHMENTS_SUBDIR};
 use tddy_workflow_recipes::writer::EXPLORATION_BASENAME;
 
@@ -109,7 +109,7 @@ pub fn attached_changeset_prompt_line(attachments: &[SessionAttachment]) -> Opti
 /// A child's `initial_prompt`, extended with [`attached_changeset_prompt_line`] when its documents
 /// include the node's changeset.
 ///
-/// The single rule both spawn paths apply — the agent's `pr_spawn_child` and the operator's
+/// The single rule both spawn paths apply — the agent's `work_item_spawn_session` and the operator's
 /// Start-session dialog — so a child cannot differ by how it was started. Fed the attachments that
 /// **actually materialized**, never the ones that were asked for: a prompt naming a document the
 /// child does not hold sends the agent hunting for a file that is not there.

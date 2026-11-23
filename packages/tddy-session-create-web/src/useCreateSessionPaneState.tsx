@@ -277,17 +277,17 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
   // the planned node it materializes — is the caller's to name (`initialValues`); the form offers no
   // picker for either. A node id names a node in exactly one orchestrator's plan, so the two travel
   // together.
-  const stackParent = initialValues?.stackParent ?? "";
-  const stackNodeId = initialValues?.stackNodeId ?? "";
-  // The host that owns the stack parent. `stackParent` is a bare session id and the base it resolves
+  const workQueueParent = initialValues?.workQueueParent ?? "";
+  const workItemId = initialValues?.workItemId ?? "";
+  // The host that owns the stack parent. `workQueueParent` is a bare session id and the base it resolves
   // to is read out of that session's own changeset, so the daemon serving this start has to be told
   // which host holds it: the session list is fanned out across every host and routinely names a
   // parent living on a different daemon than the child is started on. Empty when the list holds no
   // such session — the wire default, meaning the serving daemon's own sessions tree, which is the
   // only place it could look anyway.
-  const stackParentDaemonInstanceId = useMemo(
-    () => sessions.find((s) => s.sessionId === stackParent)?.daemonInstanceId ?? "",
-    [sessions, stackParent],
+  const workQueueParentDaemonInstanceId = useMemo(
+    () => sessions.find((s) => s.sessionId === workQueueParent)?.daemonInstanceId ?? "",
+    [sessions, workQueueParent],
   );
 
   // The attach rows and everything that follows from them: the effective size cap, the refusal shown
@@ -333,9 +333,9 @@ export function useCreateSessionPaneState(props: CreateSessionPaneProps) {
     toolPath,
     selectedAgentId,
     recipe,
-    stackParent,
-    stackNodeId,
-    stackParentDaemonInstanceId,
+    workQueueParent,
+    workItemId,
+    workQueueParentDaemonInstanceId,
     model,
     effort,
     providerAccountId,

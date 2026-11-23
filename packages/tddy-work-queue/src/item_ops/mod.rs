@@ -1,0 +1,313 @@
+//! The PR-stack operations: every writer of a session's `Changeset.stack`, and the git/GitHub
+//! syncs that keep a node's branch and pull request in line with it.
+//!
+//! Split by concern; every public item is re-exported here, so `tddy_work_queue::item_ops::*` is the
+//! one path callers name.
+
+use std::path::{Path, PathBuf};
+
+use tddy_core::changeset::{WorkItem, WorkQueue};
+use tddy_core::work_queue_store::{WorkQueueStore, WorkQueueStoreError};
+use tddy_core::WorkflowError;
+
+mod adopt;
+mod nodes;
+mod order;
+mod pull_base;
+mod repoint;
+
+pub use adopt::{
+    adopt_pr_as_stack_node, adopt_pr_as_work_item, sync_node_to_github_pr, AdoptedPrFacts,
+};
+pub use nodes::{
+    add_work_item, delete_work_item, set_work_item_parents, update_work_item, AddWorkItemInput,
+    DeletedNode, UpdateWorkItemInput,
+};
+pub use order::{assign_missing_display_order, move_work_item};
+pub use pull_base::{pull_base_into_node_branch, BaseSyncStrategy, PullBaseReport};
+pub use repoint::repoint_work_item;
+
+use order::next_display_order;
+
+/// Where a plan operation reads and writes its stack: a session (the stack its changeset names), or
+/// a record of the project's stack store addressed directly ([`StoredWorkQueue`]), as the daemon's
+/// stack tools do (`#orchestrators` 7/11).
+pub trait WorkQueueHome {
+    /// The stack, or `None` when its owner has planned none.
+    fn read_stack(&self) -> Result<Option<WorkQueue>, WorkflowError>;
+
+    /// Apply `f` to the stack and write it back, serialized against every other writer of it.
+    fn update_stack<F: FnOnce(&mut WorkQueue)>(&self, f: F) -> Result<(), WorkflowError>;
+}
+
+impl WorkQueueHome for Path {
+    fn read_stack(&self) -> Result<Option<WorkQueue>, WorkflowError> {
+        tddy_core::changeset::read_session_stack(self)
+    }
+
+    fn update_stack<F: FnOnce(&mut WorkQueue)>(&self, f: F) -> Result<(), WorkflowError> {
+        tddy_core::changeset::update_stack_atomic(self, f)
+    }
+}
+
+impl WorkQueueHome for PathBuf {
+    fn read_stack(&self) -> Result<Option<WorkQueue>, WorkflowError> {
+        self.as_path().read_stack()
+    }
+
+    fn update_stack<F: FnOnce(&mut WorkQueue)>(&self, f: F) -> Result<(), WorkflowError> {
+        self.as_path().update_stack(f)
+    }
+}
+
+impl<T: WorkQueueHome + ?Sized> WorkQueueHome for &T {
+    fn read_stack(&self) -> Result<Option<WorkQueue>, WorkflowError> {
+        (**self).read_stack()
+    }
+
+    fn update_stack<F: FnOnce(&mut WorkQueue)>(&self, f: F) -> Result<(), WorkflowError> {
+        (**self).update_stack(f)
+    }
+}
+
+/// One record of a project's stack store, named by project and stack id: a stack addressed
+/// directly, not through the session whose changeset names it.
+pub struct StoredWorkQueue<'a> {
+    pub store: &'a WorkQueueStore,
+    pub project_id: &'a str,
+    pub queue_id: &'a str,
+}
+
+fn store_error(e: WorkQueueStoreError) -> WorkflowError {
+    WorkflowError::ChangesetInvalid(e.to_string())
+}
+
+impl WorkQueueHome for StoredWorkQueue<'_> {
+    fn read_stack(&self) -> Result<Option<WorkQueue>, WorkflowError> {
+        self.store
+            .read(self.project_id, self.queue_id)
+            .map(|record| Some(record.stack))
+            .map_err(store_error)
+    }
+
+    fn update_stack<F: FnOnce(&mut WorkQueue)>(&self, f: F) -> Result<(), WorkflowError> {
+        self.store
+            .update(self.project_id, self.queue_id, f)
+            .map(drop)
+            .map_err(store_error)
+    }
+}
+
+/// The stack of `home`, or an empty one when it records none.
+///
+/// `op` prefixes the failure so the caller's name reaches the operator — every writer below reports
+/// an unreadable changeset the same way.
+fn read_stack(home: &(impl WorkQueueHome + ?Sized), op: &str) -> Result<WorkQueue, String> {
+    Ok(home
+        .read_stack()
+        .map_err(|e| format!("{op}: failed to read changeset: {e}"))?
+        .unwrap_or_default())
+}
+
+/// Append one node to the persisted stack, numbering it last in the operator's reading order, and
+/// answer the node as it was written.
+///
+/// Every append shares this, rather than spelling it out per writer, because the two statements in the
+/// closure are a **stack invariant** and not this caller's business: [`assign_missing_display_order`]
+/// numbers whatever the stack on disk left unnumbered, and only then is
+/// [`next_display_order`] the position this node takes. A writer that forgot the first statement would
+/// hand the new node a position an older node already holds, and the panel would order the two
+/// arbitrarily.
+///
+/// Both decisions are made **inside** the `update_stack_atomic` closure, against the stack that is
+/// about to be written: `update_stack_atomic` re-reads the file before applying its closure, so a
+/// position chosen from a snapshot taken earlier could collide with a node another writer appended in
+/// between.
+fn append_node_atomic(
+    home: &(impl WorkQueueHome + ?Sized),
+    node: WorkItem,
+    op: &str,
+) -> Result<WorkItem, String> {
+    let mut appended = node;
+    home.update_stack(|stack| {
+        assign_missing_display_order(stack);
+        appended.display_order = Some(next_display_order(stack));
+        stack.nodes.push(appended.clone());
+    })
+    .map_err(|e| format!("{op}: failed to write stack: {e}"))?;
+    Ok(appended)
+}
+
+/// Reject a parent list before anything is written: an id that resolves to no node, and — when
+/// `node_id` names an *existing* node being rewritten — that node naming itself, or the same parent
+/// named twice.
+///
+/// `node_id` is `None` for an append. The node does not exist yet, so it has no id for a parent to
+/// collide with, and a repeated id is not rejected there — that is [`add_work_item`]'s and
+/// [`adopt_pr_as_stack_node`]'s shipped behaviour, kept as it is.
+///
+/// `op` prefixes every message it emits, **except** that an empty `op` emits them bare. That
+/// asymmetry is deliberate, not drift: [`add_work_item`] shipped `dangling parent ref: n9`
+/// unprefixed and its callers read that exact string, so prefixing it now would change behaviour
+/// already in use.
+fn validate_parents(
+    stack: &tddy_core::changeset::WorkQueue,
+    node_id: Option<&str>,
+    parents: &[String],
+    op: &str,
+) -> Result<(), String> {
+    let prefix = message_prefix(op);
+    let mut seen: Vec<&String> = Vec::with_capacity(parents.len());
+    for parent in parents {
+        if node_id == Some(parent.as_str()) {
+            return Err(format!("{prefix}node '{parent}' cannot be its own parent"));
+        }
+        if !stack.nodes.iter().any(|n| &n.node_id == parent) {
+            return Err(format!("{prefix}dangling parent ref: {parent}"));
+        }
+        if node_id.is_some() && seen.contains(&parent) {
+            return Err(format!("{prefix}parent '{parent}' is named more than once"));
+        }
+        seen.push(parent);
+    }
+    Ok(())
+}
+
+/// Reject the stack a mutation *would* produce when it is no longer a DAG.
+///
+/// Every writer here validates a candidate before touching the file, so a rejected call leaves the
+/// stack on disk exactly as it was. `op` follows the same empty-means-unprefixed rule as
+/// [`validate_parents`], for the same reason.
+fn reject_if_cyclic(candidate: &tddy_core::changeset::WorkQueue, op: &str) -> Result<(), String> {
+    candidate
+        .topo_order()
+        .map_err(|e| format!("{}cycle detected: {e}", message_prefix(op)))?;
+    Ok(())
+}
+
+/// `"{op}: "`, or `""` for an empty `op` — see [`validate_parents`] for why one writer emits its
+/// rejections unprefixed.
+fn message_prefix(op: &str) -> String {
+    if op.is_empty() {
+        String::new()
+    } else {
+        format!("{op}: ")
+    }
+}
+
+/// Next free `"n<N>"` node id for a stack: one past the highest existing numeric suffix among
+/// ids matching `n<digits>` (non-matching ids are ignored for this purpose), or `"n1"` for an
+/// empty/all-non-matching stack. Uses the max, not the count, so a stack with a gap (e.g. `"n1"`,
+/// `"n5"`) still assigns `"n6"` rather than colliding.
+fn next_free_node_id(stack: &tddy_core::changeset::WorkQueue) -> String {
+    let max = stack
+        .nodes
+        .iter()
+        .filter_map(|n| n.node_id.strip_prefix('n')?.parse::<u32>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("n{}", max + 1)
+}
+
+/// Fixtures shared by the submodules' unit tests.
+#[cfg(test)]
+mod test_support {
+    use std::path::Path;
+    use tddy_core::changeset::{Changeset, GithubPrStatus, WorkItem, WorkQueue};
+
+    pub(super) use tddy_changeset::work_queue_fixtures::a_stack_session_dir;
+
+    pub(super) fn a_node(node_id: &str, title: &str, parents: Vec<&str>) -> WorkItem {
+        WorkItem {
+            node_id: node_id.to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            branch_suggestion: None,
+            branch: None,
+            session_id: None,
+            parents: parents.into_iter().map(str::to_string).collect(),
+            pr_status: None,
+            child_state: None,
+            internal_status: None,
+            display_order: None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // shared fixtures for the full-control primitives
+    //
+    // PRD: docs/ft/coder/pr-stacking.md § Full control over the plan.
+    // Changeset: docs/dev/changesets/2026-07-30-pr-stack-full-control.md.
+    // -----------------------------------------------------------------------
+
+    /// [`a_node`] plus the things a started node owns: a branch, a child session, and a PR recorded
+    /// at `phase`.
+    pub(super) fn a_started_node(
+        node_id: &str,
+        branch: &str,
+        phase: &str,
+        parents: Vec<&str>,
+    ) -> WorkItem {
+        WorkItem {
+            branch: Some(branch.to_string()),
+            session_id: Some(format!("session-for-{node_id}")),
+            pr_status: Some(GithubPrStatus {
+                phase: phase.to_string(),
+                url: Some(format!("https://github.com/acme/repo/pull/{node_id}")),
+                error: None,
+            }),
+            ..a_node(node_id, node_id, parents)
+        }
+    }
+
+    /// The session at `dir` is a pr-stack orchestrator whose project holds `nodes`.
+    pub(super) fn write_stack(dir: &Path, nodes: Vec<WorkItem>) {
+        tddy_core::changeset::write_changeset(
+            dir,
+            &Changeset {
+                recipe: Some("pr-stack".to_string()),
+                ..Changeset::default()
+            },
+        )
+        .unwrap();
+        tddy_changeset::work_queue_fixtures::seed_session_stack(
+            dir,
+            WorkQueue { version: 1, nodes },
+        );
+    }
+
+    pub(super) fn stack_on_disk(dir: &Path) -> WorkQueue {
+        tddy_changeset::work_queue_fixtures::stack_on_disk(dir)
+    }
+
+    pub(super) fn node_ids(dir: &Path) -> Vec<String> {
+        stack_on_disk(dir)
+            .nodes
+            .iter()
+            .map(|n| n.node_id.clone())
+            .collect()
+    }
+
+    /// A rejected call, so a test reads `assert_rejected(r).with_reason_containing("n9")`.
+    pub(super) struct Rejection(String);
+
+    pub(super) fn assert_rejected<T: std::fmt::Debug>(result: Result<T, String>) -> Rejection {
+        match result {
+            Err(reason) => Rejection(reason),
+            Ok(value) => {
+                panic!("expected the call to be rejected, but it succeeded with {value:?}")
+            }
+        }
+    }
+
+    impl Rejection {
+        pub(super) fn with_reason_containing(self, fragment: &str) -> Self {
+            assert!(
+                self.0.contains(fragment),
+                "expected the rejection to mention '{fragment}', was '{}'",
+                self.0
+            );
+            self
+        }
+    }
+}

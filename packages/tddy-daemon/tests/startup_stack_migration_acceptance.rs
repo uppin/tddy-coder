@@ -1,18 +1,18 @@
 //! The daemon moves every session-held PR stack into its project while it starts
 //! (`#orchestrators` 2/11).
 //!
-//! `tddy-pr-stack`'s `stack_migration_sweep_acceptance` proves what the sweep does to a sessions
+//! `tddy-work-queue`'s `queue_migration_sweep_acceptance` proves what the sweep does to a sessions
 //! directory. This suite proves the daemon runs it: `runtime::build`, over a data directory left by
 //! an older daemon, must leave that directory migrated before anything is served.
 
 use std::path::Path;
 
-use tddy_core::changeset::{read_changeset, write_changeset, Changeset, Stack, StackNode};
-use tddy_core::project_stack_store::ProjectStackStore;
+use tddy_core::changeset::{read_changeset, write_changeset, Changeset, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
 };
+use tddy_core::work_queue_store::WorkQueueStore;
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{self, RuntimeOptions};
 use tokio::net::TcpListener;
@@ -47,27 +47,27 @@ github:
     serde_yaml::from_str(&yaml).expect("the config fixture did not parse")
 }
 
-fn a_two_node_stack() -> Stack {
-    Stack {
+fn a_two_node_stack() -> WorkQueue {
+    WorkQueue {
         version: 1,
         nodes: vec![
-            StackNode {
+            WorkItem {
                 node_id: "n1".to_string(),
                 title: "Add token store".to_string(),
-                ..StackNode::default()
+                ..WorkItem::default()
             },
-            StackNode {
+            WorkItem {
                 node_id: "n2".to_string(),
                 title: "Rotate tokens".to_string(),
                 parents: vec!["n1".to_string()],
-                ..StackNode::default()
+                ..WorkItem::default()
             },
         ],
     }
 }
 
 /// A pr-stack session as an older daemon left it: the stack inside its `changeset.yaml`.
-fn a_legacy_orchestrator_in(data_dir: &Path, stack: Stack) -> std::path::PathBuf {
+fn a_legacy_orchestrator_in(data_dir: &Path, stack: WorkQueue) -> std::path::PathBuf {
     let dir = unified_session_dir_path(data_dir, A_LEGACY_ORCHESTRATOR);
     std::fs::create_dir_all(&dir).expect("session dir");
     write_initial_tool_session_metadata(
@@ -107,11 +107,11 @@ async fn building_the_daemon_moves_a_session_held_stack_into_its_project() {
     // Then — the changeset names a project record holding that stack, and carries no copy
     let migrated = read_changeset(&session_dir).expect("read the migrated changeset");
     assert_eq!(migrated.stack, None, "the legacy copy must be dropped");
-    let stack_id = migrated
-        .stack_id
+    let queue_id = migrated
+        .work_queue_id
         .expect("the changeset must name its project stack");
-    let record = ProjectStackStore::new(data_dir.path().join("projects"))
-        .read(A_PROJECT, &stack_id)
+    let record = WorkQueueStore::new(data_dir.path().join("projects"))
+        .read(A_PROJECT, &queue_id)
         .expect("the project must hold the named stack");
     assert_eq!(
         (record.created_by_session_id.as_str(), record.stack),

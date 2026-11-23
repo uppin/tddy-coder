@@ -157,7 +157,7 @@ impl HostService for HostServiceImpl {
     /// the daemon's own user would answer for the wrong account.
     ///
     /// Routed **before** the caller is authenticated, like the roster RPCs and
-    /// [`Self::resolve_stack_base`]: the token is verified by the daemon that serves the call, and
+    /// [`Self::resolve_work_item_base`]: the token is verified by the daemon that serves the call, and
     /// a peer's user mapping is not this one's to judge. Authenticating first would refuse an
     /// operator whose GitHub user maps to an OS user on the host being probed but not on whichever
     /// host their browser happens to be talking to.
