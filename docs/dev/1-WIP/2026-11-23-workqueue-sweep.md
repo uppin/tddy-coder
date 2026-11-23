@@ -1,7 +1,7 @@
 # Changeset: `#workqueue` sweep — split the files the stack left over 500 lines, close its code issues and closable TODOs
 
 **Date**: 2026-11-23
-**Status**: 🚧 In Progress — `[G]` done 2026-11-23; daemon-rpc scoped tests left to CI (disk)
+**Status**: 🚧 In Progress — `[G]` and validate done 2026-11-23; wrap next
 **Type**: Refactor
 **Stack**: `#workqueue` 15/15 (gh stack #1016), on `feature/workqueue/land-propagate` (#1015, `f53459523`)
 **Branch**: `feature/workqueue/sweep`
@@ -250,6 +250,15 @@ One JSONL plan per crate under `tmp/restructure/workqueue-sweep/` (not committed
 | `2026-11-23-work-queue-graph-is-not-live.md` | line edges on `WorkQueueStatusView` (proto), or a graph re-read per status snapshot |
 | `2026-07-26-pr-stack-status-polling-and-stack-hygiene.md` (narrowed by #1015) | route the web's `RepointWorkItem` RPC through `tddy_work_queue::engine` (its refusals change) |
 | `2026-11-14-node-session-not-listed-…`, `2026-11-21-trunk-watch-reads-github-com-only.md`, `2026-08-30-…querybranch…`, `2026-10-25-new-session-form-…`, `2026-07-30-…full-control-follow-ups.md` | narrowed by the stack; each remainder is a feature |
+
+## Validation Results
+
+`/validate-changes` 2026-11-23, base `origin/master` (`0b5f4a3b1`, the merged #1015 — already the branch's base, leak check clean: only this PR's 17 commits).
+
+- **Critical: 0 open.** One found and fixed: four Cypress failure screenshots had been swept into two commits by `git add -A packages`; removed in `chore(workqueue): remove Cypress failure screenshots…`.
+- **Boundary:** no behaviour change; every moved body verified by `restructure verify` (nothing lost). No parent-owned symbol implemented; the `docs.rs` deletion is the only removal and had no caller.
+- **Build:** `cargo check`/`clippy --all-targets -D warnings` clean for tool-engine, work-queue, session-files, changeset, worktree-service, daemon-rpc. daemon-rpc scoped tests not run locally (disk) — CI.
+- **Info:** seam V moved only the four pure helpers (489 lines, under budget); the planned `useWorkItemMutations.ts` hook was not written. W narrowed `service.rs` to 679, still over budget (trait impl; engine cannot cut it).
 
 ## Final Checklist
 
