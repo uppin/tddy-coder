@@ -47,7 +47,7 @@ export function serveProjectStack(
   } else {
     owner.ownsWorkQueue = true;
   }
-  window.location.hash = `#/sessions/${createdBySessionId}?inspector=work-queue`;
+  window.location.hash = `#/sessions/${createdBySessionId}`;
   return backend
     .onUnary(WorkQueueService.method.listProjectWorkQueues, () =>
       create(WorkQueueService.method.listProjectWorkQueues.output, { stacks: [] }),

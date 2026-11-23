@@ -132,6 +132,8 @@ export interface WorkItemRowProps {
    * child it no longer has, with no control left to start a new one.
    */
   identityChildSession?: StackChildSession;
+  /** The drag handle at the row's left edge, rendered by the list that owns the drag. */
+  dragHandle?: React.ReactNode;
 }
 
 /**
@@ -179,6 +181,7 @@ export function WorkItemRow({
   workItem,
   childSession,
   identityChildSession,
+  dragHandle,
 }: WorkItemRowProps) {
   // A node whose recorded child session has been deleted is workable again, so it shows the CTA
   // rather than a status chip for a session that no longer exists.
@@ -227,6 +230,7 @@ export function WorkItemRow({
       className="flex flex-col gap-1 rounded-md border border-border px-3 py-2"
     >
       <div className="flex items-center justify-between gap-3">
+        {dragHandle}
         <button
           type="button"
           data-testid={`work-item-toggle-${node.itemId}`}

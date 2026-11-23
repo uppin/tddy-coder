@@ -58,10 +58,10 @@ export const projectStacksPage = {
 
   stackView: () => byTestId(TEST_IDS.workQueueView, RENDER_WAIT),
 
-  /** The queue opened in its owning session's inspector — a queue's id is its session's. */
+  /** The queue opened in its owning session's work queue sidebar — a queue's id is its session's. */
   assertAtStackView(_projectId: string, queueId: string) {
     cy.location("hash").should("match", hashIs(`/sessions/${queueId}`));
-    cy.location("hash").should("contain", "inspector=work-queue");
+    byTestId("work-queue-sidebar", RENDER_WAIT).should("be.visible");
   },
 
   // ---------------------------------------------------------------------------

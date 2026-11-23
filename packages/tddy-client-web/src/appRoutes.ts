@@ -208,7 +208,6 @@ export const INSPECTOR_TAB_NAMES = [
   "tools",
   "agents",
   "usage",
-  "work-queue",
   "pr",
   "worktree",
   "files",

@@ -1,11 +1,13 @@
 import React, { useEffect, useState, type CSSProperties } from "react";
 import type { Client } from "@connectrpc/connect";
+import { ListTree } from "lucide-react";
 import { useIsNarrowViewport, Button } from "tddy-ui-web";
 import { ActivityService } from "tddy-client-web/gen/activity_pb";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { PathAccessRequests } from "./PathAccessRequests";
 import { ORCHESTRATOR_ROLE, PROJECT_HOME_ROLE } from "./utils/projectHomeGroups";
 import { SessionActivitySidebar } from "./SessionActivitySidebar";
+import { SessionWorkQueueSidebar } from "./SessionWorkQueueSidebar";
 import { defaultActivitySidebarOpen } from "./activitySidebarState";
 import { useHttpClient } from "tddy-client-web";
 import { AgentActivityDetailDialog, SubagentConversationDialog, rosterHalfOf, useAcpReplay, type ChatMessage } from "tddy-chat-web";
@@ -45,6 +47,10 @@ const COLUMN_STYLE: CSSProperties = {
  *   sidebar: one transcript per pane.
  * - At mobile width the sidebar is a full-width overlay instead of a docked column.
  *
+ * - `workQueuePanel` (a session that owns a work queue) docks the queue in the same slot, behind its
+ *   own toggle. The two sidebars are mutually exclusive — opening one closes the other — and a
+ *   session that owns a queue opens on it.
+ *
  * `children` always sit in the same slot of the tree, so opening or closing the sidebar never
  * remounts them (an open agent conversation inside them would otherwise cancel itself).
  *
@@ -55,11 +61,13 @@ export function SessionWithActivitySidebar(props: {
   sessionToken: string;
   client?: Client<typeof ActivityService>;
   suppressed: boolean;
+  /** The session's work queue, shown as a sidebar beside Activities. Absent: the session has none. */
+  workQueuePanel?: React.ReactNode;
   isMobile?: boolean;
   toolbar: (toggle: React.ReactNode) => React.ReactNode;
   children: React.ReactNode;
 }): React.ReactElement {
-  const { session, sessionToken, suppressed, toolbar, children } = props;
+  const { session, sessionToken, suppressed, toolbar, children, workQueuePanel } = props;
   const sessionId = session.sessionId;
 
   // `useHttpClient` is called unconditionally (hook rules); the explicit prop wins when present.
@@ -73,15 +81,24 @@ export function SessionWithActivitySidebar(props: {
   const { hasActivity, unreadCount, markSeen, loadSnapshot } = chat;
 
   // A toggle is kept against the session it was made on, and dropped when another one is selected.
-  const [override, setOverride] = useState<{ sessionId: string; open: boolean } | null>(null);
+  // One sidebar slot: whichever panel is chosen replaces the other.
+  type Panel = "activity" | "work-queue" | null;
+  const [override, setOverride] = useState<{ sessionId: string; panel: Panel } | null>(null);
   useEffect(() => {
     setOverride(null);
   }, [sessionId]);
-  const open =
-    override !== null && override.sessionId === sessionId
-      ? override.open
-      : defaultActivitySidebarOpen(session);
+  const defaultPanel: Panel =
+    workQueuePanel && session.ownsWorkQueue
+      ? "work-queue"
+      : defaultActivitySidebarOpen(session)
+        ? "activity"
+        : null;
+  const panel: Panel =
+    override !== null && override.sessionId === sessionId ? override.panel : defaultPanel;
+  const choose = (next: Panel) => setOverride({ sessionId, panel: next });
+  const open = panel === "activity";
   const shown = open && !suppressed && hasActivity;
+  const queueOpen = panel === "work-queue" && Boolean(workQueuePanel);
 
   const [detail, setDetail] = useState<ChatMessage | null>(null);
   // The subagent conversation whose bubble was clicked, opened over the session. Its title is the bubble's.
@@ -105,7 +122,7 @@ export function SessionWithActivitySidebar(props: {
     if (suppressed && unreadCount > 0) markSeen();
   }, [suppressed, unreadCount, markSeen]);
 
-  const toggle =
+  const activityToggle =
     !suppressed && hasActivity ? (
       <div className="relative inline-flex">
         <Button
@@ -114,7 +131,7 @@ export function SessionWithActivitySidebar(props: {
           size="icon-sm"
           title="Agent activity"
           aria-expanded={open}
-          onClick={() => setOverride({ sessionId, open: !open })}
+          onClick={() => choose(open ? null : "activity")}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -140,6 +157,25 @@ export function SessionWithActivitySidebar(props: {
         )}
       </div>
     ) : null;
+  const queueToggle = workQueuePanel ? (
+    <Button
+      data-testid="work-queue-button"
+      variant="ghost"
+      size="icon-sm"
+      title="Work queue"
+      aria-expanded={queueOpen}
+      onClick={() => choose(queueOpen ? null : "work-queue")}
+    >
+      <ListTree className="h-4 w-4" />
+    </Button>
+  ) : null;
+  const toggle =
+    activityToggle || queueToggle ? (
+      <>
+        {queueToggle}
+        {activityToggle}
+      </>
+    ) : null;
 
   return (
     <div style={ROOT_STYLE}>
@@ -154,7 +190,7 @@ export function SessionWithActivitySidebar(props: {
             sessionId={sessionId}
             chat={chat}
             mobile={mobile}
-            onClose={() => setOverride({ sessionId, open: false })}
+            onClose={() => choose(null)}
             onToolClick={setDetail}
             onSubagentClick={(message) => {
               if (message.conversationId) {
@@ -162,6 +198,11 @@ export function SessionWithActivitySidebar(props: {
               }
             }}
           />
+        )}
+        {queueOpen && (
+          <SessionWorkQueueSidebar mobile={mobile} onClose={() => choose(null)}>
+            {workQueuePanel}
+          </SessionWorkQueueSidebar>
         )}
       </div>
       {detail && (

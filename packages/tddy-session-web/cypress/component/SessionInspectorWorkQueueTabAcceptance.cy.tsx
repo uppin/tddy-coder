@@ -1,7 +1,7 @@
 /**
- * Acceptance (`#workqueue` 5/14): a session that owns a work queue shows a Work queue tab in its
- * inspector and opens on it; a session without one shows no such tab. No rule here reads a role —
- * the fixtures below are plain sessions.
+ * Acceptance (`#workqueue` 5/14, sidebar UX): a session that owns a work queue shows it in a right
+ * sidebar (not an inspector tab) and opens on it; a session without one shows neither the sidebar
+ * nor its toggle. No rule here reads a role — the fixtures below are plain sessions.
  *
  * Test ids and the queue RPC (`WorkQueueService`) are `#workqueue` 3/14's names.
  *
@@ -60,11 +60,10 @@ function aBackendServing(sessions: ReturnType<typeof aSession>[]) {
   return { backend, added };
 }
 
-function openInspectorOf(sessionId: string, sessions: ReturnType<typeof aSession>[]) {
+function openSessionOf(sessionId: string, sessions: ReturnType<typeof aSession>[]) {
   const served = aBackendServing(sessions);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), served.backend);
   sessionsDrawerPage.drawerItem(sessionId).click();
-  sessionsDrawerPage.inspectorToggle().click();
   return served;
 }
 
@@ -78,27 +77,31 @@ beforeEach(() => {
   appLocationPage.reset();
 });
 
-it("a session owning a work queue shows the Work queue tab and opens on it", () => {
-  // When — the session also has a PR; the queue still comes first
-  openInspectorOf(QUEUE_OWNER.sessionId, [QUEUE_OWNER]);
-
-  // Then
-  byTestId("sessions-inspector-tab-work-queue").should("have.attr", "aria-selected", "true");
-  byTestId("work-queue-view").should("be.visible");
-});
-
-it("a session without a queue shows no Work queue tab and opens on PR or Worktree", () => {
+it("a session owning a work queue opens on the work queue sidebar, and the inspector has no Work queue tab", () => {
   // When
-  openInspectorOf(PLAIN_SESSION.sessionId, [PLAIN_SESSION]);
+  openSessionOf(QUEUE_OWNER.sessionId, [QUEUE_OWNER]);
 
   // Then
+  byTestId("work-queue-sidebar").should("be.visible");
+  byTestId("work-queue-view").should("be.visible");
+  sessionsDrawerPage.inspectorToggle().click();
   byTestId("sessions-inspector-tab-pr").should("have.attr", "aria-selected", "true");
   byTestId("sessions-inspector-tab-work-queue").should("not.exist");
 });
 
-it("the user adds a work item from the Work queue tab", () => {
+it("a session without a queue shows no work queue sidebar or toggle", () => {
+  // When
+  openSessionOf(PLAIN_SESSION.sessionId, [PLAIN_SESSION]);
+
+  // Then
+  byTestId("sessions-inspector-toggle").should("be.visible");
+  byTestId("work-queue-sidebar").should("not.exist");
+  byTestId("work-queue-button").should("not.exist");
+});
+
+it("the user adds a work item from the work queue sidebar", () => {
   // Given
-  const served = openInspectorOf(QUEUE_OWNER.sessionId, [QUEUE_OWNER]);
+  const served = openSessionOf(QUEUE_OWNER.sessionId, [QUEUE_OWNER]);
 
   // When
   byTestId("work-item-add-btn").click();

@@ -6,6 +6,7 @@ import { DormantSessionRuntime } from "./DormantSessionRuntime";
 import { DormantAgentTerminal } from "./DormantAgentTerminal";
 import { useAppLocation } from "tddy-client-web";
 import { SessionWithActivitySidebar } from "./SessionWithActivitySidebar";
+import { SessionWorkQueueTab } from "./SessionWorkQueueTab";
 import { Button } from "tddy-ui-web";
 import { CreateSessionPane } from "tddy-session-create-web";
 import { AgentPicker } from "./AgentPicker";
@@ -294,6 +295,26 @@ export function SessionMainPane({
               sessionToken={sessionToken}
               client={buildSessionActivityClient?.() ?? activityClient}
               suppressed={baseViewMode === "activities"}
+              workQueuePanel={
+                selectedSession.ownsWorkQueue ? (
+                  <SessionWorkQueueTab
+                    session={selectedSession}
+                    sessions={sessions}
+                    sessionToken={sessionToken}
+                    projects={projects}
+                    projectClient={projectClient}
+                    catalogClient={catalogClient}
+                    taskClient={taskClient}
+                    workQueueClient={workQueueClient}
+                    sessionMetadataBySessionId={sessionMetadataBySessionId}
+                    onChildSessionStarted={onChildSessionStarted}
+                    onOpenSession={onSwitchPeer}
+                    client={client}
+                    sessionFilesClient={sessionFilesClient}
+                    worktreeClient={worktreeClient}
+                  />
+                ) : undefined
+              }
               toolbar={(toggle) => (
                 <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
                   {codeNavigationClient && (
@@ -425,12 +446,6 @@ export function SessionMainPane({
                   execToolClient={execToolClient}
                   worktreeClient={worktreeClient}
                   sessionFilesClient={sessionFilesClient}
-                  projectClient={projectClient}
-                  catalogClient={catalogClient}
-                  taskClient={taskClient}
-                  projects={projects}
-                  sessionMetadataBySessionId={sessionMetadataBySessionId}
-                  onChildSessionStarted={onChildSessionStarted}
                   workQueueClient={workQueueClient}
                   sessionToken={sessionToken}
                   /* The media tabs are gated on the connection to the host that owns this session —

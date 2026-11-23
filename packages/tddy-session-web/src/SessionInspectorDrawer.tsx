@@ -7,9 +7,9 @@ import type { ActivityService } from "tddy-client-web/gen/activity_pb";
 import type { ExecToolService } from "tddy-client-web/gen/exec_tools_pb";
 import type { SessionFilesService } from "tddy-client-web/gen/session_files_pb";
 import type { WorktreeService } from "tddy-client-web/gen/worktree_pb";
+import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { VncService } from "tddy-client-web/gen/vnc_pb";
 import { ScreenSharingService } from "tddy-client-web/gen/screen_sharing_pb";
-import { SessionWorkQueueTab, type SessionWorkQueueTabInputs } from "./SessionWorkQueueTab";
 import { InspectorTabs, type InspectorTab } from "./InspectorTabs";
 import {
   isDormantInspectorTabName,
@@ -41,8 +41,9 @@ import { requestSessionsRefresh } from "./lib/sessionsRefreshBridge";
 
 export type InspectorDrawerState = "closed" | "open" | "expanded";
 
-/** The Work queue tab's own inputs are [`SessionWorkQueueTabInputs`]. */
-interface SessionInspectorDrawerProps extends SessionWorkQueueTabInputs {
+interface SessionInspectorDrawerProps {
+  /** `work_queue.WorkQueueService` on the selected daemon — the PR tab reads through it. */
+  workQueueClient?: Client<typeof WorkQueueService>;
   state: InspectorDrawerState;
   session: SessionEntry | null;
   /** The drawer's full session list — the Agents tab folds this session's subagents out of it. */
@@ -131,10 +132,8 @@ export function SessionInspectorDrawer({
   buildSessionExecToolClient,
   onInsertPathIntoTerminal,
   onSwitchPeer,
-  ...workQueueTabInputs
+  workQueueClient,
 }: SessionInspectorDrawerProps) {
-  // The Work queue tab takes the whole input set by spread; the PR tab reads the client by name.
-  const { workQueueClient } = workQueueTabInputs;
   const [pendingDelete, setPendingDelete] = useState(false);
   // The active tab lives in the URL (`?inspector=<tab>`) so a shared link opens on the same tab.
   // An unresolvable value degrades to Details rather than rendering a blank panel; the screen
@@ -173,13 +172,9 @@ export function SessionInspectorDrawer({
   // session is stopped. A live session's transcript is the Agent Activity sidebar's. A request for it
   // on a live session degrades to Details, and is honoured again if the session stops.
   const activityAvailable = canResumeSession(session);
-  // The Work queue tab exists only for a session that owns a queue; a request for it on any other
-  // session degrades to Details.
-  const workQueueAvailable = session?.ownsWorkQueue === true;
   const tab: InspectorTab =
     (!mediaAvailable && isMediaInspectorTabName(requestedTab)) ||
-    (!activityAvailable && isDormantInspectorTabName(requestedTab)) ||
-    (!workQueueAvailable && requestedTab === "work-queue")
+    (!activityAvailable && isDormantInspectorTabName(requestedTab))
       ? "details"
       : requestedTab;
   const setTab = useCallback(
@@ -228,7 +223,6 @@ export function SessionInspectorDrawer({
           onChange={setTab}
           mediaAvailable={mediaAvailable}
           activityAvailable={activityAvailable}
-          workQueueAvailable={workQueueAvailable}
         />
       )}
 
@@ -310,19 +304,6 @@ export function SessionInspectorDrawer({
               client={activityClient}
               sessionToken={sessionToken ?? ""}
               sessionId={session.sessionId}
-            />
-          </ScrollArea>
-        ) : tab === "work-queue" ? (
-          <ScrollArea className="flex-1 min-h-0">
-            <SessionWorkQueueTab
-              {...workQueueTabInputs}
-              session={session}
-              sessionToken={sessionToken ?? ""}
-              sessions={sessions}
-              onOpenSession={onSwitchPeer}
-              client={client}
-              sessionFilesClient={sessionFilesClient}
-              worktreeClient={worktreeClient}
             />
           </ScrollArea>
         ) : tab === "pr" ? (
