@@ -1,7 +1,7 @@
 # Changeset: `#workqueue` sweep — split the files the stack left over 500 lines, close its code issues and closable TODOs
 
 **Date**: 2026-11-23
-**Status**: 🚧 In Progress — planned, `[G]` not started
+**Status**: 🚧 In Progress — `[G]` done 2026-11-23; daemon-rpc scoped tests left to CI (disk)
 **Type**: Refactor
 **Stack**: `#workqueue` 15/15 (gh stack #1016), on `feature/workqueue/land-propagate` (#1015, `f53459523`)
 **Branch**: `feature/workqueue/sweep`
@@ -183,7 +183,7 @@ graph TD
 
 ## Visibility
 
-To be filled by `[G]` from each apply's report. Expected: private methods of `DaemonStackTools` /
+Filled by `[G]`: widenings to `pub(crate)` reported by the applies (tool-engine `StackToolArgs`, `work_queue_op_of`; daemon-rpc moved legs; worktree-service host helpers); `queue_legs` `*_through_inbox` are `pub(super)`. Hand fixes after the daemon-rpc compile gate: restored trait/constant imports the engine's import pass missed (match-arm constants in tool-engine `args.rs`; `WorkQueueHome`, `ProjectHomePort`, `ProjectHomeTurnPort`, `WorkQueueToolPort`, `ScheduleCtx`) and `merge_holdups` to `pub(crate)`. Deviations: seam O split into two modules (`item_edits`, `annotation_edits`, the items are not adjacent); seam E uses `reexport: named` (tests name `work_queue_op_of`); seam V moved only the four pure helpers (504 → 489), not the mutation hook. Original text: Expected: private methods of `DaemonStackTools` /
 `DaemonStackGitTools` called from the parent's port impl widen to `pub(super)`; private items moved into
 `ops/item_edits.rs` called by `ops::run` widen to `pub(super)`. Zero widenings expected for T, R, L, X*.
 Seam P's new inherent methods are `pub(super)` by construction. Then the moved-line diff (normalise
@@ -197,14 +197,14 @@ one package at a time, `df` ≥ 15 GiB before each:
 
 | Gate | Before | After |
 |---|---|---|
-| `./test -p tddy-daemon-rpc` | | |
-| `./test -p tddy-work-queue` | | |
-| `./test -p tddy-tool-engine` | | |
-| `./test -p tddy-changeset` | | |
-| `./test -p tddy-worktree-service` (if W lands) | | |
-| `./test -p tddy-session-files` (compiles against `docs`) | | |
-| `tddy-workqueue-web` — the `WorkQueueView*` component specs | | |
-| `./dev cargo clippy -p <each> --all-targets -- -D warnings` | | |
+| `./test -p tddy-daemon-rpc` | 150 passed, 0 failed before the run died (disk); not completed | **not run** (disk < 8 GiB) — CI |
+| `./test -p tddy-work-queue` (with session-files: 307/0) | pass | with session-files 294/0 (−13 = deleted `docs.rs` writer/validator tests) |
+| `./test -p tddy-tool-engine` | 323/0 | 323/0 |
+| `./test -p tddy-changeset` | 268/0 | 268/0 |
+| `./test -p tddy-worktree-service` (if W lands) | not run (disk) | 197 passed, 12 failed — all in `remote_git_livekit_acceptance` (`tddy-remote-git-repo` binary not built in this worktree; environment) |
+| `./test -p tddy-session-files` (compiles against `docs`) | pass | pass (in the 294/0 above) |
+| `tddy-workqueue-web` — the `WorkQueueView*` component specs | — | **not run**: the worktree has no `tddy-workspace-web` link (needs `./dev bun run local-registry-install`); `bun build --no-bundle` parses both files |
+| `./dev cargo clippy -p <each> --all-targets -- -D warnings` | — | clean: tool-engine, work-queue, session-files, changeset, worktree-service, daemon-rpc |
 
 Name every pre-existing failure here (the macOS sandbox/seatbelt set in `tddy-daemon-rpc` is the known one),
 so none reads as a regression. CI is the authority for the whole workspace.
