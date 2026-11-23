@@ -197,15 +197,36 @@ The tools' closed lists (catalogue, admission, read-only, access, dispatch) carr
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Every commit-flow read (inbox, outbox, row counts) runs `git fetch origin --prune` first, so a queue
+  view's counts refresh costs one fetch. Accepted for now: the answer is only as fresh as the fetch.
+- `predict` uses `<commit>^` as the merge base, so a root commit in an inbox would be refused. That
+  cannot happen on a line whose items share history.
 
 ## Refactoring Needed
 
-_(populated by validation)_
+- ✅ Done in validation: the inbox cache was keyed by the full tip set, so every push added an entry
+  that was never evicted (it grew for the daemon's lifetime). It now keeps one entry per item, holding
+  the tips it was read at, and replaces it when they move (`tddy-work-queue/src/commit_flow.rs`).
 
 ## Validation Results
 
-_(populated by validation)_
+2026-11-23, on top of n10 `10c8b0568` (9 n11 commits, leak-free):
+
+| Gate | Result |
+|------|--------|
+| `cargo check --all-targets` work-queue, tool-engine, daemon-rpc, tools, service | ✅ |
+| `cargo clippy --all-targets -D warnings` work-queue, daemon-rpc | ✅ |
+| `cargo test -p tddy-work-queue` | ✅ all |
+| tool-engine `work_item_commit_flow_tools`, `work_queue_tools_catalogue`, `--lib` | ✅ |
+| daemon-rpc `stack_plan_tools_acceptance` (13), `work_queue_commit_flow_rpc_acceptance` (4) | ✅ |
+| service `unbundle_service_split` (29) | ✅ |
+| tools `pr_stack_tool_dispatch_acceptance` with `TDDY_TOOLS_BINARY` (3) | ✅ |
+| Cypress: PullRequestInboxOutbox, SessionPullRequestFlowTabs, WorkItemCommitCounts | ✅ 7/7 |
+| `scripts/generated-code.sh check` client-web, rust-typescript-tests | ✅ |
+
+Stack boundary: no Dependencies symbol is implemented here and the diff holds only n11's files.
+`ports.rs` (925 lines) and `tool-engine/src/work_queue_tools.rs` (899) were already over 500 at the
+base; n11 adds 22 and 16 lines to them.
 
 ## TODO
 
@@ -217,12 +238,12 @@ _(populated by validation)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the touched packages' tests (`./test -p {package}` per package) — verify 100% pass
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the touched packages' tests (scoped; see Validation Results)
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues

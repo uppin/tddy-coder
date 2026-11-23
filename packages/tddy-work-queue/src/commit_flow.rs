@@ -75,7 +75,9 @@ impl std::error::Error for CommitFlowError {}
 /// Commit analysis over one clone (the queue owner's worktree), cached by remote tips.
 pub struct CommitFlow {
     repo_dir: PathBuf,
-    inbox_cache: Mutex<HashMap<String, Vec<InboxEntry>>>,
+    /// Per item: the tips its inbox was read at and the answer — replaced when the tips move, so
+    /// the cache holds one entry per item for the daemon's lifetime.
+    inbox_cache: Mutex<HashMap<String, (String, Vec<InboxEntry>)>>,
     hits: AtomicU64,
 }
 
@@ -120,15 +122,17 @@ impl CommitFlow {
     ) -> Result<Vec<InboxEntry>, CommitFlowError> {
         let chain = chain_of(queue, item_id)?;
         let key = self.cache_key(&chain)?;
-        if let Some(cached) = self.inbox_cache.lock().expect("cache lock").get(&key) {
-            self.hits.fetch_add(1, Ordering::Relaxed);
-            return Ok(cached.clone());
+        if let Some((tips, cached)) = self.inbox_cache.lock().expect("cache lock").get(item_id) {
+            if *tips == key {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                return Ok(cached.clone());
+            }
         }
         let entries = self.read_inbox(&chain)?;
         self.inbox_cache
             .lock()
             .expect("cache lock")
-            .insert(key, entries.clone());
+            .insert(item_id.to_string(), (key, entries.clone()));
         Ok(entries)
     }
 
