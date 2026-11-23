@@ -67,9 +67,8 @@ fixtures the concern modules' tests share.
 
 ### `docs.rs` — per-PR documents
 
-A pass of document pairs (`StackDocsOutput`, `NodeDocs`), its validator (`validate_stack_docs`, which
-checks the `REQUIRED_CHANGESET_HEADINGS`), the writer (`write_stack_docs`), the stack-plan basename
-(`PR_STACK_PLAN_MD_BASENAME`), and the path convention (`node_doc_paths` →
+The stack-plan basename (`PR_STACK_PLAN_MD_BASENAME`), the document basenames (`NODE_PRD_BASENAME`,
+`NODE_CHANGESET_BASENAME`) and the path convention (`node_doc_paths` →
 `<artifacts root>/prs/<node_id>/{PRD.md,changeset.md}`). Paths are derived from `node_id`, not
 recorded on `WorkItem`.
 
@@ -167,7 +166,7 @@ entry, defined beside the data model they serve.
 |---|---|
 | `WORK_QUEUE_SERVICE` | the coordinate, `"work_queue.WorkQueueService"` |
 | `WorkQueueHandler` | the eight RPCs the host process answers — `add_work_item`, `get_pr_status`, `query_branch`, `resolve_work_item_base`, `link_work_item`, `repoint_work_item`, `reorder_work_item`, `pull_base_into_branch` |
-| `WorkQueueServiceImpl<H>` | the thin `WorkQueueService` adapter over an `Arc<H: WorkQueueHandler>` (`new(host)`) |
+| `WorkQueueServiceImpl<H>` | the thin `WorkQueueService` adapter over an `Arc<H: WorkQueueHandler>` (`new(host)`); defined in `rpc/service.rs` with `build_pr_stack_entry`, re-exported from `rpc` |
 | `build_pr_stack_entry(service)` | registers `work_queue.WorkQueueService` on the RPC transport |
 
 The daemon's implementation is `tddy_daemon_rpc::WorkQueueRpcHandler`
@@ -190,7 +189,7 @@ production caller*).
 ## Tests
 
 The crate's unit tests live beside the code (`item_ops/{nodes,adopt}.rs`, `docs.rs`, `assess.rs`,
-`git_ops.rs`, `pr_insight.rs`, `rpc.rs`), sharing fixtures from `item_ops/mod.rs`'s test module.
+`git_ops.rs`, `pr_insight.rs`, `rpc.rs`); the larger modules keep theirs in a `tests.rs` child (`git_ops/tests.rs`, `item_ops/nodes/tests.rs`, `assess/tests.rs`), sharing fixtures from `item_ops/mod.rs`'s test module.
 Acceptance suites that exercise these operations still live in `tddy-workflow-recipes/tests/`, naming
 `tddy_work_queue` directly.
 

@@ -27,7 +27,7 @@ and the `pr_*` stack tools, which call everything below.
 | `assess.rs` | node views (`assemble_views`, `NodeView`, `ChildPhase`, `PrLiveStatus`), `effective_base_ref` |
 | `git_ops.rs` | rebase / merge-base / force-push / commit / push helpers |
 | `pr_insight.rs` | read-side shaping for the PR-inspection tools; `pr_number_from_status_url` |
-| `rpc.rs` | `WorkQueueHandler`, `WorkQueueServiceImpl`, `build_pr_stack_entry`, `WORK_QUEUE_SERVICE` (also at the crate root) |
+| `rpc.rs` | `WorkQueueHandler`, `WorkQueueStatusStream`, `WORK_QUEUE_SERVICE` (also at the crate root); `WorkQueueServiceImpl` and `build_pr_stack_entry` live in `rpc/service.rs` and are re-exported from `rpc` |
 
 Dependencies, the seam tests and each module's surface:
 [docs/architecture.md](docs/architecture.md).
