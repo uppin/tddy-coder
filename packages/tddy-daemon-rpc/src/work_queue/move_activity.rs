@@ -121,6 +121,7 @@ mod tests {
                     ..WorkItem::default()
                 })
                 .collect(),
+            ..Default::default()
         }
     }
 

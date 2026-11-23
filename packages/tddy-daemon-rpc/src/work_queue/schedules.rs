@@ -315,7 +315,8 @@ impl ScheduleCtx<'_> {
     ) -> Result<(Vec<ScheduleStatusView>, String), ScheduleOpError> {
         let queue = self.queue()?;
         let items: Vec<String> = queue.nodes.iter().map(|n| n.node_id.clone()).collect();
-        let derived = waves::queue_waves(&items, &lineage::dependencies_of(&queue))
+        // Wave membership is structural: what has already landed does not change it.
+        let derived = waves::queue_waves(&items, &lineage::dependencies_of(&queue), &[])
             .map_err(|e| ScheduleOpError::Failed(e.to_string()))?;
         let in_wave = usize::try_from(wave)
             .ok()

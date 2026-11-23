@@ -700,6 +700,7 @@ fn a_queue_of(world: &World, owner: &str) -> tddy_service::proto::work_queue::Wo
             *queue = WorkQueue {
                 version: 1,
                 nodes: vec![item("n1"), item("n2")],
+                ..Default::default()
             }
         })
         .expect("the queue is filled");

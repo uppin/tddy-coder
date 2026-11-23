@@ -204,6 +204,8 @@ pub async fn work_queue_status_view(
     WorkQueueStatusView {
         items,
         unavailable_reason: String::new(),
+        // Filled by the status stream, which evaluates the queue's schedules (`#workqueue` 13/14).
+        schedules: Vec::new(),
     }
 }
 
