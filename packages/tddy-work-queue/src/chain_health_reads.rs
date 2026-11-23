@@ -85,6 +85,33 @@ async fn behind_of(
     .ok()?
 }
 
+/// `item`'s line ancestors, nearest first, each with its live PR's commits (an ancestor with no live
+/// PR carries nothing to leak from).
+async fn live_ancestors(
+    inbox: &GithubInbox,
+    repo: &RepoSlug,
+    item: &ItemBranch,
+    by_id: &HashMap<&str, &ItemBranch>,
+) -> Vec<(String, Vec<PrCommit>)> {
+    let mut ancestors = Vec::new();
+    let mut at = item;
+    let mut hops = 0;
+    while let LineEndpoint::Item(parent_id) = &at.line_parent {
+        hops += 1;
+        let Some(parent) = by_id.get(parent_id.as_str()).copied() else {
+            break;
+        };
+        if hops > by_id.len() {
+            break; // a line cycle: stop rather than loop
+        }
+        if let Some((_, commits)) = live_pr_commits(inbox, repo, &parent.branch).await {
+            ancestors.push((parent.branch.clone(), commits));
+        }
+        at = parent;
+    }
+    ancestors
+}
+
 /// Every branch-owning item's chain health. `line` is the queue's line edges (inbox, else planned).
 pub async fn queue_chain_health(
     inbox: &GithubInbox,
@@ -110,26 +137,7 @@ pub async fn queue_chain_health(
             });
             continue;
         };
-        // Line ancestors, nearest first, each with its live PR's commits (an ancestor with no live
-        // PR carries nothing to leak from).
-        let mut ancestors = Vec::new();
-        let mut at = *by_id
-            .get(item.item_id.as_str())
-            .expect("item is in the map");
-        let mut hops = 0;
-        while let LineEndpoint::Item(parent_id) = &at.line_parent {
-            hops += 1;
-            let Some(parent) = by_id.get(parent_id.as_str()) else {
-                break;
-            };
-            if hops > items.len() {
-                break; // a line cycle: stop rather than loop
-            }
-            if let Some((_, commits)) = live_pr_commits(inbox, repo, &parent.branch).await {
-                ancestors.push((parent.branch.clone(), commits));
-            }
-            at = parent;
-        }
+        let ancestors = live_ancestors(inbox, repo, item, &by_id).await;
         let parent_branch = match &item.line_parent {
             LineEndpoint::Item(id) => by_id.get(id.as_str()).map(|p| p.branch.as_str()),
             LineEndpoint::Trunk(b) | LineEndpoint::External(b) => Some(b.as_str()),
