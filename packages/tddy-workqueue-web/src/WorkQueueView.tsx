@@ -28,6 +28,12 @@ import { LandPropagateContext, LandWaves, useLandPropagate } from "./landPropaga
 import { WorkItemCommitCountsContext, useWorkQueueCommitCounts } from "./workItemCommitCounts";
 import { WorkItemLinksContext } from "./workItemLinks";
 import { useWorkItemLinksState } from "./useWorkItemLinksState";
+import {
+  failureReason,
+  unpushedPullReason,
+  withoutNode,
+  withoutNodeInFlight,
+} from "./workItemMutationState";
 
 /** The fields of a `work_queue.WorkQueueAddress` the view is opened on. */
 export type WorkQueueAddress = Pick<WireWorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId">;
@@ -65,27 +71,6 @@ export interface WorkQueueViewProps {
 }
 
 const NO_SESSION_METADATA: ReadonlyMap<string, StackChildMetadata> = new Map();
-
-function withoutNode(errors: Record<string, string>, itemId: string): Record<string, string> {
-  if (!(itemId in errors)) return errors;
-  const next = { ...errors };
-  delete next[itemId];
-  return next;
-}
-
-function withoutNodeInFlight(inFlight: ReadonlySet<string>, itemId: string): ReadonlySet<string> {
-  const next = new Set(inFlight);
-  next.delete(itemId);
-  return next;
-}
-
-function failureReason(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function unpushedPullReason(baseBranch: string, branch: string, pushError: string): string {
-  return `Pulled ${baseBranch} into ${branch} locally, but the push failed — ${branch} on the remote (and its PR) does not have it yet: ${pushError}`;
-}
 
 /**
  * The **stack view** (`#orchestrators` 9/11): one of a project's PR stacks, opened by its id from the
