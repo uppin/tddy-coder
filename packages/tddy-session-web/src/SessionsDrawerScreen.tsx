@@ -35,6 +35,7 @@ import { AGENT_CLI_LAUNCH, knownSessionLaunch } from "tddy-session-create-web";
 import { registerSessionTypeOptions, sessionTypeOptions } from "tddy-session-create-web";
 import { useSelectableAgents } from "tddy-session-create-web";
 import { CatalogService } from "tddy-client-web/gen/catalog_pb";
+import { defaultInspectorTab } from "./defaultInspectorTab";
 import { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
 import { useSessionsDrawerClients } from "./useSessionsDrawerClients";
 import { useProjectHomeSetup } from "./useProjectHomeSetup";
@@ -444,7 +445,9 @@ export function SessionsDrawerScreen({
               attachment={attachment}
               attachmentHint={attachmentHint}
               inspectorState={inspectorState}
-              onToggleInspector={handleInspectorToggle}
+              onToggleInspector={() =>
+                handleInspectorToggle(selectedSession ? defaultInspectorTab(selectedSession) : undefined)
+              }
               onInspectorClose={handleInspectorClose}
               onInspectorExpand={handleInspectorExpand}
               onInspectorRestore={handleInspectorRestore}

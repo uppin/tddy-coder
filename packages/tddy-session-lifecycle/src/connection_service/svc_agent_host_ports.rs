@@ -130,6 +130,12 @@ impl LaunchHost for DaemonSessionHost {
         DaemonSessionHost::subject_account_access(self, subject)
     }
 
+    fn pull_requests(
+        &self,
+    ) -> Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests> {
+        Arc::new(self.clone())
+    }
+
     fn session_identity(
         &self,
         os_user: &str,

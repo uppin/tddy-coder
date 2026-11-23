@@ -31,6 +31,103 @@ service WorktreeService {
   // a PNG or a file in any encoding round-trips intact, and oversized files are REFUSED before the
   // first frame rather than truncated — a truncated mirror is a wrong mirror.
   rpc StreamReadWorktreeFile(ReadWorktreeFileRequest) returns (stream WorktreeFileChunk);
+  // The session inspector's Worktree tab (`#workqueue` 4/14): dirty files and the branch's relation to
+  // its upstream, and the two actions that relation offers. Pull is fast-forward only; Push never forces.
+  rpc GetWorktreeSyncState(SessionWorktreeRequest) returns (WorktreeSyncState);
+  rpc PullWorktree(SessionWorktreeRequest) returns (WorktreeSyncState);
+  rpc PushWorktree(SessionWorktreeRequest) returns (WorktreeSyncState);
+  // The session inspector's PR tab (`#workqueue` 4/14): the PR whose head is the session's branch, its
+  // checks, conversation and commits — a snapshot, then a new one whenever the daemon's GitHub inbox
+  // reports a change to any of them. No browser reads GitHub.
+  rpc StreamSessionPullRequest(SessionWorktreeRequest) returns (stream SessionPullRequestView);
+}
+
+// A session addressed for its worktree's inspector tabs.
+message SessionWorktreeRequest {
+  string session_token = 1;
+  string project_id = 2;
+  string session_id = 3;
+}
+
+enum WorktreeSyncStatus {
+  WORKTREE_SYNC_STATUS_UNSPECIFIED = 0;
+  WORKTREE_SYNC_STATUS_IN_SYNC = 1;
+  WORKTREE_SYNC_STATUS_UNPUSHED = 2;
+  WORKTREE_SYNC_STATUS_UNPULLED = 3;
+  WORKTREE_SYNC_STATUS_DIVERGED = 4;
+  // The branch has no upstream yet.
+  WORKTREE_SYNC_STATUS_UNPUBLISHED = 5;
+}
+
+message WorktreeCommitLine {
+  string sha = 1;
+  string subject = 2;
+}
+
+message WorktreeDirtyFile {
+  string path = 1;
+  // `modified` / `staged` / `untracked` / `deleted` / `renamed`.
+  string change = 2;
+}
+
+message WorktreeSyncState {
+  string branch = 1;
+  // `origin/<branch>`, or empty when unpublished.
+  string upstream = 2;
+  WorktreeSyncStatus status = 3;
+  repeated WorktreeCommitLine unpushed = 4;
+  repeated WorktreeCommitLine unpulled = 5;
+  repeated WorktreeDirtyFile dirty_files = 6;
+  bool can_pull = 7;
+  bool can_push = 8;
+  // Why the state could not be read (e.g. a target session's worktree); empty when it was.
+  string unavailable_reason = 9;
+}
+
+message PullRequestCheck {
+  string name = 1;
+  // `queued` / `in_progress` / `completed`.
+  string status = 2;
+  string conclusion = 3;
+  string started_at = 4;
+  string completed_at = 5;
+  string details_url = 6;
+}
+
+message PullRequestComment {
+  uint64 id = 1;
+  // 0 for a thread's first comment.
+  uint64 in_reply_to_id = 2;
+  string author = 3;
+  string body = 4;
+  string created_at = 5;
+  // Empty for a conversation (issue-level) comment.
+  string path = 6;
+  // A review's state (`APPROVED`, `CHANGES_REQUESTED`, …) when this entry is a review.
+  string review_state = 7;
+}
+
+message PullRequestCommit {
+  string sha = 1;
+  string subject = 2;
+  string author = 3;
+  string authored_at = 4;
+}
+
+message SessionPullRequestView {
+  // False when the session's branch has no PR (the stream still stays open for one to appear).
+  bool exists = 1;
+  uint64 number = 2;
+  string url = 3;
+  string title = 4;
+  // `open` / `draft` / `merged` / `closed`.
+  string state = 5;
+  string base_branch = 6;
+  string head_branch = 7;
+  repeated PullRequestCheck checks = 8;
+  repeated PullRequestComment comments = 9;
+  repeated PullRequestCommit commits = 10;
+  string unavailable_reason = 11;
 }
 
 message CalculateWorktreeSizeRequest {

@@ -64,6 +64,8 @@ describe("SessionInspectorByteCountAndLastReceived — inspector shows I/O bytes
     sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
     sessionsDrawerPage.runtimeTerminal(SESSION.sessionId).should("exist");
     sessionsDrawerPage.inspectorToggle().click();
+    // The counters live on Details; a session now opens on its PR or Worktree tab.
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorDetailsTab().should("have.attr", "aria-selected", "true");
 
     // Then — the inspector Details tab shows byte counters and a last-received relative string
@@ -101,6 +103,8 @@ describe("SessionInspectorByteCountAndLastReceived — inspector shows I/O bytes
     sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
     sessionsDrawerPage.runtimeTerminal(SESSION.sessionId).should("exist");
     sessionsDrawerPage.inspectorToggle().click();
+    // The counters live on Details; a session now opens on its PR or Worktree tab.
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorDetailsTab().should("have.attr", "aria-selected", "true");
 
     // Then — both counters read the formatBytes rendering of 0 ("0 B"), not the raw String(0) "0".

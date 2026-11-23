@@ -12,6 +12,10 @@ export { isTasksPath, parseTaskId, tasksPathForTask, TASKS_ROUTE } from "./tasks
 export { WorktreesScreen } from "./worktrees/WorktreesScreen";
 export { WorktreesContent } from "./worktrees/WorktreesContent";
 export { SessionWorktreeTab } from "./worktrees/SessionWorktreeTab";
+export { SessionPullRequestTab, type SessionPullRequestTabProps } from "./pullRequests/SessionPullRequestTab";
+export { CheckRow, type CheckRowProps } from "./pullRequests/CheckRow";
+export { CommentThreads, threadComments, type CommentThreadsProps } from "./pullRequests/CommentThread";
+export { CommitList, type CommitListProps } from "./pullRequests/CommitList";
 export * from "./worktrees/worktreeStatsFormat";
 export * from "./lib/worktreeList";
 export * from "./lib/worktreeSize";

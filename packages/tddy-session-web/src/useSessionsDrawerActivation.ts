@@ -11,6 +11,7 @@ import type { SessionRuntimeRegistry } from "./sessionRuntimeRegistry";
 import type { UseSessionAttachmentResult } from "./useSessionAttachment";
 import type { SessionsDrawerAttachClaims } from "./useSessionsDrawerAttachClaims";
 import type { useSessionsDrawerInspector } from "./useSessionsDrawerInspector";
+import { defaultInspectorTab } from "./defaultInspectorTab";
 import { PARAM_CODE, PARAM_FULL, PARAM_INSPECTOR, type AppLocation } from "tddy-client-web";
 
 export interface UseSessionsDrawerActivationArgs {
@@ -226,7 +227,10 @@ export function useSessionsDrawerActivation({
   useEffect(() => {
     if (!selectedSessionId) return;
     if (attachment.status === "error" && inspectorState !== "expanded") {
-      applyInspectorState("open", { replace: true });
+      applyInspectorState("open", {
+        replace: true,
+        defaultTab: selectedSession ? defaultInspectorTab(selectedSession) : undefined,
+      });
     }
   // These transitions are driven by the attachment, not by the URL: re-running them whenever
   // `inspectorState`/`applyInspectorState` change would fight the operator's own toggles.

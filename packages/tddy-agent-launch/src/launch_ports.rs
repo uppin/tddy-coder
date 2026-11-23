@@ -80,6 +80,12 @@ pub trait LaunchHost: Send + Sync {
         session_token: &str,
     ) -> SessionIdentity;
 
+    /// Where a session's PR is read: the host's GitHub inbox. A listing peeks its cache through
+    /// this and never waits on GitHub (`#workqueue` 4/14).
+    fn pull_requests(
+        &self,
+    ) -> Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests>;
+
     /// An orchestrator-role session of `project_id` is running — just started, or just resumed
     /// — so the host watches the project's remote trunk for it until it stops (`#orchestra` 5/9).
     /// `session_token` is the caller's, from which the project's GitHub account is read.

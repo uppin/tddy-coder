@@ -229,6 +229,7 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
     sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).click();
     sessionsDrawerPage.inspectorToggle().click();
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorTerminateBtn(SESSION_B_ACTIVE.sessionId).click();
 
     // Then — SignalSession(SIGTERM) lands on host B, never host A

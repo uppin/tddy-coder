@@ -193,6 +193,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(SESSION_WITH_NEW_FIELDS.sessionId).click();
+    sessionsDrawerPage.inspectorDetailsTab().click();
 
     // Then
     sessionsDrawerPage.inspectorMetadata()
@@ -214,6 +215,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then
@@ -235,6 +237,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.inspectorDetailsTab().click();
 
     // First click — shows confirm button, does NOT call delete yet
     sessionsDrawerPage.inspectorDeleteBtn(DISCONNECTED_SESSION.sessionId).click();
@@ -268,6 +271,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorTerminateBtn(CONNECTED_SESSION_A.sessionId).click();
 
     // Then
@@ -283,7 +287,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
   // SessionInspectorDrawer and the tabs are wired in.
   // -------------------------------------------------------------------------
 
-  it("shows Details and Tools tabs; Details is selected by default and metadata is visible", () => {
+  it("shows Details and Tools tabs; a session without a PR opens on Worktree, and Details shows its metadata when chosen", () => {
     // Given — a disconnected session
     const backend = aSessionServiceBackend({ sessions: [DISCONNECTED_SESSION] });
 
@@ -297,7 +301,11 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
     cy.get(`[data-testid="sessions-inspector-tab-details"]`).should("exist");
     cy.get(`[data-testid="sessions-inspector-tab-tools"]`).should("exist");
 
-    // And — Details tab is active and metadata is visible (regression guard)
+    // And — with no PR the inspector opens on Worktree, not Details
+    sessionsDrawerPage.inspectorWorktreeTab().should("have.attr", "aria-selected", "true");
+
+    // And — choosing Details selects it and shows the metadata (regression guard)
+    sessionsDrawerPage.inspectorDetailsTab().click();
     cy.get(`[data-testid="sessions-inspector-tab-details"]`).should("have.attr", "aria-selected", "true");
     sessionsDrawerPage.inspectorMetadata().should("be.visible");
   });
@@ -389,6 +397,7 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
     // When — the operator resumes the session
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — the resume really did run (the attachment moves to connected on its response), and the

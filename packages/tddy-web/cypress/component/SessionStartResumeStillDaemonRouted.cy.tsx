@@ -89,6 +89,8 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
     sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
 
     // When — the user resumes the session
+    // The action buttons live on Details; a session without a PR opens on Worktree.
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
     // Then — ResumeSession reached the backend and a LiveKit client was built for the daemon participant
@@ -136,6 +138,8 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
     sessionsDrawerPage.inspectorToggle().click();
 
     // When — the user terminates the active session (single-click Terminate for active sessions)
+    // The action buttons live on Details; a session without a PR opens on Worktree.
+    sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorTerminateBtn(ACTIVE_SESSION.sessionId).click();
 
     // Then — SignalSession (terminate) reached the backend via the daemon participant identity,

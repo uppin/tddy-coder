@@ -26,6 +26,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_session_split::service_util;
 use tddy_spawn::spawner;
 
+use tddy_worktree_service::pull_request_view::{apply_cached_pull_request, SessionPullRequests};
 use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
@@ -67,6 +68,8 @@ impl LaunchSessions {
         let session_agent_inference = Arc::clone(&self.session_agent_inference);
         let agent_activity_hub = Arc::clone(&self.agent_activity_hub);
         let coding_agents = self.coding_agents.clone();
+        let pull_requests = self.host.pull_requests();
+        let os_user = os_user.clone();
         let live = self.live_sessions().await;
         let entries = service_util::spawn_blocking_with_timeout(
             timeout,
@@ -82,6 +85,7 @@ impl LaunchSessions {
                         &session_agent_inference,
                         &agent_activity_hub,
                         Some(&*coding_agents),
+                        (&*pull_requests, &os_user),
                         s,
                     )?;
                     out.push(entry);
@@ -435,6 +439,7 @@ fn session_entry_from_listing(
     >,
     agent_activity_hub: &Arc<tddy_daemon_kernel::AgentActivityHub>,
     coding_agents: Option<&crate::spec_launch::HostCodingAgents>,
+    (pull_requests, os_user): (&dyn SessionPullRequests, &str),
     s: session_reader::SessionEntry,
 ) -> Result<ConnSessionEntry, anyhow::Error> {
     let session_dir = sessions_base_blocking
@@ -455,6 +460,8 @@ fn session_entry_from_listing(
             e
         );
     }
+    // The branch is known only once enrichment has read the changeset.
+    apply_cached_pull_request(pull_requests, os_user, &mut conn_entry);
     entry = crate::family_proto_bridge::wire_same(&conn_entry)
         .map_err(|s| anyhow::anyhow!(s.to_string()))?;
     // Only a session that runs an agent is tailed — the same gate

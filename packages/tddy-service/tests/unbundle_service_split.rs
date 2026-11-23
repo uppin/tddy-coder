@@ -88,7 +88,7 @@ const HOST_METHODS: [&str; 11] = [
     "StreamHostStats",
 ];
 
-const WORKTREE_METHODS: [&str; 9] = [
+const WORKTREE_METHODS: [&str; 13] = [
     "ListWorktreesForProject",
     "RemoveWorktree",
     "StreamWorktreeStats",
@@ -98,6 +98,11 @@ const WORKTREE_METHODS: [&str; 9] = [
     "ListWorktreeDirectory",
     "ReadWorktreeFile",
     "StreamReadWorktreeFile",
+    // `#workqueue` 4/14 — the session inspector's Worktree and PR tabs.
+    "GetWorktreeSyncState",
+    "PullWorktree",
+    "PushWorktree",
+    "StreamSessionPullRequest",
 ];
 
 #[test]

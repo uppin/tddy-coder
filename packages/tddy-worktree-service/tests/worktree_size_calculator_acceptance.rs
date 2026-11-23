@@ -379,3 +379,41 @@ async fn the_project_snapshot_reports_every_known_worktree_state() {
     want.sort_by(|x, y| x.0.cmp(&y.0));
     assert_eq!(got, want);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_published_cached_size_is_already_persisted_for_a_reload() {
+    // Given a calculator whose updates are being watched
+    let tmp = tempfile::tempdir().unwrap();
+    let sizer = InstrumentedSizer::new();
+    let calc =
+        WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.clone().into_sizer());
+    let mut updates = calc.subscribe(PROJECT);
+
+    for i in 0..40u64 {
+        let path = wt(&format!("feat-{i}"));
+        sizer.set_size(&path, 1000 + i);
+
+        // When a worktree's size is published as Cached
+        calc.enqueue(PROJECT, &path).await;
+        loop {
+            let update = recv_update(&mut updates).await;
+            if update.path == path && update.status == WorktreeSizeStatus::Cached {
+                break;
+            }
+        }
+
+        // Then a calculator opened at that very moment reads it back from disk without a walk
+        let reloaded = WorktreeSizeCalculator::with_sizer(
+            tmp.path().to_path_buf(),
+            2,
+            sizer.clone().into_sizer(),
+        );
+        let state = reloaded.state(PROJECT, &path);
+        assert_eq!(
+            state.status,
+            WorktreeSizeStatus::Cached,
+            "worktree {i}: Cached was published before its size was persisted"
+        );
+        assert_eq!(state.disk_bytes, Some(1000 + i));
+    }
+}

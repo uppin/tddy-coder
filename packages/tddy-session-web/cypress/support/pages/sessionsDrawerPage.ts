@@ -314,6 +314,23 @@ export const sessionsDrawerPage = {
   inspectorWorktreeTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionInspectorTabWorktree, { timeout: 5000, ...options }),
 
+  /** The inspector's PR tab button (`#workqueue` 4/14). */
+  inspectorPrTab: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionInspectorTabPr, { timeout: 5000, ...options }),
+
+  /** The PR tab's panel. */
+  prTabPanel: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionPrTab, { timeout: 5000, ...options }),
+
+  /** One check row in the PR tab. */
+  prCheck: (name: string) => byTestId(`session-pr-check-${name}`, { timeout: 5000 }),
+
+  /** A review thread in the PR tab, by its first comment's id. */
+  prThread: (rootId: number) => byTestId(`session-pr-thread-${rootId}`, { timeout: 5000 }),
+
+  /** One comment in the PR tab. */
+  prComment: (id: number) => byTestId(`session-pr-comment-${id}`, { timeout: 5000 }),
+
   /** The Files tab button in the inspector tab strip. */
   inspectorFilesTab: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionInspectorTabFiles, { timeout: 5000, ...options }),

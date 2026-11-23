@@ -16,6 +16,7 @@ import {
   type SessionEntry,
 } from "tddy-client-web/gen/session_pb";
 import { SessionInspectorDrawer } from "../../src/SessionInspectorDrawer";
+import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 import { SESSIONS_REFRESH_EVENT } from "../../src/lib/sessionsRefreshBridge";
 import {
   byTestId,
@@ -76,6 +77,8 @@ function theInspectorOn(backend: InMemoryRpcBackend, options: { withClient: bool
     />,
     backend,
   );
+  // The name and its rename control live on Details; a session now opens on its PR or Worktree tab.
+  sessionsDrawerPage.inspectorDetailsTab().click();
 }
 
 /** Records every sessions-list refresh request raised in the app's window. */

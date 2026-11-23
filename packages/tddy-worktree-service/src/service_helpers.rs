@@ -5,8 +5,11 @@
 use std::time::Duration;
 
 use tddy_rpc::Status;
-use tddy_service::proto::worktree::WorktreeRow;
+use tddy_service::proto::worktree::{
+    WorktreeCommitLine, WorktreeDirtyFile, WorktreeRow, WorktreeSyncState, WorktreeSyncStatus,
+};
 
+use crate::worktree_sync::{CommitLine, DirtyChange, SyncState, SyncStatus};
 use crate::worktrees::{
     CleanWorktreeError, RemoveWorktreeError, WorktreeDiffRow, WorktreeSizeStatus,
 };
@@ -96,5 +99,49 @@ pub(crate) fn map_clean_worktree_error(e: CleanWorktreeError) -> Status {
         CleanWorktreeError::GitFailed { message } | CleanWorktreeError::Io(message) => {
             Status::internal(message)
         }
+    }
+}
+
+/// The wire form of a worktree's sync state, with the Pull / Push offers it implies.
+pub(crate) fn sync_state_to_proto(state: SyncState) -> WorktreeSyncState {
+    let commit_lines = |lines: &[CommitLine]| {
+        lines
+            .iter()
+            .map(|line| WorktreeCommitLine {
+                sha: line.sha.clone(),
+                subject: line.subject.clone(),
+            })
+            .collect()
+    };
+    WorktreeSyncState {
+        can_pull: state.can_pull(),
+        can_push: state.can_push(),
+        unpushed: commit_lines(&state.unpushed),
+        unpulled: commit_lines(&state.unpulled),
+        dirty_files: state
+            .dirty_files
+            .iter()
+            .map(|file| WorktreeDirtyFile {
+                path: file.path.clone(),
+                change: match file.change {
+                    DirtyChange::Modified => "modified",
+                    DirtyChange::Staged => "staged",
+                    DirtyChange::Untracked => "untracked",
+                    DirtyChange::Deleted => "deleted",
+                    DirtyChange::Renamed => "renamed",
+                }
+                .to_string(),
+            })
+            .collect(),
+        status: match state.status {
+            SyncStatus::InSync => WorktreeSyncStatus::InSync,
+            SyncStatus::Unpushed => WorktreeSyncStatus::Unpushed,
+            SyncStatus::Unpulled => WorktreeSyncStatus::Unpulled,
+            SyncStatus::Diverged => WorktreeSyncStatus::Diverged,
+            SyncStatus::Unpublished => WorktreeSyncStatus::Unpublished,
+        } as i32,
+        branch: state.branch,
+        upstream: state.upstream.unwrap_or_default(),
+        unavailable_reason: String::new(),
     }
 }

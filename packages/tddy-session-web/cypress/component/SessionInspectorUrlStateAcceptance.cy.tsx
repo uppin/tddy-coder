@@ -89,17 +89,17 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 it("choosing an inspector tab records that tab in the URL", () => {
-  // Given — a selected session whose inspector the operator opens, landing on the Details tab
+  // Given — a selected session whose inspector the operator opens, landing on the Worktree tab (the default for a session without a PR)
   mountSessionsDrawer();
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
   sessionsDrawerPage.inspectorToggle().click();
-  appLocationPage.expectParam("inspector", "details");
+  appLocationPage.expectParam("inspector", "worktree");
 
   // When
-  sessionsDrawerPage.inspectorWorktreeTab().click();
+  sessionsDrawerPage.inspectorToolsTab().click();
 
   // Then
-  appLocationPage.expectParam("inspector", "worktree");
+  appLocationPage.expectParam("inspector", "tools");
 });
 
 it("an ?inspector= deep link opens the inspector on that tab", () => {
@@ -136,7 +136,7 @@ it("closing the inspector drops the inspector param from the URL", () => {
   sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
   sessionsDrawerPage.inspectorToggle().click();
   sessionsDrawerPage.expectInspectorState("open");
-  appLocationPage.expectParam("inspector", "details");
+  appLocationPage.expectParam("inspector", "worktree");
 
   // When
   sessionsDrawerPage.inspectorClose().click();
@@ -157,7 +157,7 @@ it("expanding the inspector records full=1 in the URL", () => {
   sessionsDrawerPage.inspectorExpand().click();
 
   // Then
-  appLocationPage.expectParam("inspector", "details");
+  appLocationPage.expectParam("inspector", "worktree");
   appLocationPage.expectParam("full", "1");
 });
 

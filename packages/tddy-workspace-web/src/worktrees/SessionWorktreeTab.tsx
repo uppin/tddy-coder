@@ -7,6 +7,8 @@ import { useActionFailure } from "tddy-client-web";
 import { InlineError, Button } from "tddy-ui-web";
 import { formatDiskBytes } from "./worktreeStatsFormat";
 import { formatLastCalculated } from "../lib/worktreeSize";
+import { useWorktreeSyncState } from "./useWorktreeSyncState";
+import { WorktreeSyncSection } from "./WorktreeSyncSection";
 
 export interface SessionWorktreeTabProps {
   client: Client<typeof WorktreeService> | null;
@@ -41,6 +43,7 @@ export function SessionWorktreeTab({
     projectId,
     repoPath,
   );
+  const sync = useWorktreeSyncState(client, sessionToken, projectId, sessionId);
   const [pendingClear, setPendingClear] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(false);
   const action = useActionFailure();
@@ -76,7 +79,7 @@ export function SessionWorktreeTab({
   }
 
   // The action the operator just took outranks the stream's standing failure.
-  const error = action.error ?? statsError;
+  const error = action.error ?? statsError ?? sync.error;
 
   return (
     <div
@@ -84,6 +87,10 @@ export function SessionWorktreeTab({
       className="px-3 py-3 flex flex-col gap-3 text-xs text-muted-foreground"
     >
       <InlineError testId="session-worktree-error" message={error} className="text-xs" />
+      {sync.state ? (
+        <WorktreeSyncSection state={sync.state} acting={sync.acting} onPull={sync.pull} onPush={sync.push} />
+      ) : null}
+
       {missing ? (
         <div data-testid="session-worktree-missing" className="flex flex-col gap-2">
           <p>This session&apos;s worktree is no longer on disk.</p>

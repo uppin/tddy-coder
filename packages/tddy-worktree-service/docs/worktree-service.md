@@ -8,7 +8,8 @@ and restoring them, and browsing and reading the files inside one — served as
 
 | Group | Files | What is in them |
 |---|---|---|
-| `service.rs` | 1 | `WorktreeServiceImpl` — the nine handlers, the state they read, and the `with_*` builders |
+| `service.rs`, `service/inspector.rs` | 2 | `WorktreeServiceImpl` — the handlers, the state they read, and the `with_*` builders; the session inspector's sync and PR-stream handlers are in the child module `inspector` |
+| the inspector | `worktree_sync`, `pull_request_view` | a session worktree's sync state, ff-only pull and plain push; a session's PR view read through the GitHub inbox |
 | `stream.rs` | 1 | `MpscWorktreeStatsStream`, `MpscResultStream`, `worktree_file_frames` — the streaming adapters. `MpscResultStream::into_receiver` hands back the channel a stream wraps. `tddy-session-lifecycle` re-exports the type at `connection_service::MpscResultStream` rather than defining its own |
 | the worktrees | `worktrees`, `worktree_files` | `git worktree list` parsing, the stats cache, path validation against a repo root, and the code-pane file gate |
 | the projects | `project_storage`, `project_provision` | the per-daemon `projects.yaml` registry and the provisioning a session start needs |
@@ -28,6 +29,9 @@ and restoring them, and browsing and reading the files inside one — served as
 | `RestoreSessionWorktree` | Recreates a missing session worktree from its persisted changeset, reusing `tddy-core`'s session-worktree setup. It keeps suffixing on a branch conflict — only a surface that can prompt an operator asks to be rejected |
 | `ListWorktreeDirectory` | One directory level at `rel_path` (empty = root), `.gitignore`-aware and `.git`-excluded |
 | `ReadWorktreeFile` | UTF-8 read of a path the listing surfaced, capped at `MAX_WORKTREE_FILE_BYTES` (1 MiB) with a `truncated` flag and the full `byte_size` |
+| `GetWorktreeSyncState` | A session worktree's dirty files and its branch's relation to its upstream (`worktree_sync::read_sync_state`). A target session answers `unavailable_reason` |
+| `PullWorktree` / `PushWorktree` | `git merge --ff-only <upstream>` / `git push` (`-u origin <branch>` when unpublished, never forced), each answering the state after it |
+| `StreamSessionPullRequest` | The PR view of the session's branch, then a new one on every inbox event that changes it (`pull_request_view::watch_pull_request`) |
 | `StreamReadWorktreeFile` | The streaming, byte-exact sibling: same request, same resolution, same guards, but `bytes` rather than a string — so a PNG or a file in any encoding round-trips intact — and an oversized file is **refused before the first frame** rather than truncated, because a truncated mirror is a wrong mirror |
 
 ## The code-pane file gate
@@ -204,12 +208,42 @@ restored may need its session's room closed. It is the `SessionRooms` port of
 [`tddy-daemon-extensions`](../../tddy-daemon-extensions/docs/extension-ports.md#the-session-rooms-port-session_rooms),
 re-exported under this name, and `NoSessionRooms` is the no-op a deployment without rooms uses.
 
+## Worktree sync state (`worktree_sync.rs`)
+
+`read_sync_state(worktree)` reads the current branch (`symbolic-ref`) and its upstream
+(`branch.<b>.merge`, then `@{upstream}`). It fetches the branch's recorded remote
+(`branch.<b>.remote`) and decides the relation with `merge-base --is-ancestor` in both directions:
+`InSync`, `Unpushed`, `Unpulled`, `Diverged`, or `Unpublished` when there is no upstream. It lists the
+commits on each side (`log --reverse <a>..<b>`) and the dirty files (`status --porcelain -z
+--untracked-files=all`; a rename's second entry is consumed). `SyncState::can_pull` is true only when
+unpulled, and `can_push` only when unpushed or unpublished. Git runs with `GIT_TERMINAL_PROMPT=0`, so a
+missing credential is an error and never a hung daemon thread. The handlers run it under
+`blocking_within` with the request deadline. Nothing here commits.
+
+## The session PR view (`pull_request_view.rs`)
+
+Nothing here calls GitHub. A view is made from four inbox rows: `pr_for_head(branch)`, then
+`checks_at(head_sha)`, `conversation(number)` and `pr_commits(number, head_sha)`.
+`watch_pull_request` subscribes to `{Pr, Checks, Comments}` for the repository **before** its first
+read. It re-reads only on an event that `concerns` the shown view: the branch's `PrForHead` row, the
+shown number's `Pr` / `Conversation` / `PrCommits` row, or `ChecksAt` the shown head. It stops when
+the client goes away. An inbox failure is sent as a view carrying `unavailable_reason`, and the watch
+goes on.
+
+The host answers through the `SessionPullRequests` port: `site_for_session` registers how the
+project's repository is read (as the caller) and hands back the inbox and the repo, and
+`cached_summary` answers without any request. `DaemonSessionHost`
+(`tddy-session-lifecycle`, `svc_trunk_watch_wiring.rs`) implements it over the same inbox and
+`HostTrunkSource` the trunk watch uses. The daemon binds it with `attach_pull_requests` once the host
+exists, and it can be bound only once. `apply_cached_pull_request` fills `SessionEntry.pr_number` /
+`pr_state` during session listing (`tddy-agent-launch`), and listing never waits on GitHub.
+
 ## Testing
 
 | Level | Where |
 |---|---|
 | Unit | each module's own `#[cfg(test)]` — path validation, the stats cache, the branch-ownership rule |
-| Integration | `tests/worktrees_rpc.rs`, `worktrees_acceptance.rs`, `worktree_files_rpc.rs`, `stream_worktree_stats_rpc.rs`, `stream_read_worktree_file_acceptance.rs`, `stream_read_worktree_file_rpc_acceptance.rs`, `worktree_session_actions_acceptance.rs` |
+| Integration | `tests/worktrees_rpc.rs`, `worktrees_acceptance.rs`, `worktree_files_rpc.rs`, `stream_worktree_stats_rpc.rs`, `stream_read_worktree_file_acceptance.rs`, `stream_read_worktree_file_rpc_acceptance.rs`, `worktree_session_actions_acceptance.rs`, `worktree_sync_acceptance.rs` (real repos: a bare origin, the session clone, a second clone), `pull_request_view_acceptance.rs` (a real inbox over a scripted GitHub) |
 | Component | `packages/tddy-web/cypress/component/WorktreesAppPage.cy.tsx` and the session-inspector suites |
 
 ## See also
@@ -221,5 +255,6 @@ re-exported under this name, and `NoSessionRooms` is the no-op a deployment with
 - What stayed: [`tddy-session-lifecycle` session-service.md](../../tddy-session-lifecycle/docs/session-service.md)
 - Feature: [docs/ft/web/worktrees.md](../../../docs/ft/web/worktrees.md),
   [docs/ft/web/worktree-disk-usage-streaming.md](../../../docs/ft/web/worktree-disk-usage-streaming.md),
-  [docs/ft/web/session-worktree-inspector.md](../../../docs/ft/web/session-worktree-inspector.md)
+  [docs/ft/web/session-worktree-inspector.md](../../../docs/ft/web/session-worktree-inspector.md),
+  [docs/ft/web/session-pr-inspector.md](../../../docs/ft/web/session-pr-inspector.md)
 - [changesets/](./changesets/)

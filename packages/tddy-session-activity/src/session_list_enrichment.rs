@@ -609,6 +609,7 @@ state:
             reads_host_paths: false,
             orchestration_mark: None,
             work_queue_id: String::new(),
+            ..Default::default()
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),
@@ -1186,6 +1187,7 @@ sessions:
             reads_host_paths: false,
             orchestration_mark: None,
             work_queue_id: String::new(),
+            ..Default::default()
         };
         apply_session_list_status_to_proto(
             Some(tddy_coding_agent_specs::CodingAgentRegistry::builtin_cached()),

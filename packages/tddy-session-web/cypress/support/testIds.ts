@@ -210,6 +210,9 @@ export const TEST_IDS = {
 
   // Session more-actions menu
   sessionInspectorTabWorktree: "sessions-inspector-tab-worktree",
+  /** `#workqueue` 4/14 — the inspector's PR tab and its content. */
+  sessionInspectorTabPr: "sessions-inspector-tab-pr",
+  sessionPrTab: "session-pr-tab",
   sessionsDetailTerminalContainer: "sessions-detail-terminal-container",
   sessionsInspectorMetadata: "sessions-inspector-metadata",
 

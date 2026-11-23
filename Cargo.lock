@@ -14982,6 +14982,7 @@ dependencies = [
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-github",
+ "tddy-github-inbox",
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-projects",

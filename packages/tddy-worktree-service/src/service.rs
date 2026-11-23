@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
@@ -21,18 +21,21 @@ use tddy_service::proto::worktree::{
     CleanWorktreeResponse, ListWorktreeDirectoryRequest, ListWorktreeDirectoryResponse,
     ListWorktreesForProjectRequest, ListWorktreesForProjectResponse, ReadWorktreeFileRequest,
     ReadWorktreeFileResponse, RemoveWorktreeRequest, RemoveWorktreeResponse,
-    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, StreamWorktreeStatsRequest,
-    WorktreeDirEntry, WorktreeFileChunk, WorktreeRow, WorktreeService, WorktreeStatsEvent,
+    RestoreSessionWorktreeRequest, RestoreSessionWorktreeResponse, SessionPullRequestView,
+    SessionWorktreeRequest, StreamWorktreeStatsRequest, WorktreeDirEntry, WorktreeFileChunk,
+    WorktreeRow, WorktreeService, WorktreeStatsEvent, WorktreeSyncState,
 };
 use tddy_task::IdleTimeoutTracker;
 
 use crate::project_storage;
+use crate::pull_request_view::SessionPullRequests;
 use crate::service_helpers::{
     blocking_within, map_clean_worktree_error, map_remove_worktree_error,
     proto_worktree_size_status, worktree_row_from_diff,
 };
 use crate::stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};
 use crate::target_worktrees::TargetSession;
+use crate::worktree_sync::{pull_fast_forward, push_branch, read_sync_state};
 use crate::worktrees::{
     self, WorktreeDiffRow, WorktreeSizeCalculator, WorktreeSizeStatus, WorktreeStatsCache,
     DAEMON_SIZE_WALK_PERMITS,
@@ -54,6 +57,9 @@ pub use tddy_daemon_extensions::SessionRooms as WorktreeRoomCloser;
 /// Named rather than an `Option<…>` on the service so the "nothing to close" case is a decision
 /// somebody wrote down, not a `None` that could equally mean "wiring forgotten".
 pub use tddy_daemon_extensions::NoSessionRooms;
+
+/// The session inspector's Worktree-sync and PR-tab handlers (`#workqueue` 4/14).
+mod inspector;
 
 /// Everything `worktree.WorktreeService` answers from.
 ///
@@ -79,6 +85,9 @@ pub struct WorktreeServiceImpl {
     target_shells: Arc<dyn crate::target_worktrees::TargetShells>,
     /// Target rows measured outside a stream — see [`crate::target_worktree_stats`].
     target_row_bus: Arc<crate::target_worktree_stats::TargetRowBus>,
+    /// Where a session's PRs are read, bound once the host that owns the inbox exists — see
+    /// [`Self::attach_pull_requests`].
+    pull_requests: Arc<OnceLock<Arc<dyn SessionPullRequests>>>,
 }
 
 impl WorktreeServiceImpl {
@@ -99,6 +108,7 @@ impl WorktreeServiceImpl {
             idle_tracker: None,
             target_shells: Arc::new(crate::target_worktrees::NoTargetShells),
             target_row_bus: Arc::default(),
+            pull_requests: Arc::default(),
             tddy_data_dir,
             user_resolver,
             config,
@@ -120,6 +130,19 @@ impl WorktreeServiceImpl {
     ) -> Self {
         self.target_shells = shells;
         self
+    }
+
+    /// Read sessions' PRs through `pull_requests` (`#workqueue` 4/14). Bound after construction
+    /// because the host that owns the inbox is built after this service; shared by every clone, and
+    /// bound once.
+    ///
+    /// # Panics
+    /// When called a second time — the wiring is one decision, not a replaceable setting.
+    pub fn attach_pull_requests(&self, pull_requests: Arc<dyn SessionPullRequests>) {
+        assert!(
+            self.pull_requests.set(pull_requests).is_ok(),
+            "the PR source is attached once"
+        );
     }
 
     /// Count worktree RPCs as activity for relay mode's idle timer.
@@ -827,5 +850,48 @@ impl WorktreeService for WorktreeServiceImpl {
             ok: true,
             message: String::new(),
         }))
+    }
+
+    // `#workqueue` 4/14 — the session inspector's Worktree and PR tabs; the handlers live in
+    // `service/inspector.rs`.
+    type StreamSessionPullRequestStream = MpscResultStream<SessionPullRequestView>;
+
+    async fn get_worktree_sync_state(
+        &self,
+        request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        self.record_rpc_activity();
+        self.session_sync(
+            "GetWorktreeSyncState",
+            request.into_inner(),
+            read_sync_state,
+        )
+        .await
+    }
+
+    async fn pull_worktree(
+        &self,
+        request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        self.record_rpc_activity();
+        self.session_sync("PullWorktree", request.into_inner(), pull_fast_forward)
+            .await
+    }
+
+    async fn push_worktree(
+        &self,
+        request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<WorktreeSyncState>, Status> {
+        self.record_rpc_activity();
+        self.session_sync("PushWorktree", request.into_inner(), push_branch)
+            .await
+    }
+
+    async fn stream_session_pull_request(
+        &self,
+        request: Request<SessionWorktreeRequest>,
+    ) -> Result<Response<Self::StreamSessionPullRequestStream>, Status> {
+        self.record_rpc_activity();
+        self.session_pull_request_stream(request.into_inner()).await
     }
 }

@@ -97,6 +97,18 @@ export function InspectorTabs({
         Usage
       </button>
       <button
+        data-testid="sessions-inspector-tab-pr"
+        aria-selected={value === "pr"}
+        onClick={() => onChange("pr")}
+        className={`px-3 py-1.5 text-xs font-medium border-b-2 transition-colors ${
+          value === "pr"
+            ? "border-foreground text-foreground"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+        }`}
+      >
+        PR
+      </button>
+      <button
         data-testid="sessions-inspector-tab-worktree"
         aria-selected={value === "worktree"}
         onClick={() => onChange("worktree")}
