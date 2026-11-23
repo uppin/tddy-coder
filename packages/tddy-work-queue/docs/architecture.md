@@ -133,6 +133,15 @@ with `base_sync::count_divergence` in the owner's clone (fetched first). A merge
 checkout, reads `Unknown`. The status stream and the `work_queue_status` tool overlay the result on
 `WorkItemStatus.{leaks, line}`.
 
+### `schedule.rs` — armed schedules and their conditions *(added 2026-11-23)*
+
+Pure over a `ScheduleSnapshot` of the item's facts: `evaluate` gives a `ScheduleView` of conditions
+(`Met`/`Waiting`/`Blocked`, with detail), the worst-condition status and `held_up_on`; `arm`, `disarm` and
+`arm_wave` edit `WorkQueue.schedules` (one per item; arming replaces). `check_verdict` and `review_verdict`
+fold check runs and reviews into verdicts. The daemon (`tddy-daemon-rpc` `work_queue/schedules/`) gathers
+the snapshot — line parent (`lineage`), inbox predictions (`commit_flow`), checks and reviews through the
+GitHub inbox, worktree sync state — and the status stream re-evaluates every schedule on each update.
+
 ### `rpc.rs` — the PR-stack RPC family
 
 The one transport-facing module: family P's handler trait, its service adapter and its transport

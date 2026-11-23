@@ -2,7 +2,7 @@
  * Acceptance (`#workqueue` 13/14): the schedules panel lists each armed schedule's conditions with
  * their state and detail, and follows a condition turning met without a reload.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-schedules.md
+ * Feature: docs/ft/coder/pr-stacking.md § Armed merges and propagations
  */
 
 import React from "react";

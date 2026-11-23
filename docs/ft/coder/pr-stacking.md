@@ -357,6 +357,25 @@ tips, after a fetch; nothing local is touched):
 Each row shows a leak chip and a linearity chip from the status stream; `work_queue_status` returns both
 per node as `chain_health`. Nothing here repairs, rebases or edits a PR.
 
+### Armed merges and propagations *(added 2026-11-23)*
+
+The queue's agent or the user can **arm** a work item to **merge** or to **propagate** (take in its inbox),
+and arm a wave's merges at once (each item in the wave with an open PR, bottom-up). Arming again replaces
+the item's schedule; disarming removes it. Each armed schedule shows every condition as **met** (holds now),
+**waiting** (will hold by itself) or **blocked** (needs a person), with a readable detail; its status is the
+worst condition, and it is *held up on* the first blocked condition, else the first waiting one.
+
+- **Merge**: `order` (its line parent is the trunk), `current` (its inbox is empty — clean commits wait, a
+  predicted conflict blocks), `checks` (its own CI), `review` (approved; `skip_review` stands in for an
+  approval that has not arrived, never for a change request).
+- **Propagate**: `inbox` (something to take), `conflicts` (none predicted), `checks` (the **base's** CI; a
+  trunk or external base has none of ours), `worktree` (nothing uncommitted or unpushed).
+
+A fact that cannot be read (GitHub, the inbox, the PR, the worktree) is never met: the schedule waits on
+`facts` with the reason. Tools `work_item_schedule`, `work_queue_schedule_wave`, `work_item_unschedule` and
+`work_queue_schedules`, and matching RPCs; the queue view's schedules panel updates from the status stream.
+Nothing fires a schedule yet, and there is no resolved-threads condition (GraphQL-only).
+
 ### GitHub API surface
 
 `GithubPrApi` trait (real implementation + mock transport for tests): `get_open_pr`, `merge_pr(number)`, `patch_pr_base(number, new_base)`, `create_pr(head, base, title, body)`, and `close_pr(number)`. Backed by shared curl helpers `curl_github_patch_json`, `curl_github_post_json`, and `curl_github_put_json` in `github_rest_common.rs`.

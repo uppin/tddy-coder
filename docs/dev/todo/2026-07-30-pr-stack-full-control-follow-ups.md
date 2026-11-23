@@ -27,7 +27,8 @@
 - **Review-thread resolution state needs GraphQL** — `pr_comments` returns threads without a `resolved`
   flag because the REST API does not expose one (it is `reviewThreads.isResolved` on the GraphQL v4
   schema only). No field is emitted rather than guessing. Adding it means the first GraphQL call in the
-  repository.
+  repository. It also blocks a `threads` (review threads resolved) condition on armed merges
+  (`tddy_work_queue::schedule`, `#workqueue` 13/14).
 - **`pr_search` returns no branch names and does not paginate** — `GET /search/issues` omits a PR's head
   and base, so `base:` works as a query qualifier but the agent must follow up with `pr_read` to learn
   the branches; and `search_prs` fetches a single page (limit capped at 100). Following `Link` headers,
