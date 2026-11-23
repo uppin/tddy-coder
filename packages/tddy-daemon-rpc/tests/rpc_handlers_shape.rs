@@ -1,0 +1,245 @@
+//! The shape the RPC-handler move leaves behind.
+//!
+//! The families' suites prove behaviour, but they would pass just as well with every body still in
+//! `tddy-session-lifecycle` behind a re-export. These assert what a reviewer checks instead: that
+//! the implementations left, where the PR-stack trait now lives, that the edge between the two
+//! crates points one way only, and that each handler holds no more than it uses.
+
+use std::path::{Path, PathBuf};
+
+// ---------------------------------------------------------------------------------------------
+// Reading the tree
+// ---------------------------------------------------------------------------------------------
+
+fn package(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the packages directory")
+        .join(name)
+}
+
+/// Every file read here must exist: an unreadable manifest or source read as empty would let an
+/// edge or impl check pass on nothing. Absence is asserted with `Path::exists`, never through this.
+fn source_of(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("{} must be readable: {e}", path.display()))
+}
+
+fn rust_files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(next) = pending.pop() {
+        for entry in std::fs::read_dir(&next).expect("a readable source directory") {
+            let path = entry.expect("a readable directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                found.push(path);
+            }
+        }
+    }
+    found
+}
+
+/// The `[dependencies]` table of a crate's manifest, without its dev- or build-dependencies.
+fn normal_dependencies_of(name: &str) -> String {
+    let manifest = source_of(&package(name).join("Cargo.toml"));
+    manifest
+        .split("\n[")
+        .find(|table| table.starts_with("dependencies]"))
+        .unwrap_or_else(|| panic!("`{name}/Cargo.toml` has no `[dependencies]` table"))
+        .to_string()
+}
+
+/// Every `impl <Trait> for DaemonSessionHost` line in the lifecycle crate naming one of `traits`.
+fn host_impls_of(traits: &[&str]) -> Vec<String> {
+    rust_files_under(&package("tddy-session-lifecycle").join("src"))
+        .into_iter()
+        .flat_map(|path| {
+            let file = path.display().to_string();
+            source_of(&path)
+                .lines()
+                .filter(|line| line.trim_start().starts_with("impl"))
+                .filter(|line| line.contains(" for DaemonSessionHost"))
+                .filter(|line| traits.iter().any(|t| line.contains(&format!("{t} for"))))
+                .map(|line| format!("{file}: {}", line.trim()))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------------------------
+// AC3 — the families left the host
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_session_host_no_longer_implements_any_of_the_four_families() {
+    // Given the five traits the four families are served through
+    let family_traits = [
+        "ProjectHandler",
+        "ProjectService",
+        "CatalogHandler",
+        "ExecToolHandler",
+        "WorkQueueHandler",
+    ];
+
+    // When the lifecycle crate is searched for their impls on the host
+    let remaining = host_impls_of(&family_traits);
+
+    // Then none is left — each family is its own handler in `tddy-daemon-rpc`
+    assert!(
+        remaining.is_empty(),
+        "`DaemonSessionHost` still implements a family that moved to `tddy-daemon-rpc`:\n{}",
+        remaining.join("\n")
+    );
+}
+
+#[test]
+fn the_family_implementation_files_have_left_the_lifecycle_crate() {
+    // Given the files that held the four families' bodies
+    let connection_service = package("tddy-session-lifecycle").join("src/connection_service");
+    let moved = [
+        "svc_project_ports.rs",
+        "project_coordinate_handlers.rs",
+        "svc_catalog_ports.rs",
+        "svc_exec_tool_ports.rs",
+        "svc_pr_stack_ports.rs",
+        "svc_family_entries.rs",
+    ];
+
+    // When each is looked for where it used to be
+    let still_there: Vec<&str> = moved
+        .into_iter()
+        .filter(|file| connection_service.join(file).exists())
+        .collect();
+
+    // Then every one has moved out
+    assert!(
+        still_there.is_empty(),
+        "still in `tddy-session-lifecycle/src/connection_service/`: {still_there:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// AC5 — no handler holds the host
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn no_handler_holds_the_session_host() {
+    // Given the new crate's sources
+    let holders: Vec<String> = rust_files_under(&package("tddy-daemon-rpc").join("src"))
+        .into_iter()
+        .filter(|path| {
+            let source = source_of(path);
+            source.contains("Arc<DaemonSessionHost>") || source.contains(": DaemonSessionHost,")
+        })
+        .map(|path| path.display().to_string())
+        .collect();
+
+    // Then none keeps the host as state — a handler holding it would be the old monolith again,
+    // reached one hop further away
+    assert!(holders.is_empty(), "a handler holds the host: {holders:?}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// AC6, AC7 — where the PR-stack trait lives, and which way the edges point
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_pr_stack_handler_trait_is_defined_by_the_pr_stack_crate() {
+    // Given both crates' sources
+    let defines_it = |crate_name: &str| {
+        rust_files_under(&package(crate_name).join("src"))
+            .into_iter()
+            .any(|path| source_of(&path).contains("pub trait WorkQueueHandler"))
+    };
+
+    // Then the trait is `tddy-work-queue`'s, and the lifecycle crate keeps only a facade
+    assert!(
+        defines_it("tddy-work-queue"),
+        "`tddy-work-queue` does not define `WorkQueueHandler`"
+    );
+    assert!(
+        !defines_it("tddy-session-lifecycle"),
+        "`tddy-session-lifecycle` still defines `WorkQueueHandler` rather than re-exporting it"
+    );
+}
+
+#[test]
+fn the_pr_stack_crate_serves_its_own_rpc_family() {
+    // Given the PR-stack crate's normal dependencies
+    let dependencies = normal_dependencies_of("tddy-work-queue");
+
+    // Then it names the transport and the proto types its service adapter is built from
+    for needed in ["tddy-rpc", "tddy-service"] {
+        assert!(
+            dependencies.contains(needed),
+            "`tddy-work-queue` does not depend on `{needed}`, so it cannot hold `WorkQueueServiceImpl`"
+        );
+    }
+}
+
+#[test]
+fn the_pr_stack_crate_depends_on_neither_the_lifecycle_crate_nor_the_recipes() {
+    // Given the PR-stack crate's normal dependencies
+    let dependencies = normal_dependencies_of("tddy-work-queue");
+
+    // Then neither crate it sits beneath is among them — either edge would close a cycle
+    for forbidden in ["tddy-session-lifecycle", "tddy-workflow-recipes"] {
+        assert!(
+            !dependencies.contains(forbidden),
+            "`tddy-work-queue` depends on `{forbidden}`"
+        );
+    }
+}
+
+#[test]
+fn the_lifecycle_crate_has_no_edge_to_the_crate_above_it() {
+    // Given the lifecycle crate's whole manifest — dev-dependencies included, because a dev edge
+    // would build a second copy of the lifecycle crate into its tests
+    let manifest = source_of(&package("tddy-session-lifecycle").join("Cargo.toml"));
+
+    // Then it never names `tddy-daemon-rpc`
+    assert!(
+        !manifest.contains("tddy-daemon-rpc"),
+        "`tddy-session-lifecycle` depends on `tddy-daemon-rpc` — the edge must point one way only"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// AC8 — the binary serves the handlers
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn the_binary_runtime_serves_the_four_families_through_their_own_handlers() {
+    // Given the bundle of services the binary mounts on its local socket (declared with the
+    // runtime's tasks, `runtime/tasks.rs`, beside the `LocalSocketTransport` that serves it)
+    let runtime = source_of(&package("tddy-daemon").join("src/runtime/tasks.rs"));
+    let bundle: String = runtime
+        .lines()
+        .skip_while(|line| !line.contains("type BinaryLocalSocketServices"))
+        .take_while(|line| line.trim() != ">;")
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !bundle.is_empty(),
+        "`runtime/tasks.rs` has no `BinaryLocalSocketServices`"
+    );
+
+    // Then each of the four families is served by its own handler type
+    for handler in [
+        "ProjectRpcHandler",
+        "CatalogRpcHandler",
+        "ExecToolRpcHandler",
+        "WorkQueueRpcHandler",
+    ] {
+        assert!(
+            bundle.contains(handler),
+            "`BinaryLocalSocketServices` does not serve `{handler}`:\n{bundle}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// AC11, AC12 — the size budget
+// ---------------------------------------------------------------------------------------------
