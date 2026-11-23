@@ -4,8 +4,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 interface SessionDrawerSeparatorProps {
   /** Partition name shown in the header, e.g. "Active" or "Remaining". */
   label: string;
-  /** Number of sessions in the partition, rendered as "{label} ({count})". */
-  count: number;
+  /** Number of sessions in the partition, rendered as "{label} ({count})" when given. */
+  count?: number;
   /** Whether the partition starts expanded. */
   defaultOpen: boolean;
   /** When true, the body stays visible regardless of the local open state (e.g. bulk selection). */
@@ -38,16 +38,15 @@ export function SessionDrawerSeparator({
         type="button"
         data-testid={testId}
         onClick={() => setIsOpen((v) => !v)}
-        className="flex w-full items-center gap-1 px-1 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full items-center justify-end gap-1 px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
+        {/* Right-aligned: the label (with its count), then the arrow at the row's right edge. */}
+        <span>{count === undefined ? label : `${label} (${count})`}</span>
         {isOpen ? (
           <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
         ) : (
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
         )}
-        <span>
-          {label} ({count})
-        </span>
       </button>
       <div style={visible ? undefined : { display: "none" }}>{children}</div>
     </div>

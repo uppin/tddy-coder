@@ -190,3 +190,38 @@ it("the settings cog sits left of the project name and stays visible across the 
   // Then
   cy.wrap(openedSettings).should("deep.equal", [ALPHA.projectId]);
 });
+
+it("More sits on the right with its count, and project names line up with the session dots", () => {
+  // Given — alpha has one live and one finished session
+  mountDrawer({ sessions: [aSession("a-live", ALPHA.projectId, true), aSession("a-done", ALPHA.projectId, false)] });
+
+  cy.get("[data-testid='sessions-drawer-item-a-live']").then(($row) => {
+    const dot = $row.find("span").first()[0].getBoundingClientRect();
+    const dotCentre = dot.left + dot.width / 2;
+    const rowRight = $row[0].getBoundingClientRect().right;
+
+    // Then — "More (1)" is right-aligned, its arrow at the row's right side
+    cy.get("[data-testid='sessions-drawer-separator-remaining']").then(($more) => {
+      expect($more.text()).to.equal("More (1)");
+      const arrow = $more.find("svg")[0].getBoundingClientRect();
+      expect(arrow.right).to.be.closeTo(rowRight - 12, 2);
+      expect($more.find("span")[0].getBoundingClientRect().left).to.be.greaterThan(dotCentre + 100);
+    });
+    // And — the project's name starts where the session dot does
+    byTestId(sessionsDrawerProjectGroupHeader(ALPHA.projectId))
+      .find("span")
+      .then(($name) => expect($name[0].getBoundingClientRect().left).to.be.closeTo(dot.left, 1));
+  });
+});
+
+it("a project-home session carries a home icon; an orchestrator named home does not", () => {
+  // Given — a replaced main (project-home role) and an orchestrator that happens to be called "home"
+  const oldMain = { ...aSession("old-main", ALPHA.projectId, true, "home"), sessionRole: "project-home" };
+  const orch = { ...aSession("orch", ALPHA.projectId, true, "home"), sessionRole: "orchestrator" };
+  mountDrawer({ sessions: [oldMain, orch] });
+
+  // Then
+  byTestId("sessions-drawer-home-icon-old-main").should("be.visible");
+  byTestId("sessions-drawer-item-orchestrator-orch").should("exist");
+  byTestId("sessions-drawer-home-icon-orch").should("not.exist");
+});

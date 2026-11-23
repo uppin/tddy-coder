@@ -1,10 +1,11 @@
 import React from "react";
+import { Home } from "lucide-react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionDrawerLabel } from "./utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerMarkBadge } from "./SessionDrawerMarkBadge";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
-import { ORCHESTRATOR_ROLE } from "./utils/projectHomeGroups";
+import { ORCHESTRATOR_ROLE, PROJECT_HOME_ROLE } from "./utils/projectHomeGroups";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
 
 interface SessionDrawerItemProps {
@@ -62,6 +63,14 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
             )}
           >
           <SessionIndicatorDot session={session} />
+          {/* A project-home session (by role, never by name — an orchestrator called "home" gets none). */}
+          {session.sessionRole === PROJECT_HOME_ROLE && (
+            <Home
+              data-testid={`sessions-drawer-home-icon-${session.sessionId}`}
+              aria-label="Project home"
+              className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground"
+            />
+          )}
           {/* Label */}
           <span
             data-testid={`sessions-drawer-item-label-${session.sessionId}`}

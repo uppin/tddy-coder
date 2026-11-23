@@ -279,9 +279,9 @@ export const TEST_IDS = {
   /** Why a manual "Claim terminal" did not take control. */
   terminalClaimError: "terminal-claim-error",
   // Sessions drawer — active / remaining partition separators (collapsible headers)
-  /** "Active (N)" partition header — expanded by default; toggles the active rows below it. */
+  /** Former "Active (N)" header — no longer rendered; active rows have no header. */
   sessionsDrawerSeparatorActive: "sessions-drawer-separator-active",
-  /** "Remaining (M)" partition header — collapsed by default; toggles the disconnected rows below it. */
+  /** "More (M)" toggle — collapsed by default; shows the disconnected rows below it. */
   sessionsDrawerSeparatorRemaining: "sessions-drawer-separator-remaining",
   // Sessions drawer — open/close toggle
   sessionsDrawerCloseBtn: "sessions-drawer-close-btn",

@@ -1,8 +1,7 @@
 /**
- * Acceptance test: the open sessions drawer splits its list into an Active partition
- * (green/yellow dots) and a Remaining partition (grey/disconnected dots), separated by a
- * collapsible header labelled "Active (N)" / "Remaining (M)". Active is expanded by default,
- * Remaining collapsed. Bulk-delete selection spans both partitions.
+ * Acceptance test: the open sessions drawer lists its active sessions (green/yellow dots) bare, with
+ * no header, and folds the rest (grey/disconnected) under a collapsible **More**, collapsed by
+ * default. Bulk-delete selection spans both.
  *
  * PRD: docs/ft/web/session-drawer.md § Active / Remaining Partition Separator
  */
@@ -98,7 +97,7 @@ describe("Sessions drawer — active / remaining separator", () => {
     cy.viewport(1280, 800);
   });
 
-  it("labels the partitions Active (N) and Remaining (M) with live counts", () => {
+  it("lists active sessions with no header and the rest under More", () => {
     // Given — two live sessions (green + yellow) and one disconnected (grey)
     const drawer = aSessionsDrawer([
       aConnectedSession("live-green"),
@@ -106,21 +105,11 @@ describe("Sessions drawer — active / remaining separator", () => {
       aDisconnectedSession("done-grey"),
     ]).mount();
 
-    // Then — the active header counts both live dots, the remaining header counts the grey one
-    drawer.activeSeparator().should("contain.text", "Active (2)");
-    drawer.remainingSeparator().should("contain.text", "Remaining (1)");
-  });
-
-  it("shows the active partition expanded by default", () => {
-    // Given — one live and one disconnected session
-    const drawer = aSessionsDrawer([
-      aConnectedSession("live-green"),
-      aDisconnectedSession("done-grey"),
-    ]).mount();
-
-    // Then — the Active header renders and its row is visible without any interaction
-    drawer.activeSeparator().should("exist");
+    // Then
+    drawer.activeSeparator().should("not.exist");
     drawer.row("live-green").should("be.visible");
+    drawer.row("live-yellow").should("be.visible");
+    drawer.remainingSeparator().invoke("text").should("equal", "More (1)");
   });
 
   it("collapses the remaining partition by default", () => {
@@ -149,21 +138,6 @@ describe("Sessions drawer — active / remaining separator", () => {
     drawer.row("done-grey").should("be.visible");
   });
 
-  it("collapses the active partition when its separator is clicked", () => {
-    // Given — an expanded Active partition
-    const drawer = aSessionsDrawer([
-      aConnectedSession("live-green"),
-      aDisconnectedSession("done-grey"),
-    ]).mount();
-    drawer.row("live-green").should("be.visible");
-
-    // When — the operator clicks the Active header
-    drawer.clickActiveSeparator();
-
-    // Then — the active row is hidden
-    drawer.row("live-green").should("not.be.visible");
-  });
-
   it("places a needs-input (yellow) session in the expanded active partition", () => {
     // Given — a needs-input session alongside a disconnected one
     const drawer = aSessionsDrawer([
@@ -172,9 +146,8 @@ describe("Sessions drawer — active / remaining separator", () => {
     ]).mount();
 
     // Then — the yellow session counts as active and is visible by default
-    drawer.activeSeparator().should("contain.text", "Active (1)");
-    drawer.remainingSeparator().should("contain.text", "Remaining (1)");
     drawer.row("needs-me").should("be.visible");
+    drawer.row("done-grey").should("not.be.visible");
   });
 
   it("renders a plain list with no separators when every session is active", () => {

@@ -96,7 +96,8 @@ per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by
 ## Project Groups
 
 The open drawer groups its sessions per project. Each group is a collapsible header showing the
-project's name (no session count), followed by the group's body.
+project's name (no session count), followed by the group's body. The name starts at the same x as
+a session row's status dot; the collapse chevron sits in the gutter left of it.
 
 - **Order**: projects with at least one active session (green or yellow dot) are pinned to the top;
   the rest follow. Within each of the two runs, groups are ordered by project name, case-insensitive
@@ -104,7 +105,7 @@ project's name (no session count), followed by the group's body.
   `ListProjects` rows the screen already loads (`SessionsDrawerScreen` passes them as `projects`).
 - **Other**: sessions with no project, or whose project the drawer does not know, form a trailing
   **Other** group. It is absent when it would be empty.
-- **Body**: inside a group the drawer keeps the Active / Remaining partition and the stack-group
+- **Body**: inside a group the drawer keeps the active / remaining (**More**) partition and the stack-group
   nesting below, computed over that group's sessions only. A group with sessions in only one
   partition shows no separators.
 - **Collapse**: clicking a header collapses or expands the group; groups start expanded. The
@@ -116,6 +117,11 @@ project's name (no session count), followed by the group's body.
 
 The collapsed 12px strip, bulk selection and delete, cross-host badges and deep links are unchanged
 by grouping.
+
+**Home icon.** A session whose role is project-home (`SessionEntry.session_role == "project-home"`)
+carries a house icon after its dot (`sessions-drawer-home-icon-<sessionId>`), and so does the pinned
+**main** entry (`sessions-drawer-home-icon-project-<projectId>`). It is decided by role, never by
+name: an orchestrator named "home" shows none.
 
 ### Stacks box
 
@@ -150,7 +156,7 @@ Implementation: `groupSessionsByProject` (`packages/tddy-session-web/src/utils/s
 
 ### Project settings pane
 
-Each project group's header carries a **gear** (`sessions-drawer-project-settings-<projectId>`, left of the project's name, shown while the pointer is anywhere over the header row `sessions-drawer-project-header-row-<projectId>` — the row is the hover target, so moving from the name onto the gear keeps it shown; keyboard focus also shows it) that opens the project's **session settings** in the detail area at `#/sessions/project/<projectId>/settings` (`sessionsProjectSettingsPath` / `parseSessionsProjectSettings` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web/src/routing/appRoutes.ts`). The pane (`ProjectSettingsPane` in `packages/tddy-session-create-web/src/`) holds the project's name, two sections, and **Delete project**:
+Each project group's header carries a **gear** (`sessions-drawer-project-settings-<projectId>`, left of the project's name in the chevron's slot, replacing the chevron while the pointer is anywhere over the header row `sessions-drawer-project-header-row-<projectId>` — the row is the hover target, so moving from the name onto the gear keeps it shown; keyboard focus also shows it) that opens the project's **session settings** in the detail area at `#/sessions/project/<projectId>/settings` (`sessionsProjectSettingsPath` / `parseSessionsProjectSettings` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web/src/routing/appRoutes.ts`). The pane (`ProjectSettingsPane` in `packages/tddy-session-create-web/src/`) holds the project's name, two sections, and **Delete project**:
 
 - **Name** — the project's name with **Save**, which sends `UpdateProject`: the daemon renames the project on every host owning it, so the request names no host (`sessions-project-settings-name-<projectId>`). A refusal is shown under the field and the typed name is kept.
 - **Main** — the [setup form](#pinned-main-entry) (*Set up main*), or, when main is set up, its model and status and **Replace main**. Replace main lives only here; the pinned entry carries no Replace action.
@@ -233,17 +239,18 @@ blind to activity: a row must not change partition because an agent ran a tool.
 
 ## Active / Remaining Partition Separator
 
-Inside each [project group](#project-groups), the open drawer splits its sessions into two partitions with a collapsible separator header
-between them, so live sessions stay at the top and finished ones tuck away:
+Inside each [project group](#project-groups), the open drawer splits its sessions into two partitions,
+so live sessions stay at the top and finished ones tuck away:
 
 - **Active partition** — sessions whose status dot is **green or yellow**, i.e.
   `connectionStatusForSession(entry) !== "disconnected"` (equivalently `isActive || pendingElicitation`).
   A session blocked waiting for human input (`"needs-input"`, yellow) counts as active so it is not
-  hidden. Header label: **`Active (N)`**. Expanded by default.
-- **Remaining partition** — sessions whose dot is **grey** (`"disconnected"`). Header label:
-  **`Remaining (M)`**. Collapsed by default.
+  hidden. Listed first, **with no header**.
+- **Remaining partition** — sessions whose dot is **grey** (`"disconnected"`), folded under a
+  right-aligned **`More (M)`** toggle (`sessions-drawer-separator-remaining`, arrow at the row's right
+  edge). Collapsed by default.
 
-`N` and `M` are the number of sessions in each partition (parents + children + flat rows).
+`M` is the number of sessions in the remaining partition (parents + children + flat rows).
 
 **Stack-group nesting is preserved within each partition.** Partitioning happens first, keying on
 each session's *own* status; each partition is then stack-grouped independently by
@@ -252,12 +259,12 @@ stays nested inside one partition. A **mixed-activity** stack (e.g. a live child
 orchestrator) splits: each session lands in the partition matching its own dot, and a child whose
 orchestrator is not present in the same partition renders as a flat row there.
 
-**The separator only appears when both partitions are non-empty.** When every session is active
-(or every session is disconnected) the drawer renders a single plain list with no separator header —
+**More only appears when both partitions are non-empty.** When every session is active
+(or every session is disconnected) the drawer renders a single plain list with no toggle —
 identical to the pre-partition layout.
 
-**Collapse behaviour** mirrors the PR-stack group: clicking a partition header toggles the
-visibility of that partition's rows. The two partitions collapse independently.
+**Collapse behaviour** mirrors the PR-stack group: clicking **More** toggles the remaining rows. The
+active rows have no toggle.
 
 **Bulk delete is unaffected.** Selection mode (the bottom minibar) force-expands both partitions so
 every row's checkbox is reachable; select-all and delete operate across both partitions in the

@@ -107,7 +107,7 @@ it("a collapsed project group stays collapsed after a remount", () => {
   drawer.row("b1").should("be.visible");
 });
 
-it("active and remaining separators appear inside each project group", () => {
+it("a More fold appears inside each project group that has inactive sessions", () => {
   // Given
   const drawer = aGroupedDrawer([
     aConnectedSession("a-live", ALPHA.projectId),
@@ -115,13 +115,12 @@ it("active and remaining separators appear inside each project group", () => {
     aConnectedSession("b-live", BETA.projectId),
   ]).mount();
 
-  // Then — alpha has both partitions, beta only active sessions (no separators)
+  // Then — alpha folds its inactive session under More, beta (only active sessions) has no fold
   drawer.group(ALPHA.projectId).within(() => {
-    byTestId(TEST_IDS.sessionsDrawerSeparatorActive).should("exist");
     byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining).should("exist");
   });
   drawer.group(BETA.projectId).within(() => {
-    byTestId(TEST_IDS.sessionsDrawerSeparatorActive).should("not.exist");
+    byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining).should("not.exist");
   });
 });
 

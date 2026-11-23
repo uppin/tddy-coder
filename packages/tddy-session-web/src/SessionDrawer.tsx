@@ -294,11 +294,11 @@ export function SessionDrawer({
                       type="button"
                       data-testid={`sessions-drawer-project-settings-${group.projectId}`}
                       onClick={() => onOpenProjectSettings(group.projectId as string)}
-                      className="flex-shrink-0 px-0.5 py-1 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                      className="flex items-center text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                       title={`Settings for ${group.label}`}
                       aria-label={`Settings for ${group.label}`}
                     >
-                      <Settings className="h-3.5 w-3.5" />
+                      <Settings className="h-3 w-3" />
                     </button>
                   ) : undefined
                 }
