@@ -268,13 +268,20 @@ impl ProjectHomePort for DaemonProjectHome {
             .await
     }
 
-    /// SIGTERM to `target`'s process, delivered as `SignalSession` delivers it, on the sessions
+    /// SIGTERM to `target`'s process — and its tmux session, for a tmux run — delivered as
+    /// `SignalSession` delivers it, on the sessions
     /// directory this port reads the target from (`#start-parity` 7/9). The record, worktree and
     /// branch are left as they are.
     async fn terminate_session(&self, target: &SessionTarget) -> anyhow::Result<()> {
         let session_dir = unified_session_dir_path(&self.sessions_base, &target.session_id);
-        self.terminals
-            .signal_session_dir(&session_dir, &target.session_id, Signal::Sigterm as i32)
+        self.launch
+            .terminate_session_dir(
+                &self.os_user,
+                &session_dir,
+                &target.session_id,
+                Signal::Sigterm as i32,
+                &self.session_token,
+            )
             .await
             .map_err(status_error)?;
         Ok(())

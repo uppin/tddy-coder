@@ -873,5 +873,59 @@ async fn deleting_a_tmux_run_kills_its_tmux_session_and_agent_on_the_target() {
         .has_tmux_session(&tmux_session_of(&session_id)));
 }
 
+#[tokio::test]
+#[serial_test::serial]
+async fn terminating_a_tmux_run_kills_its_tmux_session_and_agent_on_the_target() {
+    // Given a tmux run on the target, its agent running
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target with tmux succeeds");
+    let agent = daemon.the_agent_on_the_target(&session_id).await;
+
+    // When it is terminated
+    daemon.stop(&session_id).await;
+
+    // Then its tmux session and its agent are gone from the target
+    the_agent_has_ended(&agent).await;
+    assert!(!daemon
+        .target
+        .has_tmux_session(&tmux_session_of(&session_id)));
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn resuming_a_terminated_tmux_run_starts_a_fresh_agent_on_the_target() {
+    // Given a tmux run on the target that was terminated
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target with tmux succeeds");
+    let first = daemon.the_agent_on_the_target(&session_id).await;
+    daemon.stop(&session_id).await;
+    the_agent_has_ended(&first).await;
+
+    // When it is resumed
+    daemon
+        .resume(&session_id)
+        .await
+        .expect("a terminated tmux run resumes");
+    let runs = daemon.runs_on_the_target(&session_id, 2).await;
+
+    // Then a fresh agent resumes the conversation, in tmux on the target again
+    assert_eq!(
+        (
+            runs.iter().map(AnAgentRun::is_a_resume).collect::<Vec<_>>(),
+            runs[1].is_alive(),
+            daemon
+                .target
+                .has_tmux_session(&tmux_session_of(&session_id)),
+        ),
+        (vec![false, true], true, true)
+    );
+}
+
 #[path = "remote_target_tmux_tabs/mod.rs"]
 mod tmux_tabs;

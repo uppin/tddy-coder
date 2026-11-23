@@ -13,7 +13,7 @@ mod tmux_agent_support;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::{
     DeleteSessionRequest, ListSessionsRequest, ResumeSessionRequest,
-    SessionService as SessionServiceTrait, StartSessionRequest,
+    SessionService as SessionServiceTrait, Signal, SignalSessionRequest, StartSessionRequest,
 };
 use tddy_testing_commons::stub_scripts::{read_last_appended_argv, read_recorded_env};
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
@@ -209,6 +209,45 @@ async fn deleting_a_tmux_run_session_kills_the_agent_and_the_tmux_session() {
         }))
         .await
         .expect("DeleteSession");
+
+    // Then the agent and its tmux session are gone
+    eventually(
+        "the agent and its tmux session to be gone",
+        OBSERVE,
+        || match (
+            a_process_is_alive(agent_pid),
+            daemon.tmux.has_session(&name),
+        ) {
+            (false, false) => Ok(()),
+            (agent, tmux) => Err(format!("agent alive: {agent}, tmux session alive: {tmux}")),
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn terminating_a_tmux_run_session_kills_the_agent_and_the_tmux_session() {
+    // Given a running tmux-run session
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let session_id = daemon.starts_a_session_in_tmux().await;
+    let name = daemon.tmux_session_of(&session_id);
+    daemon
+        .until_the_agent_ran_in_tmux_session(&daemon.tmux, &name)
+        .await;
+    let agent_pid = daemon.metadata_of(&session_id).pid.expect("a recorded pid");
+
+    // When it is terminated, as the web UI's Terminate does
+    daemon
+        .host
+        .signal_session(Request::direct(SignalSessionRequest {
+            session_token: VALID_TOKEN.to_string(),
+            session_id: session_id.clone(),
+            signal: Signal::Sigterm as i32,
+            control_token: String::new(),
+        }))
+        .await
+        .expect("SignalSession");
 
     // Then the agent and its tmux session are gone
     eventually(
