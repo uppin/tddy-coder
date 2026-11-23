@@ -73,6 +73,12 @@ impl CliManagerTerminalRoster {
             TerminalKind::TargetAgent { .. } => Err(Status::internal(
                 "an agent on a target starts on the session's target, not in a worktree on this host",
             )),
+            // A tmux tab on a target runs there too (`#target-tmux` 2/2).
+            TerminalKind::TargetTmux { .. }
+            | TerminalKind::TargetTmuxNew { .. }
+            | TerminalKind::TargetTmuxAgent { .. } => Err(Status::internal(
+                "a tmux tab on a target starts on the session's target, not in a worktree on this host",
+            )),
         }
     }
 
@@ -268,16 +274,26 @@ impl CliManagerTerminalRoster {
             Err(refusal) => Err(refusal),
         };
         if recorded.is_err() {
-            self.end(session_id, terminal_id, &tab.launch).await;
+            self.end(session_id, terminal_id, &tab.launch, None).await;
         }
         recorded
     }
 
     /// Stop `terminal_id`, and with it the tmux session its chain says wraps its agent.
-    async fn end(&self, session_id: &str, terminal_id: &str, launch: &[LaunchNode]) {
+    async fn end(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        launch: &[LaunchNode],
+        subject: Option<&str>,
+    ) {
         // The tmux session first: its client then ends with the agent, so no detach watcher holds
-        // the session live for an agent nobody can reach.
-        if let Some(wrapper) = launch.iter().find(|node| node.kind == TMUX_KIND) {
+        // the session live for an agent nobody can reach. A tab on a target keeps its tmux there.
+        if launch.first().map(|node| node.kind.as_str()) == Some(tddy_core::tab_roster::TARGET_KIND)
+        {
+            self.end_target_tmux_of(session_id, terminal_id, launch, subject)
+                .await;
+        } else if let Some(wrapper) = launch.iter().find(|node| node.kind == TMUX_KIND) {
             if let (Some(name), Some(os_user)) = (
                 wrapper.property(tddy_core::tab_roster::SESSION_PROPERTY),
                 wrapper.property(tddy_core::tab_roster::OS_USER_PROPERTY),
@@ -290,7 +306,12 @@ impl CliManagerTerminalRoster {
 
     /// Close `terminal_id`: end it, and remove it from the roster. `false` when the session has no
     /// such terminal.
-    pub(super) async fn close_tab(&self, session_id: &str, terminal_id: &str) -> bool {
+    pub(super) async fn close_tab(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        subject: Option<&str>,
+    ) -> bool {
         let jailed = match &self.tab_jails {
             Some(tabs) => tabs.jails.stop(session_id, terminal_id).await,
             None => false,
@@ -305,7 +326,7 @@ impl CliManagerTerminalRoster {
                 return false;
             }
             let recorded = self.recorded_chain(session_id, terminal_id);
-            self.end(session_id, terminal_id, &recorded).await;
+            self.end(session_id, terminal_id, &recorded, subject).await;
         }
         self.forget_closed_tab(session_id, terminal_id).await;
         true

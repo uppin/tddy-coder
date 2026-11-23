@@ -4,7 +4,7 @@
 **Category:** oversized-file
 **Detected:** 2026-11-23 — `/pr-wrap` step 3.5 file-length gate (#1019, `#target-tmux` 1/2); measured
 to `mod tests` (an early `#[cfg(test)]` re-export at L31 stops the gate's first-`#[cfg(test)]` count)
-**Metrics:** **623 production lines** · budget 500 · 1.2× over
+**Metrics:** **613 production lines** (623 after #1019) · budget 500 · 1.2× over
 **Restructure:** not designed — the target tmux helpers (`remote_agent_tmux_command`,
 `target_login_run`, `end_target_tmux_session`) and the start judgement (`judge_the_start`,
 `recorded_owner`) are the obvious seams
@@ -16,6 +16,7 @@ lands, because #1020 (`#target-tmux` 2/2) edits the same file — **unclaimed**
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-11-23 | 529 → 623 | #1019: `RemoteLaunch::tmux`, the tmux command, the tmux pid source in the start judgement, `end_target_tmux_session`. Not split: #1020 edits this file (stack rule) |
+| 2026-11-23 | 623 → 613 | #1020: `end_target_tmux_session` delegates to `target_tmux_tab::end_target_tmux_session_named`. Better, not clean |
 
 ## What would close it
 

@@ -309,6 +309,14 @@ impl TerminalRoster for CoderTerminalRoster {
                     "this session's terminals run bash only; {agent:?} in a tab on a target is not \
                      offered here"
                 )));
+            } // Nor tmux on one (`#target-tmux` 2/2).
+            TerminalKind::TargetTmux { .. }
+            | TerminalKind::TargetTmuxNew { .. }
+            | TerminalKind::TargetTmuxAgent { .. } => {
+                return Err(Status::failed_precondition(
+                    "this session's terminals run bash only; a tmux tab on a target is not \
+                     offered here",
+                ));
             }
         }
         self.svc

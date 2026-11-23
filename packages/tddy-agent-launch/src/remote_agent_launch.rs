@@ -16,6 +16,7 @@ mod tab_launch_status;
 mod target;
 mod target_agent_tab;
 mod target_tab;
+mod target_tmux_tab;
 
 use std::fmt;
 use std::path::Path;
@@ -59,6 +60,10 @@ pub use crate::remote_agent_launch::target_agent_tab::{
 };
 pub use crate::remote_agent_launch::target_tab::{
     launch_tab_on_target, target_shell_tab_command, TargetTab,
+};
+pub use crate::remote_agent_launch::target_tmux_tab::{
+    end_target_tmux_session_named, launch_tmux_tab_on_target, list_target_tmux_sessions,
+    target_tmux_session_lives, target_tmux_tab_command,
 };
 
 /// The base set of the agent's environment on a target, expanded by the target's own login shell:
@@ -179,22 +184,7 @@ pub async fn end_target_tmux_session(
     shell: &dyn RemoteShell,
     session_id: &str,
 ) -> Result<(), RemoteLaunchError> {
-    let name = shell_single_quote(&format!("={}", target_tmux_session_name(session_id)));
-    // A session or server already gone is what the end wants; any other refusal is reported.
-    let inner = format!(
-        "out=$(tmux kill-session -t {name} 2>&1) && exit 0; \
-         case \"$out\" in *\"can't find session\"*|*\"no server running\"*|*\"error connecting to\"*) exit 0;; esac; \
-         printf '%s\\n' \"$out\" >&2; exit 1"
-    );
-    shell
-        .exec(tddy_remote_shell::ExecRequest::new(target_login_run(
-            &inner,
-        )))
-        .await
-        .map_err(RemoteLaunchError::Shell)?
-        .success_or_exited()
-        .map_err(RemoteLaunchError::Shell)?;
-    Ok(())
+    end_target_tmux_session_named(shell, &target_tmux_session_name(session_id)).await
 }
 
 /// Where and how an agent is launched on a target.

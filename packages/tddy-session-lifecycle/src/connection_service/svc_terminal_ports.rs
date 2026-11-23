@@ -27,6 +27,7 @@ mod recorded_tabs;
 mod recorded_worktree;
 mod target_agent_tabs;
 mod target_tabs;
+mod target_tmux_tabs;
 mod tmux_host;
 
 impl DaemonSessionHost {
@@ -140,7 +141,10 @@ impl DaemonSessionHost {
     /// maps to, where the terminals and the control lease live, and what this host frames at.
     fn terminal_session_ports(&self) -> TerminalSessionPorts {
         let config = self.config.clone();
-        let tmux: Arc<dyn TmuxHost> = Arc::new(tmux_host::HostTmux);
+        let tmux: Arc<dyn TmuxHost> = Arc::new(tmux_host::SessionTmux {
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            target_shell: self.launch_sessions().tab_target_shell(),
+        });
         TerminalSessionPorts {
             github_users: self.user_resolver.clone(),
             os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
@@ -397,6 +401,9 @@ impl TerminalRoster for CliManagerTerminalRoster {
         if let tddy_terminal_rpc::service::TerminalKind::TargetAgent { agent } = &launch.kind {
             return self.start_target_agent_tab(session_id, agent, launch).await;
         }
+        if let Some(started) = self.start_target_tmux_tab(session_id, launch).await {
+            return started;
+        }
         let worktree = match self.manager.get(session_id).await {
             Some(main) => main.worktree_path.clone(),
             // A target session's worktree is on its target: a tab "On this host" runs in the
@@ -412,7 +419,11 @@ impl TerminalRoster for CliManagerTerminalRoster {
     }
 
     async fn stop(&self, session_id: &str, terminal_id: &str) -> bool {
-        self.close_tab(session_id, terminal_id).await
+        self.close_tab(session_id, terminal_id, None).await
+    }
+
+    async fn stop_as(&self, session_id: &str, terminal_id: &str, subject: &str) -> bool {
+        self.close_tab(session_id, terminal_id, Some(subject)).await
     }
 
     async fn list(&self, session_id: &str) -> Vec<TerminalDescriptor> {

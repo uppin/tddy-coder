@@ -17,9 +17,10 @@ use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::cli_session_manager::CliSessionManager;
 use tddy_core::ssh_exec::shell_single_quote;
 
-use super::agent_probe::probe_agent_on_target;
+use super::agent_probe::{probe_agent_on_target, probe_tmux_on_target};
 use super::session_files::{write_rendered_session_files, SessionFilesPlace};
 use super::target_tab::{reach_the_worktree, spawn_tab_client};
+use super::target_tmux_tab::target_tmux_tab_command;
 use super::{target_login_exec, RemoteLaunchError, TargetTab};
 use crate::spec_launch::HostPtyPlan;
 
@@ -35,6 +36,10 @@ pub struct TargetAgentTab {
     /// none: the spec's `run.env`, and the `pass_env` values the daemon holds. The base set (`HOME`,
     /// `PATH`, `TMPDIR`) is the target's own.
     pub env: Vec<(String, String)>,
+    /// The tmux session the agent runs in on the target (`#target-tmux` 2/2): the tab attaches to it
+    /// when it lives, and starts the agent in it when it does not. `None` runs the agent straight
+    /// under the tab's transport client.
+    pub tmux_session: Option<String>,
 }
 
 /// Open the agent tab `terminal_id` of `session_id` on the target `tab.shell` reaches, running
@@ -82,11 +87,23 @@ pub async fn launch_agent_tab_on_target(
     )
     .await?;
 
-    let command = format!(
-        "cd {} && {}",
-        shell_single_quote(&tab.worktree.to_string_lossy()),
-        target_login_exec(&plan.argv, &plan.env)
-    );
+    let command = match &agent.tmux_session {
+        // In tmux on the target (`#target-tmux` 2/2): attached when its tmux session lives, the
+        // agent started in it otherwise.
+        Some(name) => {
+            probe_tmux_on_target(tab.shell.as_ref(), tab.worktree).await?;
+            target_tmux_tab_command(
+                tab.worktree,
+                name,
+                Some(&target_login_exec(&plan.argv, &plan.env)),
+            )
+        }
+        None => format!(
+            "cd {} && {}",
+            shell_single_quote(&tab.worktree.to_string_lossy()),
+            target_login_exec(&plan.argv, &plan.env)
+        ),
+    };
     spawn_tab_client(
         manager,
         session_id,

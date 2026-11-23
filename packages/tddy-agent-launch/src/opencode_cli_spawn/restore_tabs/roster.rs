@@ -27,6 +27,7 @@ use crate::spec_launch::HostCodingAgents;
 use crate::tab_target_shell::TabTargetShell;
 use wrapped_tabs::{
     restore_jailed_agent, restore_jailed_shell, restore_target_agent, restore_target_shell,
+    restore_target_tmux, restore_target_tmux_agent,
 };
 
 mod wrapped_tabs;
@@ -98,8 +99,13 @@ async fn live_tabs(restore: &RosterRestore<'_>, tabs: &[TabEntry]) -> LiveTabs {
     for terminal_id in restore.tab_jails.live(restore.session_id).await {
         live = live.with_terminal(&terminal_id);
     }
+    // A tab on a target keeps its tmux there: this host's tmux is never asked about it.
     let named: BTreeSet<(String, String)> = tabs
         .iter()
+        .filter(|tab| {
+            tab.launch.first().map(|node| node.kind.as_str())
+                != Some(tddy_core::tab_roster::TARGET_KIND)
+        })
         .flat_map(|tab| tab.launch.iter())
         .filter(|node| node.kind == TMUX_KIND || node.kind == TMUX_ATTACH_KIND)
         .filter_map(|node| tmux_names(node).ok())
@@ -233,6 +239,12 @@ async fn carry_out(
             )
             .await
         }
+        TabRestore::TargetTmux { session } => restore_target_tmux(restore, tab, &session).await,
+        TabRestore::TargetTmuxAgent {
+            session,
+            harness,
+            resume_conversation,
+        } => restore_target_tmux_agent(restore, tab, session, harness, resume_conversation).await,
         TabRestore::Drop { reason } => Err(anyhow::anyhow!(reason)),
     }
 }

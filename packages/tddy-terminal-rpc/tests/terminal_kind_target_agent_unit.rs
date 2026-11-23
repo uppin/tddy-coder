@@ -9,9 +9,7 @@ use std::collections::HashMap;
 use pretty_assertions::assert_eq;
 use tddy_rpc::Code;
 use tddy_terminal_rpc::proto::terminal_session::LaunchNode;
-use tddy_terminal_rpc::{
-    TerminalKind, SANDBOX_WRAPPER_KIND, TARGET_WRAPPER_KIND, TMUX_WRAPPER_KIND,
-};
+use tddy_terminal_rpc::{TerminalKind, SANDBOX_WRAPPER_KIND, TARGET_WRAPPER_KIND};
 
 fn a_wrapper(kind: &str) -> LaunchNode {
     LaunchNode {
@@ -46,25 +44,6 @@ fn an_agent_kind_wrapped_in_target_is_named_without_its_surrounding_whitespace()
 
     // Then
     assert_eq!(kind, an_agent_on_target("cursor-cli"));
-}
-
-#[test]
-fn an_agent_in_a_tmux_wrapper_on_a_target_is_refused_naming_the_tmux_wrapper() {
-    // When
-    let refusal = TerminalKind::from_wrapped_request(
-        "claude-cli",
-        "",
-        &[a_wrapper(TARGET_WRAPPER_KIND), a_wrapper(TMUX_WRAPPER_KIND)],
-    )
-    .unwrap_err();
-
-    // Then
-    assert_eq!(refusal.code(), Code::InvalidArgument);
-    assert!(
-        refusal.message().contains("\"tmux\""),
-        "the refusal names the wrapper inside the target: {}",
-        refusal.message()
-    );
 }
 
 #[test]

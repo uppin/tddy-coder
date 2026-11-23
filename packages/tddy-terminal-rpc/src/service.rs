@@ -323,6 +323,7 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
     ) -> Result<Response<StopTerminalSessionResponse>, Status> {
         let req = request.into_inner();
         self.os_user(&req.session_token)?;
+        let subject = self.github_user(&req.session_token)?;
         let session_id = keyed_session_id(&req.session_id);
         let terminal_id = req.terminal_id.trim();
 
@@ -335,7 +336,12 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
             ));
         }
 
-        if self.ports.roster.stop(&session_id, terminal_id).await {
+        if self
+            .ports
+            .roster
+            .stop_as(&session_id, terminal_id, &subject)
+            .await
+        {
             Ok(Response::new(StopTerminalSessionResponse {
                 ok: true,
                 message: String::new(),
@@ -378,11 +384,17 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         request: Request<ListTmuxSessionsRequest>,
     ) -> Result<Response<ListTmuxSessionsResponse>, Status> {
         let req = request.into_inner();
+        let subject = self.github_user(&req.session_token)?;
         let os_user = self.os_user(&req.session_token)?;
+        let session_id = keyed_session_id(&req.session_id);
         let sessions = self
             .ports
             .tmux
-            .list(&os_user)
+            .list_for_session(&TmuxListing {
+                os_user: &os_user,
+                subject: &subject,
+                session_id: &session_id,
+            })
             .await?
             .into_iter()
             .map(|session| TmuxSessionInfo {
