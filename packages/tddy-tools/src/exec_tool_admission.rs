@@ -227,6 +227,7 @@ mod tests {
                 "work_item_clear_badge",
                 "work_queue_set_dependencies",
                 "work_queue_graph",
+                "work_queue_waves",
                 "work_item_merge",
                 "work_item_close",
                 "work_item_repoint",

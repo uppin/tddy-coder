@@ -572,6 +572,7 @@ async fn a_project_home_session_is_offered_its_read_only_tools_and_the_project_h
             "work_item_clear_badge",
             "work_queue_set_dependencies",
             "work_queue_graph",
+            "work_queue_waves",
             "work_item_merge",
             "work_item_close",
             "work_item_repoint",

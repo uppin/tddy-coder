@@ -24,8 +24,10 @@ use super::github::GithubSource;
 use super::shape::{work_pr_comments_json, work_pr_read_json, work_pr_search_json};
 
 mod lineage_ops;
+mod waves_ops;
 pub(super) use lineage_ops::graph_json;
 use lineage_ops::set_dependencies;
+use waves_ops::{queue_waves_of, waves_answer};
 
 /// The stack an operation acts on, and where the host keeps it.
 #[derive(Clone)]
@@ -242,6 +244,7 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
             item_annotations::clear_badge(queue, &item_id, &key)
         }),
         WorkQueueOp::SetDependencies { item_id, needs } => set_dependencies(env, &item_id, needs),
+        WorkQueueOp::Waves => waves_answer(&env.stack()?),
         // Served through the GitHub inbox, ahead of this blocking dispatcher.
         WorkQueueOp::Graph => {
             Err("work_queue_graph is served through the GitHub inbox".to_string())
@@ -328,11 +331,16 @@ fn edit_links(
 pub(super) fn status_answer(env: &OpEnv, refresh_error: Option<String>) -> Result<Value, String> {
     // Read after the possible persist, so the answer reflects what is stored.
     let stack = env.stack()?;
+    // A cycle in hand-edited edges leaves wave 0 and no binding needs rather than failing the status.
+    let derived = queue_waves_of(&stack).ok();
     let nodes: Vec<Value> = stack
         .nodes
         .iter()
         .map(|n| {
+            let (wave, binding_needs) = waves_ops::wave_and_needs(derived.as_ref(), &n.node_id);
             json!({
+                "wave": wave,
+                "binding_needs": binding_needs,
                 "node_id": n.node_id,
                 "title": n.title,
                 "branch": n.branch,

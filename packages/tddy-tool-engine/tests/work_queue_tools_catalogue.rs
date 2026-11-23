@@ -30,7 +30,7 @@ fn is_a_git_tool(name: &str) -> bool {
 }
 
 /// The ten work tools, `#workqueue` 6/14's four link tools, then 7/14's three annotation tools, then 9/14's two lineage tools.
-const EVERY_PLAN_TOOL: [&str; 19] = [
+const EVERY_PLAN_TOOL: [&str; 20] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -50,6 +50,7 @@ const EVERY_PLAN_TOOL: [&str; 19] = [
     "work_item_clear_badge",
     "work_queue_set_dependencies",
     "work_queue_graph",
+    "work_queue_waves",
 ];
 
 #[test]

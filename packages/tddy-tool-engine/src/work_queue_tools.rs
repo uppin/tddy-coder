@@ -44,6 +44,7 @@ use crate::work_item_link_tools::{
 };
 use crate::work_queue_access::WorkQueueAccess;
 use crate::work_queue_lineage_tools::{WORK_QUEUE_GRAPH, WORK_QUEUE_SET_DEPENDENCIES};
+use crate::work_queue_waves_tools::WORK_QUEUE_WAVES;
 use crate::ToolOutcome;
 
 pub const PR_STACK_LIST: &str = "work_queue_list";
@@ -80,6 +81,7 @@ pub fn is_stack_tool(name: &str) -> bool {
         || crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.contains(&name)
         || crate::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES.contains(&name)
         || crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.contains(&name)
+        || crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.contains(&name)
 }
 
 /// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
@@ -227,6 +229,8 @@ pub enum WorkQueueOp {
     },
     /// `work_queue_graph`: line edges and stored dependency edges.
     Graph,
+    /// `work_queue_waves` (`#workqueue` 10/14): waves, derived line, readiness, line check.
+    Waves,
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.
@@ -404,6 +408,7 @@ fn work_queue_op_of(tool_name: &str, args: StackToolArgs) -> Result<WorkQueueOp,
             needs: required(tool_name, args.needs, "needs")?,
         },
         WORK_QUEUE_GRAPH => WorkQueueOp::Graph,
+        WORK_QUEUE_WAVES => WorkQueueOp::Waves,
         other => return Err(format!("unknown stack tool: {other}")),
     })
 }

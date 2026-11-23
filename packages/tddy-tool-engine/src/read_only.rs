@@ -168,6 +168,7 @@ mod tests {
                 "mcp__tddy-tools__work_item_clear_badge",
                 "mcp__tddy-tools__work_queue_set_dependencies",
                 "mcp__tddy-tools__work_queue_graph",
+                "mcp__tddy-tools__work_queue_waves",
                 "mcp__tddy-tools__work_item_merge",
                 "mcp__tddy-tools__work_item_close",
                 "mcp__tddy-tools__work_item_repoint",

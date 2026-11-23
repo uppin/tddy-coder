@@ -140,18 +140,52 @@ pub async fn work_queue_status_view(
     queue: &WorkQueue,
 ) -> WorkQueueStatusView {
     let summaries = item_check_summaries(inbox, repo, queue).await;
-    let mut items = Vec::with_capacity(queue.nodes.len());
+    let mut prs = Vec::with_capacity(queue.nodes.len());
     for item in &queue.nodes {
         let branch = item
             .pr
             .as_ref()
             .map(|pr| pr.head_branch.as_str())
             .or(item.branch.as_deref());
-        let pr = match branch {
+        prs.push(match branch {
             Some(branch) => pr_status_view_through_inbox(inbox, repo, branch).await,
             None => PrStatusView::default(),
-        };
+        });
+    }
+    let item_ids: Vec<String> = queue
+        .nodes
+        .iter()
+        .map(|item| item.node_id.clone())
+        .collect();
+    // A merged PR — live from the inbox, or as the record stored it — is a met need, not a wait.
+    let mut done = crate::waves::merged_items(queue);
+    done.extend(
+        queue
+            .nodes
+            .iter()
+            .zip(&prs)
+            .filter(|(_, pr)| pr.state == "merged")
+            .map(|(item, _)| item.node_id.clone()),
+    );
+    // A cycle (refused at write, but a hand-edited record may hold one) leaves every item wave 0 with
+    // no binding needs rather than failing the whole status.
+    let derived =
+        crate::waves::queue_waves(&item_ids, &crate::lineage::dependencies_of(queue), &done).ok();
+    let mut items = Vec::with_capacity(queue.nodes.len());
+    for (item, pr) in queue.nodes.iter().zip(prs) {
         let checks = summaries.iter().find(|s| s.item_id == item.node_id);
+        let wave = derived.as_ref().map_or(0, |derived| {
+            derived
+                .waves
+                .iter()
+                .position(|wave| wave.contains(&item.node_id))
+                .map_or(0, |index| index as u32 + 1)
+        });
+        let binding_needs = derived
+            .as_ref()
+            .and_then(|derived| derived.readiness.iter().find(|(id, _)| *id == item.node_id))
+            .map(|(_, needs)| needs.clone())
+            .unwrap_or_default();
         items.push(WorkItemStatus {
             item_id: item.node_id.clone(),
             pr: Some(pr),
@@ -160,6 +194,8 @@ pub async fn work_queue_status_view(
             checks_failed: checks.map_or(0, |c| c.failed),
             checks_succeeded: checks.map_or(0, |c| c.succeeded),
             checks: checks.map_or_else(Vec::new, |c| c.runs.iter().map(check_view).collect()),
+            wave,
+            binding_needs,
         });
     }
     WorkQueueStatusView {
