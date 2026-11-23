@@ -12,6 +12,10 @@ use crate::work_queue_waves_tools::WORK_QUEUE_WAVES;
 use serde::Deserialize;
 
 use super::WorkQueueOp;
+use super::{
+    PR_ADD_PLANNED, PR_ADOPT, PR_COMMENTS, PR_DELETE_PLANNED, PR_READ, PR_SEARCH, PR_SET_STATUS,
+    PR_STACK_STATUS, PR_UPDATE_PLANNED,
+};
 
 use super::PrAddress;
 
