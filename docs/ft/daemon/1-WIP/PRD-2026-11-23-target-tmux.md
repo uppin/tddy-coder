@@ -1,7 +1,7 @@
 # PRD: tmux on Coder/SSH targets
 
 **Date**: 2026-11-23
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — n1 wrapped (#1019: [terminal-sessions.md § tmux terminals](../terminal-sessions.md#tmux-terminals)); this PRD wraps with n2, which owns requirements 7–12
 **Stack**: `#target-tmux` — n1 (agent run in tmux on the target), n2 (tmux tabs on the target)
 
 ## Summary
