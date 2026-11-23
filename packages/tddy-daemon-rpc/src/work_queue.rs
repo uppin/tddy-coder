@@ -33,6 +33,9 @@ pub struct WorkQueueRpcHandler {
     peer_routing: PeerRouting,
     /// The terminals and jails this daemon holds, which say which sessions are live.
     terminals: tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore,
+    /// The host's GitHub inbox and the project credentials it reads a repository with
+    /// (`#workqueue` 6/14): PR status, the status stream and an assigned PR are read through it.
+    pull_requests: Arc<dyn tddy_worktree_service::pull_request_view::SessionPullRequests>,
 }
 
 impl WorkQueueRpcHandler {
@@ -48,6 +51,7 @@ impl WorkQueueRpcHandler {
             rpc_activity: host.rpc_activity(),
             peer_routing: host.peer_routing(),
             terminals: host.terminal_sessions(),
+            pull_requests: Arc::new(host.clone()),
         }
     }
 }
@@ -60,6 +64,8 @@ fn wire_same_anyhow<Src: Message, Dst: Message + Default>(src: &Src) -> anyhow::
 #[cfg(test)]
 mod add_work_item_unit_tests;
 
+mod links;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;
+mod status_stream;
 mod work_queue_queries;

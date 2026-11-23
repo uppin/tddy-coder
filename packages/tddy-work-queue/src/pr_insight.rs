@@ -286,15 +286,19 @@ pub fn pr_number_from_status_url(
     url.rsplit('/').next()?.parse::<u64>().ok()
 }
 
-/// The pull number a stack node refers to, recovered from the URL recorded in its `pr_status`.
+/// The pull number a stack node refers to: its assigned PR (`WorkItem.pr`, `#workqueue` 6/14) when it
+/// has one, else the number recovered from the URL recorded in its `pr_status`.
 ///
-/// This is the system's existing "which PR is this node" mechanism (see
-/// [`pr_number_from_status_url`]); a node that records no PR URL is not addressable by
-/// `node_id` and says so rather than guessing a number.
+/// The URL is the system's older "which PR is this node" mechanism (see
+/// [`pr_number_from_status_url`]); a node that records neither is not addressable by `node_id` and
+/// says so rather than guessing a number.
 pub fn pull_number_for_node(stack: &WorkQueue, node_id: &str) -> Result<u64, String> {
     let node = stack
         .node(node_id)
         .ok_or_else(|| format!("pull_number_for_node: node '{node_id}' not found"))?;
+    if let Some(assigned) = &node.pr {
+        return Ok(assigned.number);
+    }
     pr_number_from_status_url(node.pr_status.as_ref()).ok_or_else(|| {
         format!(
             "pull_number_for_node: node '{node_id}' records no pull request url, so it cannot be \

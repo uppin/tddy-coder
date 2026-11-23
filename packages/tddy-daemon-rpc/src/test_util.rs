@@ -497,4 +497,56 @@ impl WorkQueueService for TestDaemon {
             .get_work_queue(request)
             .await
     }
+
+    type StreamWorkQueueStatusStream = tddy_work_queue::rpc::WorkQueueStatusStream;
+
+    async fn stream_work_queue_status(
+        &self,
+        request: Request<tddy_service::proto::work_queue::StreamWorkQueueStatusRequest>,
+    ) -> Result<Response<Self::StreamWorkQueueStatusStream>, Status> {
+        self.handlers
+            .work_queue_service()
+            .stream_work_queue_status(request)
+            .await
+    }
+
+    async fn assign_work_item_pr(
+        &self,
+        request: Request<tddy_service::proto::work_queue::AssignWorkItemPrRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .assign_work_item_pr(request)
+            .await
+    }
+
+    async fn unassign_work_item_pr(
+        &self,
+        request: Request<tddy_service::proto::work_queue::UnassignWorkItemPrRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .unassign_work_item_pr(request)
+            .await
+    }
+
+    async fn link_work_item_session(
+        &self,
+        request: Request<tddy_service::proto::work_queue::LinkWorkItemSessionRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .link_work_item_session(request)
+            .await
+    }
+
+    async fn unlink_work_item_session(
+        &self,
+        request: Request<tddy_service::proto::work_queue::UnlinkWorkItemSessionRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .unlink_work_item_session(request)
+            .await
+    }
 }

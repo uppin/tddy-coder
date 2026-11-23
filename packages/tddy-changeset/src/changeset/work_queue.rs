@@ -59,6 +59,31 @@ pub struct WorkItem {
     /// next write to that stack numbers every node (see `WorkQueue::display_order`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_order: Option<u32>,
+    /// An existing pull request assigned to this item (`#workqueue` 6/14). Its head branch is the
+    /// item's `branch`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<AssignedPr>,
+    /// tddy sessions linked to this item, in link order (`#workqueue` 6/14). A linked session is
+    /// *addressed* by the queue: it may read it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_sessions: Vec<LinkedSession>,
+}
+
+/// The pull request assigned to an item.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AssignedPr {
+    pub number: u64,
+    pub url: String,
+    pub head_branch: String,
+}
+
+/// A tddy session linked to an item.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkedSession {
+    pub session_id: String,
+    /// The daemon holding the session; empty for the queue's own host.
+    #[serde(default)]
+    pub daemon_instance_id: String,
 }
 
 impl WorkItem {
@@ -403,6 +428,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n2".to_string(),
@@ -416,6 +442,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
             ],
         };
@@ -444,6 +471,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n2".to_string(),
@@ -461,6 +489,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n3".to_string(),
@@ -474,6 +503,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
             ],
         };
@@ -511,6 +541,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n2".to_string(),
@@ -524,6 +555,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n3".to_string(),
@@ -537,6 +569,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
             ],
         };
@@ -561,6 +594,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n2".to_string(),
@@ -574,6 +608,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n3".to_string(),
@@ -587,6 +622,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
             ],
         };
@@ -614,6 +650,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n2".to_string(),
@@ -627,6 +664,7 @@ mod stack_tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
             ],
         };

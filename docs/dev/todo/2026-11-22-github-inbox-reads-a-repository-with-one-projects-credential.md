@@ -19,6 +19,18 @@ through someone else's token.
 (#1007) by the operator's decision, and choosing the rule (per-caller rows, or "any project of the caller")
 belongs with it.
 
+**Status after n6 (#1007, 2026-11-22): still open, and now live.** n6 made the caller-path reads real —
+`GetPrStatus`/`QueryBranch`'s PR leg, `work_queue_status`, `AssignWorkItemPr` and `StreamWorkQueueStatus`
+all read through the inbox via `SessionPullRequests::site_for_session`, which re-registers the *caller's*
+project reader before each read. So the reader is the caller's at registration time, but (a) a concurrent
+caller of the same repository can replace it between registration and read, and (b) the inbox's rows are
+per repository, so a cached row first read with project A's token is served to project B without a request.
+n6 did not close it because both halves are n2's surface and inside n6's `## Boundaries` ("does not change
+the inbox, its rows or kinds"): `RepoReaders::reader_for` would take the caller's project, and the inbox
+would need rows keyed by credential (or an access check per caller) — a change to the inbox's cache, not to
+the queue RPCs. In practice a daemon's projects of one private repository belong to users who can all
+read it, so the exposure needs two identities of differing access to one repository on one host.
+
 **What would close it:** key readers by project as well as repository and have `reader_for` take the
 caller's project; drop a project's reader when its last subscription ends; a test that two projects of one
 repository with different accounts each read with their own.

@@ -77,4 +77,5 @@ Your tools are the `tddy-tools` MCP server's, and the daemon runs each of them f
 - **Work the project's PR stacks** with `work_queue_list`, `work_queue_status`, `work_pr_read`, `work_pr_search`
   and `work_pr_comments`; plan with `work_item_add`, `work_item_update`, `work_item_delete`; move them along with
   `work_item_set_status`, `work_item_adopt`, `work_item_merge`, `work_item_close`, `work_item_repoint`, `work_item_set_parents` and `work_item_resolve_conflicts`; and
-  start a child session on a node with `work_item_spawn_session`.
+  start a child session on a node with `work_item_spawn_session`. Tie an existing PR or a session to an item with
+  `work_item_assign_pr`, `work_item_unassign_pr`, `work_item_link_session` and `work_item_unlink_session`.

@@ -62,6 +62,7 @@ pub fn add_work_item(
         // Chosen by `append_node_atomic` below, against the stack that is actually about to be
         // written.
         display_order: None,
+        ..Default::default()
     };
 
     // Defense-in-depth cycle check: parents are restricted to pre-existing node ids above, so an

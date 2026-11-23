@@ -170,7 +170,7 @@ The ten plan and read tools — `work_queue_list`, `work_queue_status`, `work_pr
 
 The six git tools — `work_item_merge`, `work_item_repoint`, `work_item_close`, `work_item_resolve_conflicts`, `work_item_set_parents`, `work_item_spawn_session` — are **daemon exec tools** too, in the sibling family `tddy-tool-engine::work_item_git_tools`, served by `tddy-daemon-rpc` over the same store and addressing: each names a `node_id` (and accepts `queue_id` and `daemon_instance_id`, forwarding whole to the holding host).
 
-**Access follows the queue, never a role** (`tddy-tool-engine::work_queue_access`). For one queue, a caller is its **Owner** when it is the queue's session — every plan, read and git tool — or **Addressed** when an item of the queue links to it (`WorkItem.session_id`) — `work_queue_status` and `work_pr_read` only; any other session has no access. A call that acts on a queue is checked on the host that holds it, against that queue (`WorkQueueToolPort::access_to` / `WorkItemGitToolPort::access_to`, backed by `caller_records::access_to_queue_here`): a queue id naming a session that owns no queue is refused with *"session <id> has no work queue — a queue is created when a session is started with a work queue"*, and a queue that is not the caller's is refused as such. A call that names a queue held by another host is forwarded there by the caller's own host **without** a local check (`names_a_queue_on_another_host`), since that host holds no record of the queue. A call that acts on no queue (`work_queue_list`, `work_pr_search`, a read by pull number) is served to a caller whose own records give it any access, checked on the caller's own host. **Listing follows the same rule:** `caller_records::work_queue_caller_from_records` reads the caller's best access over its project's queues on its own host (Owner if it owns one, else Addressed if an item links it), and both `ListExecTools` paths — the daemon's catalogue and the jail bridge (`list_exec_tools_from_jail` in `tddy-session-lifecycle`) — answer the session's role catalogue with its work tools replaced by exactly what that access offers (`with_work_tools_offered_to`). A session whose records cannot be read is refused the work tools.
+**Access follows the queue, never a role** (`tddy-tool-engine::work_queue_access`). For one queue, a caller is its **Owner** when it is the queue's session — every plan, read and git tool — or **Addressed** when an item of the queue links to it (`WorkItem.session_id`, or one of the item's `linked_sessions`) — `work_queue_status` and `work_pr_read` only; any other session has no access. A call that acts on a queue is checked on the host that holds it, against that queue (`WorkQueueToolPort::access_to` / `WorkItemGitToolPort::access_to`, backed by `caller_records::access_to_queue_here`): a queue id naming a session that owns no queue is refused with *"session <id> has no work queue — a queue is created when a session is started with a work queue"*, and a queue that is not the caller's is refused as such. A call that names a queue held by another host is forwarded there by the caller's own host **without** a local check (`names_a_queue_on_another_host`), since that host holds no record of the queue. A call that acts on no queue (`work_queue_list`, `work_pr_search`, a read by pull number) is served to a caller whose own records give it any access, checked on the caller's own host. **Listing follows the same rule:** `caller_records::work_queue_caller_from_records` reads the caller's best access over its project's queues on its own host (Owner if it owns one, else Addressed if an item links it), and both `ListExecTools` paths — the daemon's catalogue and the jail bridge (`list_exec_tools_from_jail` in `tddy-session-lifecycle`) — answer the session's role catalogue with its work tools replaced by exactly what that access offers (`with_work_tools_offered_to`). A session whose records cannot be read is refused the work tools.
 
 **A session on another host is served by the host that holds the queue.** A forwarded work-tool call is confirmed with the session's owner first; the holding host then decides access by the queue it holds, as above. A call acting on no queue is not re-checked there: the caller's own host checked it before forwarding. One listing gap remains: a session addressed only by a queue held on another host is not *listed* the two reads by its own host's `ListExecTools`, because that host holds no record of the queue — it can use the reads only by addressing the call at the host that holds the queue. Every git step runs on the daemon **in the node's own worktree** — the worktree of the project's repository that holds the node's branch — never in the caller's checkout. A rebase is refused, untouched, while that worktree has uncommitted changes or the node's session is running, then force-pushes with lease to the project's remote with the project account's token. `work_item_resolve_conflicts` finds the conflicting paths with `git merge-tree --write-tree`, leaving the worktree exactly as it was, marks the node `has-conflicts`, and with `delegate: true` asks the node's session to resolve them — `SendSessionMessage` when it is running, `ResumeSession` with the message when it is stopped. `work_item_spawn_session` starts the node's session through the daemon's start path with the caller as its stack parent, defaulting `session_type` and `model` to the caller's own, and binds the node to the started session. `tddy-tools` keeps no copy of the six; it advertises them from the daemon's `ListExecTools` and forwards calls to it.
 
@@ -215,6 +215,41 @@ Two limitations are part of the contract rather than defects:
 - **No thread is reported as resolved.** Thread resolution is exposed only by GitHub's GraphQL API, so the REST-backed `work_pr_comments` emits no `resolved` field rather than guessing one.
 
 A search is always scoped to the orchestrator's own repository: `repo:` and `is:pr` are injected by the tool, and the agent's `text` / `author` / `base` values are refused if they carry a `:` or whitespace — GitHub *ORs* repeated `repo:` qualifiers, so an unguarded value would read another repository with the operator's own credential.
+
+### An item's assigned PR and linked sessions *(added 2026-11-22)*
+
+A work item can be **assigned an existing pull request** and **linked to any number of tddy sessions**
+(on any host of the project), beside the session it was started into (`WorkItem.session_id`). The four
+link tools — `work_item_assign_pr { item_id, pull_number }`, `work_item_unassign_pr { item_id }`,
+`work_item_link_session { item_id, session_id }`, `work_item_unlink_session { item_id, session_id }` —
+are daemon exec tools in `tddy-tool-engine::work_item_link_tools`, offered to the queue's **owner** only
+(addressed sessions get none of them), and the same four operations are RPCs on
+`work_queue.WorkQueueService` (`AssignWorkItemPr`, `UnassignWorkItemPr`, `LinkWorkItemSession`,
+`UnlinkWorkItemSession`, each answering the queue after the change) behind the queue row's controls.
+
+- **Assigning reads the PR, as the project's account**: the caller gives only the number; the item records
+  the PR's own number, URL and head branch (`WorkItem.pr`), never a client's claim. The PR's head branch
+  becomes the item's branch; an item that already records a *different* branch is refused, naming both —
+  never overwritten. Assigning never edits the PR on GitHub.
+- **Unassigning** removes the PR and keeps the branch. **Linking** the same session twice links it once;
+  **unlinking** a session that is not linked is refused.
+- **A linked session is Addressed** by the item's queue (it may call `work_queue_status` and
+  `work_pr_read`); writing stays the owner's.
+- **A refused edit writes nothing**: every link edit is applied to a copy under the queue's record lock.
+
+**Live checks on the row.** `StreamWorkQueueStatus` answers, per item, its PR's state and the count of
+its checks at the PR's head that are running, failed and succeeded, with each run (name, status,
+conclusion, times, details link) for the row's expanded list — a snapshot when the view opens, then
+a new one whenever the daemon's GitHub inbox reports a PR or checks change in the queue's repository. One
+stream per open queue view, never per row, and the browser never polls GitHub. An item whose PR or checks
+the inbox cannot read has no summary, rather than zeros. The stream is served only by the host that holds
+the queue (`docs/dev/todo/2026-11-22-work-queue-status-stream-is-local-only.md`).
+
+**PR reads go through the inbox.** `GetPrStatus`, `QueryBranch`'s PR leg and `work_queue_status` read
+each branch's PR through the daemon's GitHub inbox with the queue's project credential, so a second
+reader of the same branch costs no GitHub request; a read the inbox cannot make is *unavailable* with its
+reason, never "no PR". The inbox keeps one reader per repository, so two projects of one repository on
+one host share cached rows (`docs/dev/todo/2026-11-22-github-inbox-reads-a-repository-with-one-projects-credential.md`).
 
 ### GitHub API surface
 

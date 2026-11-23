@@ -13,7 +13,7 @@ use crate::work_queue_tools::PR_UPDATE_PLANNED;
 use crate::work_queue_tools::STACK_ID;
 use serde_json::{json, Value};
 
-/// The ten tools' definitions. Every one takes [`TARGET_DAEMON_INSTANCE_ID`]; every one but the
+/// The plan and read tools' definitions, then the four link tools'. Every one takes [`TARGET_DAEMON_INSTANCE_ID`]; every one but the
 /// two project-level tools takes [`STACK_ID`].
 pub fn stack_tool_defs() -> Vec<ToolDef> {
     let node_id = |what: &str| json!({ "type": "string", "description": what });
@@ -22,7 +22,7 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
         "items": { "type": "string" },
         "description": "Parent node ids (chosen ancestors); empty for a root node."
     });
-    vec![
+    let mut defs = vec![
         tool_def(
             PR_STACK_LIST,
             "List the PR stacks of this project on a host — this one unless daemon_instance_id names another — each with its queue_id (the id of the session that owns it), title, the host that holds it and its node count. Name a queue by its queue_id (and daemon_instance_id) in the other work_ tools.",
@@ -128,7 +128,10 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
                 &["pull_number"],
             ),
         ),
-    ]
+    ];
+    // `#workqueue` 6/14: the four link tools follow the plan tools; the owner has them.
+    defs.extend(crate::work_item_link_tools::work_item_link_tool_defs());
+    defs
 }
 
 /// A tool schema of `properties` plus the host argument.

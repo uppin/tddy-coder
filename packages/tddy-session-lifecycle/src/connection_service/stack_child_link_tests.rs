@@ -17,6 +17,7 @@ fn a_planned_node(node_id: &str, branch_suggestion: &str, parents: &[&str]) -> W
         child_state: None,
         internal_status: None,
         display_order: None,
+        ..Default::default()
     }
 }
 

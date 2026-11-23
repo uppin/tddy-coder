@@ -176,6 +176,23 @@ pub fn assemble_views(
     gh: &dyn GithubPrApi,
     _default_branch: &str,
 ) -> Result<Vec<NodeView>, tddy_core::WorkflowError> {
+    assemble_views_with(parent_dir, sessions_root, stack, |branch| {
+        Ok(gh
+            .get_open_pr(branch)?
+            .map(|pr| (pr.number, pr.base_branch)))
+    })
+}
+
+/// [`assemble_views`] with the open-PR lookup supplied: `open_pr_of(branch)` answers the open PR's
+/// `(number, base branch)` for a node's resolved branch, `None` when it has none. The lookup is the
+/// only part that reads GitHub, so a caller that reads through the inbox answers it from rows it has
+/// already fetched (see `inbox_reads`).
+pub(crate) fn assemble_views_with(
+    parent_dir: &Path,
+    sessions_root: &Path,
+    stack: &WorkQueue,
+    mut open_pr_of: impl FnMut(&str) -> Result<Option<(u64, String)>, tddy_core::WorkflowError>,
+) -> Result<Vec<NodeView>, tddy_core::WorkflowError> {
     use tddy_core::changeset::{read_changeset, resolve_stack_node_branch};
     use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -219,11 +236,8 @@ pub fn assemble_views(
         // A PR belongs to the branch, not to the child session that happened to create it: report
         // it for every node that owns a branch, whether or not a session is still attached.
         let pr = if !branch.is_empty() {
-            match gh.get_open_pr(&branch)? {
-                Some(pr_ref) => PrLiveStatus::Open {
-                    number: pr_ref.number,
-                    base: pr_ref.base_branch,
-                },
+            match open_pr_of(&branch)? {
+                Some((number, base)) => PrLiveStatus::Open { number, base },
                 None => {
                     if let Some(ref status) = node.pr_status {
                         match status.phase.as_str() {
@@ -593,6 +607,7 @@ mod tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
                 WorkItem {
                     node_id: "n2".into(),
@@ -606,6 +621,7 @@ mod tests {
                     child_state: None,
                     internal_status: None,
                     display_order: None,
+                    ..Default::default()
                 },
             ],
         };
@@ -673,6 +689,7 @@ mod tests {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             }],
         };
         let mock_gh = NoneOpenMockGh;
@@ -711,6 +728,7 @@ mod tests {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             }],
         };
         let gh = AlwaysOpenMockGh {
@@ -765,6 +783,7 @@ mod tests {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             }],
         };
 

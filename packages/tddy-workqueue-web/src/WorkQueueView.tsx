@@ -21,6 +21,8 @@ import { resolveRepointTarget } from "./startBlockers";
 import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
 import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
 import { baseBranchChoice } from "./baseBranchChoice";
+import { WorkItemLinksContext } from "./workItemLinks";
+import { useWorkItemLinksState } from "./useWorkItemLinksState";
 
 /** The fields of a `work_queue.WorkQueueAddress` the view is opened on. */
 export type WorkQueueAddress = Pick<WireWorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId">;
@@ -206,6 +208,15 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     }
   };
 
+  // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
+  const workItemLinks = useWorkItemLinksState({
+    workQueueClient,
+    sessionToken,
+    address,
+    sessions,
+    onWorkQueueJson: setWorkQueueJson,
+  });
+
   const handleReorder = async (itemId: string, direction: "up" | "down") => {
     if (!workQueueClient) return;
     if (reorderingNodeIds.has(itemId)) return;
@@ -374,6 +385,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
           onCancel={() => setIsAddingPlannedPr(false)}
         />
       )}
+      <WorkItemLinksContext.Provider value={workItemLinks}>
       <WorkItemList
         nodes={nodes}
         onStartSession={handleStartSession}
@@ -394,6 +406,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         orchestratorSessionId={createdBySessionId}
         branchQueries={branchQueries}
       />
+      </WorkItemLinksContext.Provider>
       <DirtyWorktreeDialog
         prompt={dirtyWorktreePrompt}
         onCommitAndPull={handleCommitDirtyWorktreeAndPull}

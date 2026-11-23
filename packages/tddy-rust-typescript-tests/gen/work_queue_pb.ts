@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file work_queue.proto.
  */
 export const file_work_queue: GenFile = /*@__PURE__*/
-  fileDesc("ChB3b3JrX3F1ZXVlLnByb3RvEgp3b3JrX3F1ZXVlIlQKEFdvcmtRdWV1ZUFkZHJlc3MSEgoKcHJvamVjdF9pZBgBIAEoCRIQCghxdWV1ZV9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAki0gEKEkFkZFdvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFdGl0bGUYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSGQoRYnJhbmNoX3N1Z2dlc3Rpb24YBSABKAkSDwoHcGFyZW50cxgGIAMoCRIUCgxjaGlsZF9yZWNpcGUYByABKAkSKwoFc3RhY2sYCCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiPwoTQWRkV29ya0l0ZW1SZXNwb25zZRIXCg93b3JrX3F1ZXVlX2pzb24YASABKAkSDwoHaXRlbV9pZBgCIAEoCSLWAQoOQnJhbmNoQmFzZVN5bmMSEwoLYmFzZV9icmFuY2gYASABKAkSFAoMYmVoaW5kX2NvdW50GAIgASgNEhMKC2FoZWFkX2NvdW50GAMgASgNEhUKDWhhc19jb25mbGljdHMYBCABKAgSGAoQY29uZmxpY3RlZF9wYXRocxgFIAMoCRITCgt1bmF2YWlsYWJsZRgGIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YByABKAkSEAoIYmFzZV9yZWYYCCABKAkSEAoIaGVhZF9yZWYYCSABKAkiKwoMQnJhbmNoUmVtb3RlEg4KBmV4aXN0cxgBIAEoCBILCgNzaGEYAiABKAki9gEKEEJyYW5jaFJlc29sdXRpb24SDgoGYnJhbmNoGAEgASgJEiUKB3Nlc3Npb24YAiABKAsyFC50eXBlcy5CcmFuY2hTZXNzaW9uEiwKCHdvcmt0cmVlGAMgASgLMhoud29ya19xdWV1ZS5CcmFuY2hXb3JrdHJlZRIkCgJwchgEIAEoCzIYLndvcmtfcXVldWUuUHJTdGF0dXNWaWV3EigKBnJlbW90ZRgFIAEoCzIYLndvcmtfcXVldWUuQnJhbmNoUmVtb3RlEi0KCWJhc2Vfc3luYxgGIAEoCzIaLndvcmtfcXVldWUuQnJhbmNoQmFzZVN5bmMiUgoOQnJhbmNoV29ya3RyZWUSDgoGZXhpc3RzGAEgASgIEgwKBHBhdGgYAiABKAkSDQoFZGlydHkYAyABKAgSEwoLZGlydHlfcGF0aHMYBCADKAkifAoSR2V0UHJTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZicmFuY2gYAyABKAkSKwoFc3RhY2sYBCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiPwoTR2V0UHJTdGF0dXNSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC53b3JrX3F1ZXVlLlByU3RhdHVzVmlldyKkAQoTTGlua1dvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgDIAEoCRIPCgdpdGVtX2lkGAQgASgJEhgKEGNoaWxkX3Nlc3Npb25faWQYBSABKAkSDgoGYnJhbmNoGAYgASgJIi8KFExpbmtXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSJ7CgxQclN0YXR1c1ZpZXcSDgoGZXhpc3RzGAEgASgIEg4KBm51bWJlchgCIAEoBBILCgN1cmwYAyABKAkSDQoFc3RhdGUYBCABKAkSEwoLdW5hdmFpbGFibGUYBSABKAgSGgoSdW5hdmFpbGFibGVfcmVhc29uGAYgASgJIuIBChlQdWxsQmFzZUludG9CcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdpdGVtX2lkGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEhAKCHN0cmF0ZWd5GAUgASgJEh0KFWRpcnR5X3dvcmt0cmVlX2FjdGlvbhgGIAEoCRIWCg5jb21taXRfbWVzc2FnZRgHIAEoCRIrCgVzdGFjaxgIIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyKVAQoaUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USMAoKcmVzb2x1dGlvbhgBIAEoCzIcLndvcmtfcXVldWUuQnJhbmNoUmVzb2x1dGlvbhIQCghzdHJhdGVneRgCIAEoCRIPCgdjaGFuZ2VkGAMgASgIEg4KBnB1c2hlZBgEIAEoCBISCgpwdXNoX2Vycm9yGAUgASgJIpEBChJRdWVyeUJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmJyYW5jaBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIrCgVzdGFjaxgFIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJHChNRdWVyeUJyYW5jaFJlc3BvbnNlEjAKCnJlc29sdXRpb24YASABKAsyHC53b3JrX3F1ZXVlLkJyYW5jaFJlc29sdXRpb24ilAEKFlJlb3JkZXJXb3JrSXRlbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg8KB2l0ZW1faWQYAyABKAkSEQoJZGlyZWN0aW9uGAQgASgJEisKBXN0YWNrGAUgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzIjIKF1Jlb3JkZXJXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSKdAQoWUmVwb2ludFdvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHaXRlbV9pZBgDIAEoCRIaChJ0YXJnZXRfYmFzZV9icmFuY2gYBCABKAkSKwoFc3RhY2sYBSABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiMgoXUmVwb2ludFdvcmtJdGVtUmVzcG9uc2USFwoPd29ya19xdWV1ZV9qc29uGAEgASgJIq0BChpSZXNvbHZlV29ya0l0ZW1CYXNlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIZChF3b3JrX3F1ZXVlX3BhcmVudBgDIAEoCRISCgpwcm9qZWN0X2lkGAQgASgJEhcKD25ld19icmFuY2hfbmFtZRgFIAEoCRIUCgx3b3JrX2l0ZW1faWQYBiABKAkiLwobUmVzb2x2ZVdvcmtJdGVtQmFzZVJlc3BvbnNlEhAKCGJhc2VfcmVmGAEgASgJImEKHExpc3RQcm9qZWN0V29ya1F1ZXVlc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhYKDnRoaXNfaG9zdF9vbmx5GAMgASgIIkAKDldvcmtJdGVtQ291bnRzEg0KBXRvdGFsGAEgASgNEg8KB3N0YXJ0ZWQYAiABKA0SDgoGbWVyZ2VkGAMgASgNIt0BChBXb3JrUXVldWVTdW1tYXJ5Ei0KB2FkZHJlc3MYASABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MSDQoFdGl0bGUYAiABKAkSLwoLbm9kZV9jb3VudHMYAyABKAsyGi53b3JrX3F1ZXVlLldvcmtJdGVtQ291bnRzEh8KF3JlZmVyZW5jaW5nX3Nlc3Npb25faWRzGAQgAygJEh0KFWNyZWF0ZWRfYnlfc2Vzc2lvbl9pZBgFIAEoCRIaChJjcmVhdGVkX2F0X3VuaXhfbXMYBiABKAQiRgoYVW5yZWFjaGFibGVXb3JrUXVldWVIb3N0EhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkijgEKHUxpc3RQcm9qZWN0V29ya1F1ZXVlc1Jlc3BvbnNlEiwKBnN0YWNrcxgBIAMoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlU3VtbWFyeRI/ChF1bnJlYWNoYWJsZV9ob3N0cxgCIAMoCzIkLndvcmtfcXVldWUuVW5yZWFjaGFibGVXb3JrUXVldWVIb3N0IlkKE0dldFdvcmtRdWV1ZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIrCgVzdGFjaxgCIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJeChRHZXRXb3JrUXVldWVSZXNwb25zZRItCgdzdW1tYXJ5GAEgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVTdW1tYXJ5EhcKD3dvcmtfcXVldWVfanNvbhgCIAEoCTKbBwoQV29ya1F1ZXVlU2VydmljZRJOCgtBZGRXb3JrSXRlbRIeLndvcmtfcXVldWUuQWRkV29ya0l0ZW1SZXF1ZXN0Gh8ud29ya19xdWV1ZS5BZGRXb3JrSXRlbVJlc3BvbnNlEk4KC0dldFByU3RhdHVzEh4ud29ya19xdWV1ZS5HZXRQclN0YXR1c1JlcXVlc3QaHy53b3JrX3F1ZXVlLkdldFByU3RhdHVzUmVzcG9uc2USWgoPUmVwb2ludFdvcmtJdGVtEiIud29ya19xdWV1ZS5SZXBvaW50V29ya0l0ZW1SZXF1ZXN0GiMud29ya19xdWV1ZS5SZXBvaW50V29ya0l0ZW1SZXNwb25zZRJaCg9SZW9yZGVyV29ya0l0ZW0SIi53b3JrX3F1ZXVlLlJlb3JkZXJXb3JrSXRlbVJlcXVlc3QaIy53b3JrX3F1ZXVlLlJlb3JkZXJXb3JrSXRlbVJlc3BvbnNlEmMKElB1bGxCYXNlSW50b0JyYW5jaBIlLndvcmtfcXVldWUuUHVsbEJhc2VJbnRvQnJhbmNoUmVxdWVzdBomLndvcmtfcXVldWUuUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USTgoLUXVlcnlCcmFuY2gSHi53b3JrX3F1ZXVlLlF1ZXJ5QnJhbmNoUmVxdWVzdBofLndvcmtfcXVldWUuUXVlcnlCcmFuY2hSZXNwb25zZRJmChNSZXNvbHZlV29ya0l0ZW1CYXNlEiYud29ya19xdWV1ZS5SZXNvbHZlV29ya0l0ZW1CYXNlUmVxdWVzdBonLndvcmtfcXVldWUuUmVzb2x2ZVdvcmtJdGVtQmFzZVJlc3BvbnNlElEKDExpbmtXb3JrSXRlbRIfLndvcmtfcXVldWUuTGlua1dvcmtJdGVtUmVxdWVzdBogLndvcmtfcXVldWUuTGlua1dvcmtJdGVtUmVzcG9uc2USbAoVTGlzdFByb2plY3RXb3JrUXVldWVzEigud29ya19xdWV1ZS5MaXN0UHJvamVjdFdvcmtRdWV1ZXNSZXF1ZXN0Gikud29ya19xdWV1ZS5MaXN0UHJvamVjdFdvcmtRdWV1ZXNSZXNwb25zZRJRCgxHZXRXb3JrUXVldWUSHy53b3JrX3F1ZXVlLkdldFdvcmtRdWV1ZVJlcXVlc3QaIC53b3JrX3F1ZXVlLkdldFdvcmtRdWV1ZVJlc3BvbnNlYgZwcm90bzM", [file_types]);
+  fileDesc("ChB3b3JrX3F1ZXVlLnByb3RvEgp3b3JrX3F1ZXVlIlQKEFdvcmtRdWV1ZUFkZHJlc3MSEgoKcHJvamVjdF9pZBgBIAEoCRIQCghxdWV1ZV9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAki0gEKEkFkZFdvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFdGl0bGUYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSGQoRYnJhbmNoX3N1Z2dlc3Rpb24YBSABKAkSDwoHcGFyZW50cxgGIAMoCRIUCgxjaGlsZF9yZWNpcGUYByABKAkSKwoFc3RhY2sYCCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiPwoTQWRkV29ya0l0ZW1SZXNwb25zZRIXCg93b3JrX3F1ZXVlX2pzb24YASABKAkSDwoHaXRlbV9pZBgCIAEoCSLWAQoOQnJhbmNoQmFzZVN5bmMSEwoLYmFzZV9icmFuY2gYASABKAkSFAoMYmVoaW5kX2NvdW50GAIgASgNEhMKC2FoZWFkX2NvdW50GAMgASgNEhUKDWhhc19jb25mbGljdHMYBCABKAgSGAoQY29uZmxpY3RlZF9wYXRocxgFIAMoCRITCgt1bmF2YWlsYWJsZRgGIAEoCBIaChJ1bmF2YWlsYWJsZV9yZWFzb24YByABKAkSEAoIYmFzZV9yZWYYCCABKAkSEAoIaGVhZF9yZWYYCSABKAkiKwoMQnJhbmNoUmVtb3RlEg4KBmV4aXN0cxgBIAEoCBILCgNzaGEYAiABKAki9gEKEEJyYW5jaFJlc29sdXRpb24SDgoGYnJhbmNoGAEgASgJEiUKB3Nlc3Npb24YAiABKAsyFC50eXBlcy5CcmFuY2hTZXNzaW9uEiwKCHdvcmt0cmVlGAMgASgLMhoud29ya19xdWV1ZS5CcmFuY2hXb3JrdHJlZRIkCgJwchgEIAEoCzIYLndvcmtfcXVldWUuUHJTdGF0dXNWaWV3EigKBnJlbW90ZRgFIAEoCzIYLndvcmtfcXVldWUuQnJhbmNoUmVtb3RlEi0KCWJhc2Vfc3luYxgGIAEoCzIaLndvcmtfcXVldWUuQnJhbmNoQmFzZVN5bmMiUgoOQnJhbmNoV29ya3RyZWUSDgoGZXhpc3RzGAEgASgIEgwKBHBhdGgYAiABKAkSDQoFZGlydHkYAyABKAgSEwoLZGlydHlfcGF0aHMYBCADKAkifAoSR2V0UHJTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZicmFuY2gYAyABKAkSKwoFc3RhY2sYBCABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiPwoTR2V0UHJTdGF0dXNSZXNwb25zZRIoCgZzdGF0dXMYASABKAsyGC53b3JrX3F1ZXVlLlByU3RhdHVzVmlldyKkAQoTTGlua1dvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgDIAEoCRIPCgdpdGVtX2lkGAQgASgJEhgKEGNoaWxkX3Nlc3Npb25faWQYBSABKAkSDgoGYnJhbmNoGAYgASgJIi8KFExpbmtXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSJ7CgxQclN0YXR1c1ZpZXcSDgoGZXhpc3RzGAEgASgIEg4KBm51bWJlchgCIAEoBBILCgN1cmwYAyABKAkSDQoFc3RhdGUYBCABKAkSEwoLdW5hdmFpbGFibGUYBSABKAgSGgoSdW5hdmFpbGFibGVfcmVhc29uGAYgASgJIuIBChlQdWxsQmFzZUludG9CcmFuY2hSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIPCgdpdGVtX2lkGAMgASgJEhMKC2Jhc2VfYnJhbmNoGAQgASgJEhAKCHN0cmF0ZWd5GAUgASgJEh0KFWRpcnR5X3dvcmt0cmVlX2FjdGlvbhgGIAEoCRIWCg5jb21taXRfbWVzc2FnZRgHIAEoCRIrCgVzdGFjaxgIIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyKVAQoaUHVsbEJhc2VJbnRvQnJhbmNoUmVzcG9uc2USMAoKcmVzb2x1dGlvbhgBIAEoCzIcLndvcmtfcXVldWUuQnJhbmNoUmVzb2x1dGlvbhIQCghzdHJhdGVneRgCIAEoCRIPCgdjaGFuZ2VkGAMgASgIEg4KBnB1c2hlZBgEIAEoCBISCgpwdXNoX2Vycm9yGAUgASgJIpEBChJRdWVyeUJyYW5jaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBmJyYW5jaBgDIAEoCRITCgtiYXNlX2JyYW5jaBgEIAEoCRIrCgVzdGFjaxgFIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJHChNRdWVyeUJyYW5jaFJlc3BvbnNlEjAKCnJlc29sdXRpb24YASABKAsyHC53b3JrX3F1ZXVlLkJyYW5jaFJlc29sdXRpb24ilAEKFlJlb3JkZXJXb3JrSXRlbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg8KB2l0ZW1faWQYAyABKAkSEQoJZGlyZWN0aW9uGAQgASgJEisKBXN0YWNrGAUgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzIjIKF1Jlb3JkZXJXb3JrSXRlbVJlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSKdAQoWUmVwb2ludFdvcmtJdGVtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDwoHaXRlbV9pZBgDIAEoCRIaChJ0YXJnZXRfYmFzZV9icmFuY2gYBCABKAkSKwoFc3RhY2sYBSABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiMgoXUmVwb2ludFdvcmtJdGVtUmVzcG9uc2USFwoPd29ya19xdWV1ZV9qc29uGAEgASgJIq0BChpSZXNvbHZlV29ya0l0ZW1CYXNlUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIZChF3b3JrX3F1ZXVlX3BhcmVudBgDIAEoCRISCgpwcm9qZWN0X2lkGAQgASgJEhcKD25ld19icmFuY2hfbmFtZRgFIAEoCRIUCgx3b3JrX2l0ZW1faWQYBiABKAkiLwobUmVzb2x2ZVdvcmtJdGVtQmFzZVJlc3BvbnNlEhAKCGJhc2VfcmVmGAEgASgJImEKHExpc3RQcm9qZWN0V29ya1F1ZXVlc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhYKDnRoaXNfaG9zdF9vbmx5GAMgASgIIkAKDldvcmtJdGVtQ291bnRzEg0KBXRvdGFsGAEgASgNEg8KB3N0YXJ0ZWQYAiABKA0SDgoGbWVyZ2VkGAMgASgNIt0BChBXb3JrUXVldWVTdW1tYXJ5Ei0KB2FkZHJlc3MYASABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MSDQoFdGl0bGUYAiABKAkSLwoLbm9kZV9jb3VudHMYAyABKAsyGi53b3JrX3F1ZXVlLldvcmtJdGVtQ291bnRzEh8KF3JlZmVyZW5jaW5nX3Nlc3Npb25faWRzGAQgAygJEh0KFWNyZWF0ZWRfYnlfc2Vzc2lvbl9pZBgFIAEoCRIaChJjcmVhdGVkX2F0X3VuaXhfbXMYBiABKAQiRgoYVW5yZWFjaGFibGVXb3JrUXVldWVIb3N0EhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRIOCgZyZWFzb24YAiABKAkijgEKHUxpc3RQcm9qZWN0V29ya1F1ZXVlc1Jlc3BvbnNlEiwKBnN0YWNrcxgBIAMoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlU3VtbWFyeRI/ChF1bnJlYWNoYWJsZV9ob3N0cxgCIAMoCzIkLndvcmtfcXVldWUuVW5yZWFjaGFibGVXb3JrUXVldWVIb3N0IlkKE0dldFdvcmtRdWV1ZVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIrCgVzdGFjaxgCIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcyJeChRHZXRXb3JrUXVldWVSZXNwb25zZRItCgdzdW1tYXJ5GAEgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVTdW1tYXJ5EhcKD3dvcmtfcXVldWVfanNvbhgCIAEoCSKDAQoXQXNzaWduV29ya0l0ZW1QclJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIrCgVxdWV1ZRgCIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcxIPCgdpdGVtX2lkGAMgASgJEhMKC3B1bGxfbnVtYmVyGAQgASgEInAKGVVuYXNzaWduV29ya0l0ZW1QclJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIrCgVxdWV1ZRgCIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcxIPCgdpdGVtX2lkGAMgASgJIqEBChpMaW5rV29ya0l0ZW1TZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEisKBXF1ZXVlGAIgASgLMhwud29ya19xdWV1ZS5Xb3JrUXVldWVBZGRyZXNzEg8KB2l0ZW1faWQYAyABKAkSEgoKc2Vzc2lvbl9pZBgEIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBSABKAkihwEKHFVubGlua1dvcmtJdGVtU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIrCgVxdWV1ZRgCIAEoCzIcLndvcmtfcXVldWUuV29ya1F1ZXVlQWRkcmVzcxIPCgdpdGVtX2lkGAMgASgJEhIKCnNlc3Npb25faWQYBCABKAkiMAoVV29ya0l0ZW1MaW5rc1Jlc3BvbnNlEhcKD3dvcmtfcXVldWVfanNvbhgBIAEoCSJiChxTdHJlYW1Xb3JrUXVldWVTdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSKwoFcXVldWUYAiABKAsyHC53b3JrX3F1ZXVlLldvcmtRdWV1ZUFkZHJlc3MiXAoTV29ya1F1ZXVlU3RhdHVzVmlldxIpCgVpdGVtcxgBIAMoCzIaLndvcmtfcXVldWUuV29ya0l0ZW1TdGF0dXMSGgoSdW5hdmFpbGFibGVfcmVhc29uGAIgASgJIs8BCg5Xb3JrSXRlbVN0YXR1cxIPCgdpdGVtX2lkGAEgASgJEiQKAnByGAIgASgLMhgud29ya19xdWV1ZS5QclN0YXR1c1ZpZXcSEgoKaGFzX2NoZWNrcxgDIAEoCBIWCg5jaGVja3NfcnVubmluZxgEIAEoDRIVCg1jaGVja3NfZmFpbGVkGAUgASgNEhgKEGNoZWNrc19zdWNjZWVkZWQYBiABKA0SKQoGY2hlY2tzGAcgAygLMhkud29ya19xdWV1ZS5Xb3JrSXRlbUNoZWNrIoABCg1Xb3JrSXRlbUNoZWNrEgwKBG5hbWUYASABKAkSDgoGc3RhdHVzGAIgASgJEhIKCmNvbmNsdXNpb24YAyABKAkSEgoKc3RhcnRlZF9hdBgEIAEoCRIUCgxjb21wbGV0ZWRfYXQYBSABKAkSEwoLZGV0YWlsc191cmwYBiABKAkyhQsKEFdvcmtRdWV1ZVNlcnZpY2USTgoLQWRkV29ya0l0ZW0SHi53b3JrX3F1ZXVlLkFkZFdvcmtJdGVtUmVxdWVzdBofLndvcmtfcXVldWUuQWRkV29ya0l0ZW1SZXNwb25zZRJOCgtHZXRQclN0YXR1cxIeLndvcmtfcXVldWUuR2V0UHJTdGF0dXNSZXF1ZXN0Gh8ud29ya19xdWV1ZS5HZXRQclN0YXR1c1Jlc3BvbnNlEloKD1JlcG9pbnRXb3JrSXRlbRIiLndvcmtfcXVldWUuUmVwb2ludFdvcmtJdGVtUmVxdWVzdBojLndvcmtfcXVldWUuUmVwb2ludFdvcmtJdGVtUmVzcG9uc2USWgoPUmVvcmRlcldvcmtJdGVtEiIud29ya19xdWV1ZS5SZW9yZGVyV29ya0l0ZW1SZXF1ZXN0GiMud29ya19xdWV1ZS5SZW9yZGVyV29ya0l0ZW1SZXNwb25zZRJjChJQdWxsQmFzZUludG9CcmFuY2gSJS53b3JrX3F1ZXVlLlB1bGxCYXNlSW50b0JyYW5jaFJlcXVlc3QaJi53b3JrX3F1ZXVlLlB1bGxCYXNlSW50b0JyYW5jaFJlc3BvbnNlEk4KC1F1ZXJ5QnJhbmNoEh4ud29ya19xdWV1ZS5RdWVyeUJyYW5jaFJlcXVlc3QaHy53b3JrX3F1ZXVlLlF1ZXJ5QnJhbmNoUmVzcG9uc2USZgoTUmVzb2x2ZVdvcmtJdGVtQmFzZRImLndvcmtfcXVldWUuUmVzb2x2ZVdvcmtJdGVtQmFzZVJlcXVlc3QaJy53b3JrX3F1ZXVlLlJlc29sdmVXb3JrSXRlbUJhc2VSZXNwb25zZRJRCgxMaW5rV29ya0l0ZW0SHy53b3JrX3F1ZXVlLkxpbmtXb3JrSXRlbVJlcXVlc3QaIC53b3JrX3F1ZXVlLkxpbmtXb3JrSXRlbVJlc3BvbnNlEmwKFUxpc3RQcm9qZWN0V29ya1F1ZXVlcxIoLndvcmtfcXVldWUuTGlzdFByb2plY3RXb3JrUXVldWVzUmVxdWVzdBopLndvcmtfcXVldWUuTGlzdFByb2plY3RXb3JrUXVldWVzUmVzcG9uc2USUQoMR2V0V29ya1F1ZXVlEh8ud29ya19xdWV1ZS5HZXRXb3JrUXVldWVSZXF1ZXN0GiAud29ya19xdWV1ZS5HZXRXb3JrUXVldWVSZXNwb25zZRJaChBBc3NpZ25Xb3JrSXRlbVByEiMud29ya19xdWV1ZS5Bc3NpZ25Xb3JrSXRlbVByUmVxdWVzdBohLndvcmtfcXVldWUuV29ya0l0ZW1MaW5rc1Jlc3BvbnNlEl4KElVuYXNzaWduV29ya0l0ZW1QchIlLndvcmtfcXVldWUuVW5hc3NpZ25Xb3JrSXRlbVByUmVxdWVzdBohLndvcmtfcXVldWUuV29ya0l0ZW1MaW5rc1Jlc3BvbnNlEmAKE0xpbmtXb3JrSXRlbVNlc3Npb24SJi53b3JrX3F1ZXVlLkxpbmtXb3JrSXRlbVNlc3Npb25SZXF1ZXN0GiEud29ya19xdWV1ZS5Xb3JrSXRlbUxpbmtzUmVzcG9uc2USZAoVVW5saW5rV29ya0l0ZW1TZXNzaW9uEigud29ya19xdWV1ZS5VbmxpbmtXb3JrSXRlbVNlc3Npb25SZXF1ZXN0GiEud29ya19xdWV1ZS5Xb3JrSXRlbUxpbmtzUmVzcG9uc2USZAoVU3RyZWFtV29ya1F1ZXVlU3RhdHVzEigud29ya19xdWV1ZS5TdHJlYW1Xb3JrUXVldWVTdGF0dXNSZXF1ZXN0Gh8ud29ya19xdWV1ZS5Xb3JrUXVldWVTdGF0dXNWaWV3MAFiBnByb3RvMw", [file_types]);
 
 /**
  * Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -1188,6 +1188,299 @@ export const GetWorkQueueResponseSchema: GenMessage<GetWorkQueueResponse> = /*@_
   messageDesc(file_work_queue, 28);
 
 /**
+ * `#workqueue` 6/14 — work-item links.
+ *
+ * @generated from message work_queue.AssignWorkItemPrRequest
+ */
+export type AssignWorkItemPrRequest = Message<"work_queue.AssignWorkItemPrRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * @generated from field: string item_id = 3;
+   */
+  itemId: string;
+
+  /**
+   * @generated from field: uint64 pull_number = 4;
+   */
+  pullNumber: bigint;
+};
+
+/**
+ * Describes the message work_queue.AssignWorkItemPrRequest.
+ * Use `create(AssignWorkItemPrRequestSchema)` to create a new message.
+ */
+export const AssignWorkItemPrRequestSchema: GenMessage<AssignWorkItemPrRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 29);
+
+/**
+ * @generated from message work_queue.UnassignWorkItemPrRequest
+ */
+export type UnassignWorkItemPrRequest = Message<"work_queue.UnassignWorkItemPrRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * @generated from field: string item_id = 3;
+   */
+  itemId: string;
+};
+
+/**
+ * Describes the message work_queue.UnassignWorkItemPrRequest.
+ * Use `create(UnassignWorkItemPrRequestSchema)` to create a new message.
+ */
+export const UnassignWorkItemPrRequestSchema: GenMessage<UnassignWorkItemPrRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 30);
+
+/**
+ * @generated from message work_queue.LinkWorkItemSessionRequest
+ */
+export type LinkWorkItemSessionRequest = Message<"work_queue.LinkWorkItemSessionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * @generated from field: string item_id = 3;
+   */
+  itemId: string;
+
+  /**
+   * @generated from field: string session_id = 4;
+   */
+  sessionId: string;
+
+  /**
+   * The daemon holding `session_id`; empty for the queue's own host.
+   *
+   * @generated from field: string daemon_instance_id = 5;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message work_queue.LinkWorkItemSessionRequest.
+ * Use `create(LinkWorkItemSessionRequestSchema)` to create a new message.
+ */
+export const LinkWorkItemSessionRequestSchema: GenMessage<LinkWorkItemSessionRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 31);
+
+/**
+ * @generated from message work_queue.UnlinkWorkItemSessionRequest
+ */
+export type UnlinkWorkItemSessionRequest = Message<"work_queue.UnlinkWorkItemSessionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+
+  /**
+   * @generated from field: string item_id = 3;
+   */
+  itemId: string;
+
+  /**
+   * @generated from field: string session_id = 4;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message work_queue.UnlinkWorkItemSessionRequest.
+ * Use `create(UnlinkWorkItemSessionRequestSchema)` to create a new message.
+ */
+export const UnlinkWorkItemSessionRequestSchema: GenMessage<UnlinkWorkItemSessionRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 32);
+
+/**
+ * @generated from message work_queue.WorkItemLinksResponse
+ */
+export type WorkItemLinksResponse = Message<"work_queue.WorkItemLinksResponse"> & {
+  /**
+   * @generated from field: string work_queue_json = 1;
+   */
+  workQueueJson: string;
+};
+
+/**
+ * Describes the message work_queue.WorkItemLinksResponse.
+ * Use `create(WorkItemLinksResponseSchema)` to create a new message.
+ */
+export const WorkItemLinksResponseSchema: GenMessage<WorkItemLinksResponse> = /*@__PURE__*/
+  messageDesc(file_work_queue, 33);
+
+/**
+ * @generated from message work_queue.StreamWorkQueueStatusRequest
+ */
+export type StreamWorkQueueStatusRequest = Message<"work_queue.StreamWorkQueueStatusRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: work_queue.WorkQueueAddress queue = 2;
+   */
+  queue?: WorkQueueAddress;
+};
+
+/**
+ * Describes the message work_queue.StreamWorkQueueStatusRequest.
+ * Use `create(StreamWorkQueueStatusRequestSchema)` to create a new message.
+ */
+export const StreamWorkQueueStatusRequestSchema: GenMessage<StreamWorkQueueStatusRequest> = /*@__PURE__*/
+  messageDesc(file_work_queue, 34);
+
+/**
+ * @generated from message work_queue.WorkQueueStatusView
+ */
+export type WorkQueueStatusView = Message<"work_queue.WorkQueueStatusView"> & {
+  /**
+   * @generated from field: repeated work_queue.WorkItemStatus items = 1;
+   */
+  items: WorkItemStatus[];
+
+  /**
+   * Why the queue's GitHub state could not be read at all (no inbox, no credential); empty otherwise.
+   *
+   * @generated from field: string unavailable_reason = 2;
+   */
+  unavailableReason: string;
+};
+
+/**
+ * Describes the message work_queue.WorkQueueStatusView.
+ * Use `create(WorkQueueStatusViewSchema)` to create a new message.
+ */
+export const WorkQueueStatusViewSchema: GenMessage<WorkQueueStatusView> = /*@__PURE__*/
+  messageDesc(file_work_queue, 35);
+
+/**
+ * One item's PR (by branch, or the assigned PR) and, when it has one, its checks at the head.
+ *
+ * @generated from message work_queue.WorkItemStatus
+ */
+export type WorkItemStatus = Message<"work_queue.WorkItemStatus"> & {
+  /**
+   * @generated from field: string item_id = 1;
+   */
+  itemId: string;
+
+  /**
+   * @generated from field: work_queue.PrStatusView pr = 2;
+   */
+  pr?: PrStatusView;
+
+  /**
+   * @generated from field: bool has_checks = 3;
+   */
+  hasChecks: boolean;
+
+  /**
+   * @generated from field: uint32 checks_running = 4;
+   */
+  checksRunning: number;
+
+  /**
+   * @generated from field: uint32 checks_failed = 5;
+   */
+  checksFailed: number;
+
+  /**
+   * @generated from field: uint32 checks_succeeded = 6;
+   */
+  checksSucceeded: number;
+
+  /**
+   * Each check run at the PR's head, for the row's expanded list — the shape of
+   * `worktree.PullRequestCheck`, so the web renders it with the session PR tab's `CheckRow`.
+   *
+   * @generated from field: repeated work_queue.WorkItemCheck checks = 7;
+   */
+  checks: WorkItemCheck[];
+};
+
+/**
+ * Describes the message work_queue.WorkItemStatus.
+ * Use `create(WorkItemStatusSchema)` to create a new message.
+ */
+export const WorkItemStatusSchema: GenMessage<WorkItemStatus> = /*@__PURE__*/
+  messageDesc(file_work_queue, 36);
+
+/**
+ * One check run at a PR's head.
+ *
+ * @generated from message work_queue.WorkItemCheck
+ */
+export type WorkItemCheck = Message<"work_queue.WorkItemCheck"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * `queued` / `in_progress` / `completed`.
+   *
+   * @generated from field: string status = 2;
+   */
+  status: string;
+
+  /**
+   * @generated from field: string conclusion = 3;
+   */
+  conclusion: string;
+
+  /**
+   * @generated from field: string started_at = 4;
+   */
+  startedAt: string;
+
+  /**
+   * @generated from field: string completed_at = 5;
+   */
+  completedAt: string;
+
+  /**
+   * @generated from field: string details_url = 6;
+   */
+  detailsUrl: string;
+};
+
+/**
+ * Describes the message work_queue.WorkItemCheck.
+ * Use `create(WorkItemCheckSchema)` to create a new message.
+ */
+export const WorkItemCheckSchema: GenMessage<WorkItemCheck> = /*@__PURE__*/
+  messageDesc(file_work_queue, 37);
+
+/**
  * @generated from service work_queue.WorkQueueService
  */
 export const WorkQueueService: GenService<{
@@ -1322,6 +1615,52 @@ export const WorkQueueService: GenService<{
     methodKind: "unary";
     input: typeof GetWorkQueueRequestSchema;
     output: typeof GetWorkQueueResponseSchema;
+  },
+  /**
+   * `#workqueue` 6/14: an existing PR, and tddy sessions, linked to a work item. Each answers the queue
+   * after the change (same wire shape as `GetWorkQueueResponse.work_queue_json`).
+   *
+   * @generated from rpc work_queue.WorkQueueService.AssignWorkItemPr
+   */
+  assignWorkItemPr: {
+    methodKind: "unary";
+    input: typeof AssignWorkItemPrRequestSchema;
+    output: typeof WorkItemLinksResponseSchema;
+  },
+  /**
+   * @generated from rpc work_queue.WorkQueueService.UnassignWorkItemPr
+   */
+  unassignWorkItemPr: {
+    methodKind: "unary";
+    input: typeof UnassignWorkItemPrRequestSchema;
+    output: typeof WorkItemLinksResponseSchema;
+  },
+  /**
+   * @generated from rpc work_queue.WorkQueueService.LinkWorkItemSession
+   */
+  linkWorkItemSession: {
+    methodKind: "unary";
+    input: typeof LinkWorkItemSessionRequestSchema;
+    output: typeof WorkItemLinksResponseSchema;
+  },
+  /**
+   * @generated from rpc work_queue.WorkQueueService.UnlinkWorkItemSession
+   */
+  unlinkWorkItemSession: {
+    methodKind: "unary";
+    input: typeof UnlinkWorkItemSessionRequestSchema;
+    output: typeof WorkItemLinksResponseSchema;
+  },
+  /**
+   * `#workqueue` 6/14: the queue's PR state and check counts per item — a snapshot, then a new one
+   * whenever the daemon's GitHub inbox reports a change to a PR or its checks. No browser polls.
+   *
+   * @generated from rpc work_queue.WorkQueueService.StreamWorkQueueStatus
+   */
+  streamWorkQueueStatus: {
+    methodKind: "server_streaming";
+    input: typeof StreamWorkQueueStatusRequestSchema;
+    output: typeof WorkQueueStatusViewSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_work_queue, 0);

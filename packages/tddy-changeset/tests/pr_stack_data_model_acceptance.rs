@@ -37,6 +37,7 @@ fn stack_roundtrip_linear_and_dag() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
             WorkItem {
                 node_id: "n2".into(),
@@ -50,6 +51,7 @@ fn stack_roundtrip_linear_and_dag() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
             WorkItem {
                 node_id: "n3".into(),
@@ -63,6 +65,7 @@ fn stack_roundtrip_linear_and_dag() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
         ],
     };
@@ -107,6 +110,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
             WorkItem {
                 node_id: "n2".into(),
@@ -124,6 +128,7 @@ fn effective_base_refs_skips_merged_ancestor() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
         ],
     };
@@ -157,6 +162,7 @@ fn topo_order_rejects_cycle() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
             WorkItem {
                 node_id: "n2".into(),
@@ -170,6 +176,7 @@ fn topo_order_rejects_cycle() {
                 child_state: None,
                 internal_status: None,
                 display_order: None,
+                ..Default::default()
             },
         ],
     };
@@ -218,6 +225,7 @@ fn internal_status_roundtrips_through_changeset_yaml() {
                 source: "derived".into(),
             }),
             display_order: None,
+            ..Default::default()
         }],
     };
 

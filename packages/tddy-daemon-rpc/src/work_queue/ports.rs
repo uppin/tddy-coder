@@ -20,6 +20,10 @@ use tddy_service::proto::work_queue::{
     ReorderWorkItemResponse, RepointWorkItemRequest, RepointWorkItemResponse,
     ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
 };
+use tddy_service::proto::work_queue::{
+    AssignWorkItemPrRequest, LinkWorkItemSessionRequest, UnassignWorkItemPrRequest,
+    UnlinkWorkItemSessionRequest, WorkItemLinksResponse,
+};
 use tddy_session_lifecycle::connection_service::{
     local_gh_github_token, project_github_token, resolve_os_user, spawn_blocking_with_timeout,
     wire_same,
@@ -50,10 +54,10 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         {
             return Ok(Response::new(answered));
         }
+        let _ = &github_user;
         if req.title.trim().is_empty() {
             return Err(Status::invalid_argument("title is required"));
         }
-        let _ = &github_user;
         let os_user = &os_user_owned;
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
@@ -116,7 +120,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         request: Request<GetPrStatusRequest>,
     ) -> Result<Response<GetPrStatusResponse>, Status> {
         let req = request.into_inner();
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let os_user_owned = self.authenticated_os_user(&req.session_token)?;
         let target = work_queue_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, GetPrStatusResponse>("GetPrStatus", &target, &req)
@@ -136,8 +140,9 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         // one over an unknown checkout — as unavailable rather than failing this call.
         let repo_root = self.repo_root_for_target(&sessions_base, os_user, &target)?;
 
+        let site = self.pr_site_for_target(os_user, &req.session_token, &sessions_base, &target);
         let status = self
-            .pr_status_for_caller(&github_user, repo_root.as_deref(), req.branch.trim())
+            .pr_status_for_caller(site, repo_root.as_deref(), req.branch.trim())
             .await;
         Ok(Response::new(GetPrStatusResponse {
             status: Some(wire_same(&status)?),
@@ -151,7 +156,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         use tddy_service::proto::work_queue::{BranchRemote, BranchResolution, BranchWorktree};
 
         let req = request.into_inner();
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let os_user_owned = self.authenticated_os_user(&req.session_token)?;
         let target = work_queue_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, QueryBranchResponse>("QueryBranch", &target, &req)
@@ -273,8 +278,9 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
 
         // PR — same path as get_pr_status. A lookup that cannot be performed degrades this leg
         // alone; the session, worktree and remote legs above stay usable.
+        let site = self.pr_site_for_target(os_user, &req.session_token, &sessions_base, &target);
         let pr = self
-            .pr_status_for_caller(&github_user, repo_root.as_deref(), &branch)
+            .pr_status_for_caller(site, repo_root.as_deref(), &branch)
             .await;
 
         Ok(Response::new(QueryBranchResponse {
@@ -621,48 +627,42 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         &self,
         request: Request<ReorderWorkItemRequest>,
     ) -> Result<Response<ReorderWorkItemResponse>, Status> {
-        let req = request.into_inner();
-        let os_user = self.authenticated_os_user(&req.session_token)?;
-        let target = work_queue_target(req.stack.as_ref(), &req.session_id)?;
-        if let Some(answered) = self
-            .forward_if_addressed::<_, ReorderWorkItemResponse>("ReorderWorkItem", &target, &req)
-            .await?
-        {
-            return Ok(Response::new(answered));
-        }
-        if req.item_id.trim().is_empty() {
-            return Err(Status::invalid_argument("node_id is required"));
-        }
-        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        if let WorkQueueTarget::Address(address) = &target {
-            let work_queue_json = self.reorder_work_item_in_store(
-                &sessions_base,
-                address,
-                req.item_id.trim(),
-                req.direction.trim(),
-            )?;
-            return Ok(Response::new(ReorderWorkItemResponse { work_queue_json }));
-        }
-        let WorkQueueTarget::Session(session_id) = &target else {
-            unreachable!("work_queue_target yields an address or a session")
-        };
-        validate_session_id_segment(session_id)
-            .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        require_a_stack(&session_dir)?;
+        self.reorder_work_item_rpc(request).await
+    }
 
-        tddy_work_queue::item_ops::move_work_item(
-            &session_dir,
-            req.item_id.trim(),
-            req.direction.trim(),
-        )
-        .map_err(Status::invalid_argument)?;
+    async fn stream_work_queue_status(
+        &self,
+        request: Request<tddy_service::proto::work_queue::StreamWorkQueueStatusRequest>,
+    ) -> Result<Response<tddy_work_queue::rpc::WorkQueueStatusStream>, Status> {
+        self.stream_work_queue_status_rpc(request).await
+    }
 
-        // The same serializer `ListSessions` enrichment uses, so the response's `work_queue_json` is
-        // the exact wire shape `PrStackScreen`'s `parseWorkQueue` already reads.
-        let work_queue_json = session_list_enrichment::work_queue_json_of(&session_dir);
-        Ok(Response::new(ReorderWorkItemResponse { work_queue_json }))
+    async fn assign_work_item_pr(
+        &self,
+        request: Request<AssignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.assign_work_item_pr_rpc(request).await
+    }
+
+    async fn unassign_work_item_pr(
+        &self,
+        request: Request<UnassignWorkItemPrRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.unassign_work_item_pr_rpc(request).await
+    }
+
+    async fn link_work_item_session(
+        &self,
+        request: Request<LinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.link_work_item_session_rpc(request).await
+    }
+
+    async fn unlink_work_item_session(
+        &self,
+        request: Request<UnlinkWorkItemSessionRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.unlink_work_item_session_rpc(request).await
     }
 
     /// Take a base branch's commits into a planned node's branch, inside that node's own worktree,
@@ -679,7 +679,7 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         use tddy_service::proto::work_queue::{BranchRemote, BranchResolution, BranchWorktree};
 
         let req = request.into_inner();
-        let (github_user, os_user_owned) = self.authenticated_user(&req.session_token)?;
+        let os_user_owned = self.authenticated_os_user(&req.session_token)?;
         let target = work_queue_target(req.stack.as_ref(), &req.session_id)?;
         if let Some(answered) = self
             .forward_if_addressed::<_, PullBaseIntoBranchResponse>(
@@ -691,7 +691,6 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         {
             return Ok(Response::new(answered));
         }
-        let _ = &github_user;
         let os_user = &os_user_owned;
         if req.item_id.trim().is_empty() {
             return Err(Status::invalid_argument("node_id is required"));
@@ -823,8 +822,9 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
                 Some(base_sync),
             )
         });
+        let site = self.pr_site_for_target(os_user, &req.session_token, &sessions_base, &target);
         let pr = self
-            .pr_status_for_caller(&github_user, Some(&repo_root), &branch)
+            .pr_status_for_caller(site, Some(&repo_root), &branch)
             .await;
 
         Ok(Response::new(PullBaseIntoBranchResponse {

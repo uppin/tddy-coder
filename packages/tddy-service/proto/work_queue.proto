@@ -66,6 +66,16 @@ service WorkQueueService {
   // One work queue by its address, served by the daemon that holds its owning session — forwarded
   // there when the address names another host.
   rpc GetWorkQueue(GetWorkQueueRequest) returns (GetWorkQueueResponse);
+
+  // `#workqueue` 6/14: an existing PR, and tddy sessions, linked to a work item. Each answers the queue
+  // after the change (same wire shape as `GetWorkQueueResponse.work_queue_json`).
+  rpc AssignWorkItemPr(AssignWorkItemPrRequest) returns (WorkItemLinksResponse);
+  rpc UnassignWorkItemPr(UnassignWorkItemPrRequest) returns (WorkItemLinksResponse);
+  rpc LinkWorkItemSession(LinkWorkItemSessionRequest) returns (WorkItemLinksResponse);
+  rpc UnlinkWorkItemSession(UnlinkWorkItemSessionRequest) returns (WorkItemLinksResponse);
+  // `#workqueue` 6/14: the queue's PR state and check counts per item — a snapshot, then a new one
+  // whenever the daemon's GitHub inbox reports a change to a PR or its checks. No browser polls.
+  rpc StreamWorkQueueStatus(StreamWorkQueueStatusRequest) returns (stream WorkQueueStatusView);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -438,4 +448,74 @@ message GetWorkQueueResponse {
   // The stack, same wire shape as `SessionEntry.work_queue_json` (field 23) — read with the
   // existing `parseWorkQueue`.
   string work_queue_json = 2;
+}
+
+// `#workqueue` 6/14 — work-item links.
+message AssignWorkItemPrRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  uint64 pull_number = 4;
+}
+
+message UnassignWorkItemPrRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+}
+
+message LinkWorkItemSessionRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string session_id = 4;
+  // The daemon holding `session_id`; empty for the queue's own host.
+  string daemon_instance_id = 5;
+}
+
+message UnlinkWorkItemSessionRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string session_id = 4;
+}
+
+message WorkItemLinksResponse {
+  string work_queue_json = 1;
+}
+
+
+message StreamWorkQueueStatusRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+}
+
+message WorkQueueStatusView {
+  repeated WorkItemStatus items = 1;
+  // Why the queue's GitHub state could not be read at all (no inbox, no credential); empty otherwise.
+  string unavailable_reason = 2;
+}
+
+// One item's PR (by branch, or the assigned PR) and, when it has one, its checks at the head.
+message WorkItemStatus {
+  string item_id = 1;
+  PrStatusView pr = 2;
+  bool has_checks = 3;
+  uint32 checks_running = 4;
+  uint32 checks_failed = 5;
+  uint32 checks_succeeded = 6;
+  // Each check run at the PR's head, for the row's expanded list — the shape of
+  // `worktree.PullRequestCheck`, so the web renders it with the session PR tab's `CheckRow`.
+  repeated WorkItemCheck checks = 7;
+}
+
+// One check run at a PR's head.
+message WorkItemCheck {
+  string name = 1;
+  // `queued` / `in_progress` / `completed`.
+  string status = 2;
+  string conclusion = 3;
+  string started_at = 4;
+  string completed_at = 5;
+  string details_url = 6;
 }

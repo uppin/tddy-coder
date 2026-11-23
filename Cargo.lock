@@ -12972,6 +12972,7 @@ dependencies = [
  "tddy-daemon-sandbox",
  "tddy-discovery",
  "tddy-github",
+ "tddy-github-inbox",
  "tddy-host-service",
  "tddy-index-daemon",
  "tddy-livekit",
@@ -14625,6 +14626,7 @@ dependencies = [
  "tddy-session-lifecycle",
  "tddy-task",
  "tddy-testing-commons",
+ "tddy-work-queue",
  "tddy-workflow",
  "tddy-worktree-service",
  "tempfile",
@@ -14884,6 +14886,7 @@ name = "tddy-work-queue"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "log",
  "pretty_assertions",
  "rstest 0.24.0",
@@ -14893,10 +14896,12 @@ dependencies = [
  "tddy-core",
  "tddy-git",
  "tddy-github",
+ "tddy-github-inbox",
  "tddy-rpc",
  "tddy-service",
  "tddy-workflow",
  "tempfile",
+ "tokio",
  "uuid",
 ]
 

@@ -1,6 +1,6 @@
 //! Which work tools each access is offered (`#workqueue` 5/14): the owner of a queue every one of the
-//! ten, an addressed session the two read tools, and a session with no access none. The queue decides;
-//! no role does. The daemon offers and serves the same set: `tddy-daemon-rpc`'s
+//! ten (and, since 6/14, the four link tools), an addressed session the two read tools, and a session
+//! with no access none. The queue decides; no role does. The daemon offers and serves the same set: `tddy-daemon-rpc`'s
 //! `stack_plan_tools_acceptance.rs` drives it end to end.
 //!
 //! Feature doc: docs/ft/coder/pr-stacking.md § Where a stack lives.
@@ -29,7 +29,8 @@ fn is_a_git_tool(name: &str) -> bool {
     )
 }
 
-const EVERY_PLAN_TOOL: [&str; 10] = [
+/// The ten work tools, then `#workqueue` 6/14's four link tools.
+const EVERY_PLAN_TOOL: [&str; 14] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -40,6 +41,10 @@ const EVERY_PLAN_TOOL: [&str; 10] = [
     "work_item_delete",
     "work_item_set_status",
     "work_item_adopt",
+    "work_item_assign_pr",
+    "work_item_unassign_pr",
+    "work_item_link_session",
+    "work_item_unlink_session",
 ];
 
 #[test]

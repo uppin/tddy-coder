@@ -11,6 +11,7 @@ use tddy_core::work_queue_store::{WorkQueueStore, WorkQueueStoreError};
 use tddy_core::WorkflowError;
 
 mod adopt;
+pub mod item_links;
 mod nodes;
 mod order;
 mod pull_base;
@@ -230,6 +231,7 @@ mod test_support {
             child_state: None,
             internal_status: None,
             display_order: None,
+            ..Default::default()
         }
     }
 

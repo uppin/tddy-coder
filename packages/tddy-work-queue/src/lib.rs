@@ -11,6 +11,7 @@
 pub mod assess;
 pub mod docs;
 pub mod git_ops;
+pub mod inbox_reads;
 pub mod internal_status;
 pub mod item_ops;
 pub mod merge_repoint;

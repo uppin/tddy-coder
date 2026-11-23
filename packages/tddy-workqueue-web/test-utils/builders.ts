@@ -80,6 +80,8 @@ export function aStackNode(overrides: Partial<WorkItem> = {}): WorkItem {
     childRecipe: "tdd",
     internalStatus: null,
     displayOrder: null,
+    pr: null,
+    linkedSessions: [],
     ...overrides,
   };
 }

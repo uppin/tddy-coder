@@ -280,9 +280,10 @@ mod tests {
             WorkQueueAccess::Addressed,
         )));
 
-        // Then the owner has the ten plan tools then the six git tools, an addressed session two reads
+        // Then the owner has the ten plan tools, the four link tools, then the six git tools, an addressed session two reads
         let every: Vec<String> = WORK_QUEUE_TOOL_NAMES
             .iter()
+            .chain(crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.iter())
             .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
             .map(|name| name.to_string())
             .collect();
