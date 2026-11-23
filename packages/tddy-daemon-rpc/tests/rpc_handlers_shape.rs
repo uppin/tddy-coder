@@ -164,11 +164,14 @@ fn each_handler_holds_no_more_fields_than_its_budget() {
     // `terminals`, the store whose live set says which sessions are active. Both read it (project
     // listing and delete, PR-stack node and session checks); there is no existing field it could
     // be folded into without hiding the dependency.
+    // `WorkQueueRpcHandler` gained `pull_requests` in `#workqueue` 6/14: the host's GitHub inbox and
+    // project credentials, which `GetPrStatus`, an assigned PR and `StreamWorkQueueStatus` read
+    // through; no existing field reaches the inbox.
     let budgets = [
         ("project.rs", "ProjectRpcHandler", 7),
         ("catalog.rs", "CatalogRpcHandler", 5),
         ("exec_tool.rs", "ExecToolRpcHandler", 10),
-        ("work_queue.rs", "WorkQueueRpcHandler", 8),
+        ("work_queue.rs", "WorkQueueRpcHandler", 9),
     ];
     let src = package("tddy-daemon-rpc").join("src");
 
