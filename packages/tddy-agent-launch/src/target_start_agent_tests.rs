@@ -12,7 +12,9 @@ use tddy_actions::tool::{ResolvedTool, ToolHost};
 use tddy_remote_shell::{ExecOutput, InMemoryShell};
 use tddy_rpc::{Code, Status};
 
-use super::{require_the_agent_on_the_target, resolve_session_agent_for_target};
+use super::{
+    require_the_agent_on_the_target, require_tmux_on_the_target, resolve_session_agent_for_target,
+};
 use crate::harness_from_spec::{cli_session_type, CliSessionAgent};
 use crate::spec_launch::{HostAgent, HostCodingAgents};
 
@@ -312,5 +314,28 @@ async fn an_unreachable_target_refuses_unavailable_with_the_transports_reason() 
             )
         }),
         Err((Code::Unavailable, true))
+    );
+}
+
+/// What the probe of `tmux` runs on the target, from its login's own directory.
+const PROBE_OF_TMUX: &str = r#"cd '.' && exec "${SHELL:-/bin/sh}" -lc 'command -v '"'"'tmux'"'"''"#;
+
+#[tokio::test]
+async fn a_tmux_run_on_a_target_without_tmux_is_refused_naming_tmux() {
+    // Given a target whose login shell finds no tmux
+    let target = InMemoryShell::new("buildbox");
+    target.answers(PROBE_OF_TMUX, ExecOutput::exited(1, ""));
+
+    // When
+    let refused = require_tmux_on_the_target(&target).await;
+
+    // Then the start is refused as a precondition the caller can meet, naming tmux
+    let refusal = refused.expect_err("a target without tmux refuses a tmux run");
+    assert_eq!(
+        (refusal.code(), refusal.message()),
+        (
+            Code::FailedPrecondition,
+            "run_in_tmux needs tmux on the target: its login shell finds no `tmux` on its PATH"
+        )
     );
 }

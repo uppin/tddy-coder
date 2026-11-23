@@ -25,7 +25,7 @@ use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_core::session_pointer::{SessionPointer, SessionPointerOwner};
 use tddy_remote_shell::SshShell;
-use tddy_testing_commons::wait::eventually;
+use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 /// The ssh `Host` alias the session's target is known by.
 const TARGET_ALIAS: &str = "buildbox";
@@ -225,13 +225,34 @@ impl ATarget {
             &self.root.join("bin/login-shell"),
             &format!(
                 "#!/bin/sh\n[ \"$1\" = -lc ] || exit 64\n\
-                 HOME='{}'\nPATH='{}:/usr/bin:/bin'\nTMPDIR='{}'\nexport HOME PATH TMPDIR\n\
+                 HOME='{}'\nPATH='{}:{}:/usr/bin:/bin'\nTMPDIR='{}'\nTMUX_TMPDIR='{}'\n\
+                 export HOME PATH TMPDIR TMUX_TMPDIR\n\
                  exec /bin/sh -c \"$2\"\n",
                 self.home().display(),
                 self.agents_dir().display(),
+                tmux_dir().display(),
+                self.tmpdir().display(),
                 self.tmpdir().display()
             ),
         );
+    }
+
+    /// Whether the target's tmux — on its private socket under its `TMPDIR` — holds the tmux
+    /// session `name`.
+    fn has_tmux_session(&self, name: &str) -> bool {
+        self.tmux(&["has-session", "-t", &format!("={name}")])
+            .status
+            .success()
+    }
+
+    /// The target's tmux, run on its private socket.
+    fn tmux(&self, args: &[&str]) -> std::process::Output {
+        std::process::Command::new(tmux_dir().join("tmux"))
+            .args(args)
+            .env("TMUX_TMPDIR", self.tmpdir())
+            .env_remove("TMUX")
+            .output()
+            .expect("tmux runs")
     }
 
     /// The remote shell on the target, through the stand-in.
@@ -323,6 +344,28 @@ impl ATarget {
             })
             .collect()
     }
+}
+
+impl Drop for ATarget {
+    /// The target's tmux server, if a test started one on its private socket, goes with it.
+    fn drop(&mut self) {
+        if self.tmpdir().exists() {
+            let _ = self.tmux(&["kill-server"]);
+        }
+    }
+}
+
+/// The directory holding this host's `tmux`, which the target's login finds on its `PATH`: the
+/// stand-in target runs on this host.
+fn tmux_dir() -> PathBuf {
+    let output = std::process::Command::new("/bin/sh")
+        .args(["-c", "command -v tmux"])
+        .output()
+        .expect("`command -v tmux` runs");
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    path.parent()
+        .unwrap_or_else(|| panic!("tmux is installed on this host: {path:?}"))
+        .to_path_buf()
 }
 
 /// The name this host gives itself, as `hostname` prints it: the stand-in's target is this host.
@@ -590,6 +633,36 @@ impl ADaemon {
         slots: &RenderedSlots,
         start_timeout: Duration,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        self.launches_placed(program, target, pointer, slots, start_timeout, false)
+            .await
+    }
+
+    /// [`Self::launches`] `agent` in a tmux session of its own on `target`.
+    async fn launches_in_tmux(
+        &self,
+        agent: &AStubAgent,
+        target: &ATarget,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
+        self.launches_placed(
+            &agent.program(),
+            target,
+            None,
+            &RenderedSlots::default(),
+            START_TIMEOUT,
+            true,
+        )
+        .await
+    }
+
+    async fn launches_placed(
+        &self,
+        program: &Path,
+        target: &ATarget,
+        pointer: Option<&SessionPointer>,
+        slots: &RenderedSlots,
+        start_timeout: Duration,
+        tmux: bool,
+    ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
             &the_acme_agent(program),
             &TemplateParams::new().with("model", MODEL),
@@ -602,6 +675,7 @@ impl ADaemon {
                 startup_window: STARTUP_WINDOW,
                 start_timeout,
                 clone_root: None,
+                tmux,
             },
             HostPtySession {
                 manager: &self.manager,
@@ -1019,4 +1093,127 @@ async fn the_agent_on_a_target_reads_its_appended_system_prompt_from_the_target(
             Some(APPENDED_SYSTEM_PROMPT.to_string())
         )
     );
+}
+
+/// The tmux session the session's agent runs in on the target.
+fn the_sessions_tmux_session() -> String {
+    tddy_agent_launch::remote_agent_launch::target_tmux_session_name(SESSION_ID)
+}
+
+#[tokio::test]
+async fn an_agent_run_in_tmux_runs_in_a_tmux_session_named_for_the_session_on_the_target() {
+    // Given a reachable target with tmux, holding the session's worktree and the agent
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When the agent is launched in tmux
+    let _launched = daemon
+        .launches_in_tmux(&agent, &target)
+        .await
+        .expect("the agent is launched in tmux on the target");
+    let report = agent.report().await;
+
+    // Then it runs in the worktree, in the session's tmux session on the target, with no pid file
+    assert_eq!(
+        (
+            report.cwd,
+            target.has_tmux_session(&the_sessions_tmux_session()),
+            target.agent_pid_file().exists()
+        ),
+        (target.worktree(), true, false)
+    );
+}
+
+#[tokio::test]
+async fn an_agent_run_in_tmux_outlives_its_dropped_connection() {
+    // Given an agent running in tmux on the target
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+    let _launched = daemon
+        .launches_in_tmux(&agent, &target)
+        .await
+        .expect("the agent is launched in tmux on the target");
+    agent.report().await;
+
+    // When the session's connection to the target drops
+    daemon.manager.stop_session(SESSION_ID).await;
+    eventually_awaiting("the session's terminal to end", OBSERVE, || async {
+        (!daemon.has_a_terminal().await)
+            .then_some(())
+            .ok_or_else(|| "the terminal is still registered".to_string())
+    })
+    .await;
+
+    // Then the agent's tmux session is still running on the target
+    assert!(target.has_tmux_session(&the_sessions_tmux_session()));
+}
+
+#[tokio::test]
+async fn a_second_launch_in_tmux_re_attaches_to_the_running_agent() {
+    // Given an agent running in tmux on the target whose connection dropped
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+    daemon
+        .launches_in_tmux(&agent, &target)
+        .await
+        .expect("the agent is launched in tmux on the target");
+    let first = agent.report().await;
+    daemon.manager.stop_session(SESSION_ID).await;
+
+    // When the session is launched in tmux again
+    let relaunched = daemon.launches_in_tmux(&agent, &target).await;
+
+    // Then it attached to the same agent: started, and the agent never started a second time
+    let again = agent.report().await;
+    assert_eq!((relaunched.is_ok(), again.pid), (true, first.pid));
+}
+
+#[tokio::test]
+async fn ending_a_tmux_run_kills_its_tmux_session_on_the_target() {
+    // Given an agent running in tmux on the target
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+    daemon
+        .launches_in_tmux(&agent, &target)
+        .await
+        .expect("the agent is launched in tmux on the target");
+    agent.report().await;
+    let running_before = target.has_tmux_session(&the_sessions_tmux_session());
+
+    // When the session's tmux run is ended
+    let ended = tddy_agent_launch::remote_agent_launch::end_target_tmux_session(
+        target.shell().as_ref(),
+        SESSION_ID,
+    )
+    .await;
+
+    // Then its tmux session, running until then, is gone from the target
+    assert_eq!(
+        (
+            running_before,
+            ended,
+            target.has_tmux_session(&the_sessions_tmux_session())
+        ),
+        (true, Ok(()), false)
+    );
+}
+
+#[tokio::test]
+async fn ending_a_tmux_run_whose_session_is_gone_is_not_an_error() {
+    // Given a target with tmux where the session's tmux session is not running
+    let target = a_target_with_a_login_of_its_own();
+
+    // When the session's tmux run is ended
+    let ended = tddy_agent_launch::remote_agent_launch::end_target_tmux_session(
+        target.shell().as_ref(),
+        SESSION_ID,
+    )
+    .await;
+
+    // Then
+    assert_eq!(ended, Ok(()));
 }

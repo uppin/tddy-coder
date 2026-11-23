@@ -29,6 +29,7 @@ pub fn tab_launch_status(error: &RemoteLaunchError) -> Status {
         }
         RemoteLaunchError::Spawn(_) => Status::internal(message),
         RemoteLaunchError::AgentNotOnTarget { .. }
+        | RemoteLaunchError::TmuxNotOnTarget
         | RemoteLaunchError::Plan(_)
         | RemoteLaunchError::Trust(TargetTrustError::Malformed { .. })
         | RemoteLaunchError::ExitedDuringStartup { .. }

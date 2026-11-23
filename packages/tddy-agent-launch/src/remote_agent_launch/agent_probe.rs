@@ -48,6 +48,19 @@ pub async fn probe_agent_on_target(
     Ok(())
 }
 
+/// Ask the target `shell` reaches whether its login shell, in `worktree`, finds `tmux` — the probe
+/// [`probe_agent_on_target`] makes, for `tmux`. A probe that exits non-zero is
+/// [`RemoteLaunchError::TmuxNotOnTarget`]; a target the transport cannot reach is
+/// [`RemoteLaunchError::Shell`].
+pub async fn probe_tmux_on_target(
+    shell: &dyn RemoteShell,
+    worktree: &Path,
+) -> Result<(), RemoteLaunchError> {
+    // FIXME(#target-tmux 1/2): contract stub — asks nothing.
+    let _ = (shell, worktree);
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "agent_probe_tests.rs"]
 mod tests;
