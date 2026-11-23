@@ -52,7 +52,10 @@ a PR stack looked as movable as a free one.
 `SessionInspectorWorkQueueTabAcceptance` (rewritten for the sidebar), `defaultInspectorTab.test.ts`.
 `WorkQueueGraphAcceptance` is removed with the graph it covered.
 
-## Docs to update at wrap
+## Docs updated at wrap
 
-`session-drawer.md` (Work queue tab → sidebar, default tab), `agent-activity-pane.md` (the shared
-sidebar slot), `pr-stacking.md` (opening a queue), a `docs/ft/web/changelog/` entry.
+`session-drawer.md`, `agent-activity-pane.md`, `pr-stacking.md`, `create-session-package.md`, `session-pr-inspector.md`, and `docs/ft/web/changelog/2026-11-23-work-queue-sidebar.md`.
+
+## Wrap
+
+File-length gate: `WorkQueueView.tsx` 500 → under 500 production lines (comment compaction after the graph panel moved out); no other touched file is over budget. Scoped checks only (TypeScript packages; no Rust touched).

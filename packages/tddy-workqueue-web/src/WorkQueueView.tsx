@@ -99,7 +99,6 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     worktreeClient,
     taskClient,
   } = props;
-
   const [workQueueJson, setWorkQueueJson] = useState("");
   const [createdBySessionId, setCreatedBySessionId] = useState("");
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
@@ -122,9 +121,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         setWorkQueueJson(res.workQueueJson);
         setCreatedBySessionId(res.summary?.createdBySessionId ?? "");
       })
-      .catch(() => {
-        // Keep what is shown; a failed read must not blank a plan already loaded.
-      });
+      .catch(() => undefined); // keep what is shown: a failed read must not blank a plan already loaded
     return () => {
       cancelled = true;
     };
@@ -221,9 +218,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     workQueueClient
       ?.getWorkQueue({ sessionToken, stack: address })
       .then((res) => setWorkQueueJson(res.workQueueJson))
-      .catch(() => {
-        // Keep what is shown; the next status update brings the change.
-      });
+      .catch(() => undefined); // keep what is shown; the next status update brings the change
   });
   // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
   const workItemLinks = useWorkItemLinksState({

@@ -161,6 +161,8 @@ The `•` on the icon is the unread badge. With zero records, no icon renders at
 
 ## Right sidebar, open by default for managed sessions
 
+The sidebar slot is shared with the session's [work queue sidebar](session-drawer.md#work-queue-sidebar): opening one closes the other.
+
 Since `#project-home` 3/7 the transcript is a **right sidebar** docked beside the session view, not
 a top-bar popover. The layout diagram above shows the popover it replaced.
 
