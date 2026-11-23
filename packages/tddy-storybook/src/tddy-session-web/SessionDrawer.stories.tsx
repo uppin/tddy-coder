@@ -1,12 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { create } from "@bufbuild/protobuf";
-import type { Client } from "@connectrpc/connect";
+import type { ComponentProps } from "react";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
-import {
-  WorkQueueSummarySchema,
-  type WorkQueueService,
-  type WorkQueueSummary,
-} from "tddy-client-web/gen/work_queue_pb";
+import { WorkQueueSummarySchema, type WorkQueueSummary } from "tddy-client-web/gen/work_queue_pb";
 import { SessionDrawer } from "tddy-session-web";
 import { TooltipProvider } from "tddy-ui-web";
 
@@ -25,7 +21,7 @@ const PROJECTS = [
 ];
 
 let seq = 0;
-function aSession(projectId: string, displayName: string, live: boolean, extra: Partial<SessionEntry> = {}) {
+function aSession(projectId: string, displayName: string, live: boolean, extra: MessageInitShape<typeof SessionEntrySchema> = {}) {
   seq += 1;
   return create(SessionEntrySchema, {
     sessionId: `0190${String(seq).padStart(4, "0")}-0000-7000-8000-00000000${String(seq).padStart(4, "0")}`,
@@ -69,7 +65,7 @@ const STACKS: Record<string, WorkQueueSummary[]> = {
 /** A work-queue client double answering `ListProjectWorkQueues` from {@link STACKS}. */
 const workQueueClient = {
   listProjectWorkQueues: async ({ projectId }: { projectId: string }) => ({ stacks: STACKS[projectId] ?? [] }),
-} as unknown as Client<typeof WorkQueueService>;
+} as unknown as NonNullable<ComponentProps<typeof SessionDrawer>["workQueueClient"]>;
 
 const meta: Meta<typeof SessionDrawer> = {
   title: "tddy-session-web/SessionDrawer",
