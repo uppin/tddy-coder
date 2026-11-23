@@ -374,7 +374,36 @@ worst condition, and it is *held up on* the first blocked condition, else the fi
 A fact that cannot be read (GitHub, the inbox, the PR, the worktree) is never met: the schedule waits on
 `facts` with the reason. Tools `work_item_schedule`, `work_queue_schedule_wave`, `work_item_unschedule` and
 `work_queue_schedules`, and matching RPCs; the queue view's schedules panel updates from the status stream.
-Nothing fires a schedule yet, and there is no resolved-threads condition (GraphQL-only).
+There is no resolved-threads condition (GraphQL-only). An armed schedule **fires by itself**, once — see
+below.
+
+### Landing and propagating *(added 2026-11-23)*
+
+Two actions act on a queue, and armed schedules fire them:
+
+- **Propagate** an item (`work_item_propagate { item_id, force? }`, the row's **Propagate** button):
+  fetch; refuse unless the item's local branch is clean, pushed and level with its remote — the refusal
+  names the state and the actions that fix it (`commit`, `pull`, `push`), and `force` never overrides
+  it; refuse a predicted conflict unless `force`; rebase the item onto its line parent's tip in its own
+  worktree; push with lease; retarget its PR when the line parent changed. A running session's branch,
+  an unknown fork point or an unreadable project account is refused, never guessed around.
+- **Land** a range of waves (`work_queue_land { from_wave, to_wave }`, the view's **Land wave**): in
+  derived-line order, refuse an item whose merge conditions are not met, merge its PR, then propagate
+  what sat directly on it onto the trunk before taking the next item. It stops at the first item that
+  cannot land (or whose successor cannot be propagated), naming it and why; the view lists each step.
+- `work_item_merge` lands one item and `work_item_repoint` propagates one — the same engines and checks,
+  so a merge now rebases its successors. The direct tools are explicit acts and do not evaluate the
+  schedule conditions; `work_queue_land` and every firing schedule do. The web's plan-level
+  `RepointWorkItem` RPC is unchanged.
+- **Firing.** The daemon watches each queue with armed schedules through the GitHub inbox's PR, checks,
+  comment and push events (no polling), and re-evaluates on every event and every arming. A schedule
+  whose conditions are all met fires once: it is taken out of the store in the write that fires it, then
+  its merge or propagation runs. The watcher acts as the person who armed, and survives a daemon
+  restart: at startup every queue that still has schedules is watched again as the GitHub user
+  `users[]` maps the arming OS user to.
+- **Activities.** Every landing, propagation, refusal and firing reaches the queue's owner as a
+  `work_queue` activity (alongside moves): by the user, by an agent, or by a schedule someone armed. The
+  owner's own agent's acts are recorded without waking it.
 
 ### GitHub API surface
 

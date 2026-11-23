@@ -2,7 +2,7 @@
  * Acceptance (`#workqueue` 14/14): an item's Propagate control, wired through `useLandPropagate` —
  * a refused propagation shows why, and the control is offered again once the call answered.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-land-propagate.md
+ * Feature: docs/ft/coder/pr-stacking.md § Landing and propagating
  */
 
 import React from "react";

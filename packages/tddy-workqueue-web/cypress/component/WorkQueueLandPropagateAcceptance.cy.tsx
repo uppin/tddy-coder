@@ -2,7 +2,7 @@
  * Acceptance (`#workqueue` 14/14): Land wave asks for the wave range and shows the result per item; a
  * refused propagation shows the state and the actions that would fix it.
  *
- * PRD: docs/ft/coder/1-WIP/PRD-2026-11-22-land-propagate.md
+ * Feature: docs/ft/coder/pr-stacking.md § Landing and propagating
  */
 
 import React from "react";

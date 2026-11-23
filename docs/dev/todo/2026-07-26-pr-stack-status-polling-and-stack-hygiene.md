@@ -53,6 +53,10 @@
   force-push failure is only `log::warn!`, so the RPC returns success while `origin/<branch>` still points
   at the old base and the PR was re-targeted anyway. Untouched by `pr-stack-repoint-dead-end`, which only
   moved them inside a branch guard. Source: `pr-stack-repoint-dead-end`.
+  **Narrowed 2026-11-23 (`#workqueue` 14/14, #1015):** the `work_item_repoint` and `work_item_merge`
+  tools, `work_queue_land` and every firing schedule now run through `tddy_work_queue::engine`, whose git
+  port refuses an unknown fork point, an unreadable project account and a failed push by name. What
+  remains is the web's plan-level `RepointWorkItem` RPC, which still calls `item_ops::repoint_work_item`.
 - **A `tddy-coder`-embedded web server retains no GitHub token** — `packages/tddy-coder/src/run.rs`
   builds its own `AuthServiceImpl` without a `GitHubTokenStore`, so PR status there reads
   *unavailable* even after a real login. The daemon path is wired; this one is not.
