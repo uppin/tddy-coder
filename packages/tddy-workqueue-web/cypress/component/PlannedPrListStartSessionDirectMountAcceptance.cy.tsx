@@ -68,6 +68,7 @@ function mountViewOver(backend: ReturnType<typeof aDaemon>) {
     <WorkQueueView
       address={THE_STACK}
       workQueueClient={createClient(WorkQueueService, transport)}
+      watchClient={createClient(WorkQueueService, transport)}
       client={createClient(SessionService, transport)}
       projectClient={createClient(ProjectService, transport)}
       catalogClient={createClient(CatalogService, transport)}

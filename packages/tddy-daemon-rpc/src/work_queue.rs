@@ -85,6 +85,7 @@ pub(crate) mod commit_flow;
 pub(crate) mod land;
 mod lineage;
 mod links;
+mod queue_changes;
 mod queue_watch;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;

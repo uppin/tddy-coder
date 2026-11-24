@@ -38,6 +38,7 @@ function mountTheQueue() {
     <WorkQueueView
       address={THE_QUEUE}
       workQueueClient={createClient(WorkQueueService, backend.transport())}
+      watchClient={createClient(WorkQueueService, backend.transport())}
       sessionToken="fake-token"
     />,
     backend,

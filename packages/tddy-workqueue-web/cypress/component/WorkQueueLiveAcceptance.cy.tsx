@@ -10,6 +10,7 @@
 
 import React from "react";
 import { createClient } from "@connectrpc/connect";
+import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { WorkQueueView } from "../../src";
@@ -76,10 +77,9 @@ it("an item added outside the view appears in it without leaving the view", () =
 
 it("an older snapshot arriving after the view's own edit does not undo it", () => {
   // Given — the view open on n1, n2; adding a planned PR answers with the queue at revision 4
-  const viewHost = anInMemoryRpcBackend().onUnary(WorkQueueService.method.addWorkItem, () => ({
-    workQueueJson: queueAt(4, [N1, N2, N3]),
-    itemId: "n3",
-  }));
+  const viewHost = anInMemoryRpcBackend().onUnary(WorkQueueService.method.addWorkItem, () =>
+    create(WorkQueueService.method.addWorkItem.output, { workQueueJson: queueAt(4, [N1, N2, N3]), itemId: "n3" }),
+  );
   const feed = theViewWatching(viewHost);
   feed.onSubscribe((subscription) => subscription.send(2, queueAt(2, [N1, N2])));
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);

@@ -12949,6 +12949,7 @@ dependencies = [
  "libc",
  "livekit",
  "log",
+ "notify",
  "pretty_assertions",
  "prost 0.13.5",
  "serde",

@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
+import { revisionOf } from "../../src/queueRevision";
 import { type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
 import { StartPassphraseProvider } from "tddy-session-create-web";
 import "tddy-ui-web/theme.css";
@@ -42,18 +43,9 @@ registerServerStreamFallback({
   stream: WorkQueueService.method.watchWorkQueue,
   toEvent: (answer) =>
     create(WorkQueueSnapshotSchema, {
-      revision: BigInt(revisionIn(answer.workQueueJson)),
+      revision: BigInt(revisionOf(answer.workQueueJson)),
       workQueueJson: answer.workQueueJson,
       summary: answer.summary,
     }),
   holdOpen: true,
 });
-
-function revisionIn(workQueueJson: string): number {
-  try {
-    const revision = (JSON.parse(workQueueJson) as { revision?: unknown }).revision;
-    return typeof revision === "number" ? revision : 0;
-  } catch {
-    return 0;
-  }
-}

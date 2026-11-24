@@ -7,6 +7,7 @@
  */
 
 import { createClient } from "@connectrpc/connect";
+import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
@@ -21,9 +22,9 @@ interface WatchOutcome {
 }
 
 async function watchOnce(): Promise<WatchOutcome> {
-  const backend = anInMemoryRpcBackend().onUnary(WorkQueueService.method.getWorkQueue, () => ({
-    workQueueJson: QUEUE_JSON,
-  }));
+  const backend = anInMemoryRpcBackend().onUnary(WorkQueueService.method.getWorkQueue, () =>
+    create(WorkQueueService.method.getWorkQueue.output, { workQueueJson: QUEUE_JSON }),
+  );
   const client = createClient(WorkQueueService, backend.transport());
   const abort = new AbortController();
   const iterator = client.watchWorkQueue({ sessionToken: "t" }, { signal: abort.signal })[Symbol.asyncIterator]();

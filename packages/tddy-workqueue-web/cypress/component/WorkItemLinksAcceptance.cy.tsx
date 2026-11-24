@@ -44,6 +44,7 @@ function theQueueView(): InMemoryRpcBackend {
     <WorkQueueView
       address={THE_QUEUE}
       workQueueClient={createClient(WorkQueueService, backend.transport())}
+      watchClient={createClient(WorkQueueService, backend.transport())}
       sessionToken="fake-token"
       sessions={[A_SESSION] as never}
     />,

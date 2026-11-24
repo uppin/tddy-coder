@@ -1,7 +1,8 @@
 import type React from "react";
 import type { Client } from "@connectrpc/connect";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
-import type { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import { useHostClient, useSelectedDaemon } from "tddy-client-web";
 import type { ProjectService, ProjectEntry } from "tddy-client-web/gen/project_pb";
 import type { CatalogService } from "tddy-client-web/gen/catalog_pb";
 import type { TaskService } from "tddy-client-web/gen/tasks_pb";
@@ -39,7 +40,8 @@ export interface SessionWorkQueueTabProps extends SessionWorkQueueTabInputs {
 
 /**
  * The inspector's Work queue tab (`#workqueue` 5/14): the session's own queue — its id is the
- * session's — shown in the queue view, addressed at the daemon that holds the session.
+ * session's — shown in the queue view, addressed at the daemon that holds the session. The queue is
+ * watched on that daemon's own connection (a session with no host named is the selected daemon's).
  */
 export function SessionWorkQueueTab({
   session,
@@ -47,6 +49,8 @@ export function SessionWorkQueueTab({
   sessions,
   ...rest
 }: SessionWorkQueueTabProps) {
+  const { selectedInstanceId } = useSelectedDaemon();
+  const watchClient = useHostClient(WorkQueueService, session.daemonInstanceId || selectedInstanceId);
   return (
     <>
     <style>{SESSION_INDICATOR_DOT_STYLES}</style>
@@ -60,6 +64,7 @@ export function SessionWorkQueueTab({
         projects.find((project) => project.projectId === session.projectId)?.mainBranchRef ?? ""
       }
       sessions={[...sessions]}
+      watchClient={watchClient}
       // An attached session shows the activity dot the drawer paints for it: green and breathing while
       // it works, green when idle, yellow when it needs input, grey when disconnected.
       renderSessionIndicator={(sessionId) => {

@@ -1,9 +1,11 @@
 //! `StreamWorkQueueStatus` (`#workqueue` 6/14): each item's PR state and check counts, read through
 //! the daemon's GitHub inbox — a snapshot, then a new one whenever the inbox reports a PR or checks
-//! change in the queue's repository. The browser never polls GitHub.
+//! change in the queue's repository, or the queue itself changes (an item added, linked or moved by
+//! anyone). The browser never polls GitHub.
 
 use super::chain_health::{leak_views, line_view};
 use super::project_stacks::{store_status, work_queue_target, WorkQueueTarget};
+use super::queue_changes::QueueChanges;
 use super::WorkQueueRpcHandler;
 use tddy_github_inbox::EventKind;
 use tddy_rpc::{Request, Response, Status};
@@ -24,12 +26,13 @@ impl WorkQueueRpcHandler {
             unreachable!("a validated address resolves to an address")
         };
         let local = self.local_instance_id();
+        // A queue's streams are served by the host that holds it, and a client opens them there (the
+        // web's queue view does, on that host's own connection); they are not forwarded.
         if !address.daemon_instance_id.is_empty() && address.daemon_instance_id != local {
-            // TODO: a queue another host holds is not streamed from here (unary calls forward;
-            // streams do not yet) — docs/dev/todo/2026-11-22-work-queue-status-stream-is-local-only.md
-            return Err(Status::unimplemented(
-                "the status of a work queue another host holds is not streamed from here",
-            ));
+            return Err(Status::failed_precondition(format!(
+                "work queue {} is held by host {}: stream its status there",
+                address.queue_id, address.daemon_instance_id
+            )));
         }
         let sessions_base = self.sessions_base(&os_user)?;
         let store = self.stack_store(&sessions_base);
@@ -75,6 +78,8 @@ impl WorkQueueRpcHandler {
             ),
         );
         // Subscribed before the first read, so a change landing during it is not missed.
+        let mut changes =
+            QueueChanges::of_record(&store.record_path(&address.queue_id).map_err(store_status)?)?;
         let mut events = site.inbox.subscribe(
             &site.repo,
             &[
@@ -151,12 +156,14 @@ impl WorkQueueRpcHandler {
                 if tx.send(Ok(view)).is_err() {
                     return;
                 }
-                // Ends with the client: a dropped subscription stops the inbox feed behind it.
-                let event = tokio::select! {
+                // Ends with the client: a dropped subscription stops the inbox feed and the queue
+                // watch behind it.
+                let woken = tokio::select! {
                     () = tx.closed() => return,
-                    event = events.next() => event,
+                    event = events.next() => event.map(drop),
+                    changed = changes.changed() => changed,
                 };
-                if event.is_none() {
+                if woken.is_none() {
                     return;
                 }
             }

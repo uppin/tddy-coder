@@ -1,9 +1,11 @@
 /**
- * Parsing + ordering helpers for `SessionEntry.workQueueJson` — the JSON-serialized `Stack`
- * (`tddy_core::changeset::Stack`) an orchestrator session carries once it has a plan.
+ * Parsing + ordering helpers for a work queue's `work_queue_json` — the JSON-serialized `WorkQueue`
+ * (`tddy_changeset::changeset::WorkQueue`) that every copy of a queue the daemon hands out carries:
+ * `WatchWorkQueue`'s snapshots, `GetWorkQueue`, every mutation's answer, and the owning session's
+ * `SessionEntry.workQueueJson`. Each copy carries the queue's `revision` (see `queueRevision.ts`).
  *
- * Field names are snake_case to match the Rust struct's default serde encoding (no
- * `rename_all` on `Stack` / `WorkItem` — see `packages/tddy-core/src/changeset.rs`).
+ * Field names are snake_case to match the Rust struct's default serde encoding (no `rename_all` on
+ * `WorkQueue` / `WorkItem` — see `packages/tddy-changeset/src/changeset/work_queue.rs`).
  */
 
 export interface PrStatus {
@@ -98,7 +100,7 @@ interface WireStack {
   nodes?: WireStackNode[];
 }
 
-/** Parse `SessionEntry.workQueueJson` into a `Stack`. Empty/invalid input yields an empty stack. */
+/** Parse a `work_queue_json` into a `Stack`. Empty/invalid input yields an empty stack. */
 export function parseWorkQueue(workQueueJson: string | undefined | null): Stack {
   if (!workQueueJson) return { version: 0, nodes: [] };
   let parsed: WireStack;

@@ -6,9 +6,14 @@
  */
 
 /** The revision a `work_queue_json` carries; `0` when it carries none (or is not a queue). */
-export function revisionOf(_workQueueJson: string): number {
-  // TODO(red): implemented by /green.
-  throw new Error("revisionOf is not implemented");
+export function revisionOf(workQueueJson: string): number {
+  if (!workQueueJson) return 0;
+  try {
+    const revision = (JSON.parse(workQueueJson) as { revision?: unknown }).revision;
+    return typeof revision === "number" && Number.isFinite(revision) ? revision : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -16,7 +21,6 @@ export function revisionOf(_workQueueJson: string): number {
  * A copy numbered `0` predates numbering — an answer from a daemon that numbers nothing — and is
  * taken as it comes, since nothing orders it.
  */
-export function supersedes(_held: number | null, _incoming: number): boolean {
-  // TODO(red): implemented by /green.
-  throw new Error("supersedes is not implemented");
+export function supersedes(held: number | null, incoming: number): boolean {
+  return held === null || incoming === 0 || incoming > held;
 }

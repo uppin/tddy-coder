@@ -10,6 +10,8 @@ type Address = Pick<WorkQueueAddress, "projectId" | "queueId" | "daemonInstanceI
 
 export interface UseWorkItemLinksStateArgs {
   workQueueClient?: Client<typeof WorkQueueService>;
+  /** `WorkQueueService` on the host that holds the queue — its `StreamWorkQueueStatus` is served only there. */
+  statusClient: Client<typeof WorkQueueService> | null;
   sessionToken: string;
   address: Address;
   sessions: SessionEntry[];
@@ -36,12 +38,14 @@ function withoutItem(errors: Record<string, string>, itemId: string): Record<str
 
 /**
  * The queue view's [`WorkItemLinks`](./workItemLinks) (`#workqueue` 6/14): the four link calls with
- * their per-item refusals, and each PR'ed item's live check counts from `StreamWorkQueueStatus` — the
- * daemon pushes a snapshot, then one per GitHub inbox change; the browser never polls.
+ * their per-item refusals, and each PR'ed item's live check counts from `StreamWorkQueueStatus` on the
+ * host that holds the queue — it pushes a snapshot, then one per GitHub inbox change or queue change;
+ * the browser never polls.
  * `null` without a client, so the rows offer no link controls.
  */
 export function useWorkItemLinksState({
   workQueueClient,
+  statusClient,
   sessionToken,
   address,
   sessions,
@@ -54,11 +58,11 @@ export function useWorkItemLinksState({
   const [checksByItemId, setChecksByItemId] = useState<Readonly<Record<string, ItemChecks>>>({});
 
   useEffect(() => {
-    if (!workQueueClient?.streamWorkQueueStatus) return;
+    if (!statusClient?.streamWorkQueueStatus) return;
     const abort = new AbortController();
     (async () => {
       try {
-        for await (const view of workQueueClient.streamWorkQueueStatus(
+        for await (const view of statusClient.streamWorkQueueStatus(
           { sessionToken, queue: address },
           { signal: abort.signal },
         )) {
@@ -94,7 +98,7 @@ export function useWorkItemLinksState({
     })();
     return () => abort.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workQueueClient, sessionToken, address.projectId, address.queueId, address.daemonInstanceId]);
+  }, [statusClient, sessionToken, address.projectId, address.queueId, address.daemonInstanceId]);
 
   if (!workQueueClient) return null;
 

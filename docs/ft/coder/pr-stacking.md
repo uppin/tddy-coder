@@ -240,10 +240,11 @@ are daemon exec tools in `tddy-tool-engine::work_item_link_tools`, offered to th
 **Live checks on the row.** `StreamWorkQueueStatus` answers, per item, its PR's state and the count of
 its checks at the PR's head that are running, failed and succeeded, with each run (name, status,
 conclusion, times, details link) for the row's expanded list — a snapshot when the view opens, then
-a new one whenever the daemon's GitHub inbox reports a PR or checks change in the queue's repository. One
-stream per open queue view, never per row, and the browser never polls GitHub. An item whose PR or checks
-the inbox cannot read has no summary, rather than zeros. The stream is served only by the host that holds
-the queue (`docs/dev/todo/2026-11-22-work-queue-status-stream-is-local-only.md`).
+a new one whenever the daemon's GitHub inbox reports a PR or checks change in the queue's repository, or
+the queue itself changes. One stream per open queue view, never per row, and the browser never polls
+GitHub. An item whose PR or checks the inbox cannot read has no summary, rather than zeros. The stream is
+served only by the host that holds the queue, and the view opens it there, on that host's own connection
+(a request naming another host is refused with `failed_precondition`, never forwarded).
 
 **PR reads go through the inbox.** `GetPrStatus`, `QueryBranch`'s PR leg and `work_queue_status` read
 each branch's PR through the daemon's GitHub inbox with the queue's project credential, so a second
@@ -537,7 +538,37 @@ Two RPCs read a project's queues by address:
 
 Implementation: `packages/tddy-daemon-rpc/src/work_queue/project_stacks.rs` (address resolution, target and session-dir resolution) and `work_queue_queries.rs` (the two RPCs and the by-address store mutations); `ports.rs` only delegates. `SessionEntry.work_queue_id` (proto field 38) carries the id of the queue a session owns — its own id — and `SessionEntry.owns_work_queue` (field 44) whether it owns one; both are filled from the session directory in the session-list enrichment.
 
-The **stack view** (`WorkQueueView` in `packages/tddy-workqueue-web`, `work-queue-view`) renders the Planned PRs panel full width for one stack, loaded by address through `GetWorkQueue`; every control (start session, repoint, reorder, add planned PR, pull base) names that address. The route is `#/sessions/project/<projectId>/stack/<stackId>` (`sessionsProjectQueuePath` / `parseSessionsProjectStack` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web`); the owning host comes from the drawer's listing row, not the URL.
+The **stack view** (`WorkQueueView` in `packages/tddy-workqueue-web`, `work-queue-view`) renders the Planned PRs panel full width for one stack, loaded and kept current by address through `WatchWorkQueue` (see [The queue view stays current](#the-queue-view-stays-current-added-2026-11-24)); every control (start session, repoint, reorder, add planned PR, pull base) names that address. The route is `#/sessions/project/<projectId>/stack/<stackId>` (`sessionsProjectQueuePath` / `parseSessionsProjectStack` in `packages/tddy-client-web/src/appRoutes.ts`, re-exported by `packages/tddy-web`); the owning host comes from the drawer's listing row, not the URL.
+
+### The queue view stays current *(added 2026-11-24)*
+
+A queue changed from outside the open view — an orchestrator's `work_item_add` or
+`work_item_link_session`, another session, another view, a schedule firing — shows in the view without
+leaving it. Nothing polls.
+
+- **Every copy of a queue is numbered.** `WorkQueue.revision` is 1 when the owning session creates the
+  queue and one more on every write that changes it, whoever writes; it is stored with the queue, so it
+  never goes back. An update that changes nothing writes nothing and keeps the revision.
+- **`WatchWorkQueue(queue)`** streams the queue: its snapshot first (`WorkQueueSnapshot { revision,
+  work_queue_json, summary }`), then one per new revision. Writes landing close together may arrive as
+  one snapshot of the latest. A queue removed while watched ends the stream with `not_found`; a queue
+  this host does not hold is `not_found` when opened; an address naming another host is
+  `failed_precondition` — the stream is served by the host that holds the queue and never forwarded.
+  The daemon hears a change by watching the queue's record on disk, so a write from any process counts.
+- **The view keeps the newest copy.** The watch's snapshots and every mutation's answer carry the
+  revision (inside `work_queue_json`); the view replaces its queue only with a newer one, so a late
+  snapshot never undoes the operator's own edit. A copy carrying no revision (an older daemon) is taken
+  as it comes.
+- **The view watches on the holding host.** `WorkQueueView` requires `watchClient`: `WorkQueueService` on
+  the host that holds the queue, which the caller resolves on that host's own connection
+  (`useHostClient`); the item status stream (`StreamWorkQueueStatus`) is opened on it too. A host that
+  cannot be reached is said so, never replaced by another host's client.
+- **A failed load is not an empty queue.** Until a first copy arrives, a failure shows *Could not load
+  this work queue: <reason>* in place of the list. Once loaded, a dropped watch keeps the queue shown
+  with *Live updates interrupted (<reason>). Reconnecting…*, reopens after 1 s, 2 s, 4 s … (at most 30 s,
+  starting over after a snapshot), and its first snapshot resyncs the queue. `not_found`,
+  `unauthenticated`, `permission_denied`, `invalid_argument`, `failed_precondition` and `unimplemented`
+  end it for good: *Live updates stopped: <reason>*.
 
 ### Session drawer: children collapsed under the main stack session
 
