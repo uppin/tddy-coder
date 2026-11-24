@@ -23,55 +23,66 @@ pub(super) async fn conversation_worktrees_in(
     let worktrees = ConversationWorktrees::new(session_worktree, session_id);
     let mut planned = Vec::new();
     for name in names {
-        let root = session_worktree.join(SUBAGENT_WORKTREES_DIR).join(&name);
-        let without_base = || Removal::ConversationWithoutBase {
-            session_worktree: session_worktree.to_path_buf(),
-            root: root.clone(),
-        };
-        // A directory that names no conversation, or whose conversation recorded no base, is still
-        // read — removing the session's worktree would take whatever it holds along.
-        let found = match ConversationId::parse(&name) {
-            Ok(conversation) => worktrees.existing(&conversation).await,
-            Err(_) => Ok(None),
-        };
-        let (read, removal) = match found {
-            Ok(Some(found)) => (
-                CloseSessionWorktree {
-                    branch: found.branch().to_string(),
-                    ..read_local_worktree(found.root(), Some(found.base())).await
-                },
-                Removal::Conversation(found),
-            ),
-            // Not a checkout of its own: git would read the enclosing session worktree instead,
-            // which excludes this directory, so what it holds is never reported as safe to lose.
-            Ok(None) if !root.join(".git").exists() => (
-                unavailable(
-                    CloseSessionWorktree::default(),
-                    format!(
-                        "{} is not a git worktree, so what it holds cannot be read; removing the \
-                         session's worktree would delete it",
-                        root.display()
-                    ),
-                ),
-                without_base(),
-            ),
-            Ok(None) => (read_local_worktree(&root, None).await, without_base()),
-            Err(error) => (
-                unavailable(CloseSessionWorktree::default(), error.to_string()),
-                without_base(),
-            ),
-        };
-        planned.push(PlannedWorktree {
-            view: CloseSessionWorktree {
-                path: root.to_string_lossy().into_owned(),
-                owner: CloseSessionWorktreeOwner::Conversation as i32,
-                owner_id: name,
-                ..read
-            },
-            removal,
-        });
+        plan_conversation_worktree(session_worktree, &worktrees, &mut planned, name).await;
     }
     planned
+}
+
+/// Plan the conversation worktree in directory `name` of the session worktree's conversations, read
+/// for what removing it would lose — or why it cannot be — and add it to `planned`.
+async fn plan_conversation_worktree(
+    session_worktree: &Path,
+    worktrees: &ConversationWorktrees,
+    planned: &mut Vec<PlannedWorktree>,
+    name: String,
+) {
+    let root = session_worktree.join(SUBAGENT_WORKTREES_DIR).join(&name);
+    let without_base = || Removal::ConversationWithoutBase {
+        session_worktree: session_worktree.to_path_buf(),
+        root: root.clone(),
+    };
+    // A directory that names no conversation, or whose conversation recorded no base, is still
+    // read — removing the session's worktree would take whatever it holds along.
+    let found = match ConversationId::parse(&name) {
+        Ok(conversation) => worktrees.existing(&conversation).await,
+        Err(_) => Ok(None),
+    };
+    let (read, removal) = match found {
+        Ok(Some(found)) => (
+            CloseSessionWorktree {
+                branch: found.branch().to_string(),
+                ..read_local_worktree(found.root(), Some(found.base())).await
+            },
+            Removal::Conversation(found),
+        ),
+        // Not a checkout of its own: git would read the enclosing session worktree instead,
+        // which excludes this directory, so what it holds is never reported as safe to lose.
+        Ok(None) if !root.join(".git").exists() => (
+            unavailable(
+                CloseSessionWorktree::default(),
+                format!(
+                    "{} is not a git worktree, so what it holds cannot be read; removing the \
+                         session's worktree would delete it",
+                    root.display()
+                ),
+            ),
+            without_base(),
+        ),
+        Ok(None) => (read_local_worktree(&root, None).await, without_base()),
+        Err(error) => (
+            unavailable(CloseSessionWorktree::default(), error.to_string()),
+            without_base(),
+        ),
+    };
+    planned.push(PlannedWorktree {
+        view: CloseSessionWorktree {
+            path: root.to_string_lossy().into_owned(),
+            owner: CloseSessionWorktreeOwner::Conversation as i32,
+            owner_id: name,
+            ..read
+        },
+        removal,
+    });
 }
 
 /// The name of every directory in `directory`, sorted. Only "there is no such directory" is no
