@@ -1,13 +1,15 @@
 # Brief templates
 
-Fill every `<…>`. Keep the forbidden list verbatim. "Back channel" = your harness's session-message
-tool to the orchestrator.
+Fill every `<…>`. Keep the forbidden list verbatim. `<back channel>` is the child's reporting
+channel — the exact route it reports on to you ([SKILL.md § 6.1](../SKILL.md#61-ask-for-reports-in-every-brief)).
+Subscribe to the child's messages and its end right after starting it (§ 6.2).
 
 ## Shared footer (append to every brief)
 
 ```
-REPORTING: via the back channel only, before every turn ends and at least every ~50 minutes:
-a one-line status. Final: "✅ <PR> <sha> + full check counts (pass/fail)".
+REPORTING: via <back channel> only — no other route — on start, at each milestone, at once on any
+blocker or decision, before every turn ends, and at least every <N> minutes: a one-line status.
+Final: "✅ <PR> <sha> + full check counts (pass/fail)".
 PRE-APPROVED: scoped build/test/lint, commits, leased pushes to <branch>, rebasing <branch>,
 reading CI, deleting your own build outputs.
 FORBIDDEN: merging; auto-merge / force-merge / force-build tokens; dispatching workflows;
@@ -17,6 +19,21 @@ Finishing the planned scope is never a deferral — do not turn it into TODOs.
 You are the main agent: do not hand the whole job to one subagent.
 STOP and report if: the base moved unexpectedly, disk is under <floor>, a gate fails twice for the
 same reason, or the task needs a decision outside its boundaries.
+```
+
+## Deliverable (one line in every brief — §3)
+
+```
+DELIVERABLE: <a PR READY FOR REVIEW — docs wrapped, marked ready, checks read; report
+the PR number and CI state> | <a report over <back channel>, no PR>.
+```
+
+## Investigation (no change delivered)
+
+```
+TASK <title> — investigate / diagnose / answer: <question>. Work in <worktree>; change nothing.
+DELIVERABLE: a report over <back channel>, no PR: findings, evidence (paths, logs, commands), and
+what you recommend. Report "✅ <title>: <one-line answer>" and stop.
 ```
 
 ## [G] implement
