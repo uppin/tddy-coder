@@ -15,7 +15,7 @@ A streak is a **set** of PRs: one or several `gh stack` stacks (each linear, eac
 The pipeline treats every node alike; what differs between a stacked and a standalone node is only
 **lineage** — a stacked node has a predecessor whose head it must contain, a standalone one has none.
 The general orchestration model this command applies — the queue, line versus dependency edges,
-waves, caps, briefs, verification — is the `orchestrate-prs` skill's; this file is its
+waves, caps, briefs, verification — is the `orchestrate-work` skill's; this file is its
 streak-specific form.
 
 ```
@@ -802,7 +802,7 @@ that is not ✅ is stated plainly — no pipeline is "mostly done".
 `Complexity`), `/green`, `/validate-changes`, `/pr-wrap`, `/fix-pr`, `/green-yolo` (the single-branch
 version whose consent table this reuses), `/pr-stack-rebase`, `/add-to-pr-stack`, `/repoint`,
 `/merge-pr-stack`
-**Skills**: `orchestrate-prs` (the general queue model — stack, siblings or DAG — this command
+**Skills**: `orchestrate-work` (the general queue model — stack, siblings or DAG — this command
 applies), `code-restructuring`, `analyze-code-issues`, `muse-subagent` (Muse mode),
 `behaviour-modifiers` (`#muse`), `deferred-work` (record formats, the bar for deferring), `pr-stack`
 (`.agents/skills/pr-stack/SKILL.md` — the model for each stack in the streak) — § *`## Green wave`*,

@@ -1063,7 +1063,7 @@ command plans from requirements), `/split-branch` (sibling branches from existin
 `/follow-up-branch`, `/green`, `/validate-changes`, `/pr-stack-rebase` (cascade mode per stack as the
 completion gate), `/merge-pr-stack`, `/merge`, `/repoint`, `/pr-wrap`, `/wrap-context-docs`
 **Skills**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md` — the model for each stack in the streak),
-`orchestrate-prs` (the queue model — stack, siblings or DAG — that `/yolo-streak` drives)
+`orchestrate-work` (the queue model — stack, siblings or DAG — that `/yolo-streak` drives)
 **References**: `.agents/skills/planning/references/planning-phase.md`,
 `.agents/skills/planning/references/initial-discovery.md`,
 `.agents/skills/fluent-tests/references/generic-guidelines.md`
