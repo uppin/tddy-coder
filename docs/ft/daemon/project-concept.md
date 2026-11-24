@@ -485,11 +485,11 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 | `ReadSessionTerminal` | `session_id`, `styles?`, `region? {row, col, rows, cols}`, `daemon_instance_id?` | `{lines, cursor: {row, col, visible}, cols, rows, offset}`: what the session's **main** terminal shows right now, as text — the visible rows of the screen it is on (the alternate screen while a full-screen TUI runs), each with trailing whitespace trimmed, and the cursor, zero-based. `offset` is the position in the terminal's output stream the text corresponds to: the same sequence point a reconnecting browser's snapshot carries. Text only, no scrollback, unless `styles: true` adds `styles` and `highlighted_rows`; `region` reads one box. Reading sends no input, takes no control lease and disturbs no attached screen. A session with no live terminal, or whose terminal has not reported its size, is refused naming why. See [Reading a terminal](#reading-a-terminal) |
 | `ClaimSessionTerminal` | `session_id`, `daemon_instance_id?` | `{holder}`: takes the session's terminal control lease for the screen `project-home:<home session id>`, stealing it from whoever holds it, as a browser's claim with `steal` does — the change is broadcast, so an attached browser drops to watch-only and names the new holder. The control token stays on the host that owns the terminal and is never returned. Control stays this home's until a person claims it in the browser or the home gives it back with `ReleaseSessionTerminal`. See [Typing into a terminal](#typing-into-a-terminal) |
 | `ReleaseSessionTerminal` | `session_id`, `daemon_instance_id?` | `{released: true}`: gives back the lease this home session's `ClaimSessionTerminal` took, leaving the session uncontrolled — the change is broadcast, so a browser can take control without stealing. For this home's own claim only: a terminal it never claimed, or whose lease another screen has taken since, is refused naming why, and nothing changes. See [Typing into a terminal](#typing-into-a-terminal) |
-| `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes}`: types `text`, then each named key in order, into the session's **main** terminal while this home session holds its lease. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
+| `SendSessionKeys` | `session_id`, `daemon_instance_id?`, `text?`, `keys?` | `{sent_bytes, echo_seen?}`: types `text`, then — once the application has echoed it — each named key in order, into the session's **main** terminal while this home session holds its lease. `echo_seen` is answered when keys followed text: `false` means no echo came within 5 s and the keys were pressed anyway. Refused, naming the holder, when it does not, and nothing is sent. See [Typing into a terminal](#typing-into-a-terminal) |
 | `AnswerSessionPermission` | `session_id`, `request_id`, `option_id` or `cancelled`, `message?`, `daemon_instance_id?` | `{session_id, request_id, answered_by, option_id, cancelled, at_unix_ms}`: answers the Claude permission prompt a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. `option_id` is `allow_once`, `reject_once` (with `message` saying why), or `allow_always` when Claude suggested a rule; `cancelled` leaves the prompt to the person at its terminal. Only the target's orchestrator may answer, and the first answer wins. See [Answering a permission prompt](#answering-a-permission-prompt) |
 | `AnswerSessionQuestion` | `session_id`, `request_id`, `answers: [{question_index, selected, other?}]`, `daemon_instance_id?` | `{session_id, request_id, answered_by, answers, at_unix_ms}`: answers the `AskUserQuestion` a session this caller started is waiting on, as `ReadSessionActivity`'s `pending_question` shows it. Each answer names a question by index, the option labels chosen and, optionally, free text. Only the target's orchestrator may answer, the answers are checked against the question as asked, and the first answer wins. See [Answering a question](#answering-a-question) |
-| `SendSessionMessage` | `session_id`, `text`, `daemon_instance_id?` | `{session_id, delivered_via}`: gives a running session's agent one new turn, delivered the way its agent spec's `turn_input` declares (`terminal_paste`: pasted into the **main** terminal, then the submit key). Takes **no** control lease. Refused, with nothing typed, for an agent that declares no `turn_input` (naming it), a stopped session (naming `ResumeSession`), and one waiting on a permission prompt or question with a `request_id` to answer (naming the answer tool); a session merely waiting for input after its turn is delivered to. See [Sending a session a turn](#sending-a-session-a-turn) |
-| `ResumeSession` | `session_id`, `message?`, `daemon_instance_id?` | `{session_id, outcome}`: `resumed` — what the web UI's **Resume** does, then `message`, if any, as the resumed agent's first turn once its terminal has drawn — or `running` for a session already running, which is left alone. See [Sending a session a turn](#sending-a-session-a-turn) |
+| `SendSessionMessage` | `session_id`, `text`, `daemon_instance_id?` | `{session_id, delivered_via, echo_seen?}`: gives a running session's agent one new turn, delivered the way its agent spec's `turn_input` declares (`terminal_paste`: pasted into the **main** terminal, then, once the agent has echoed the paste, the submit key). A `terminal_paste` answers `echo_seen`: `false` means no echo came within 5 s and the submit key was pressed anyway. Takes **no** control lease. Refused, with nothing typed, for an agent that declares no `turn_input` (naming it), a stopped session (naming `ResumeSession`), and one waiting on a permission prompt or question with a `request_id` to answer (naming the answer tool); a session merely waiting for input after its turn is delivered to. See [Sending a session a turn](#sending-a-session-a-turn) |
+| `ResumeSession` | `session_id`, `message?`, `daemon_instance_id?` | `{session_id, outcome, echo_seen?}`: `resumed` — what the web UI's **Resume** does, then `message`, if any, as the resumed agent's first turn once its terminal has drawn, pasted and submitted as `SendSessionMessage` does (`echo_seen` is answered when a message was pasted) — or `running` for a session already running, which is left alone. See [Sending a session a turn](#sending-a-session-a-turn) |
 | `PostSessionMessage` | `to_session_id`, `text`, `reply_to?` | `{message_id, to_session_id, sent_at_unix_ms}`: sends another session of the project a message it reads when it next looks — nothing is typed into its terminal. Offered to **every** session role. Who may be addressed is the rule of [Messages between sessions](#messages-between-sessions); the text is non-empty and at most 8 KiB |
 | `ReadSessionMessages` | `after_message_id?`, `limit?` (50 by default and at most) | `{messages, lost, has_more}`: the messages addressed to the caller that it has not read yet, oldest first, each once; answering them advances its inbox position. See [Messages between sessions](#messages-between-sessions) |
 | `WriteSessionFile` | `name`, `content` | `{name, size_bytes, modified_unix_ms, attachment}`: writes a text file (at most 1 MiB; `name` one flat file name, at most 128 bytes, no `/`, no `..`, no leading `.`) into the caller's **own** session's files, replacing one of that name. `attachment` is the entry to put in `StartSession`'s `attachments[]` to hand the file to the session it starts, which gets a copy. Orchestrator roles only; see [Session attachments § Session files an orchestrator writes](../coder/session-attachments.md#session-files-an-orchestrator-writes) |
@@ -762,6 +762,17 @@ The rule is "type only while you hold it".
   the paste-end sequence `ESC[201~` is refused while pasting, since it would end the paste early.
   Typing text reads the terminal's paste mode first, so a terminal that has not reported its size
   refuses `text` (keys alone still go). `Enter` is never implied.
+- **Keys wait for the echo.** With both, the text and the keys are two writes: the keys are written
+  once the application has echoed the text — the terminal's output has moved past where it stood
+  before the text, then held still for 30 ms (or 500 ms have passed since the echo began, for a
+  screen that never holds still). An application may read bytes that arrive with the end of a paste
+  as part of it — Cursor Agent holds them until its next input, so a paste and Enter in one read
+  leave the text unsubmitted — and a transport in between (tmux, `coder ssh`) merges writes made
+  back to back, so only the echo shows the text was read. **No echo within 5 s: the keys are pressed
+  anyway** (an operator decision), a warning is logged and the answer carries `echo_seen: false`;
+  otherwise `echo_seen: true`. Text alone or keys alone is one write, nothing is waited on and the
+  answer carries no `echo_seen`. A failure after the text was written says the text was typed and
+  the keys were not.
 - **Key names**, case-sensitive: `Enter` `\r`, `Escape`, `Tab`, `BTab` `ESC[Z`, `Backspace` `0x7f`,
   `Delete` `ESC[3~`, `Up`/`Down`/`Right`/`Left` `ESC[A..D`, `Home` `ESC[H`, `End` `ESC[F`,
   `PageUp`/`PageDown` `ESC[5~`/`ESC[6~`, `Space`, `C-a` … `C-z` (`0x01` … `0x1a`), `F1`–`F4`
@@ -792,9 +803,14 @@ a subagent: give it a follow-up turn, resume it when it has stopped, and learn w
   reads the slot, never the agent's id. A session whose agent declares none is refused naming the
   agent and `turn_input`.
 - **No lease.** A message is one turn, not control of the terminal: the daemon writes the text —
-  as a bracketed paste when the terminal enabled mode 2004 — and the submit key in one input write,
-  with offset 0, and no lease change is broadcast. A browser holding control keeps it. A person
-  typing at the same moment may interleave with the message.
+  as a bracketed paste when the terminal enabled mode 2004 — with offset 0, and no lease change is
+  broadcast. A browser holding control keeps it. A person typing at the same moment may interleave
+  with the message.
+- **Text, then the submit key once the agent echoed it.** The submit key is a write of its own,
+  made as `SendSessionKeys` makes its keys ([Typing into a terminal](#typing-into-a-terminal)): once
+  the agent has echoed the paste, or after 5 s with no echo, when it is pressed anyway (an operator
+  decision). The answer's `echo_seen` says which — `false` is a turn that may still sit unsubmitted
+  in an agent that draws nothing as it is typed into, so read its terminal.
 - **Refusals**, each before anything is typed: a stopped session (resume it with `ResumeSession`), a
   session waiting on a permission prompt (`AnswerSessionPermission`) or a question
   (`AnswerSessionQuestion`) that carries a `request_id`, an empty `text`, and a session without a live terminal or whose
@@ -803,7 +819,10 @@ a subagent: give it a follow-up turn, resume it when it has stopped, and learn w
   agent's `turn_input` is checked **before** resuming, so a message the agent cannot take never
   leaves the session resumed with it dropped; the message is pasted once the resumed main terminal
   shows something, within 60 s, or the call answers that it was resumed but the message was not
-  delivered. An empty message is no message.
+  delivered. An empty message is no message. The agent is relaunched on the session record's
+  `model`, which follows the model the running agent last reported (its spec's
+  `coding_agent.model_report`), so a model its operator picked inside the agent (`/model`) survives
+  the resume.
 - **`acp_prompt` is not delivered yet.** No shipped agent declares it, and a session whose agent did
   would be refused saying this host cannot deliver it.
 - <a id="which-route"></a>**Which route.** `ListProjectSessions` says per session how the orchestrator
@@ -1076,8 +1095,15 @@ interrupts it unless it opts into the idle wake.
   `Started` or `Ended` (no status counts as `Started`); `Running` and `ExecutingTool` are mid-turn
   and are not woken. The turn is one pasted `[tddy watch]` message listing each event of its waking
   watches with its session, kind and `request_id`, plus anything lost and the waking watches that
-  ended. A burst is
+  ended. It is pasted and submitted as `SendSessionMessage` pastes a turn: the submit key once the
+  orchestrator has echoed the paste, or after 5 s with no echo. A burst is
   coalesced by a 2-second settle, and two wakes of one orchestrator are at least 30 seconds apart.
+  Each orchestrator is woken by one wake at a time, and one orchestrator's wake never waits on
+  another's: a wake coming due while that orchestrator's last one is still pasting fires when it
+  ends, still keeping the gap. While a wake pastes, the project's other watch calls — create, list,
+  renew, cancel, collection on a tool answer, stream calls — go on; only the woken orchestrator's
+  own collections and stream calls wait for the paste to end, so nothing being pasted to it is
+  handed to it a second time; a watch cancelled while the wake pastes stays cancelled.
   The events in a wake count as delivered, so they do not ride on a later tool answer; a paste
   that fails delivers nothing, and what was waiting waits for the next chance. A busy orchestrator
   is woken once its turn ends with events still waiting. A stopped orchestrator is never started

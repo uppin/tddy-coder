@@ -1,7 +1,7 @@
 # 2026-11-24 — Cursor's start-option model list lacks models its TUI offers
 
 **Category:** Future enhancement (upstream)
-**Source:** `fix/cursor-tui-submit-and-resume-model` ([changeset](../1-WIP/2026-11-24-cursor-tui-submit-and-resume-model.md)).
+**Source:** `fix/cursor-tui-submit-and-resume-model` ([change record](../changesets/2026-11-24-cursor-tui-submit-and-resume-model.md)).
 
 `DescribeSessionStartOptions` lists a Cursor session's models from `agent --list-models` (the
 `cursor-models` adapter, `cursor.yaml` `models.list_command`). On 2026-11-24 (Cursor Agent

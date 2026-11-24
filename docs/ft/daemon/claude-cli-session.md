@@ -51,7 +51,11 @@ As a developer, I want to start a raw Claude Code CLI session from the tddy web 
 12. When the `claude` process exits (for any reason), the daemon marks the session `status: inactive` in `.session.yaml` (PID cleared).
 13. The session row shows **Resume** in the session table (same as any inactive session).
 14. Clicking **Resume** issues `ResumeSession`. The daemon:
-    - Reads `session_type`, `model`, and `repo_path` from `.session.yaml`.
+    - Reads `session_type`, `model`, and `repo_path` from `.session.yaml`. `model` is the one the
+      session last reported (`claude.yaml`'s `coding_agent.model_report`: the `SessionStart` hook's
+      `model`, then, after each turn, the transcript's last assistant message's), so a `/model` pick
+      survives the resume. On a remote target the transcript is not on the daemon's host, so only
+      the `SessionStart` model is recorded.
     - Refuses a second Resume while one is still in flight (`session <id> is already being resumed`)
       and a Resume of a session whose agent is still running (`session <id> is already running`) —
       both `FAILED_PRECONDITION` — so a session never has two agents on its worktree. A resume on a

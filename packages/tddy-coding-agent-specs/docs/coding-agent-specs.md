@@ -297,8 +297,10 @@ The slot is serde-tagged with `deny_unknown_fields`, so an unknown `kind` or fie
 load naming it; `parse_section` also calls `validate_turn_input_slot`, refusing a `submit_key` that
 is not a key name (messages prefixed `turn_input:`). An agent without the slot takes no message.
 `specs/claude.yaml`, `specs/cursor.yaml` and `specs/muse.yaml` declare `terminal_paste` with `Enter`
-(Cursor and Muse since `#orchestra` 7/9; their TUIs' paste behaviour is not yet observed live —
-`docs/dev/todo/2026-11-21-cursor-muse-terminal-paste-unverified.md`); no other built-in declares one.
+(Cursor and Muse since `#orchestra` 7/9). Cursor's paste followed by Enter submits once the paste
+has echoed — `tddy-tool-engine`'s `type_into` presses the submit key only then — observed live
+against Cursor Agent 2026.11.22; Muse's paste behaviour is not yet observed live —
+`docs/dev/todo/2026-11-21-cursor-muse-terminal-paste-unverified.md`. No other built-in declares one.
 
 **Key names** live in `terminal_keys.rs` — `named_key_bytes(name)` and `is_key_name(name)`, the one
 table (`Enter`, `Escape`, `Tab`, `BTab`, `Backspace`, `Delete`, arrows, `Home`, `End`, `PageUp`,
@@ -307,6 +309,58 @@ table (`Enter`, `Escape`, `Tab`, `BTab`, `Backspace`, `Delete`, arrows, `Home`, 
 
 Tests: `tests/spec_turn_input_acceptance.rs` (claude's slot, an unknown kind, a submit key that is
 not a key name), `tests/spec_turn_input_delivery_acceptance.rs` (Cursor's and Muse's slots).
+
+## Model report (`coding_agent.model_report`)
+
+`CodingAgentSection.model_report: Vec<ModelReportSource>` (`spec/model_report_slot.rs`, read through
+`CodingAgentSpec::model_report()`) says where a running session of the agent reports the model it is
+currently on, so the session's record — and every resume, which relaunches with `.session.yaml` `model` —
+follows a model its operator picked inside the agent (`/model`). Dropping `--model` on resume is no
+substitute: both Cursor's and Claude Code's `/model` rewrite a *global* default, not the session's.
+
+```yaml
+# cursor.yaml — the main conversation's own events, never a (subagent's) tool call
+model_report:
+  - { kind: hook_field, field: model, events: [sessionStart, beforeSubmitPrompt, stop] }
+# claude.yaml
+model_report:
+  - { kind: hook_field, field: model, events: [SessionStart] }
+  - { kind: usage, events: [Stop], ignore: ["<synthetic>"] }
+```
+
+| Kind | Yields |
+|---|---|
+| `hook_field` | the top-level string `field` of the hook event (`ReportSessionStatus.hook_fields`) |
+| `usage` | the model the agent's `usage` binding reads last off the session's current main conversation — the last of `.session.yaml` `agent_conversations`, else the usage context's — evaluated by `tddy-usage` with **no fallback model**, so a transcript that names none yields none rather than the start's model undoing a later report |
+
+Both kinds take `events` (the hook events the source is read on; empty for every event,
+`ModelReportSource::applies_to`) and `ignore` (values that are not a model to relaunch on). A value is
+a model when it is non-blank after trimming and not in `ignore` (`ModelReportSource::accepts`). The
+sources are tried in order on every hook report; the first that applies to the report's event and
+yields a model wins. The enum is serde-tagged by `kind` with `deny_unknown_fields`, so an unknown kind
+or field is refused at load; `parse_section` also calls `validate_model_report`, refusing a
+`hook_field` source with a blank `field` and a `usage` source on an agent that declares no
+`coding_agent.usage` binding (messages prefixed `model_report:`). An agent without the slot reports
+nothing, and its record keeps the start's model.
+
+The built-ins:
+
+- **cursor** reads `model` off `sessionStart`, `beforeSubmitPrompt` and `stop` — every Cursor hook
+  event carries the session's current model (`glm-5p3-flash-high` after picking GLM 5.3 Flash; `auto`
+  reports itself as `auto-smart`, which is recorded as reported), and `agent --model` takes it. The
+  event list keeps a subagent's tool call on another model from re-pointing the session.
+- **claude** reads `model` off `SessionStart`, the only hook that names it, and after each turn
+  (`Stop`) the transcript's last assistant message's model through its `usage` binding; `<synthetic>`
+  marks a message Claude Code wrote itself. A Claude alias is recorded as the id it resolved to
+  (`opus` → `claude-opus-5-5`), which pins the resume to that id. A `usage` source reads the
+  transcript on the daemon's host, so a Claude session on a remote target — whose transcript lives
+  there — records the `SessionStart` model only.
+
+The daemon side is `tddy-session-activity`'s `follow_reported_model`
+([activity-service.md § Following the reported model](../../tddy-session-activity/docs/activity-service.md#following-the-reported-model)).
+
+Tests: `tests/spec_model_report.rs` (both built-ins' declarations, `events` and an empty list,
+a blank or ignored value, and the two load-time refusals).
 
 ## Home directories (`coding_agent.home_dirs`)
 

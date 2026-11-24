@@ -1,7 +1,7 @@
 # 2026-11-24 — A Cursor session's replies never reach its transcript
 
 **Category:** Future enhancement
-**Source:** `fix/cursor-tui-submit-and-resume-model` ([changeset](../1-WIP/2026-11-24-cursor-tui-submit-and-resume-model.md)); deferred out of that PR by the operator.
+**Source:** `fix/cursor-tui-submit-and-resume-model` ([change record](../changesets/2026-11-24-cursor-tui-submit-and-resume-model.md)); deferred out of that PR by the operator.
 
 A `cursor-cli` session's ACP transcript (`acp-transcript.jsonl`, `ReadSessionTranscript`, the web's
 Activities view) holds its tool calls but never what Cursor said; a `claude-cli` session's holds
