@@ -162,20 +162,7 @@ impl LaunchSessions {
         // the removal (its `worktree-removed` marker): a target that can no longer be reached must
         // not keep the record from going, so a closed session's tmux on its target is not asked
         // for again. Here, the kill is cheap and still runs.
-        if closed_on_its_target(&session_dir) {
-            log::info!(
-                "DeleteSession: {session_id} was closed, which ended its tmux session on its \
-                 target; the target is not asked again"
-            );
-        } else {
-            self.end_tmux_run(os_user, session_id, &session_dir, session_token)
-                .await?;
-        }
-        // Every other tab and every conversation goes the same way, for the same reason: a tab's
-        // tmux session, here or on the target, would keep its agent running with no session left
-        // to reclaim it.
-        self.session_tabs
-            .end_tabs_and_conversations(session_id, session_token)
+        self.end_everything_running(os_user, session_id, session_token, &session_dir)
             .await?;
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
@@ -184,15 +171,7 @@ impl LaunchSessions {
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
         // failure to reach that daemon fails the delete rather than silently dropping its half.
-        self.split_sessions
-            .delete_paired_codebase_session(&sessions_base, session_id, session_token)
-            .await?;
-        // Every clone this session's roster created, on every host that built one — including hosts
-        // the operator never looked at. Refused rather than continued if one cannot be reached, for
-        // the same reason the paired workspace above is: a delete that succeeded here while a
-        // checkout survived elsewhere is exactly the silent leak this is for.
-        self.agent_roster
-            .tear_down_every_agent_clone(session_id, session_token)
+        self.delete_what_peers_hold(session_id, session_token, &sessions_base)
             .await?;
         // Every admission this session minted is void with the session: a mirror that re-admits
         // after the delete must be refused, and `revoke_all_for_session` is the bulk revocation
@@ -210,6 +189,72 @@ impl LaunchSessions {
         // refuses the removal refuses the delete with the session's record intact, so a retry can
         // still name what to remove. One already gone — removed by a close, or outside the
         // daemon — counts as removed.
+        self.remove_the_target_worktree(session_token, session_dir)
+            .await?;
+        session_deletion::delete_session_directory(
+            &sessions_base,
+            session_id,
+            projects_dir_opt.as_deref(),
+            Some(self.coding_agents.agents()),
+        )?;
+        log::info!("DeleteSession: successfully removed session {}", session_id);
+        Ok(Response::new(DeleteSessionResponse { ok: true }))
+    }
+
+    /// End what still runs of the session: its tmux-run main — but not on the target of a closed
+    /// session — then every other tab and every conversation.
+    async fn end_everything_running(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        session_token: &str,
+        session_dir: &std::path::Path,
+    ) -> Result<(), Status> {
+        if closed_on_its_target(session_dir) {
+            log::info!(
+                "DeleteSession: {session_id} was closed, which ended its tmux session on its \
+                 target; the target is not asked again"
+            );
+        } else {
+            self.end_tmux_run(os_user, session_id, session_dir, session_token)
+                .await?;
+        }
+        // Every other tab and every conversation goes the same way, for the same reason: a tab's
+        // tmux session, here or on the target, would keep its agent running with no session left
+        // to reclaim it.
+        self.session_tabs
+            .end_tabs_and_conversations(session_id, session_token)
+            .await?;
+        Ok(())
+    }
+
+    /// Delete what other daemons hold for the session: its split codebase half, then every agent
+    /// clone.
+    async fn delete_what_peers_hold(
+        &self,
+        session_id: &str,
+        session_token: &str,
+        sessions_base: &std::path::Path,
+    ) -> Result<(), Status> {
+        self.split_sessions
+            .delete_paired_codebase_session(sessions_base, session_id, session_token)
+            .await?;
+        // Every clone this session's roster created, on every host that built one — including hosts
+        // the operator never looked at. Refused rather than continued if one cannot be reached, for
+        // the same reason the paired workspace above is: a delete that succeeded here while a
+        // checkout survived elsewhere is exactly the silent leak this is for.
+        self.agent_roster
+            .tear_down_every_agent_clone(session_id, session_token)
+            .await?;
+        Ok(())
+    }
+
+    /// Remove the session's worktree on its target, while its record still names it.
+    async fn remove_the_target_worktree(
+        &self,
+        session_token: &str,
+        session_dir: std::path::PathBuf,
+    ) -> Result<(), Status> {
         if let Some((target, worktree)) = target_worktree_of(&session_dir) {
             // The shell is resolved with the caller's account, as the start resolves it, so a
             // Coder target's worktree is removed on its workspace too.
@@ -225,14 +270,7 @@ impl LaunchSessions {
             )
             .await?;
         }
-        session_deletion::delete_session_directory(
-            &sessions_base,
-            session_id,
-            projects_dir_opt.as_deref(),
-            Some(self.coding_agents.agents()),
-        )?;
-        log::info!("DeleteSession: successfully removed session {}", session_id);
-        Ok(Response::new(DeleteSessionResponse { ok: true }))
+        Ok(())
     }
 
     /// Kill the tmux session a target session's agent runs in on its target
