@@ -83,11 +83,11 @@ While loading with more than one running phase the strip adds `+<N> more`
 | `cypress/component/SessionIndexingIndicatorAcceptance.cy.tsx` (1) | the header shows indexing until ready |
 | `cypress/component/SessionIndexingIndicatorResubscribe.cy.tsx` (4) | the header shows a load that starts after its first watch ended empty; drops what it said once its watch ends mid-load; watches again after 1, 2 and 4 s; a refused watch is not repeated and names why |
 | `cypress/component/CodeIndexStatusStrip.cy.tsx` | the strip's own states: the failure's reason; an index let go while the pane is open reads as starting; reconnecting with why; a worktree the host serves no language of has no code index, and why. Live progress, phases and `+N more` are pinned by `WorktreeCodePaneCodeSession.cy.tsx` ([code navigation](code-navigation.md#testing)) |
-| `cypress/component/ServerStreamFallback.cy.tsx` (7) | the testkit fallback below |
+| `tddy-web/cypress/component/UnaryBackedStream.cy.tsx` (7) | the testkit's unary-backed stream below |
 
-**`registerServerStreamFallback` (`tddy-connectrpc-testkit`).** The form always starts over the stream, so
+**`registerUnaryBackedStream` (`tddy-connectrpc-testkit`, a test fake).** The form always starts over the stream, so
 a component spec that stubs only the unary `startSession` would leave it unanswered. The testkit offers
-`registerServerStreamFallback({ unary, stream, toEvent })`: for every in-memory backend built afterwards
+`registerUnaryBackedStream({ unary, stream, toEvent, holdOpen?, toRequest? })`: for every in-memory backend built afterwards
 (process-wide), a backend that serves the unary method but not the stream answers the stream by running
 the unary handler and emitting `toEvent(answer)` as its only event — a thrown `ConnectError` becomes the
 stream's error, and the call is recorded as the unary call would be. A stream the backend implements

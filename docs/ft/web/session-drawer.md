@@ -1134,8 +1134,10 @@ stack"), read each PR's live state, and start, repoint, reorder and pull-base it
 ### Planned-PR list
 
 Reads the stack's `Stack` (see [PR stacking § Stack data model](../coder/pr-stacking.md#stack-data-model))
-from `GetWorkQueue`'s `work_queue_json` (a JSON-serialized `Stack`) and renders one row per
-`WorkItem`.
+from the `work_queue_json` (a JSON-serialized `Stack`) of `WatchWorkQueue` — opened on the host that holds
+the queue, a snapshot then one per change, whoever makes it — and renders one row per `WorkItem`. A queue
+that cannot be loaded says why instead of reading as empty; a dropped watch keeps the list and reconnects
+([PR stacking § The queue view stays current](../coder/pr-stacking.md#the-queue-view-stays-current-added-2026-11-24)).
 
 > **Updated 2026-08-01** — rows render in the order the plan **persists** (`WorkItem.display_order`),
 > not in `Stack::topo_order`. The reading order and the dependency graph are different facts, and
@@ -1327,7 +1329,7 @@ the identical `UseAgentChatResult` — `messages`, `elicitations`, `sendPrompt`,
 
 ### New RPCs / proto fields used
 
-- `GetWorkQueue` `work_queue_json` — JSON-serialized `Stack` for the planned-PR list.
+- `WatchWorkQueue` `WorkQueueSnapshot.work_queue_json` — JSON-serialized `Stack` for the planned-PR list, live.
 - `TddyRemote.Stream` (existing) — chat window transport.
 - `ConnectionService.StartSession` (existing, `recipe` + `work_queue_parent`) — the Start session CTA.
 

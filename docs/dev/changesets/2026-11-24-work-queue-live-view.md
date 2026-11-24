@@ -84,6 +84,14 @@ open. The tab stayed empty until the operator left it and came back.
 | `tddy-workqueue-web` | `useWorkQueueWatch`, `queueRevision`, `WorkQueueLiveStatus`, required `watchClient`, status stream on it, `workQueue.ts` doc |
 | `tddy-session-web` | `SessionWorkQueueTab` resolves `watchClient` on the holding host |
 
+## Restructuring
+
+`/pr-wrap`'s file-length gate measured `packages/tddy-workqueue-web/src/WorkQueueView.tsx` at **499 → 507**
+production lines: this change took it over the 500 budget. The Start-session dialog's pre-fill derivation
+moved, unchanged, into `src/startSessionInitialValues.ts` (a pure function of the node, the queue's
+nodes, the address, the default branch and remote, and the owner). `WorkQueueView.tsx` is now **484**. The
+other files this change touched are under budget (`tddy-changeset/src/changeset/work_queue.rs` is 460 → 469).
+
 ## Tests
 
 - `tddy-changeset/tests/session_work_queue_acceptance.rs`:
@@ -112,11 +120,32 @@ open. The tab stayed empty until the operator left it and came back.
 
 ## Docs updated at wrap
 
-- `docs/ft/coder/pr-stacking.md`: § *The queue view stays current* (added), § *Live checks on the row*
-  and § *Opening a session's work queue* (updated in this change).
+- `docs/ft/coder/pr-stacking.md`: § *The queue view stays current* (added); § *Vocabulary*, § *Live checks on
+  the row* and § *Opening a session's work queue* updated.
+- `docs/ft/web/session-drawer.md` § *Planned-PR list* and its RPC list; `docs/ft/web/prstack-package.md`.
+- `packages/tddy-workqueue-web/docs/README.md`, `packages/tddy-daemon-rpc/docs/architecture.md`
+  (`queue_watch.rs`, `queue_changes.rs`, `status_stream.rs`), `packages/tddy-changeset/docs/architecture.md`
+  (revision on change, no-op writes nothing, `record_path`).
 - `packages/tddy-session-web/docs/indexing-indicator.md`, `packages/tddy-session-create-web/docs/start-progress.md`:
   the renamed `registerUnaryBackedStream`.
 
+## Prerequisites
+
+- ✅ RESOLVED HERE — `docs/dev/todo/2026-11-22-work-queue-status-stream-is-local-only.md`: the web opens
+  `StreamWorkQueueStatus` (and `WatchWorkQueue`) on the host that holds the queue; deleted.
+
 ## Wrap
 
-Pending `/pr-wrap`.
+Wrapped 2026-11-24 by `/pr-wrap` on PR #1030. Verification was scoped to the touched packages:
+- the `tddy-changeset` suites
+- `tddy-daemon-rpc`'s watch acceptance and status-stream wake tests
+- the bun suites of `tddy-workqueue-web` and `tddy-session-web`
+- the Cypress specs of `tddy-workqueue-web`, `tddy-session-web`, `tddy-session-create-web` and `tddy-web`
+  that exercise the view or the renamed testkit helper
+
+Whole-workspace health is CI's.
+
+**Boundary tests:** the `packageBoundary.test.ts` of `tddy-session-web` and `tddy-workqueue-web` now load
+the entry point in a `beforeAll` with a 60 s budget. The cold import measured 0.9–5.8 s at load 35–90, and
+11.3 s at ~370, against bun's 5 s default. The same pattern stands in seven other packages; per the
+operator, those go in a separate PR.

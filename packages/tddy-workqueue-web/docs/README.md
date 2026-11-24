@@ -2,10 +2,13 @@
 
 The project stack's screens:
 
-- **`WorkQueueView`** — one project stack, loaded by address through `GetWorkQueue`: the
+- **`WorkQueueView`** — one project stack, loaded and kept current by `useWorkQueueWatch` over
+  `WatchWorkQueue` on `watchClient` (required: `WorkQueueService` on the host that holds the queue, or
+  `null` when it is unreachable), keeping the newest copy by revision (`queueRevision`) across snapshots
+  and mutation answers, with its load-error and live notices in `WorkQueueLiveStatus`: the
   planned-PR list (`WorkItemList`, the row, badges and details, `AddWorkItemForm`,
   `DirtyWorktreeDialog`), "New stack", reorder and repoint, and the Start-session flow, which opens
-  `tddy-session-create-web`'s dialog pre-filled from the node. `StartPassphraseProvider` is the host
+  `tddy-session-create-web`'s dialog pre-filled from the node (`startSessionInitialValues`). `StartPassphraseProvider` is the host
   application's to mount (as for `CreateSessionPane`).
 - **Live status** — `useQueryBranch`, `branchQueries`, `baseSyncStatus`, `orderWorkItems`,
   `parentTitles`, `boundChildSession`, `nodeChildSession`, `isNodeOrphaned`, `resolveNodeSession`,

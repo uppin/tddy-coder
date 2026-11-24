@@ -22,9 +22,8 @@ import { buildBranchQueries } from "./branchQueries";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { DirtyWorktreeDialog, type DirtyWorktreePrompt } from "./DirtyWorktreeDialog";
 import { resolveRepointTarget } from "./startBlockers";
-import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
-import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
-import { baseBranchChoice } from "./baseBranchChoice";
+import { CreateSessionDialog } from "tddy-session-create-web";
+import { startSessionInitialValues } from "./startSessionInitialValues";
 import { WorkItemChainHealthContext, type ItemChainHealth } from "./WorkItemChainHealth";
 import { LandPropagateContext, LandWaves, useLandPropagate } from "./landPropagate";
 import { WorkItemCommitCountsContext, useWorkQueueCommitCounts } from "./workItemCommitCounts";
@@ -351,35 +350,13 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     setStartSessionNode(node);
   };
 
-  const remote = defaultRemote || "origin";
-  const ownedBranch = startSessionNode?.branch ?? "";
-  const choice = startSessionNode
-    ? baseBranchChoice(startSessionNode, nodes, defaultBranch)
-    : { options: [], selected: "" };
-  const baseBranchOptions = choice.options.map((option) => {
-    const ref = remoteTrackingName(option.value, remote);
-    return { value: ref, label: option.label === option.value ? ref : option.label };
-  });
-  const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
-    ? {
-        projectId: address.projectId,
-        daemonInstanceId: address.daemonInstanceId,
+  const startSessionInitial = startSessionNode
+    ? startSessionInitialValues(startSessionNode, nodes, {
+        address,
+        defaultBranch,
+        remote: defaultRemote || "origin",
         workQueueParent: createdBySessionId,
-        workItemId: startSessionNode.itemId,
-        branchIntent: ownedBranch ? "work_on_selected_branch" : "new_branch_from_base",
-        selectedBranch: ownedBranch,
-        newBranchName: ownedBranch ? "" : (startSessionNode.branchSuggestion ?? ""),
-        baseBranchLabel: remoteTrackingName(
-          deriveStackBaseBranch(startSessionNode, nodes, defaultBranch),
-          remote,
-        ),
-        baseBranchOptions,
-        selectedBaseBranch: remoteTrackingName(choice.selected, remote),
-        createRemoteBranch: true,
-        initialPrompt: [startSessionNode.title, startSessionNode.description]
-          .filter(Boolean)
-          .join("\n\n"),
-      }
+      })
     : undefined;
 
   const handleChildSessionCreated = (sessionId: string) => {
@@ -497,7 +474,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
           worktreeClient={worktreeClient}
           taskClient={taskClient}
           sessionToken={sessionToken}
-          initialValues={startSessionInitialValues}
+          initialValues={startSessionInitial}
           onClose={() => setStartSessionNode(null)}
           onCreated={handleChildSessionCreated}
         />

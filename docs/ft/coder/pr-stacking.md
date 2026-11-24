@@ -17,7 +17,7 @@ The design extends the existing single-level session chaining mechanism (see [Gi
 
 A planned PR is a **work item** and the container that holds them is a **work queue**. Every surface
 uses these names: the `work_queue.WorkQueueService` RPCs (`AddWorkItem`, `RepointWorkItem`,
-`ReorderWorkItem`, `ResolveWorkItemBase`, `LinkWorkItem`, `ListProjectWorkQueues`, `GetWorkQueue`,
+`ReorderWorkItem`, `ResolveWorkItemBase`, `LinkWorkItem`, `ListProjectWorkQueues`, `GetWorkQueue`, `WatchWorkQueue`,
 `CreateWorkQueue`; `GetPrStatus`, `QueryBranch` and `PullBaseIntoBranch` describe PRs and branches and
 keep their names), the agent tools (`work_queue_*`, `work_item_*`, `work_pr_read` / `work_pr_search` /
 `work_pr_comments`), the `tddy-work-queue` crate, the `tddy-workqueue-web` package and the
@@ -535,6 +535,7 @@ Two RPCs read a project's queues by address:
 
 - **`ListProjectWorkQueues(project_id)`** → `WorkQueueSummary { address, title, node_counts { total, started, merged }, referencing_session_ids, created_by_session_id, created_at_unix_ms }` per queue, where `created_by_session_id` and the one `referencing_session_ids` entry are the owning session (the queue's id). The listing fans out one hop: the forwarded copy carries `this_host_only = true`, every eligible peer is asked, and a peer whose forward fails is named in `UnreachableWorkQueueHost { daemon_instance_id, reason }` while the listing itself still succeeds. Node counts derive from the stored queue: `started` counts items with a session or a branch recorded, `merged` counts items whose PR status phase is `merged`.
 - **`GetWorkQueue(address)`** → the summary plus the queue's `work_queue_json`, forwarded to the owning host.
+- **`WatchWorkQueue(queue)`** → the same, live — a snapshot, then one per new revision; served by the owning host only, never forwarded ([The queue view stays current](#the-queue-view-stays-current-added-2026-11-24)).
 
 Implementation: `packages/tddy-daemon-rpc/src/work_queue/project_stacks.rs` (address resolution, target and session-dir resolution) and `work_queue_queries.rs` (the two RPCs and the by-address store mutations); `ports.rs` only delegates. `SessionEntry.work_queue_id` (proto field 38) carries the id of the queue a session owns — its own id — and `SessionEntry.owns_work_queue` (field 44) whether it owns one; both are filled from the session directory in the session-list enrichment.
 
