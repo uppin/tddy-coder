@@ -52,7 +52,8 @@ export interface CloseFailure {
   readonly failedSteps: readonly CloseSessionStep[];
 }
 
-type CloseRun = "ended" | "asked-again";
+/** How one close ended: every step done, something failed (reported), or the daemon asked again. */
+type CloseRun = "closed" | "failed" | "asked-again";
 
 function failureOf(
   session: SessionEntry,
@@ -163,15 +164,16 @@ export function useSessionCloses({
             const { ok, failedSteps } = event.value;
             if (!ok || failedSteps.length > 0) {
               report(failureOf(session, failedSteps.length > 0 ? null : "the close did not complete", failedSteps));
+              return "failed";
             }
-            return "ended";
+            return "closed";
           }
         }
         report(failureOf(session, "the host ended the close without reporting its outcome", []));
-        return "ended";
+        return "failed";
       } catch (err) {
         report(failureOf(session, rpcFailureText(err), []));
-        return "ended";
+        return "failed";
       } finally {
         unmarkClosing(sessionId);
         requestSessionsRefresh();
@@ -221,8 +223,10 @@ export function useSessionCloses({
       setDialogs((prev) => prev.filter((d) => d.key !== request.key));
       void (async () => {
         const run = await runClose(request.session, request.children, true, confirmation.fingerprint);
-        // Asked again: the re-opened dialog offers the children choice afresh.
-        if (run === "asked-again") return;
+        // Children are closed only after the session itself closed. Asked again: the re-opened
+        // dialog offers the children choice afresh. Failed: its failure is shown, and the operator
+        // retries the session, then its children.
+        if (run !== "closed") return;
         await Promise.all(
           confirmation.children.map(({ session, fingerprint }) =>
             runClose(session, closableChildren(session, sessions), true, fingerprint),

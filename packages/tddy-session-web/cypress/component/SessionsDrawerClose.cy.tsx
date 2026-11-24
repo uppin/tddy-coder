@@ -584,6 +584,39 @@ describe("Sessions drawer — closing a session", () => {
         ],
       );
     });
+    it("closes no child when the session's own close fails, and shows the session's failure", () => {
+      // Given — the orchestrator's close cannot end one of its tabs
+      const backend = theDrawerOver({
+        ...STACK_SCENARIO,
+        closeScripts: {
+          [id(STACK_ORCHESTRATOR)]: aCloseThatFails([
+            {
+              kind: CloseSessionStepKind.TERMINATE,
+              subject: "tmux:tddy-orchestrator-review",
+              state: CloseSessionStepState.FAILED,
+              message: "tab still running 10s after SIGTERM",
+              host: "",
+            },
+          ]),
+        },
+      });
+      close.clickClose(id(STACK_ORCHESTRATOR));
+      close.chooseCloseChildrenToo();
+      close.expectDialogShows("packages/tddy-service/proto/session.proto");
+
+      // When
+      close.confirm();
+
+      // Then — only the orchestrator was asked to close, and its failure is reported
+      close.expectFailureNoticeShows(
+        id(STACK_ORCHESTRATOR),
+        "tmux:tddy-orchestrator-review",
+        "tab still running 10s after SIGTERM",
+      );
+      close.expectCloseRequests(backend, [
+        { sessionId: id(STACK_ORCHESTRATOR), confirmed: true, confirmedFingerprint: ORCHESTRATOR_FINGERPRINT },
+      ]);
+    });
   });
 
   describe("while a close runs", () => {

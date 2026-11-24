@@ -134,7 +134,9 @@ Both are routed to the session's owning host, as Terminate and Delete are.
      (`close-session-dialog-children-close`), which adds each child's own losses to the dialog;
    - **Cancel** (`close-session-dialog-cancel`) closes the dialog and changes nothing;
      **Terminate and remove** (`close-session-dialog-confirm`) runs the close with the list the
-     operator saw (its fingerprint). Children chosen are closed after the parent, each with its own.
+     operator saw (its fingerprint). Children chosen are closed after the parent, each with its own —
+     and only once the parent's close succeeded: when it fails, no child is closed, the parent's
+     failure is shown, and the operator retries the parent and then its children.
 4. If the daemon finds more at risk than the operator confirmed (an agent wrote in the meantime),
    the dialog opens again with the new list; nothing was removed.
 
