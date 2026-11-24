@@ -47,6 +47,8 @@ import { useSessionsDrawerRuntimeAttachment } from "./useSessionsDrawerRuntimeAt
 import { useSessionsDrawerOwningHost } from "./useSessionsDrawerOwningHost";
 import { useSessionsDrawerActivation } from "./useSessionsDrawerActivation";
 import { useSessionsDrawerDeleteSelection } from "./useSessionsDrawerDeleteSelection";
+import { useSessionCloses } from "./useSessionCloses";
+import { CloseSessionDialog } from "./CloseSessionDialog";
 import { SessionsDrawerOpenListButton, SessionsDrawerUnknownSession } from "./SessionsDrawerScreenParts";
 import { useSessionsDrawerPaneActions } from "./useSessionsDrawerPaneActions";
 import { SessionsDrawerDetailPane, SessionTypeOptionsRegistrar } from "./SessionsDrawerDetailPane";
@@ -308,6 +310,16 @@ export function SessionsDrawerScreen({
     },
   });
 
+  // Closing a session from its row: each close is routed to the session's owning host and runs on
+  // its own, so the drawer is never blocked by one.
+  const sessionCloses = useSessionCloses({
+    sessions: listedSessions,
+    selectedInstanceId,
+    clientForHost,
+    sessionToken,
+    hostLabelForInstance,
+  });
+
   const {
     handleUnknownHome,
     handleCreateSession,
@@ -388,7 +400,9 @@ export function SessionsDrawerScreen({
             onBulkDelete={() => {
               void handleBulkDelete();
             }}
-            notices={sessionsDrawerListNotices(listLoadError, bulkDeleteFailures)}
+            closingSessions={sessionCloses.closing}
+            onCloseSession={sessionCloses.requestClose}
+            notices={sessionsDrawerListNotices(listLoadError, bulkDeleteFailures, sessionCloses.failures)}
             projects={projects}
             projectHomes={projectHomes}
             onEnsureProjectHome={(projectId) =>
@@ -400,6 +414,12 @@ export function SessionsDrawerScreen({
             workQueueClient={drawerClients.workQueueClient}
             sessionToken={sessionToken}
             onOpenProjectStack={handleOpenProjectStack}
+          />
+          <CloseSessionDialog
+            request={sessionCloses.dialog}
+            onPreview={sessionCloses.previewClose}
+            onCancel={sessionCloses.cancelDialog}
+            onConfirm={sessionCloses.confirmDialog}
           />
           {!unknownSession && <SessionsDrawerPaneError message={paneError} />}
           {!unknownSession && !paneError && (

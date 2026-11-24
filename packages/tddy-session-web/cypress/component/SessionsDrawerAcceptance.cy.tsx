@@ -125,8 +125,8 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
     // Then — drawer items appear newest-first by createdAt
     sessionsDrawerPage.drawer().within(() => {
-      cy.get("button[data-testid^='sessions-drawer-item-']").should("have.length", 3);
-      cy.get("button[data-testid^='sessions-drawer-item-']").then(($items) => {
+      sessionsDrawerPage.rowButtons().should("have.length", 3);
+      sessionsDrawerPage.rowButtons().then(($items) => {
         const ids = [...$items].map((el) => el.getAttribute("data-testid")!.replace("sessions-drawer-item-", ""));
         expect(ids[0]).to.equal(CONNECTED_SESSION_A.sessionId);
         expect(ids[1]).to.equal(DISCONNECTED_SESSION.sessionId);

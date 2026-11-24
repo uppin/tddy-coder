@@ -1,6 +1,8 @@
 import React from "react";
 import { InlineError } from "tddy-ui-web";
+import { CloseSessionStepState } from "tddy-client-web/gen/session_pb";
 import type { BulkDeleteFailure } from "./useSessionsDrawerDeleteSelection";
+import type { CloseFailure } from "./useSessionCloses";
 
 /**
  * Screen-wide reads that failed: the registry unscoped sessions resolve their project from, and the
@@ -31,14 +33,16 @@ export function SessionsDrawerLoadNotices({
 }
 
 /**
- * The drawer list's own notices: why the list could not be loaded, and one line per row the last
- * bulk delete left behind. `undefined` when there is nothing to say, so the drawer draws no slot.
+ * The drawer list's own notices: why the list could not be loaded, one line per row the last bulk
+ * delete left behind, and one notice per close that did not do everything it set out to.
+ * `undefined` when there is nothing to say, so the drawer draws no slot.
  */
 export function sessionsDrawerListNotices(
   listLoadError: string | null,
   bulkDeleteFailures: readonly BulkDeleteFailure[],
+  closeFailures: readonly CloseFailure[],
 ): React.ReactNode | undefined {
-  if (!listLoadError && bulkDeleteFailures.length === 0) return undefined;
+  if (!listLoadError && bulkDeleteFailures.length === 0 && closeFailures.length === 0) return undefined;
   return (
     <>
       <InlineError testId="sessions-drawer-load-error" message={listLoadError} className="text-xs" />
@@ -50,7 +54,37 @@ export function sessionsDrawerListNotices(
           className="text-xs"
         />
       ))}
+      {closeFailures.map((failure) => (
+        <SessionCloseFailureNotice key={failure.sessionId} failure={failure} />
+      ))}
     </>
+  );
+}
+
+/** A close that did not do everything: why it could not run, or each step that failed and where. */
+function SessionCloseFailureNotice({ failure }: { failure: CloseFailure }) {
+  return (
+    <div
+      role="alert"
+      data-testid={`sessions-drawer-close-failure-${failure.sessionId}`}
+      className="text-xs text-destructive"
+    >
+      <p>
+        Could not close {failure.label}
+        {failure.reason ? `: ${failure.reason}` : ""}
+      </p>
+      {failure.failedSteps.length > 0 && (
+        <ul className="list-disc pl-4">
+          {failure.failedSteps.map((step, index) => (
+            <li key={index}>
+              <span className="font-mono">{step.subject}</span>{" "}
+              {step.state === CloseSessionStepState.SKIPPED ? "skipped" : "failed"}: {step.message}
+              {step.host && ` (on ${step.host})`}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

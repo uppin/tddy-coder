@@ -51,6 +51,10 @@ interface DrawerRowProps {
   sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
   selectedForDelete?: ReadonlySet<string>;
   onToggleSelect?: (sessionId: string) => void;
+  /** Session id → what its running close is doing now. */
+  closingSessions?: ReadonlyMap<string, string>;
+  /** Close a row's session — its × or trash bin. */
+  onCloseSession?: (session: SessionEntry) => void;
 }
 
 function DrawerRow({ session, depth, ...props }: DrawerRowProps & { session: SessionEntry; depth?: number }) {
@@ -65,6 +69,8 @@ function DrawerRow({ session, depth, ...props }: DrawerRowProps & { session: Ses
       sessionMetadata={props.sessionMetadataBySessionId.get(session.sessionId)}
       selected={props.selectedForDelete?.has(session.sessionId)}
       onToggleSelect={props.onToggleSelect}
+      closingStep={props.closingSessions?.get(session.sessionId)}
+      onCloseSession={props.onCloseSession}
     />
   );
 }

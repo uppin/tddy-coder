@@ -3,6 +3,7 @@ import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import { sessionDrawerLabel } from "./utils/sessionDrawerLabel";
 import { SessionIndicatorDot } from "./SessionIndicatorDot";
 import { SessionDrawerMarkBadge } from "./SessionDrawerMarkBadge";
+import { SessionDrawerCloseControl } from "./SessionDrawerCloseControl";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
 import { ORCHESTRATOR_ROLE, PROJECT_HOME_ROLE } from "./utils/projectHomeGroups";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
@@ -26,10 +27,14 @@ interface SessionDrawerItemProps {
   selected?: boolean;
   /** Toggle this row's bulk-delete selection. When provided, a selection checkbox renders. */
   onToggleSelect?: (sessionId: string) => void;
+  /** What this row's running close is doing now; `undefined` while no close runs. */
+  closingStep?: string;
+  /** Close this row's session — its × or trash bin. When absent, the row offers neither. */
+  onCloseSession?: (session: SessionEntry) => void;
 }
 
 
-export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, codebaseHostLabel, sessionMetadata, selected, onToggleSelect }: SessionDrawerItemProps) {
+export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLabel, codebaseHostLabel, sessionMetadata, selected, onToggleSelect, closingStep, onCloseSession }: SessionDrawerItemProps) {
   const label = sessionDrawerLabel(session);
   const derivedHostLabel =
     session.target?.kind.case === "ssh" ? session.target.kind.value.configHost : undefined;
@@ -132,6 +137,14 @@ export function SessionDrawerItem({ session, isSelected, onClick, depth, hostLab
           )}
           </button>
         </TooltipTrigger>
+        {onCloseSession && (
+          <SessionDrawerCloseControl
+            session={session}
+            label={label}
+            closingStep={closingStep}
+            onClose={onCloseSession}
+          />
+        )}
       </div>
       <TooltipContent
         data-testid={`sessions-drawer-item-tooltip-${session.sessionId}`}
