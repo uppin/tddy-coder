@@ -6,14 +6,14 @@ use async_trait::async_trait;
 use futures_util::stream::Stream;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
+    CloseSessionEvent, CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
+};
+use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
     RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SignalSessionRequest,
     SignalSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
-};
-use tddy_service::proto::session::{
-    CloseSessionEvent, CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
 };
 
 /// Server-streaming output for [`SessionHandler::stream_start_session`].

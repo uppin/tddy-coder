@@ -137,7 +137,6 @@ impl SessionHandler for DaemonSessionHost {
     ) -> Result<Response<crate::CloseSessionEventStream>, Status> {
         self.close_session_at_host(request).await
     }
-
 }
 
 /// Legacy direct calls on [`DaemonSessionHost`] in acceptance tests and internal helpers.
@@ -229,7 +228,6 @@ impl SessionService for DaemonSessionHost {
     ) -> Result<Response<Self::CloseSessionStream>, Status> {
         SessionHandler::close_session(self, request).await
     }
-
 }
 
 impl DaemonSessionHost {

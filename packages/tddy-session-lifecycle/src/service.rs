@@ -117,7 +117,6 @@ impl<H: SessionHandler + 'static> SessionService for SessionServiceImpl<H> {
     ) -> Result<Response<Self::CloseSessionStream>, Status> {
         self.host.close_session(request).await
     }
-
 }
 
 /// Registers `session.SessionService` on the RPC transport.
