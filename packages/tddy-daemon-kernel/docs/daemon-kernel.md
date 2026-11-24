@@ -351,13 +351,13 @@ on its own) and `session_start_timeout()` (clamped to at least one second, as
 
 ## `peer_calls` — typed RPCs forwarded to a peer
 
-`peer_calls` holds the fourteen typed forwards over `CommonRoom`: each encodes its request, forwards it
+`peer_calls` holds the sixteen typed forwards over `CommonRoom`: each encodes its request, forwards it
 to the peer's service and method, and decodes the answer. The unary ones go through one private
 `forward_unary`; a body that does not decode is `Internal`, `"decode <ResponseType>: …"`.
 
 | Family | Functions | Service |
 |---|---|---|
-| session | `forward_start_session_relaying` (relayed start, `ForwardedStartFailure`), `forward_stream_start_session`, `forward_delete_session` | `session.SessionService` |
+| session | `forward_start_session_relaying` (relayed start, `ForwardedStartFailure`), `forward_stream_start_session`, `forward_delete_session`, `forward_preview_close_session`, `forward_close_session` (a split session's codebase half, closed on its daemon) | `session.SessionService` |
 | exec tool | `forward_stream_execute_tool` | `exec_tools.ExecToolService` |
 | tasks | `forward_cancel_task` (a split start's codebase half; a `CancelTask` addressed to a peer) | `tasks.TaskService` |
 | project | `forward_add_project_to_host`, `forward_set_project_default_branch`, `forward_set_project_accounts` | `project.ProjectService` |

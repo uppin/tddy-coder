@@ -419,6 +419,16 @@ It then removes the session pointer from the worktree the `.session.yaml` record
 records when it records one (`remove_recorded_session_pointer`, on a blocking thread), so a worktree kept
 after the delete does not point a shell-run `tddy-tools` at a session that is gone.
 
+`delete_session_as` is refused `ALREADY_EXISTS` while a close holds the session, and so is
+`resume_session_at_session_coordinate`, through the **`SessionClosesInFlight`** port of
+`LaunchSessions` (`session_closes`; the host's `SessionCloses`). `end_everything_running` ends the main
+— not on the target of a session a close already ended (`worktree-removed` marker and a target tmux
+run: `closed_on_its_target`) — then every other tab and conversation through the **`SessionTabEnding`**
+port (`session_tabs`, the host's close code), which refuses a tab roster that cannot be read.
+`delete_what_peers_hold` deletes the split codebase half and every agent clone;
+`remove_the_target_worktree` removes the worktree on the session's target while the record still names
+it, and leaves a closed session's target alone.
+
 ### `ConnectSession` and the session-reach port
 
 `ConnectSession` resolves the session, then reports a **reach**: for a session whose type this daemon

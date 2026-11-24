@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine gap)
 **Source:** `/pr-wrap` step 3.5 on `feature/session-close-and-remove`: the `close_plan.rs` and
-`worktrees.rs` splits (`docs/dev/1-WIP/2026-11-24-session-close-and-remove.md` § Restructuring)
+`worktrees.rs` splits (`docs/dev/changesets/2026-11-24-session-close-and-remove.md` § Restructuring)
 
 When a move takes the last production use of an imported name, and only the file's own
 `#[cfg(test)] mod tests { use super::*; … }` still needs it, the run's tidy keeps the import but gates

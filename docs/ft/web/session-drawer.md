@@ -95,7 +95,7 @@ re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
 ## Closing a session
 
-**Status:** 🚧 In progress (changeset `docs/dev/1-WIP/2026-11-24-session-close-and-remove.md`)
+**Status:** ✅ Implemented (2026-11-24)
 
 An operator done with a session closes it from its row in one action: **every agent tab of the
 session is terminated and every worktree it owns is removed**, as one daemon task

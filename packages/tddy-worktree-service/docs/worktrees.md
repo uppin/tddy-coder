@@ -19,6 +19,8 @@ Library helpers for the Worktrees manager feature: parse **`git worktree list`**
 | **`git_diff_numstat`** | Runs and parses that diff. Shared with `session_room`, so a session room and the Worktrees screen can never quote different totals for one checkout. Paths arrive as git presents them — C-quoted for non-ASCII, `{old => new}` for renames — so they are display-only. |
 | **`RemoveWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotRemovePrimary`**, **`Io`**. |
 | **`remove_worktree_under_repo`** | Validates membership via **`git worktree list`**, blocks primary row, runs **`git worktree remove`**. |
+| **`force_remove_worktree_under_repo`** | **`git worktree remove --force`** while the path is there, then **`prune`**; then checks the worktree is neither on disk nor in **`git worktree list --porcelain`**. For a caller that already established nothing would be lost (a confirmed session close). |
+| **`path_is_present`** | Whether a path is on disk; only "no such file" is absent, and a path that cannot be looked at is the error. |
 | **`CleanWorktreeError`** | **`GitFailed`**, **`NotListed`**, **`CannotCleanPrimary`**, **`Io`**. |
 | **`clean_worktree_under_repo`** | Validates membership via **`git worktree list`**, blocks primary row, runs **`git clean -fdx`** in the worktree (reclaims disk without removing it). Mirrors **`remove_worktree_under_repo`**. |
 | **`WorktreeSizeStatus`** | Size lifecycle: **`None`** (never calculated), **`Calculating`**, **`Cached`**. |
@@ -26,6 +28,11 @@ Library helpers for the Worktrees manager feature: parse **`git worktree list`**
 | **`WorktreeSizeCalculator`** | **`new(root, permits)`** / **`with_sizer(root, permits, sizer)`**; **`state`**, **`enqueue`**, **`subscribe`**, **`snapshot`**. Lazy, semaphore-bounded per-worktree disk-size lifecycle (see below). |
 | **`project_worktree_snapshot(main_repo, calculator, project)`** → `Vec<WorktreeSnapshotRow {diff, size}>` | Every worktree's diff summary with the size state `calculator` holds now; starts no walk. `StreamWorktreeStats`' first frame and the project-home `ListWorktrees` tool both read it, so they cannot disagree. |
 | **`DAEMON_SIZE_WALK_PERMITS`** | The daemon-wide cap (2) on concurrent size walks. |
+
+`worktrees.rs` holds listing, the path policy, remove and clean, and re-exports by name what lives in
+its sibling modules, so every `worktrees::…` path resolves: `worktree_sizes.rs` (the size calculator
+and its sizes file), `worktree_stats_cache.rs` (`WorktreeStatsCache` and its cache file) and
+`worktree_diff.rs` (numstat, diff rows, `project_worktree_snapshot`).
 
 ## Lazy per-worktree disk size (`WorktreeSizeCalculator`)
 

@@ -149,11 +149,17 @@ route such a session to its target before resolving anything against the host's 
   `WorktreeServiceImpl::with_target_shells`. It is a port because the code that builds a target
   shell lives in `tddy-agent-launch`, which depends on this crate.
 - `clean_target_worktree` (`git clean -fdx`), `remove_target_worktree` (`git worktree remove
-  --force`, then `prune`, in `target_checkout_root_of(worktree)` — `<root>/.worktrees/<id>` →
-  `<root>`; `DeleteSession` uses it too) and `restore_target_worktree` (present → unchanged;
+  --force` while the worktree is there, then `prune`, in `target_checkout_root_of(worktree)` —
+  `<root>/.worktrees/<id>` → `<root>`; then checked: still on the target or still listed by the
+  clone fails it; `DeleteSession` and a session close use it) and `restore_target_worktree` (present → unchanged;
   otherwise `prune`, then `worktree add` of the recorded branch, or `fetch --all` and `worktree add
   -b` from the recorded integration base; neither recorded → `FAILED_PRECONDITION`). A non-zero exit
   is `INTERNAL` with its output. Restore never rewrites the changeset.
+
+`target_path_is_present(shell, path)` answers whether a path is on the target, and answers "absent"
+only when the nearest existing ancestor is a directory this account can search; a path whose
+ancestor cannot be searched is `INTERNAL`, never read as gone. A worktree already gone counts as
+removed.
 
 ### Target rows in the stats stream (`target_worktree_stats.rs`)
 
@@ -258,3 +264,23 @@ exists, and it can be bound only once. `apply_cached_pull_request` fills `Sessio
   [docs/ft/web/session-worktree-inspector.md](../../../docs/ft/web/session-worktree-inspector.md),
   [docs/ft/web/session-pr-inspector.md](../../../docs/ft/web/session-pr-inspector.md)
 - [changesets/](./changesets/)
+
+## What a removal would lose (`worktree_loss.rs`)
+
+`read_local_worktree_loss(worktree, base)` and `read_target_worktree_loss(shell, worktree, base)` read
+the same `WorktreeLoss`: every `git status --porcelain -z --untracked-files=all` entry
+(`parse_porcelain_status`; ignored files are not listed) as a `DirtyFile` with its `DirtyChange`, and
+every commit on `HEAD` that no remote-tracking ref and not the recorded base holds — up to
+`LISTED_UNPUSHED_COMMITS` (20) listed, all counted. The base is passed to git only as the SHA
+`rev-parse --verify` resolves, so an option-shaped ref is never a git argument. A target that cannot
+be reached is an error. A session close reads every worktree it would remove through these
+(`tddy-session-lifecycle`, `svc_close_session`).
+
+## The removal record (`worktree_removed_marker.rs`)
+
+`worktree-removed` in a session directory holds the RFC 3339 time a close removed the session's
+worktrees (`record_worktree_removed`, `worktree_removal_recorded`, `clear_worktree_removed`). A file
+beside `.session.yaml` rather than a field of it: `SessionMetadata` refuses unknown fields, so an older
+daemon could no longer read a closed session's record. `RestoreSessionWorktree` clears it
+(`service_helpers::forget_a_recorded_removal`); `DeleteSession` reads it to leave a closed session's
+target alone.

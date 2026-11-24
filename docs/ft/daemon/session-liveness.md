@@ -136,7 +136,7 @@ second, so a pid reissued to a process that started within the same second as th
 
 ## Closing a session
 
-**Status:** 🚧 In progress (changeset `docs/dev/1-WIP/2026-11-24-session-close-and-remove.md`)
+**Status:** ✅ Implemented (2026-11-24)
 
 `session.SessionService/CloseSession` terminates **every agent tab of a session** and removes
 **every worktree it owns**, as one task; `PreviewCloseSession` reports first what that would lose.

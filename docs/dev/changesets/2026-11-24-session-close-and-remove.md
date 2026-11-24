@@ -1,10 +1,11 @@
-# Changeset: session-close-and-remove
+# 2026-11-24 — Close a session: terminate every tab, remove every worktree, as one task
 
 **Type:** Feature
+**Branch:** `feature/session-close-and-remove` (#1032)
 **Packages:** `tddy-service`, `tddy-session-lifecycle`, `tddy-agent-launch`, `tddy-worktree-service`,
 `tddy-session-agents`, `tddy-daemon-kernel`, `tddy-session-activity`, `tddy-cli-sessions`,
 `tddy-client-web`, `tddy-session-web`
-PRDs (target): [`docs/ft/web/session-drawer.md`](../../ft/web/session-drawer.md) § Closing a session,
+Product docs: [`docs/ft/web/session-drawer.md`](../../ft/web/session-drawer.md) § Closing a session,
 [`docs/ft/daemon/session-liveness.md`](../../ft/daemon/session-liveness.md) § Closing a session
 Design brief: the orchestrator-approved proposal (local `plans/session-close-and-remove-design.md`, not versioned); decisions recorded below.
 
@@ -267,10 +268,10 @@ tddy-worktree-service/src/
 `impl WorktreeService` trait impl, which the engine cannot cut (record
 `packages/tddy-worktree-service/docs/code-issues/oversized-file-service.md`). Two code-issue records
 closed on the number: `oversized-file-worktrees.md` (final 409) and `oversized-file-test-util.md`
-(final 489). Both are deleted here.
+(final 489). Both are deleted.
 
-- [`2026-11-20-session-liveness-oversized-files-after-the-stack.md`](../todo/2026-11-20-session-liveness-oversized-files-after-the-stack.md):
-  **✅ RESOLVED HERE**. Its "What closes it" is the `test_util/held_agents.rs` split, done above
+- `2026-11-20-session-liveness-oversized-files-after-the-stack` (backlog entry, deleted at the wrap):
+  **resolved here**. Its "What closes it" is the `test_util/held_agents.rs` split, done above
   (556 → 489). The other files it lists carry records of their own.
 
 - `svc_close_session/close_task.rs` is at **601** production lines after the validation fixes
@@ -348,30 +349,27 @@ Restructuring).
 
 **Overall:** 8/10.
 
-## Refactoring Needed
+## Follow-ups
 
-### From /red (TDD Red Phase)
-- [ ] `close_target_session.rs` re-builds the stand-in-ssh daemon of `remote_target_session_acceptance.rs`
-  (`ADaemonWithATarget`, the stub agent, the start request): extract one shared `target_session_support`
-  module for both suites.
-- [ ] A `git(dir, args)` helper is now written out in `tmux_agent_support/close_session.rs`,
-  `worktree_loss.rs`, `worktree_sync_acceptance.rs` and `target_session_support`: one in
-  `tddy-testing-commons`.
-- [ ] `worktree_loss.rs`'s `ASessionWorktree` repeats `worktree_sync_acceptance.rs`'s `a_repo_world`
-  (bare origin + tracking clone): share the builder.
-- [ ] `close_events_support` (the `CloseEvents` reader) is reached from `tmux_agent_support` by a
-  `#[path]` module so the target suite can declare it alone; fold it into a shared target/tmux support
-  crate module if more suites need it.
-- [ ] Subagent-conversation coverage of a close covers a **remote** conversation only
-  (`test_util::open_a_remote_conversation`): a local one needs a `SubagentSession`, opened only through
-  `tddy-daemon-rpc`'s harness. Add a local close case there (`session_agent_conversation_acceptance.rs`),
-  including an interrupted turn that does not stop (`ClosedTurnLoop::turn_still_runs`).
-- [ ] `DeleteSession` of a closed target session skips each tab's tmux on the target as well as the
-  main's (`SessionTab::without_its_target_tmux`); only the main's is covered
-  (`close_target_session.rs`). A target tmux *tab* case needs the `remote_target_tmux_tabs` harness.
-- [ ] Web: `closeSessionPage.revealEndedRow` copies the More-fold logic of
-  `sessionsDrawerPage.selectEndedSession`; extract one shared "open the fold this row is under"
-  helper and have both use it.
-- [ ] Web: `aSessionServiceBackend`'s builders still take `Partial<…Init>` overrides, which `tsc`
-  rejects (pre-existing errors at `aSessionEntry` / `aProjectEntry`); `closeSessionBackend.ts`
-  avoids the pattern, and the rest of the file should follow it.
+The test-support folds and two coverage gaps the change left (a local conversation in a close, a
+closed target session's tab tmux on delete) are recorded in
+[`2026-11-24-session-close-test-support-and-coverage-follow-ups.md`](../todo/2026-11-24-session-close-test-support-and-coverage-follow-ups.md).
+
+## Backlog entries and code issues
+
+- **Resolved and deleted:** `2026-11-20-session-liveness-oversized-files-after-the-stack` ("`#session-liveness` 1/4
+  left five stack-shared files over the 500-production-line budget") — its closing step, the
+  `test_util/held_agents.rs` split, landed here (`test_util.rs` 556 → 491 production lines at the wrap).
+  The four other files it listed keep their own code-issue records.
+- **Code issues closed** (records deleted in the restructuring commit): `tddy-worktree-service`
+  `oversized-file-worktrees` (final 409 production lines; 464 at the wrap after the validation fixes,
+  still under 500) and `tddy-session-lifecycle` `oversized-file-test-util` (final 489; 491 at the wrap).
+- **Code issues measured, kept open:** `tddy-session-lifecycle` `oversized-file-connection-service`
+  (+4 lines, 575 → 579 whole file: the `session_closes` field and the `svc_close_session` module);
+  `tddy-agent-launch` `complexity-svc-resume-session-resume-session-at-session-coordinate`
+  (196 → 197 by brace matching: the close guard); `tddy-worktree-service` `oversized-file-service`
+  (681, unchanged since the restructuring row).
+- **Deferred with consent:** `svc_close_session/close_task.rs` at 601 production lines
+  ([`2026-11-24-close-task-rs-over-budget.md`](../todo/2026-11-24-close-task-rs-over-budget.md)) and
+  `tddy-worktree-service/src/service.rs`
+  ([`2026-11-24-worktree-service-rs-grew-two-lines-in-restore.md`](../todo/2026-11-24-worktree-service-rs-grew-two-lines-in-restore.md)).

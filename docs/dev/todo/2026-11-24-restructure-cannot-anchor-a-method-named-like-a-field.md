@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine gap)
 **Source:** `/pr-wrap` step 3.5 on `feature/session-close-and-remove`: the `close_task.rs` split
-(`docs/dev/1-WIP/2026-11-24-session-close-and-remove.md` § Restructuring)
+(`docs/dev/changesets/2026-11-24-session-close-and-remove.md` § Restructuring)
 
 `CloseRun` in `svc_close_session/close_task.rs` has a field `failed` (the steps that failed, in order)
 and a method `failed` (stream one FAILED step):

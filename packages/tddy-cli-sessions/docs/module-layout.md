@@ -66,6 +66,10 @@ inserts `--append-system-prompt-file` and the extra arguments before any positio
 launch (`start_with_options`) and the tmux launch (`tddy-agent-launch`'s `claude_cli_tmux`) both build
 `build_claude_argv` through it, so the two cannot diverge.
 
+
+`tmux_session_lives(os_user, name)` answers whether a tmux session exists, or why that cannot be told
+(tmux could not be run as that user); a session close reads "cannot tell" as a survivor.
+`tmux_session_alive` answers the same with a refused run logged and read as `false`.
 ## Exit hooks
 
 `on_exit: Option<ExitHook>` is work to finish once the process has exited. `ExitHook`

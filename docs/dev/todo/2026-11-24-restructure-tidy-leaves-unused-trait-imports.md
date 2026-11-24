@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine gap)
 **Source:** `/pr-wrap` step 3.5 on `feature/session-close-and-remove`: the `close_plan.rs` split
-(`docs/dev/1-WIP/2026-11-24-session-close-and-remove.md` § Restructuring)
+(`docs/dev/changesets/2026-11-24-session-close-and-remove.md` § Restructuring)
 
 [`2026-10-04-restructure-move-item-copies-the-whole-use-header.md`](./2026-10-04-restructure-move-item-copies-the-whole-use-header.md)
 records that a move copies the source module's whole `use` header, and that "at the end of a

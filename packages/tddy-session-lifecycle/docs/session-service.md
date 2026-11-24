@@ -1,8 +1,8 @@
 # `session.SessionService` (tddy-session-lifecycle)
 
-Ten RPCs over a session's whole life: listing, starting (unary or streamed with attachment
+Twelve RPCs over a session's whole life: listing, starting (unary or streamed with attachment
 materialization), connecting, resuming, setting up the project's main, signalling, deleting,
-renaming, and measuring a checkout for a session room. The proto is `packages/tddy-service/proto/session.proto`; handlers live under
+renaming, measuring a checkout for a session room, and closing a session (with its preview). The proto is `packages/tddy-service/proto/session.proto`; handlers live under
 `packages/tddy-session-lifecycle/src/` (the modules moved from `tddy-daemon` in `#unbundle` node 9),
 laid out as [module-layout.md](module-layout.md) describes. Listing's enrichment, reading and
 deletion are `tddy-session-activity`'s modules, reached here through facades.
@@ -20,6 +20,8 @@ deletion are `tddy-session-activity`'s modules, reached here through facades.
 | `DeleteSession` | unary | Tear down a session |
 | `RenameSession` | unary | Record or clear the session's name (`display_name` in `.session.yaml`) on the daemon holding it — a client sends it to the session's owning host, as it does `DeleteSession`. `NOT_FOUND` for a session this daemon does not hold, `INVALID_ARGUMENT` for a name over 80 characters or with a control character (`tddy_agent_launch::svc_rename_session`) |
 | `GetWorktreeSnapshot` | unary | One checkout measurement for a session room (local or peer-fetched) |
+| `PreviewCloseSession` | unary | What closing the session would lose, per worktree it owns, the tabs it would end, and a fingerprint of all of it ([Closing a session](#closing-a-session-svc_close_session)) |
+| `CloseSession` | server stream | Terminate every tab of the session and remove every worktree it owns, as a `close_session` task: `started`, typed steps, one terminal `needs_confirmation` or `outcome` |
 
 `types.proto` types (`HostDocumentScope`, `SessionAgentStatus`, `SessionAgentActivity`,
 `BranchSession`) are imported by this proto because listing and start reach them.
@@ -244,3 +246,54 @@ the local Unix socket (alongside the other services `runtime.rs` assembles).
 
 Product docs: [claude-cli-session.md](../../../docs/ft/daemon/claude-cli-session.md),
 [cursor-cli-session.md](../../../docs/ft/daemon/cursor-cli-session.md).
+
+## Closing a session (`svc_close_session`)
+
+Product contract: [session-liveness.md § Closing a session](../../../docs/ft/daemon/session-liveness.md#closing-a-session).
+Both RPCs are answered by the daemon holding the session: a session id with no directory here is
+refused `FAILED_PRECONDITION` carrying `peer_session_answer::SESSION_NOT_HELD_HERE`, and a record that
+cannot be read is `INTERNAL`.
+
+| File (`connection_service/svc_close_session/`) | Holds |
+|---|---|
+| `../svc_close_session.rs` | the two handlers, `CloseContext`, the local force removal and the forwarded `CloseSession` |
+| `close_plan.rs` | `ClosePlan`, `PlannedWorktree`, `Removal`; the session's own worktree (here or on its target), the codebase half (asked here for a jailed codebase, forwarded otherwise), `fingerprint_of` |
+| `worktree_reads.rs` | reading one worktree: recorded base and branch, local and target branch, loss → wire view |
+| `conversation_worktrees.rs` | every clone-placed conversation worktree under the session's own |
+| `close_tabs.rs` | ending the main, the tabs and the conversations, the survivor checks, the tabs a close lists; `impl SessionTabEnding` (what `DeleteSession` ends through) |
+| `close_task.rs` (`steps.rs`, `codebase.rs`) | the task: check, terminate, re-check, remove, record; streaming a step; closing the codebase half |
+| `closes_in_flight.rs` | `SessionCloses`: one running close per session, released on drop |
+
+**The plan.** Every worktree is read for what removing it would lose (`worktree_loss`), or carries
+why it could not be read. Presence is read with its error: a path that cannot be looked at is
+unreadable, never gone (`worktrees::path_is_present`, `target_worktrees::target_path_is_present`),
+and `Removal::Local`/`Removal::Target` carry whether the plan found the worktree there. A
+conversation worktrees' directory that cannot be listed is one unreadable worktree. The codebase half
+is gone only when its daemon answers the exact not-held-here refusal
+(`peer_does_not_hold_the_session`); any other refusal leaves it unreadable. A tab roster that cannot
+be read is `ClosePlan::unreadable_tabs`.
+
+**The task** (`CloseTask`, registered under `close_session`, its one output channel `progress`):
+
+1. **Check** — an unreadable tab roster fails the step and ends the close with every removal and the
+   record skipped; anything unreadable, or a loss the request did not confirm with the preview's
+   fingerprint, ends it `needs_confirmation`.
+2. **Terminate** — `end_the_main`, `end_every_tab_beside_main`, `end_every_conversation`, then
+   `check_that_no_tab_survived`: stop what holds the worktree and wait (`ENDED_WITHIN`, 10 s) for
+   every ended tab to be gone. A local tmux that cannot be asked (`tmux_session_lives`), a target
+   tmux that cannot be told, a workspace jail registered again and a local conversation whose
+   interrupted turn still holds its session (`ClosedTurnLoop::turn_still_runs`) are survivors. A
+   survivor fails its step and skips every removal.
+3. **Re-check** — the plan again; anything not confirmed ends `needs_confirmation`, tabs ended and
+   nothing removed.
+4. **Remove** — every worktree, one step each: a worktree planned gone that is there again is refused,
+   the session's own worktree is kept once a conversation worktree inside it failed to go, and each
+   removal is verified afterwards (gone from disk, unlisted by its clone). Each agent clone is torn
+   down (`AgentRoster::tear_down_agent_clone`, which also drops the clone from `.session.yaml
+   agents[]`).
+5. **Record** — `worktree_removed_marker::record_worktree_removed`, only when every removal went.
+
+A `needs_confirmation` ending is `Completed(0)`; a cancelled task skips the removals and is
+`Cancelled`. While a close holds a session, `SessionCloses::refuse_while_closing` refuses
+`ALREADY_EXISTS` to its resume and delete (through `tddy-agent-launch`'s `SessionClosesInFlight`
+port of `LaunchSessions`) and to a new tab (the terminal roster's `start`).
