@@ -1,17 +1,20 @@
 ---
-name: orchestrate-prs
+name: orchestrate-work
 description: >-
   How an orchestrator agent drives a QUEUE of tasks — each becoming a PR — to green and mergeable
   through worker agents, while new tasks keep arriving. The queue may be a linear PR stack,
   independent siblings, or a dependency DAG. Defines the work-item model, line versus stored
   dependency edges, waves and concurrency caps, the per-task [G] implement / [W] validate+wrap /
   [F] fix pipeline, worker briefs and the forbidden-action list, triage of tasks arriving mid-run,
-  verification of "green" claims, watching without polling, disk hygiene, the operator protocol,
-  and the end-of-queue sweep with its TODO gate. Use when asked to orchestrate, babysit, run or
-  resume several PRs at once, to feed new work into a running queue, or to supervise workers.
+  verification of "green" claims, the back channel the orchestrator must keep open to every agent
+  it starts (ask for reports, keep a watch, read before acting, treat silence as a signal, close
+  the loop), the tracked work queue every delegated task lives in, the review-ready-PR deliverable
+  for every change request, disk hygiene, the operator protocol, and the end-of-queue sweep with
+  its TODO gate. Use when asked to orchestrate, babysit, run or resume several PRs at once, to
+  feed new work into a running queue, or to supervise workers.
 ---
 
-# Orchestrate PRs
+# Orchestrate work
 
 You are the **orchestrator**. You never implement; you plan the queue, start **workers**, brief
 them, verify what they claim, and keep the **operator** informed. Each **task** becomes one PR.
@@ -61,6 +64,20 @@ edges, with line edges only where code genuinely builds on a predecessor).
 (non-decreasing). Run every task of the current wave **concurrently up to the cap**. A ready task
 never idles behind a neighbour it does not depend on. A task lifted to a later wave moves up.
 
+**Track every task where others can see it — a firm rule.** Every piece of work you delegate is
+recorded in a **shared work queue or checklist** that the operator and other orchestrators can
+see, never only in your head or your conversation. Prefer a real work queue when your environment
+has one; fall back to a plain checklist (one line per task: child, PR, status) only when it has
+none.
+
+- **Add an item** for each task the moment you delegate it.
+- **Link each item to its child** when the child starts, and **to its PR** once one exists.
+- **Record dependencies** between items as the queue model above defines them.
+- **Update the item on every transition** — stage, status, blocker, done.
+- **Read the queue before giving the operator a status**, never answer from memory.
+
+For example, in tddy: the `work_item_*` and `work_queue_set_dependencies` tools.
+
 ## 2. The per-task pipeline
 
 | Stage | Does | Done when |
@@ -99,11 +116,24 @@ Every brief carries:
 | Reporting | the back channel, cadence, final format |
 | Stop conditions | when to stop and report instead of improvising |
 | Pre-approved / forbidden | explicit lists (below) |
+| Deliverable | a review-ready PR, or a back-channel report and no PR (below) |
 
-**Reporting.** A worker reports over **the worker's back channel to the orchestrator** (your
-harness's session-message tool) before **every turn ends** and at least every ~50 minutes: a
+**A change request ends in a review-ready PR — a firm rule.** For every brief, decide first whether
+the request **delivers a change**:
+
+| The request | The brief asks for |
+|---|---|
+| Delivers a change (code, docs, config) | a PR **ready for review**, not a draft: docs wrapped, marked ready, checks read. The child reports the **PR number and its CI state** |
+| Does not (investigation, diagnostics, a question) | a **report on the child's reporting channel** (§6) and **no PR** |
+| Ambiguous | **you decide**, state the decision in the brief, and tell the operator which you chose |
+
+A draft PR is never the end of a change request; a child that stops at a draft has not finished.
+
+**Reporting.** A worker reports over **the worker's back channel to the orchestrator** — the
+channel the brief names (§6) — before **every turn ends** and at least every ~50 minutes: a
 one-line status, and at the end a structured `✅ <PR> <sha> + full check counts`. **Never let a
-worker use a channel you cannot read later.**
+worker use a channel you cannot read later.** Keeping that channel open and read is the
+orchestrator's duty, not the worker's: §6.
 
 **Pre-approved** (state it): scoped build/test/lint, commits, leased pushes to its own branch,
 rebasing its own branch, reading CI, opening/readying its own PR, deleting its own build outputs.
@@ -152,16 +182,68 @@ the predecessor); wave computed; cap and disk checked; status table re-posted.
 Draft PRs are usually not built by CI: a skipped check is **not** green. Ready the PR (after wrap)
 or use the project's sanctioned build trigger **once**.
 
-## 6. Watching and keep-warm
+## 6. The back channel — you maintain it for every agent you start
 
-- Rely on **notifications / watches on worker state** (turn finished, waiting for input, message,
-  ended) — your harness's equivalent. **Do not poll.**
-- **Heartbeat**: a long fallback, a keep-warm check about every 10 minutes. If the active [F]
-  worker has had no activity for ~50 minutes, ping it for a one-line status; resume it if ended.
+**This is a duty, not a tip.** Every session or subagent you start has a reporting channel back to
+you, and keeping it open, watched and read is **your** job from the moment the child starts until
+you have relayed its final report. A child that reports into a channel nobody reads has not been
+heard, and anything you tell the operator about it is a guess.
+
+> **Why this rule exists.** On 2026-11-24 a diagnostics child sent its report twice on its
+> reporting channel. The orchestrator had never subscribed to the child's messages and never read
+> them, then told the operator the child had failed to report. The child had done its job. The
+> orchestrator had not.
+
+### 6.1 Ask for reports, in every brief
+
+Every brief names **the child's reporting channel** — the exact route it reports on — and **how
+often** it reports: on start, at each milestone, at once on any blocker or decision, at the end,
+and at least every N minutes in between (~50 for a long [G]/[W]/[F] worker, less for short jobs).
+Choose a channel **you can read later**; never let a child pick its own, and never accept one you
+have no way to read.
+
+For example, in tddy: a session on your host reports with `tddy-tools send --to <your session id>`.
+
+### 6.2 Keep listening — subscribe right after the start
+
+**Right after starting a child**, before you do anything else, set up **a subscription or watch
+that tells you when the child messages or ends** — one that wakes you even while you are idle
+between turns. **Never rely on remembering to poll.** Check that the subscription exists, and
+renew it before it expires while the child lives.
+
+For example, in tddy: `CreateSessionWatch` on `message` and `ended`, with `wake_when_idle`.
+
+### 6.3 Read before acting
+
+Before you **answer the operator about a child**, **ask a child anything**, or **conclude that a
+child is silent, stuck or failed**, **read the child's messages and its transcript**. A
+notification says *that* something arrived; the messages and the transcript say *what*. Never state
+a child's status from memory or from the last notification you happened to see.
+
+For example, in tddy: `ReadSessionMessages` and `ReadSessionTranscript`.
+
+### 6.4 Silence is a signal
+
+A child that **misses its reporting interval** gets checked at once: its transcript, its terminal
+and its recent activity. Then **tell the operator** what you found — still working, waiting for
+input, stuck, ended. **Never assume a silent child is still working.** If it ended, resume or
+restart it; if it is waiting, answer it.
+
+An idle "waiting for input" right after a status report is **normal** — that is the child doing
+what it was told, not silence.
+
+### 6.5 Close the loop
+
+When a child **ends**, read its **final report** (messages and transcript), **relay it to the
+operator**, and **only then** drop its subscription. A subscription dropped before the final report
+is read loses the one message that mattered.
+
+### 6.6 Keep-warm and CI watching
+
+- **Heartbeat**: besides the subscriptions, a long fallback — a keep-warm check about every 10
+  minutes. If the active [F] worker has had no activity for ~50 minutes, treat it as §6.4.
 - **Exactly one CI watcher per PR.** A timed-out foreground watch keeps running and burns the
   shared API rate limit; never start a second.
-- An idle "waiting for input" right after a status report is **normal** — do not react. Peek at the
-  worker's screen only when its reports stop.
 
 ## 7. The sweep and the TODO gate
 
@@ -189,7 +271,7 @@ pipeline and verification as any task.
 | Operator away | do not ask; take the recommended option at **pre-approved** forks; record each decision |
 | Not pre-approved (others' resources, merging, a hand move the tooling refused) | **park** with a notification; do not do it |
 | Notifications | only on completion or a real block — never routine progress |
-| Every stage transition | re-post the status table: **task, PR, stage, state, head SHA** |
+| Every stage transition | update the work queue (§1), then re-post the status table: **task, PR, stage, state, head SHA** |
 | Trunk moves (earlier tasks merged) | refresh, check which open tasks need a rebase, tell those workers |
 
 **Final report**: what is green (with counts), decisions taken on the operator's behalf, cleanup
@@ -205,4 +287,5 @@ done, open decisions (TODO gate, approvals, the merge).
 | **Pattern-kill** | forbid it in every brief; kill only recorded PIDs; check other workers' state after any incident |
 | **CI cancelled by ready-after-push** | re-run the cancelled runs; ready only after the push build starts, or re-run |
 | **Disk full** | stop new starts, delete idle builds, shrink workers, ask before touching foreign worktrees |
+| **"The child never reported"** | it probably did: read its messages and transcript before saying so; a missing subscription is your defect (§6) |
 | **Rebased base / queue merged mid-run** | refresh trunk, recompute which tasks sit on a stale base, rebase bottom-up (≤2 PRs building at once), repoint bases **before** pushing rebuilt branches, tell affected workers, re-verify rollups |
