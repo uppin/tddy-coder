@@ -9,6 +9,7 @@
 import React from "react";
 import { create } from "@bufbuild/protobuf";
 import { SessionEntrySchema, type SessionEntry } from "tddy-client-web/gen/session_pb";
+import { SessionAgentActivitySchema } from "tddy-client-web/gen/types_pb";
 import { SessionDrawer } from "../../src/SessionDrawer";
 import { TooltipProvider } from "tddy-ui-web";
 import { byTestId, sessionsDrawerItem, sessionRowSelect, TEST_IDS } from "../support/testIds";
@@ -39,6 +40,32 @@ function aNeedsInputSession(sessionId: string): SessionEntry {
 /** A disconnected (grey-dot) session — finished/history. */
 function aDisconnectedSession(sessionId: string): SessionEntry {
   return { ...aConnectedSession(sessionId), isActive: false, status: "exited", pid: 0 };
+}
+
+/** A connected session started at `createdAt`, by `orchestratorSessionId` when given. */
+function aSessionStartedAt(sessionId: string, createdAt: string, orchestratorSessionId = ""): SessionEntry {
+  return { ...aConnectedSession(sessionId), createdAt, orchestratorSessionId };
+}
+
+/** A disconnected session last updated at `updatedAt`, its agent last seen at `lastActivityAt`. */
+function aSessionEndedAt(sessionId: string, updatedAt: string, lastActivityAt?: string): SessionEntry {
+  return {
+    ...aDisconnectedSession(sessionId),
+    updatedAt,
+    lastActivity:
+      lastActivityAt === undefined
+        ? undefined
+        : create(SessionAgentActivitySchema, { atUnixMs: BigInt(Date.parse(lastActivityAt)), summary: "edited a file" }),
+  };
+}
+
+/** The ids among `sessionIds` in the order their drawer rows appear in the DOM, shown or folded. */
+function rowOrderOf(sessionIds: string[]): Cypress.Chainable<string[]> {
+  return cy.get("[data-testid^='sessions-drawer-item-']").then(($rows) =>
+    [...$rows]
+      .map((el) => el.getAttribute("data-testid")!.replace(/^sessions-drawer-item-/, ""))
+      .filter((id) => sessionIds.includes(id)),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -162,6 +189,70 @@ describe("Sessions drawer — active / remaining separator", () => {
     byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining).should("not.exist");
     drawer.row("live-1").should("be.visible");
     drawer.row("live-2").should("be.visible");
+  });
+
+  it("folds every session under a collapsed More when none is active", () => {
+    // Given — a project whose sessions have all ended
+    const drawer = aSessionsDrawer([
+      aDisconnectedSession("done-1"),
+      aDisconnectedSession("done-2"),
+    ]).mount();
+
+    // Then — the ended rows sit under More, collapsed like any other
+    drawer.remainingSeparator().invoke("text").should("equal", "More (2)");
+    drawer.row("done-1").should("not.be.visible");
+    drawer.row("done-2").should("not.be.visible");
+
+    // When — the operator opens More
+    drawer.clickRemainingSeparator();
+
+    // Then
+    drawer.row("done-1").should("be.visible");
+    drawer.row("done-2").should("be.visible");
+  });
+
+  it("lists active sessions newest-started first, each started session right after its starter", () => {
+    // Given — live sessions, one orchestrator having started two of them
+    const sessions = [
+      aSessionStartedAt("oldest", "2026-11-20T08:00:00Z"),
+      aSessionStartedAt("orch", "2026-11-20T09:00:00Z"),
+      aSessionStartedAt("orch-kid-1", "2026-11-20T10:00:00Z", "orch"),
+      aSessionStartedAt("orch-kid-2", "2026-11-20T11:00:00Z", "orch"),
+      aSessionStartedAt("newest", "2026-11-20T12:00:00Z"),
+    ];
+
+    // When
+    aSessionsDrawer(sessions).mount();
+
+    // Then
+    rowOrderOf(sessions.map((s) => s.sessionId)).should("deep.equal", [
+      "newest",
+      "orch",
+      "orch-kid-2",
+      "orch-kid-1",
+      "oldest",
+    ]);
+  });
+
+  it("lists the sessions under More most recently stopped or active first", () => {
+    // Given — ended sessions; the latest of each one's update and agent activity places it
+    const sessions = [
+      aSessionEndedAt("ended-long-ago", "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z"),
+      aSessionEndedAt("stopped-just-now", "2026-11-24T12:00:00Z", "2026-11-20T00:00:00Z"),
+      aSessionEndedAt("busy-till-late", "2026-11-21T00:00:00Z", "2026-11-24T11:00:00Z"),
+      aSessionEndedAt("never-active", "2026-11-23T00:00:00Z"),
+    ];
+
+    // When
+    aSessionsDrawer([aConnectedSession("live"), ...sessions]).mount();
+
+    // Then
+    rowOrderOf(sessions.map((s) => s.sessionId)).should("deep.equal", [
+      "stopped-just-now",
+      "busy-till-late",
+      "never-active",
+      "ended-long-ago",
+    ]);
   });
 
   it("keeps remaining-partition checkboxes reachable during bulk selection", () => {

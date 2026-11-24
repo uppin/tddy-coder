@@ -172,7 +172,7 @@ describe("Input on a session's desktop", () => {
       withSelectedDaemon(<SessionsDrawerScreen />),
       backend,
     );
-    sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
     sessionsDrawerPage.inspectorScreenSharingTab().click();
     sessionsDrawerPage.screenSharingStartBtn(A_SESSION_TARGET.id).click();
     desktopPage.root().should("exist");

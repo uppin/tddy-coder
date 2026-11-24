@@ -1,11 +1,11 @@
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 
 /**
- * Parse `createdAt` as ISO-8601 (or other strings `Date` understands).
+ * Parse an RFC 3339 timestamp (`createdAt`, `updatedAt`) as ISO-8601 (or other strings `Date` understands).
  * Returns `NaN` when the value is not a valid date — callers use `sessionId` for ordering.
  */
-function createdAtMs(createdAt: string): number {
-  const ms = Date.parse(createdAt);
+function timestampMs(value: string): number {
+  const ms = Date.parse(value);
   return Number.isFinite(ms) ? ms : Number.NaN;
 }
 
@@ -19,8 +19,8 @@ function compareSessionsForDisplay(a: SessionEntry, b: SessionEntry): number {
   if (a.isActive !== b.isActive) {
     return a.isActive ? -1 : 1;
   }
-  const ta = createdAtMs(a.createdAt);
-  const tb = createdAtMs(b.createdAt);
+  const ta = timestampMs(a.createdAt);
+  const tb = timestampMs(b.createdAt);
   if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) {
     return tb - ta;
   }
@@ -44,8 +44,8 @@ export function sortSessionsForDisplay(sessions: SessionEntry[]): SessionEntry[]
  * 2. If timestamps are equal or either side fails to parse, order by `sessionId` ascending.
  */
 function compareSessionsByCreation(a: SessionEntry, b: SessionEntry): number {
-  const ta = createdAtMs(a.createdAt);
-  const tb = createdAtMs(b.createdAt);
+  const ta = timestampMs(a.createdAt);
+  const tb = timestampMs(b.createdAt);
   if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) {
     return tb - ta;
   }
@@ -60,4 +60,34 @@ function compareSessionsByCreation(a: SessionEntry, b: SessionEntry): number {
  */
 export function sortSessionsByCreation(sessions: SessionEntry[]): SessionEntry[] {
   return [...sessions].sort(compareSessionsByCreation);
+}
+
+/**
+ * When the session was last touched: the later of its agent's last observed activity
+ * (`lastActivity.atUnixMs`) and its last metadata update (`updatedAt`, which the daemon bumps on a
+ * hook-reported status change such as a session ending). `NaN` when neither is known.
+ */
+export function sessionLastTouchedMs(session: SessionEntry): number {
+  const activityMs = session.lastActivity ? Number(session.lastActivity.atUnixMs) : Number.NaN;
+  const updatedMs = timestampMs(session.updatedAt);
+  const known = [activityMs, updatedMs].filter((ms) => Number.isFinite(ms) && ms > 0);
+  return known.length > 0 ? Math.max(...known) : Number.NaN;
+}
+
+/**
+ * Orders sessions by {@link sessionLastTouchedMs}, most recent first — how the drawer lists the
+ * sessions under **More**, so the one that stopped most recently leads.
+ *
+ * Tie-break: `sessionId` ascending. A session with no known time sorts after every one with a time.
+ */
+export function sortSessionsByLastTouched(sessions: SessionEntry[]): SessionEntry[] {
+  return [...sessions].sort((a, b) => {
+    const ta = sessionLastTouchedMs(a);
+    const tb = sessionLastTouchedMs(b);
+    const knownA = Number.isFinite(ta);
+    const knownB = Number.isFinite(tb);
+    if (knownA !== knownB) return knownA ? -1 : 1;
+    if (knownA && ta !== tb) return tb - ta;
+    return a.sessionId.localeCompare(b.sessionId);
+  });
 }

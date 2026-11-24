@@ -91,7 +91,7 @@ it("the resolved host is written back into a URL that carried none", () => {
 it("switching host drops the selected session from the URL", () => {
   // Given — a session selected on the first host
   mountWithBothHosts();
-  sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
   appLocationPage.expectPath(`/sessions/${SESSION.sessionId}`);
 
   // When — the operator switches to a host that does not own that session

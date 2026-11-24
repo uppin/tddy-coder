@@ -130,7 +130,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
 
     // Then
@@ -148,7 +148,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorExpand().click();
@@ -173,7 +173,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
     sessionsDrawerPage.inspectorClose().click();
@@ -192,7 +192,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(SESSION_WITH_NEW_FIELDS.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(SESSION_WITH_NEW_FIELDS.sessionId);
     sessionsDrawerPage.inspectorDetailsTab().click();
 
     // Then
@@ -214,7 +214,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 
@@ -236,7 +236,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorDetailsTab().click();
 
     // First click — shows confirm button, does NOT call delete yet
@@ -293,7 +293,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -316,7 +316,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -355,7 +355,7 @@ describe("SessionInspectorAcceptance — inspector drawer open/expand/close and 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorAgentsTab().click();
 
@@ -392,7 +392,7 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
     });
 
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -424,10 +424,9 @@ describe("SessionInspectorAcceptance — the attachment does not drive the inspe
     sessionsDrawerPage.drawerItem(CONNECTED_SESSION_A.sessionId).click();
     sessionsDrawerPage.inspectorDrawer().should("have.attr", "data-state", "closed");
 
-    // When — switching selection drops the attachment back to idle. The disconnected row lives in
-    // the default-collapsed Remaining partition, so expand it first.
-    sessionsDrawerPage.expandRemaining();
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    // When — switching selection drops the attachment back to idle (the disconnected row lives
+    // under the default-collapsed More fold)
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
 
     // Then — the new selection really did take (its Agent tab is the observable proof), and the
     // drawer was not opened for it

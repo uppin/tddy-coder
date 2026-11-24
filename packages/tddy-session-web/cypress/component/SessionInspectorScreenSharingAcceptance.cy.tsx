@@ -54,7 +54,7 @@ it("shows a Screen Sharing tab in the inspector tab strip alongside Details and 
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorToggle().click();
   page.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -75,7 +75,7 @@ it("renders the Screen Sharing tab panel when the Screen Sharing tab is clicked"
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
 
   // Then
@@ -94,7 +94,7 @@ it("shows an empty target list and an Add form with protocol selector when no ta
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
 
   // Then
@@ -116,7 +116,7 @@ it("selecting VNC protocol defaults the port to 5900", () => {
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddProtocol().select("VNC");
 
@@ -139,7 +139,7 @@ it("selecting RDP protocol defaults the port to 3389", () => {
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddProtocol().select("RDP");
 
@@ -172,7 +172,7 @@ it("submitting VNC target calls AddTarget with protocol VNC and correct fields",
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddLabel().type("VNC Dev VM");
   page.screenSharingAddHost().type("192.168.1.5");
@@ -212,7 +212,7 @@ it("submitting RDP target calls AddTarget with protocol RDP and correct fields",
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddLabel().type("Windows Server");
   page.screenSharingAddHost().type("10.0.0.10");
@@ -252,7 +252,7 @@ it("adds a desktop that has a password without asking for a second secret", () =
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
   page.screenSharingAddLabel().type("Secure VM");
   page.screenSharingAddHost().type("10.0.0.1");
@@ -283,7 +283,7 @@ it("tells the operator the credential store is locked rather than showing no des
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorScreenSharingTab().click();
 
   // Then — rendering this as "no desktops" would tell the operator to add machines they already

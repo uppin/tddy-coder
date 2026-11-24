@@ -77,7 +77,7 @@ function aStoppedSessionBackend({
 
 function selectTheStoppedSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(STOPPED.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(STOPPED.sessionId);
 }
 
 describe("A stopped session's Agent tab", () => {

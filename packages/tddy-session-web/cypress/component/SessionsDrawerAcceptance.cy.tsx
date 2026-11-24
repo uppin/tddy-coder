@@ -263,7 +263,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
     // When — the inspector waits to be asked for, whatever the session's liveness
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorToggle().click();
     sessionsDrawerPage.inspectorDetailsTab().click();
 
@@ -284,7 +284,7 @@ describe("SessionsDrawerAcceptance — session list, status, labels, and detail 
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     sessionsDrawerPage.inspectorDetailsTab().click();
     sessionsDrawerPage.inspectorResumeBtn(DISCONNECTED_SESSION.sessionId).click();
 

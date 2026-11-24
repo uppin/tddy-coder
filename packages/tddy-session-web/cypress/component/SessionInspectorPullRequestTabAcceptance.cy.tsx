@@ -90,7 +90,7 @@ function aBackendServing(sessions: ReturnType<typeof aSession>[]) {
 
 function openInspectorOf(sessionId: string, sessions: ReturnType<typeof aSession>[]) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), aBackendServing(sessions));
-  sessionsDrawerPage.drawerItem(sessionId).click();
+  sessionsDrawerPage.selectEndedSession(sessionId);
   sessionsDrawerPage.inspectorToggle().click();
 }
 

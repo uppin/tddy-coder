@@ -76,7 +76,7 @@ function previewMainRsIn(host: CodeIndexHost) {
     withSelectedDaemon(<SessionsDrawerScreen />),
     host.backend(aSessionsDrawerBackend([SESSION])),
   );
-  sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
   worktreeCodePanePage.node("src").click();
   worktreeCodePanePage.node("src/main.rs").click();

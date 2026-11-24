@@ -114,7 +114,7 @@ describe("SessionTerminalFeedRecovery — a live session re-attaches after its f
     // When — the operator resumes it from the top bar and the daemon reports it alive, and the
     // terminal feed it was given drops. The operator does nothing else: no re-selection, no reload.
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     sessionActivitiesPage.resume(DORMANT.sessionId);
     cy.then(() => {
       sessionIsLive = true;
@@ -140,7 +140,7 @@ describe("SessionTerminalFeedRecovery — a live session re-attaches after its f
 
     // When — it is resumed once and the feed drops
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     sessionActivitiesPage.resume(DORMANT.sessionId);
     cy.then(() => {
       sessionIsLive = true;

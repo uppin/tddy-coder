@@ -84,9 +84,8 @@ describe("SessionStartResumeStillDaemonRouted — bootstrap RPCs keep targeting 
       withSelectedDaemon(<SessionsDrawerScreen />, [{ instanceId: DAEMON_INSTANCE_ID, label: "local" }]),
       backend,
     );
-    // The disconnected row lives in the default-collapsed Remaining partition — expand it first.
-    sessionsDrawerPage.expandRemaining();
-    sessionsDrawerPage.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    // The disconnected row lives under the default-collapsed More fold.
+    sessionsDrawerPage.selectEndedSession(DISCONNECTED_SESSION.sessionId);
 
     // When — the user resumes the session
     // The action buttons live on Details; a session without a PR opens on Worktree.

@@ -107,6 +107,22 @@ export const sessionsDrawerPage = {
   expandRemaining: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawerSeparatorRemaining, { timeout: 5000, ...options }).click(),
 
+  /**
+   * Select an ended session: its row sits under its project's **More** fold, so open that fold
+   * first unless it is already open (`aria-expanded`), then click the row. Fails when the row is not
+   * under a **More** — an active session is selected with `drawerItem(id).click()`.
+   */
+  selectEndedSession: (sessionId: string) => {
+    const more = `[data-testid='${TEST_IDS.sessionsDrawerSeparatorRemaining}']`;
+    byTestId(sessionsDrawerItem(sessionId), { timeout: 5000 })
+      .closest(`div:has(> ${more})`)
+      .children(more)
+      .then(($more) => {
+        if ($more.attr("aria-expanded") !== "true") cy.wrap($more).click();
+      });
+    return byTestId(sessionsDrawerItem(sessionId), { timeout: 5000 }).click();
+  },
+
   /** Asserts the given session's drawer row is the currently selected one. */
   expectSelected: (sessionId: string) => {
     byTestId(sessionsDrawerItem(sessionId), { timeout: 5000 }).should(

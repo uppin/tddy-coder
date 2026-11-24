@@ -182,7 +182,7 @@ describe("the selected session's actions", () => {
   it("says the owning host is not connected when resuming a session on it", () => {
     // Given a dormant session on a host no wire reaches
     mountDrawer(aSessionServiceBackend({ sessions: [DORMANT_ELSEWHERE] }));
-    sessionsDrawerPage.drawerItem(DORMANT_ELSEWHERE.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DORMANT_ELSEWHERE.sessionId);
 
     // When
     sessionsDrawerPage.inspectorDetailsTab().click();
@@ -195,7 +195,7 @@ describe("the selected session's actions", () => {
   it("says the owning host is not connected when deleting a session on it", () => {
     // Given
     mountDrawer(aSessionServiceBackend({ sessions: [DORMANT_ELSEWHERE] }));
-    sessionsDrawerPage.drawerItem(DORMANT_ELSEWHERE.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DORMANT_ELSEWHERE.sessionId);
 
     // When
     sessionsDrawerPage.inspectorDetailsTab().click();
@@ -239,7 +239,7 @@ describe("the selected session's actions", () => {
       "the session's worktree was removed",
     );
     mountDrawer(backend);
-    sessionsDrawerPage.drawerItem(DORMANT.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DORMANT.sessionId);
 
     // When
     sessionsDrawerPage.inspectorDetailsTab().click();
@@ -257,7 +257,7 @@ describe("the selected session's actions", () => {
       "only the session's owner may delete it",
     );
     mountDrawer(backend);
-    sessionsDrawerPage.drawerItem(DORMANT.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(DORMANT.sessionId);
 
     // When
     sessionsDrawerPage.inspectorDetailsTab().click();
@@ -327,7 +327,7 @@ describe("bulk delete", () => {
       },
     );
     mountDrawer(backend);
-    sessionsDrawerPage.drawerItem(SESSION_A.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(SESSION_A.sessionId);
 
     // When
     errors.bulkDelete([SESSION_B.sessionId]);

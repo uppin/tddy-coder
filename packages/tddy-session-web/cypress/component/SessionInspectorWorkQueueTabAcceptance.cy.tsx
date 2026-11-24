@@ -63,7 +63,7 @@ function aBackendServing(sessions: ReturnType<typeof aSession>[]) {
 function openSessionOf(sessionId: string, sessions: ReturnType<typeof aSession>[]) {
   const served = aBackendServing(sessions);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), served.backend);
-  sessionsDrawerPage.drawerItem(sessionId).click();
+  sessionsDrawerPage.selectEndedSession(sessionId);
   return served;
 }
 

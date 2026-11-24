@@ -59,7 +59,7 @@ it("a session recorded with the removed stack recipe opens in the workflow chat 
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(LEGACY_STACK_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(LEGACY_STACK_SESSION.sessionId);
 
   // Then
   workflowChatScreenPage.screen().should("exist");

@@ -91,7 +91,7 @@ beforeEach(() => {
 it("choosing an inspector tab records that tab in the URL", () => {
   // Given — a selected session whose inspector the operator opens, landing on the Worktree tab (the default for a session without a PR)
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
   sessionsDrawerPage.inspectorToggle().click();
   appLocationPage.expectParam("inspector", "worktree");
 
@@ -133,7 +133,7 @@ it("an unknown ?inspector= value falls back to the Details tab", () => {
 it("closing the inspector drops the inspector param from the URL", () => {
   // Given — a selected session whose inspector the operator opened, recorded in the URL
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
   sessionsDrawerPage.inspectorToggle().click();
   sessionsDrawerPage.expectInspectorState("open");
   appLocationPage.expectParam("inspector", "worktree");
@@ -149,7 +149,7 @@ it("closing the inspector drops the inspector param from the URL", () => {
 it("expanding the inspector records full=1 in the URL", () => {
   // Given
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
   sessionsDrawerPage.inspectorToggle().click();
   sessionsDrawerPage.expectInspectorState("open");
 
@@ -179,7 +179,7 @@ it("an ?inspector=&full=1 deep link opens the inspector expanded", () => {
 it("opening the Code pane records code=1 in the URL", () => {
   // Given
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(SESSION.sessionId);
 
   // When
   sessionsDrawerPage.codeToggle().click();
