@@ -136,16 +136,29 @@ as done.
 
 | Layer | File | Covers |
 |---|---|---|
-| Rust unit | `tddy-worktree-service/src/worktree_loss.rs` (unit) | porcelain parsing per change kind, ignored excluded, unpushed vs remotes and base, target reader over `InMemoryShell` |
+| Rust integration | `tddy-worktree-service/tests/worktree_loss.rs` | porcelain parsing per change kind (literal `-z` strings), each change kind over a real repo, ignored excluded, unpushed vs remotes and base, the 20-commit list and full count, the target reader over `LocalShell` agreeing with the local one, an unreachable target (`InMemoryShell`) is an error |
+| Rust integration | `tddy-worktree-service/tests/target_worktree_actions_acceptance.rs` (extended) | `remove_target_worktree` of a worktree already gone succeeds; of one whose directory vanished, prunes its registration |
 | Daemon integration | `tddy-session-lifecycle/tests/close_session.rs` | preview of clean / dirty / committed-not-pushed; unconfirmed dirty close does nothing; confirmed close ends main + tmux tab + conversation and removes worktrees, keeps record and branch; fingerprint drift refused; a surviving tab skips removal; `holds_worktree` false after close; two sessions close concurrently; a second close of a closing session is refused |
-| Daemon integration | `tddy-session-lifecycle/tests/close_target_session.rs` | target worktree preview and removal over the stand-in target; unreachable target → `unavailable_reason`, nothing done |
-| Daemon integration | `tddy-session-lifecycle/tests/delete_session.rs` (extended) | delete kills non-main tmux tab sessions; delete of a closed (worktree-removed) session succeeds |
+| Daemon integration | `tddy-session-lifecycle/tests/close_target_session.rs` | target worktree preview and removal over the stand-in target; unreachable target → `unavailable_reason`, nothing done; delete of a target session whose worktree is already gone succeeds |
+| Daemon integration | `tddy-session-lifecycle/tests/delete_session.rs` (extended) | delete kills non-main tmux tab sessions; delete of a closed session, and of one whose worktree was removed outside the daemon, succeeds |
 | Cypress component | `tddy-session-web/cypress/component/SessionsDrawerClose.cy.tsx` | × only on active rows, trash only on inactive rows holding a worktree; clean → no dialog; dirty → dialog per worktree; Cancel sends nothing; Confirm sends confirmed + fingerprint; unreadable → Retry; children choice; failure notice; spinner while closing; a second row closes while the first is still running |
 
 ## Refactoring Needed
 
 ### From /red (TDD Red Phase)
-- [ ] (filled in after the red phase)
+- [ ] `close_target_session.rs` re-builds the stand-in-ssh daemon of `remote_target_session_acceptance.rs`
+  (`ADaemonWithATarget`, the stub agent, the start request): extract one shared `target_session_support`
+  module for both suites.
+- [ ] A `git(dir, args)` helper is now written out in `tmux_agent_support/close_session.rs`,
+  `worktree_loss.rs`, `worktree_sync_acceptance.rs` and `target_session_support`: one in
+  `tddy-testing-commons`.
+- [ ] `worktree_loss.rs`'s `ASessionWorktree` repeats `worktree_sync_acceptance.rs`'s `a_repo_world`
+  (bare origin + tracking clone): share the builder.
+- [ ] `close_events_support` (the `CloseEvents` reader) is reached from `tmux_agent_support` by a
+  `#[path]` module so the target suite can declare it alone; fold it into a shared target/tmux support
+  crate module if more suites need it.
+- [ ] Subagent-conversation coverage of a close is not in the lifecycle suites: conversations are opened
+  only through `tddy-daemon-rpc`'s harness. Add a close case there (`session_agent_conversation_acceptance.rs`).
 - [ ] Web: `closeSessionPage.revealEndedRow` copies the More-fold logic of
   `sessionsDrawerPage.selectEndedSession`; extract one shared "open the fold this row is under"
   helper and have both use it.

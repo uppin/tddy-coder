@@ -8,6 +8,10 @@
 
 #![allow(dead_code)]
 
+#[path = "../close_events_support/mod.rs"]
+pub mod close_events;
+pub mod close_session;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -54,6 +58,9 @@ pub enum AgentTemperament {
     /// Ignores SIGHUP and never reads its pane, so nothing a tmux kill does ends it: only a
     /// signal sent to its own pid does.
     IgnoresHangupAndNeverReadsItsPane,
+    /// Ignores SIGHUP and SIGTERM too, and never reads its pane: only SIGKILL ends it, so whatever
+    /// ends it waits out its whole grace first.
+    IgnoresHangupAndTerminationAndNeverReadsItsPane,
 }
 
 pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon {
@@ -64,16 +71,23 @@ pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDae
     let environment = stub_dir.path().join("environment.txt");
     let working_directory = stub_dir.path().join("cwd.txt");
     let mut stub = a_stub_agent_script(stub_dir.path(), "stub_claude.sh");
-    if !matches!(temperament, AgentTemperament::HoldsItsPane) {
-        // An ignored signal stays ignored across `exec`, so what the stub ends in ignores it too.
-        stub = stub.with_prelude("trap '' HUP");
+    // An ignored signal stays ignored across `exec`, so what the stub ends in ignores it too.
+    match temperament {
+        AgentTemperament::HoldsItsPane => {}
+        AgentTemperament::IgnoresHangupAndNeverReadsItsPane => {
+            stub = stub.with_prelude("trap '' HUP");
+        }
+        AgentTemperament::IgnoresHangupAndTerminationAndNeverReadsItsPane => {
+            stub = stub.with_prelude("trap '' HUP TERM");
+        }
     }
     let stub = stub
         .with_prelude(&format!("pwd -P > \"{}\"", working_directory.display()))
         .recording_env_to(&environment, &["CLAUDE_CODE_NO_FLICKER"])
         .appending_argv_to(&launches);
     let stub = match temperament {
-        AgentTemperament::IgnoresHangupAndNeverReadsItsPane => {
+        AgentTemperament::IgnoresHangupAndNeverReadsItsPane
+        | AgentTemperament::IgnoresHangupAndTerminationAndNeverReadsItsPane => {
             // The pane's terminal stays its stdin/stdout/stderr: a process that closed every slave
             // end would make tmux see its pty close on Linux and destroy the session at once,
             // before the test has a session to delete.

@@ -12,8 +12,10 @@
 mod target_session_support;
 
 use pretty_assertions::assert_eq;
+use tddy_remote_shell::SshShell;
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::worktree::*;
+use tddy_worktree_service::target_worktrees::remove_target_worktree;
 use tddy_worktree_service::test_util::TEST_TOKEN;
 
 use target_session_support::{
@@ -78,6 +80,23 @@ impl ADaemon {
             }))
             .await
             .map(|r| r.into_inner())
+    }
+
+    /// The session's worktree directory vanished on the target — deleted outside git, so the
+    /// target's clone still lists it.
+    fn worktree_directory_vanished_on_the_target(&self) {
+        std::fs::remove_dir_all(self.remote_worktree()).unwrap();
+    }
+
+    /// Whether the target's clone still lists the session's worktree.
+    fn target_clone_lists_the_worktree(&self) -> bool {
+        git_output(&self.remote_clone(), &["worktree", "list", "--porcelain"]).contains(SESSION_ID)
+    }
+
+    /// Remove the session's worktree on the target directly, through the stand-in's `ssh`.
+    async fn removes_the_target_worktree(&self) -> Result<(), Status> {
+        let shell = SshShell::through(self.target.root.join("bin/ssh"), "devbox");
+        remove_target_worktree(&shell, REMOTE_WORKTREE).await
     }
 
     async fn removes(&self) -> Result<RemoveWorktreeResponse, Status> {
@@ -194,5 +213,49 @@ async fn an_action_on_an_unreachable_target_fails_with_its_reason_and_changes_no
             daemon.local_worktree_count(),
         ),
         (Some((Code::FailedPrecondition, true)), true, 1)
+    );
+}
+
+#[tokio::test]
+async fn removing_a_target_worktree_that_is_already_gone_succeeds() {
+    // Given a target session whose worktree was already removed on the target
+    let daemon = a_daemon_with_a_target_session(reachable);
+    daemon.worktree_is_gone_on_the_target();
+
+    // When
+    let removed = daemon.removes_the_target_worktree().await;
+
+    // Then a worktree already gone counts as removed
+    assert_eq!(
+        (
+            removed.map_err(|s| s.message().to_string()),
+            daemon.remote_worktree().exists(),
+            daemon.target_clone_lists_the_worktree(),
+        ),
+        (Ok(()), false, false)
+    );
+}
+
+#[tokio::test]
+async fn removing_a_target_worktree_whose_directory_vanished_prunes_its_registration() {
+    // Given a target session whose worktree directory was deleted outside git, so the target's
+    // clone still lists it
+    let daemon = a_daemon_with_a_target_session(reachable);
+    daemon.worktree_directory_vanished_on_the_target();
+    assert!(
+        daemon.target_clone_lists_the_worktree(),
+        "the clone lists the vanished worktree before the removal"
+    );
+
+    // When
+    let removed = daemon.removes_the_target_worktree().await;
+
+    // Then the removal succeeds and the clone no longer lists it
+    assert_eq!(
+        (
+            removed.map_err(|s| s.message().to_string()),
+            daemon.target_clone_lists_the_worktree(),
+        ),
+        (Ok(()), false)
     );
 }

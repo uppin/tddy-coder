@@ -8,6 +8,10 @@
 //! that started when the agent did, as the session's tab roster recorded (`#tab-hardening` 2/4).
 //! Those run a real, private tmux (`support::PrivateTmux`) and a stub agent that ignores SIGHUP;
 //! serial, since the tmux socket directory is process-wide environment.
+//!
+//! A delete also kills the tmux sessions of the session's tmux-wrapped tabs, and treats a worktree
+//! that is already gone — removed outside the daemon, or by a close — as removed
+//! (docs/ft/daemon/session-liveness.md § Closing a session).
 
 mod support;
 mod tmux_agent_support;
@@ -206,5 +210,72 @@ async fn a_tmux_run_session_records_when_its_agent_started() {
     assert_eq!(
         daemon.recorded_agent_start(&session_id),
         process_start(agent)
+    );
+}
+
+/// Deleting a session ends its tmux-wrapped agent tabs too, not only the tmux session
+/// its main runs in — a tab's tmux session would otherwise keep its agent running with no session
+/// left to reclaim it.
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_session_kills_the_tmux_sessions_of_its_tabs() {
+    // Given a running tmux-run session with a tmux-wrapped agent tab open
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let (_tab, tab_tmux) = daemon.opens_a_tmux_wrapped_agent_tab(&session_id).await;
+
+    // When it is deleted
+    daemon.deletes(&session_id).await;
+
+    // Then the tab's tmux session is gone with it
+    eventually("the tab's tmux session to be gone", OBSERVE, || {
+        (!daemon.tmux.has_session(&tab_tmux))
+            .then_some(())
+            .ok_or_else(|| format!("tmux session {tab_tmux:?} is still alive"))
+    })
+    .await;
+}
+
+/// A session whose worktree is already gone is deleted all the same.
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_session_whose_worktree_was_already_removed_succeeds() {
+    // Given a running session whose worktree was removed outside the daemon
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    daemon.worktree_is_removed_outside_the_daemon(&session_id);
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            deleted.map_err(|s| s.message().to_string()),
+            daemon.session_dir(&session_id).exists()
+        ),
+        (Ok(()), false)
+    );
+}
+
+/// A session that was closed — its tabs ended and its worktree removed — is deleted.
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_closed_session_succeeds() {
+    // Given a closed session
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    daemon.closes(&session_id).await.outcome();
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            deleted.map_err(|s| s.message().to_string()),
+            daemon.session_dir(&session_id).exists()
+        ),
+        (Ok(()), false)
     );
 }
