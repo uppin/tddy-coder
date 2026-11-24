@@ -272,6 +272,20 @@ export const TEST_IDS = {
   sessionsDrawerSelectAll: "sessions-drawer-select-all",
   /** Single "delete selected" action button, enabled once ≥1 row checkbox is ticked. */
   sessionsDrawerBulkDelete: "sessions-drawer-bulk-delete",
+
+  // Closing a session from its drawer row (docs/ft/web/session-drawer.md § Closing a session)
+  /** The close dialog: what closing the session would lose, before anything is terminated or removed. */
+  closeSessionDialog: "close-session-dialog",
+  /** Closes the dialog and changes nothing. */
+  closeSessionDialogCancel: "close-session-dialog-cancel",
+  /** "Terminate and remove": runs the close with the list the operator saw. */
+  closeSessionDialogConfirm: "close-session-dialog-confirm",
+  /** Asks the owning host for the preview again, after a worktree could not be read. */
+  closeSessionDialogRetry: "close-session-dialog-retry",
+  /** "Leave them running" — the sessions this one started stay up (the default). */
+  closeSessionDialogChildrenLeave: "close-session-dialog-children-leave",
+  /** "Close them too" — each session this one started is closed after it. */
+  closeSessionDialogChildrenClose: "close-session-dialog-children-close",
   /** Why the selected host's session list could not be loaded (the last good list stays shown). */
   sessionsDrawerLoadError: "sessions-drawer-load-error",
   /** Why the selected session's last pane action (attach, resume, delete, terminate) failed. */
@@ -792,6 +806,28 @@ export const sessionRowSelect = (sessionId: string) => `session-row-select-${ses
 
 /** `[data-testid="sessions-drawer-item-<sessionId>"]` — clickable drawer row */
 export const sessionsDrawerItem = (sessionId: string) => `sessions-drawer-item-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-item-close-<sessionId>"]` — an active row's × (Close session). */
+export const sessionsDrawerItemClose = (sessionId: string) => `sessions-drawer-item-close-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-item-remove-worktree-<sessionId>"]` — an inactive row's trash bin,
+ *  offered while the session still holds a worktree. */
+export const sessionsDrawerItemRemoveWorktree = (sessionId: string) =>
+  `sessions-drawer-item-remove-worktree-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-item-closing-<sessionId>"]` — the mini spinner that replaces a
+ *  row's × / trash bin while its close runs. */
+export const sessionsDrawerItemClosing = (sessionId: string) =>
+  `sessions-drawer-item-closing-${sessionId}`;
+
+/** `[data-testid="sessions-drawer-close-failure-<sessionId>"]` — the drawer notice for a close whose
+ *  outcome carried failed steps. */
+export const sessionsDrawerCloseFailure = (sessionId: string) =>
+  `sessions-drawer-close-failure-${sessionId}`;
+
+/** `[data-testid="close-session-dialog-worktree-<n>"]` — the close dialog's section for the n-th
+ *  (0-based, preview order) worktree. */
+export const closeSessionDialogWorktree = (index: number) => `close-session-dialog-worktree-${index}`;
 
 /** `[data-testid="sessions-drawer-project-group-<projectId|other>"]` — one project's group in the
  *  expanded drawer (`#project-home` 2/7); `other` is the trailing group of project-less sessions. */

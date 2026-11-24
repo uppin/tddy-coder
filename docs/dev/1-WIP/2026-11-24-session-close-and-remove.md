@@ -146,3 +146,9 @@ as done.
 
 ### From /red (TDD Red Phase)
 - [ ] (filled in after the red phase)
+- [ ] Web: `closeSessionPage.revealEndedRow` copies the More-fold logic of
+  `sessionsDrawerPage.selectEndedSession`; extract one shared "open the fold this row is under"
+  helper and have both use it.
+- [ ] Web: `aSessionServiceBackend`'s builders still take `Partial<…Init>` overrides, which `tsc`
+  rejects (pre-existing errors at `aSessionEntry` / `aProjectEntry`); `closeSessionBackend.ts`
+  avoids the pattern, and the rest of the file should follow it.
