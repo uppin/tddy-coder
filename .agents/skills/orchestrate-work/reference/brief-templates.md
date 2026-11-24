@@ -22,6 +22,21 @@ STOP and report if: the base moved unexpectedly, disk is under <floor>, a gate f
 same reason, or the task needs a decision outside its boundaries.
 ```
 
+## Deliverable (one line in every brief — §3)
+
+```
+DELIVERABLE: <a PR READY FOR REVIEW — docs wrapped with /pr-wrap, marked ready, checks read; report
+the PR number and CI state> | <a report over <back channel>, no PR>.
+```
+
+## Investigation (no change delivered)
+
+```
+TASK <title> — investigate / diagnose / answer: <question>. Work in <worktree>; change nothing.
+DELIVERABLE: a report over <back channel>, no PR: findings, evidence (paths, logs, commands), and
+what you recommend. Report "✅ <title>: <one-line answer>" and stop.
+```
+
 ## [G] implement
 
 ```

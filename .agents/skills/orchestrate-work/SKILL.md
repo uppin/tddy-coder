@@ -7,9 +7,11 @@ description: >-
   dependency edges, waves and concurrency caps, the per-task [G] implement / [W] validate+wrap /
   [F] fix pipeline, worker briefs and the forbidden-action list, triage of tasks arriving mid-run,
   verification of "green" claims, the back channel the orchestrator must keep open to every agent
-  it starts (ask for reports, keep a watch, read before acting, treat silence as a signal, close the
-  loop), disk hygiene, the operator protocol, and the end-of-queue sweep with its TODO gate. Use when asked to orchestrate, babysit, run or
-  resume several PRs at once, to feed new work into a running queue, or to supervise workers.
+  it starts (ask for reports, keep a watch, read before acting, treat silence as a signal, close
+  the loop), the tracked work queue every delegated task lives in, the review-ready-PR deliverable
+  for every change request, disk hygiene, the operator protocol, and the end-of-queue sweep with
+  its TODO gate. Use when asked to orchestrate, babysit, run or resume several PRs at once, to
+  feed new work into a running queue, or to supervise workers.
 ---
 
 # Orchestrate work
@@ -58,6 +60,22 @@ edges, with line edges only where code genuinely builds on a predecessor).
 (non-decreasing). Run every task of the current wave **concurrently up to the cap**. A ready task
 never idles behind a neighbour it does not depend on. A task lifted to a later wave moves up.
 
+**Track every task where others can see it — a firm rule.** Every piece of work you delegate is
+recorded in a place the operator and other orchestrators can read, never only in your head or your
+conversation. **Prefer the work queue**:
+
+| When | Call |
+|---|---|
+| You delegate a task | `work_item_add`, one item per task |
+| Its child starts | `work_item_link_session` |
+| A PR exists | `work_item_assign_pr` |
+| Every transition (stage, status) | `work_item_set_status` |
+| It depends on another task | `work_queue_set_dependencies` |
+
+Only when no work queue is available, keep a **plain markdown checklist** instead, one line per
+task: child session, PR, status. Either way, **update it on every transition**, and **read it**
+(`work_queue_status` / `work_queue_list`, or the checklist) **before giving the operator a status**.
+
 ## 2. The per-task pipeline
 
 | Stage | Does | Done when |
@@ -96,6 +114,18 @@ Every brief carries:
 | Reporting | the back channel, cadence, final format |
 | Stop conditions | when to stop and report instead of improvising |
 | Pre-approved / forbidden | explicit lists (below) |
+| Deliverable | a review-ready PR, or a back-channel report and no PR (below) |
+
+**A change request ends in a review-ready PR — a firm rule.** For every brief, decide first whether
+the request **delivers a change**:
+
+| The request | The brief asks for |
+|---|---|
+| Delivers a change (code, docs, config) | a PR **ready for review**, not a draft: docs wrapped with `/pr-wrap`, marked ready, checks read. The child reports the **PR number and its CI state** |
+| Does not (investigation, diagnostics, a question) | a **report over the back channel** (§6) and **no PR** |
+| Ambiguous | **you decide**, state the decision in the brief, and tell the operator which you chose |
+
+A draft PR is never the end of a change request; a child that stops at a draft has not finished.
 
 **Reporting.** A worker reports over **the worker's back channel to the orchestrator** — the
 channel the brief names (§6) — before **every turn ends** and at least every ~50 minutes: a
@@ -247,7 +277,7 @@ pipeline and verification as any task.
 | Operator away | do not ask; take the recommended option at **pre-approved** forks; record each decision |
 | Not pre-approved (others' resources, merging, a hand move the tooling refused) | **park** with a notification; do not do it |
 | Notifications | only on completion or a real block — never routine progress |
-| Every stage transition | re-post the status table: **task, PR, stage, state, head SHA** |
+| Every stage transition | update the work queue (§1), then re-post the status table: **task, PR, stage, state, head SHA** |
 | Trunk moves (earlier tasks merged) | refresh, check which open tasks need a rebase, tell those workers |
 
 **Final report**: what is green (with counts), decisions taken on the operator's behalf, cleanup
