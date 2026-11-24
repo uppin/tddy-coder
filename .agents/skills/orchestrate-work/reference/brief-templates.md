@@ -1,9 +1,8 @@
 # Brief templates
 
-Fill every `<…>`. Keep the forbidden list verbatim. `<back channel>` is the exact route the child
-reports on — for a tddy session on this host, `tddy-tools send --to <orchestrator session id>`; see
-[SKILL.md § 6.1](../SKILL.md#61-ask-for-reports-in-every-brief). Set up your watch on the child right
-after starting it (§ 6.2).
+Fill every `<…>`. Keep the forbidden list verbatim. `<back channel>` is the child's reporting
+channel — the exact route it reports on to you ([SKILL.md § 6.1](../SKILL.md#61-ask-for-reports-in-every-brief)).
+Subscribe to the child's messages and its end right after starting it (§ 6.2).
 
 ## Shared footer (append to every brief)
 
@@ -25,7 +24,7 @@ same reason, or the task needs a decision outside its boundaries.
 ## Deliverable (one line in every brief — §3)
 
 ```
-DELIVERABLE: <a PR READY FOR REVIEW — docs wrapped with /pr-wrap, marked ready, checks read; report
+DELIVERABLE: <a PR READY FOR REVIEW — docs wrapped, marked ready, checks read; report
 the PR number and CI state> | <a report over <back channel>, no PR>.
 ```
 

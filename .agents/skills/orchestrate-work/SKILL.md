@@ -61,20 +61,18 @@ edges, with line edges only where code genuinely builds on a predecessor).
 never idles behind a neighbour it does not depend on. A task lifted to a later wave moves up.
 
 **Track every task where others can see it — a firm rule.** Every piece of work you delegate is
-recorded in a place the operator and other orchestrators can read, never only in your head or your
-conversation. **Prefer the work queue**:
+recorded in a **shared work queue or checklist** that the operator and other orchestrators can
+see, never only in your head or your conversation. Prefer a real work queue when your environment
+has one; fall back to a plain checklist (one line per task: child, PR, status) only when it has
+none.
 
-| When | Call |
-|---|---|
-| You delegate a task | `work_item_add`, one item per task |
-| Its child starts | `work_item_link_session` |
-| A PR exists | `work_item_assign_pr` |
-| Every transition (stage, status) | `work_item_set_status` |
-| It depends on another task | `work_queue_set_dependencies` |
+- **Add an item** for each task the moment you delegate it.
+- **Link each item to its child** when the child starts, and **to its PR** once one exists.
+- **Record dependencies** between items as the queue model above defines them.
+- **Update the item on every transition** — stage, status, blocker, done.
+- **Read the queue before giving the operator a status**, never answer from memory.
 
-Only when no work queue is available, keep a **plain markdown checklist** instead, one line per
-task: child session, PR, status. Either way, **update it on every transition**, and **read it**
-(`work_queue_status` / `work_queue_list`, or the checklist) **before giving the operator a status**.
+For example, in tddy: the `work_item_*` and `work_queue_set_dependencies` tools.
 
 ## 2. The per-task pipeline
 
@@ -121,8 +119,8 @@ the request **delivers a change**:
 
 | The request | The brief asks for |
 |---|---|
-| Delivers a change (code, docs, config) | a PR **ready for review**, not a draft: docs wrapped with `/pr-wrap`, marked ready, checks read. The child reports the **PR number and its CI state** |
-| Does not (investigation, diagnostics, a question) | a **report over the back channel** (§6) and **no PR** |
+| Delivers a change (code, docs, config) | a PR **ready for review**, not a draft: docs wrapped, marked ready, checks read. The child reports the **PR number and its CI state** |
+| Does not (investigation, diagnostics, a question) | a **report on the child's reporting channel** (§6) and **no PR** |
 | Ambiguous | **you decide**, state the decision in the brief, and tell the operator which you chose |
 
 A draft PR is never the end of a change request; a child that stops at a draft has not finished.
@@ -182,72 +180,64 @@ or use the project's sanctioned build trigger **once**.
 
 ## 6. The back channel — you maintain it for every agent you start
 
-**This is a duty, not a tip.** Every session or subagent you start has a back channel to you, and
-keeping it open, watched and read is **your** job from the moment the child starts until you have
-relayed its final report. A child that reports into a channel nobody reads has not been heard, and
-anything you tell the operator about it is a guess.
+**This is a duty, not a tip.** Every session or subagent you start has a reporting channel back to
+you, and keeping it open, watched and read is **your** job from the moment the child starts until
+you have relayed its final report. A child that reports into a channel nobody reads has not been
+heard, and anything you tell the operator about it is a guess.
 
-> **Why this rule exists.** On 2026-11-24 a diagnostics child sent its report twice through
-> `tddy-tools send`. The orchestrator had set up no watch and never read its inbox, then told the
-> operator the child had failed to report. The child had done its job. The orchestrator had not.
+> **Why this rule exists.** On 2026-11-24 a diagnostics child sent its report twice on its
+> reporting channel. The orchestrator had never subscribed to the child's messages and never read
+> them, then told the operator the child had failed to report. The child had done its job. The
+> orchestrator had not.
 
 ### 6.1 Ask for reports, in every brief
 
-Every brief names **the exact channel** the child reports on and **how often**:
-
-| Child | Its back channel |
-|---|---|
-| A tddy session on your host | `tddy-tools send --to <your session id> "<report>"` |
-| A Claude Code subagent you spawned | its final result, plus the peer message the harness routes to you |
-| A child on a Coder or SSH target | the `.tddy/hooks.log` `TddyMessage` command its launch guidance gives |
-| Any other harness | that harness's session-message route, chosen so **you** can read it later |
-
-State the cadence as a number: on start, at each milestone, on any blocker or decision, at the end,
+Every brief names **the child's reporting channel** — the exact route it reports on — and **how
+often** it reports: on start, at each milestone, at once on any blocker or decision, at the end,
 and at least every N minutes in between (~50 for a long [G]/[W]/[F] worker, less for short jobs).
-Never let a child pick its own channel, and never accept one you have no way to read.
+Choose a channel **you can read later**; never let a child pick its own, and never accept one you
+have no way to read.
 
-### 6.2 Keep listening — set it up right after the start
+For example, in tddy: a session on your host reports with `tddy-tools send --to <your session id>`.
 
-**Right after starting a child**, before you do anything else, set up a way to be **told** when a
-message or state change arrives:
+### 6.2 Keep listening — subscribe right after the start
 
-| You will be | Set up |
-|---|---|
-| Working in a loop | a `CreateSessionWatch` on the child (kinds including `message`, `ended`) drained by `WaitSessionWatchEvents`, or a `WaitProjectNotifications { started_by_me: true }` loop |
-| A Claude Code session with a shell | `tddy-tools monitor --kinds message,ended …` run under `Monitor`, so each event arrives as a turn |
-| Idle between turns | a watch created or renewed with `wake_when_idle: true`, so the child's message wakes you |
+**Right after starting a child**, before you do anything else, set up **a subscription or watch
+that tells you when the child messages or ends** — one that wakes you even while you are idle
+between turns. **Never rely on remembering to poll.** Check that the subscription exists, and
+renew it before it expires while the child lives.
 
-**Never rely on remembering to poll.** Confirm the watch exists (`ListSessionWatches`) and renew it
-(`RenewSessionWatch`) before its TTL runs out while the child lives.
+For example, in tddy: `CreateSessionWatch` on `message` and `ended`, with `wake_when_idle`.
 
 ### 6.3 Read before acting
 
 Before you **answer the operator about a child**, **ask a child anything**, or **conclude that a
-child is silent, stuck or failed**, read what it already sent: `ReadSessionMessages`, the child's
-transcript (`ReadSessionTranscript`), or both. A watch event says *that* something arrived; the
-inbox and the transcript say *what*. Never state a child's status from memory or from the last event
-you happened to see.
+child is silent, stuck or failed**, **read the child's messages and its transcript**. A
+notification says *that* something arrived; the messages and the transcript say *what*. Never state
+a child's status from memory or from the last notification you happened to see.
+
+For example, in tddy: `ReadSessionMessages` and `ReadSessionTranscript`.
 
 ### 6.4 Silence is a signal
 
 A child that **misses its reporting interval** gets checked at once: its transcript, its terminal
-(`ReadSessionTerminal`) and its activity (`ReadSessionActivity`). Then **tell the operator** what you
-found — still working, waiting for input, stuck, ended. **Never assume a silent child is still
-working.** If it ended, resume or restart it; if it is waiting, answer it.
+and its recent activity. Then **tell the operator** what you found — still working, waiting for
+input, stuck, ended. **Never assume a silent child is still working.** If it ended, resume or
+restart it; if it is waiting, answer it.
 
-An idle "waiting for input" right after a status report is **normal** — that is the child doing what
-it was told, not silence.
+An idle "waiting for input" right after a status report is **normal** — that is the child doing
+what it was told, not silence.
 
 ### 6.5 Close the loop
 
-When a child **ends**, read its **final report** (inbox and transcript), **relay it to the
-operator**, and **only then** cancel its watch (`CancelSessionWatch`) or stop its monitor. A watch
-dropped before the final report is read loses the one message that mattered.
+When a child **ends**, read its **final report** (messages and transcript), **relay it to the
+operator**, and **only then** drop its subscription. A subscription dropped before the final report
+is read loses the one message that mattered.
 
 ### 6.6 Keep-warm and CI watching
 
-- **Heartbeat**: besides the watches, a long fallback — a keep-warm check about every 10 minutes.
-  If the active [F] worker has had no activity for ~50 minutes, treat it as §6.4.
+- **Heartbeat**: besides the subscriptions, a long fallback — a keep-warm check about every 10
+  minutes. If the active [F] worker has had no activity for ~50 minutes, treat it as §6.4.
 - **Exactly one CI watcher per PR.** A timed-out foreground watch keeps running and burns the
   shared API rate limit; never start a second.
 
@@ -293,5 +283,5 @@ done, open decisions (TODO gate, approvals, the merge).
 | **Pattern-kill** | forbid it in every brief; kill only recorded PIDs; check other workers' state after any incident |
 | **CI cancelled by ready-after-push** | re-run the cancelled runs; ready only after the push build starts, or re-run |
 | **Disk full** | stop new starts, delete idle builds, shrink workers, ask before touching foreign worktrees |
-| **"The child never reported"** | it probably did: read `ReadSessionMessages` and the transcript before saying so; a missing watch is your defect (§6) |
+| **"The child never reported"** | it probably did: read its messages and transcript before saying so; a missing subscription is your defect (§6) |
 | **Rebased base / queue merged mid-run** | refresh trunk, recompute which tasks sit on a stale base, rebase bottom-up (≤2 PRs building at once), repoint bases **before** pushing rebuilt branches, tell affected workers, re-verify rollups |
