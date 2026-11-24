@@ -2,7 +2,7 @@
 
 **Type:** Feature
 **Packages:** `tddy-service`, `tddy-session-lifecycle`, `tddy-agent-launch`, `tddy-worktree-service`,
-`tddy-session-agents`, `tddy-daemon-kernel`, `tddy-changeset`, `tddy-session-activity`,
+`tddy-session-agents`, `tddy-daemon-kernel`, `tddy-session-activity`, `tddy-cli-sessions`,
 `tddy-client-web`, `tddy-session-web`
 PRDs (target): [`docs/ft/web/session-drawer.md`](../../ft/web/session-drawer.md) § Closing a session,
 [`docs/ft/daemon/session-liveness.md`](../../ft/daemon/session-liveness.md) § Closing a session
@@ -154,14 +154,56 @@ as done.
   instead of leaking the clone.
 - Web: when "Close them too" is chosen and the parent's close fails, no child is closed.
 
+### From validation (2026-11-24)
+
+- **A close holds its session.** While a close runs, `ResumeSession`, a new tab
+  (`StartTerminalSession`) and `DeleteSession` of that session are refused `ALREADY_EXISTS`, naming
+  the close's task (`SessionCloses::refuse_while_closing`, reached by `tddy-agent-launch` through the
+  `SessionClosesInFlight` port of `LaunchSessions`, and by the terminal roster's `start`). Not
+  `FAILED_PRECONDITION`: a peer forwarding a delete reads that code as "no such session".
+- **An unreadable `tabs.yaml` stops the close at its check** (CHECK failed, every removal and the
+  record skipped, nothing ended) and refuses a delete (`INTERNAL`). No `tabs.yaml` is no recorded
+  tab. `tabs_beside_main` answers the roster error; each tab is ended through the tmux the roster
+  read gave it (`end_with_its_session` no longer re-reads the roster and logs).
+- **A codebase half is "gone" only on the exact refusal.** `peer_does_not_hold_the_session` matches
+  `FAILED_PRECONDITION` carrying `SESSION_NOT_HELD_HERE` (the words `DeleteSession` and the close
+  refuse an absent session with); `held_session` answers an unreadable record `INTERNAL`. Any other
+  refusal leaves the codebase worktree unreadable.
+- **Presence is read with its error.** Local: `worktrees::path_is_present` (`symlink_metadata`; only
+  `NotFound` is absent). Target: `target_worktrees::target_path_is_present`, a probe that answers
+  "absent" only when the nearest existing ancestor is a searchable directory. The plan carries
+  `present` into `Removal::Local`/`Removal::Target`; a worktree planned gone that is there again is
+  refused ("it reappeared since it was checked"). `force_remove_worktree_under_repo` and
+  `remove_target_worktree` check afterwards that the worktree is neither on disk nor listed.
+- **A torn-down clone leaves the record.** `tear_down_agent_clone` removes every `agents[]` entry
+  reading the clone (`SessionAgentRosterStore::forget_clone`) and republishes the roster, so close
+  and delete share it. `every_agent_clone_of` answers an unreadable record as an error; no directory
+  or no `.session.yaml` records no clone.
+- **A conversation worktrees' directory that cannot be listed** is one unreadable conversation
+  worktree (`NotFound` is none), which blocks the close.
+- **A closed target session is deleted without its target.** With the `worktree-removed` marker
+  present, `DeleteSession` does not ask the target to kill the main's tmux session nor any tab's
+  (`SessionTab::without_its_target_tmux`): the close ended them and checked them gone. A local tmux
+  kill still runs (cheap, needs nothing remote).
+- **Survivor checks read "cannot tell" as surviving**: a local tmux that cannot be asked
+  (`tmux_session_lives`, `tddy-cli-sessions`), a workspace jail registered again, and a local
+  conversation whose interrupted turn still holds its session (`ClosedTurnLoop::turn_still_runs`,
+  from `close_every_conversation_of`).
+- **Nested removals**: once a conversation worktree inside the session's own worktree fails to go,
+  the session's worktree is skipped rather than forced out over it.
+- The progress note of a re-check that stops the close says the tabs were ended and no worktree was
+  removed.
+
 ## Tests
 
 | Layer | File | Covers |
 |---|---|---|
 | Rust integration | `tddy-worktree-service/tests/worktree_loss.rs` | porcelain parsing per change kind (literal `-z` strings), each change kind over a real repo, ignored excluded, unpushed vs remotes and base, the 20-commit list and full count, the target reader over `LocalShell` agreeing with the local one, an unreachable target (`InMemoryShell`) is an error |
-| Rust integration | `tddy-worktree-service/tests/target_worktree_actions_acceptance.rs` (extended) | `remove_target_worktree` of a worktree already gone succeeds; of one whose directory vanished, prunes its registration |
-| Daemon integration | `tddy-session-lifecycle/tests/close_session.rs` | preview of clean / dirty / committed-not-pushed; unconfirmed dirty close does nothing; confirmed close ends main + tmux tab + conversation and removes worktrees, keeps record and branch; fingerprint drift refused; a surviving tab skips removal; `holds_worktree` false after close; two sessions close concurrently; a second close of a closing session is refused |
-| Daemon integration | `tddy-session-lifecycle/tests/close_target_session.rs` | target worktree preview and removal over the stand-in target; unreachable target → `unavailable_reason`, nothing done; delete of a target session whose worktree is already gone succeeds |
+| Rust integration | `tddy-worktree-service/tests/target_worktree_actions_acceptance.rs` (extended) | `remove_target_worktree` of a worktree already gone succeeds; of one whose directory vanished, prunes its registration; **of one whose parent cannot be searched is refused and keeps it** |
+| Rust unit | `tddy-worktree-service/src/worktrees.rs` | **a forced removal of a worktree that cannot be looked at is refused; a forced removal leaves it neither on disk nor listed** |
+| Rust unit | `closes_in_flight.rs`, `peer_session_answer.rs` | **a session held by a close refuses other work until it ends; only the not-held-here refusal reads as "gone"** |
+| Daemon integration | `tddy-session-lifecycle/tests/close_session.rs` | preview of clean / dirty / committed-not-pushed; unconfirmed dirty close does nothing; confirmed close ends main + tmux tab and removes worktrees (the session's and a conversation's, with its branch and base ref), keeps record and branch; fingerprint drift refused; a surviving tab skips removal; `holds_worktree` false after close; two sessions close concurrently; a second close of a closing session is refused; **while a close runs, resume, a new tab and delete are refused**; **an agent that writes as it is ended makes the re-check ask, nothing removed**; **a cancelled close skips every removal**; **an unreadable `tabs.yaml` fails the check (close) and refuses the delete**; **an unreadable conversation-worktrees directory, and a session worktree that cannot be looked at, are unreadable, not gone**; **codebase half** on this daemon (listed, closed, gone when not held, unreadable record) and on a scripted peer (previewed and closed there confirming its fingerprint, "not held here" is gone, any other refusal is unreadable, unreachable peer); **agent clones** from the record (torn down by a close and forgotten from the record, a closed session then deletes with the room down, an unreachable clone fails its removal, a delete tears down a record-only clone); **a remote conversation** cancelled by a close, and one that cannot be cancelled fails the close and refuses the delete |
+| Daemon integration | `tddy-session-lifecycle/tests/close_target_session.rs` | target worktree preview and removal over the stand-in target; unreachable target → `unavailable_reason`, nothing done; delete of a target session whose worktree is already gone succeeds; **a closed tmux-run target session deletes once its target is unreachable**; **a target worktree whose parent cannot be searched is unreadable, not gone** |
 | Daemon integration | `tddy-session-lifecycle/tests/delete_session.rs` (extended) | delete kills non-main tmux tab sessions; delete of a closed session, and of one whose worktree was removed outside the daemon, succeeds |
 | Cypress component | `tddy-session-web/cypress/component/SessionsDrawerClose.cy.tsx` | × only on active rows, trash only on inactive rows holding a worktree; clean → no dialog; dirty → dialog per worktree; Cancel sends nothing; Confirm sends confirmed + fingerprint; unreadable → Retry; children choice; failure notice; spinner while closing; a second row closes while the first is still running |
 
@@ -231,6 +273,11 @@ closed on the number: `oversized-file-worktrees.md` (final 409) and `oversized-f
   **✅ RESOLVED HERE**. Its "What closes it" is the `test_util/held_agents.rs` split, done above
   (556 → 489). The other files it lists carry records of their own.
 
+- `svc_close_session/close_task.rs` is at **601** production lines after the validation fixes
+  (budget 500). Deferral consented by the developer on 2026-11-24; the `move_impl_members` plan of the
+  terminate phases into `close_task/terminate.rs` already passes `check --deep`
+  ([`2026-11-24-close-task-rs-over-budget.md`](../todo/2026-11-24-close-task-rs-over-budget.md)).
+
 ### Engine findings
 
 - **Refused:** the whole step-member run of `CloseRun` (`running` … `send`). `CloseRun::failed` names
@@ -246,6 +293,61 @@ closed on the number: `oversized-file-worktrees.md` (final 409) and `oversized-f
   - `service.rs`: the `use crate::service_helpers::forget_a_recorded_removal;` the move wrote below a
     `pub use` was folded into the existing `service_helpers` group.
 
+## Validation Results
+
+**Last run:** 2026-11-24 — `/validate-changes`, `/validate-tests`, `/validate-prod-ready`,
+`/analyze-clean-code` (file length handled separately), scope `origin/master...HEAD` at 837a3590a;
+fixes applied on top of 4d17b281e.
+
+**Status:** ✅ the blocker and the 9 should-fix items are fixed (W9 by the restructure engine);
+nits N1–N5, N11 and N12 done (N4 partly, see below); N6–N10 left as recorded choices.
+
+**Build (scoped):** `./dev cargo clippy -p tddy-cli-sessions -p tddy-worktree-service
+-p tddy-session-agents -p tddy-agent-launch -p tddy-session-lifecycle --all-targets -- -D warnings`
+clean; `rustfmt --check` clean on every changed `.rs` file.
+
+**Tests (scoped, local):**
+- `tddy-session-lifecycle`: `close_session` 62/62, `close_target_session` 7/7, `delete_session` 8/8.
+  The 12 fix tests were run red against the pre-fix code first (W1, W2 ×2, W3 ×2, W4 ×3, W5, W6,
+  W7 ×2); the W8 coverage tests passed against it, as they cover existing behaviour.
+- `tddy-worktree-service`: lib 34/34, `worktree_loss` and `target_worktree_actions_acceptance` green;
+  only the 12 known `remote_git_livekit_acceptance` failures (environmental).
+- `tddy-session-agents`, `tddy-cli-sessions`: all green.
+- `tddy-agent-launch`: green except `clone_askpass_acceptance` (9), which failed only because
+  `tddy-askpass` was not built in this worktree — **left to CI**.
+- Full `tddy-session-lifecycle` package: stopped part-way on the developer's instruction (488 passed,
+  12 failed, every failure in the known environmental baseline) — **left to CI**.
+- No web or proto surface changed, so no Cypress spec was run.
+
+**Fixes:**
+- ✅ B1 rustfmt of the five lifecycle files.
+- ✅ W1 a close holds its session: `ResumeSession`, `StartTerminalSession`, `DeleteSession` refused
+  `ALREADY_EXISTS` while it runs (`SessionClosesInFlight` port; terminal roster `start`).
+- ✅ W2 unreadable `tabs.yaml`: CHECK fails (close), delete refused; no file is no tab.
+- ✅ W3 a torn-down clone is removed from `.session.yaml agents[]` in `tear_down_agent_clone`.
+- ✅ W4 only `FAILED_PRECONDITION` carrying `SESSION_NOT_HELD_HERE` reads as "gone"; an unreadable
+  record is `INTERNAL`.
+- ✅ W5 a closed (marker) target session's main and tab tmux sessions are not asked of the target on
+  delete.
+- ✅ W6 conversation-directory listing and recorded clones propagate errors (only `NotFound` is none).
+- ✅ W7 presence read with its error, local and target; planned presence carried into removal; both
+  removals verified afterwards.
+- ✅ W8 tests for the re-check, codebase forwarding (here and over a scripted peer), clone teardown,
+  conversation ending (remote) and cancellation, plus one per fix.
+- ✅ W9 `terminate_every_tab`, `codebase_worktrees`, `conversation_worktrees_in`, `delete_session_as`
+  split by `tddy-tools restructure` `extract_method` (each plan `check --deep` clean, applied with the
+  compile gate green; no refusals). Hand edits: doc comments, one `let_and_return`.
+- ✅ N1 progress note; ✅ N2 `tmux_session_lives`; ✅ N3 `ClosedTurnLoop`; ⚠️ N4 partial — `stop()`
+  answers nothing, so only a re-registered workspace jail is caught; ✅ N5 nested removal failure
+  keeps the enclosing worktree; ✅ N11 Packages line; ✅ N12 PRD paragraphs wrapped.
+- ✅ The progress channel id `"0"` is named (`PROGRESS_CHANNEL_ID`); `project_has_ref` moved into
+  the support module.
+
+**File length:** `close_task.rs` grew to 601 production lines — deferred with developer consent (see
+Restructuring).
+
+**Overall:** 8/10.
+
 ## Refactoring Needed
 
 ### From /red (TDD Red Phase)
@@ -260,8 +362,13 @@ closed on the number: `oversized-file-worktrees.md` (final 409) and `oversized-f
 - [ ] `close_events_support` (the `CloseEvents` reader) is reached from `tmux_agent_support` by a
   `#[path]` module so the target suite can declare it alone; fold it into a shared target/tmux support
   crate module if more suites need it.
-- [ ] Subagent-conversation coverage of a close is not in the lifecycle suites: conversations are opened
-  only through `tddy-daemon-rpc`'s harness. Add a close case there (`session_agent_conversation_acceptance.rs`).
+- [ ] Subagent-conversation coverage of a close covers a **remote** conversation only
+  (`test_util::open_a_remote_conversation`): a local one needs a `SubagentSession`, opened only through
+  `tddy-daemon-rpc`'s harness. Add a local close case there (`session_agent_conversation_acceptance.rs`),
+  including an interrupted turn that does not stop (`ClosedTurnLoop::turn_still_runs`).
+- [ ] `DeleteSession` of a closed target session skips each tab's tmux on the target as well as the
+  main's (`SessionTab::without_its_target_tmux`); only the main's is covered
+  (`close_target_session.rs`). A target tmux *tab* case needs the `remote_target_tmux_tabs` harness.
 - [ ] Web: `closeSessionPage.revealEndedRow` copies the More-fold logic of
   `sessionsDrawerPage.selectEndedSession`; extract one shared "open the fold this row is under"
   helper and have both use it.

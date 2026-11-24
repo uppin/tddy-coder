@@ -143,9 +143,11 @@ Both are routed to the session's owning host, as Terminate and Delete are.
 While the close runs, the row's × (or trash bin) is replaced by a **mini spinner**
 (`sessions-drawer-item-closing-<id>`), its hover text the step in progress. A close never blocks the
 drawer: the operator can close another session right away, and any number of closes run at once,
-each tracked on its own row. A row that is closing cannot be closed again until its close ends. A step that fails — a tab that would not end, a worktree that could not be removed, a
-host that could not be reached — is reported in the drawer notices, naming the step and the host;
-when a tab survives, nothing is removed. The list is refreshed when the close ends.
+each tracked on its own row. A row that is closing cannot be closed again until its close ends;
+while it runs the host also refuses a Resume, a new tab and a Delete of that session. A step that
+fails — a tab that would not end, a worktree that could not be removed, a host that could not be
+reached, a tab roster that could not be read — is reported in the drawer notices, naming the step
+and the host; when a tab survives, nothing is removed. The list is refreshed when the close ends.
 
 ## Project Groups
 

@@ -159,29 +159,44 @@ runs it.
 **What would be lost**, per worktree: every `git status --porcelain --untracked-files=all` entry
 (ignored files are not), and every commit on its `HEAD` that no remote-tracking ref and not the
 session's recorded base holds. A target worktree is read through the session's remote shell; the
-codebase half by forwarding the preview. A worktree that cannot be read is reported with the reason.
-The preview carries a fingerprint of all of it.
+codebase half by forwarding the preview. A worktree that cannot be read is reported with the reason
+— one that cannot even be looked at (a parent directory that cannot be searched, here or on the
+target) is unreadable, never "already gone", and so is a conversation worktrees' directory that
+cannot be listed. A codebase daemon that answers anything but "this session is not on this daemon"
+leaves the codebase half unreadable. The preview carries a fingerprint of all of it.
 
 **The task** (`TaskRegistry` kind `close_session`; the stream's first event names it):
 
-1. **Check.** Anything unreadable, or a loss the request did not confirm (`confirmed`, and the
-   fingerprint it saw), ends the task with `needs_confirmation` — nothing done.
-2. **Terminate** every tab, then verify none is left: no live terminal, no recorded tmux session
-   alive here or on the target. A survivor fails its step and **no worktree is removed**.
+1. **Check.** A tab roster (`tabs.yaml`) that cannot be read fails the check — not every tab could be
+   ended — and nothing is done. Anything unreadable, or a loss the request did not confirm
+   (`confirmed`, and the fingerprint it saw), ends the task with `needs_confirmation` — nothing done.
+2. **Terminate** every tab, then verify none is left: no live terminal, no workspace jail
+   registered again, no recorded tmux session alive here or on the target, no interrupted local
+   conversation turn still running. A tmux that cannot be asked counts as a survivor. A survivor
+   fails its step and **no worktree is removed**.
 3. **Re-check**: what is at risk now must still be what was confirmed (nothing, when nothing was);
    otherwise `needs_confirmation`, nothing removed.
 4. **Remove** each worktree — every one attempted, each its own step; one already gone counts as
-   removed, so running a failed close again is safe.
-5. **Record** the removal: a `worktree-removed` marker in the session directory. The record and the branch are kept;
-   `SessionEntry.holds_worktree` turns false. `RestoreSessionWorktree` removes the marker.
+   removed, so running a failed close again is safe. One the plan found gone that is there again is
+   refused, as is the session's own worktree once a conversation worktree inside it failed to go.
+   A removal is checked afterwards: a worktree still on disk, or still listed by its clone, fails
+   its step. A torn-down agent clone leaves the session's record (`agents[]`) with its agents.
+5. **Record** the removal: a `worktree-removed` marker in the session directory. The record and the
+   branch are kept; `SessionEntry.holds_worktree` turns false. `RestoreSessionWorktree` removes the
+   marker.
 
 The outcome lists every failed step with its reason. No step falls back to anything else.
 
 Closes of different sessions run at once, each its own task. A second `CloseSession` for a session
-whose close is still running is refused (`already_exists`, naming the running task).
+whose close is still running is refused (`already_exists`, naming the running task), and so are a
+`ResumeSession`, a new tab (`StartTerminalSession`) and a `DeleteSession` of it until the close
+ends.
 
 `DeleteSession` ends tabs and conversations through the same path, tears down agent clones from the
-record as well as the clone store, and treats a worktree that is already gone as removed.
+record as well as the clone store, and treats a worktree that is already gone as removed. It is
+refused when the session's tab roster cannot be read. A closed session's tmux sessions on its target
+— the main's and each tab's — are not asked for again: the close ended them and checked them gone,
+so a delete of a closed target session needs no reachable target.
 
 ## Tool sessions as a process tab
 
