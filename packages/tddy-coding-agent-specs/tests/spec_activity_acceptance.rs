@@ -10,7 +10,7 @@
 //! every reply, the intermediate text between tool calls included, but no tool results and no tool
 //! ids. `tests/fixtures/cursor-agent-transcript.jsonl` is that probe's transcript, home anonymised.
 //!
-//! Feature doc: docs/ft/daemon/1-WIP/PRD-2026-11-24-transcript-activity-source.md.
+//! Feature doc: docs/ft/daemon/cursor-cli-session.md (§ Activity from the transcript).
 
 use std::path::Path;
 
