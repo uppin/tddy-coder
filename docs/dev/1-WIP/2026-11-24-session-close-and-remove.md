@@ -132,6 +132,28 @@ as done.
   and never block the drawer: another row can be closed right away, closes run concurrently.
   Failed steps land in the drawer notices, naming each step and host; then the list refreshes.
 
+## Implementation notes (choices beyond the brief)
+
+- `holds_worktree` for a local session also requires a daemon-managed worktree (under `.worktrees`):
+  a close never removes a client-supplied `repo_path`. Only a type that owns its worktree
+  (`worktree_removal_applies_to`) lists one; a worktree already gone is listed with no losses and its
+  REMOVE prunes.
+- Steps: a CHECK DONE after each check; TERMINATE streams RUNNING, then its final state after the
+  survivor check (bounded 10 s); a failed TERMINATE skips every REMOVE, clone teardown and RECORD;
+  RECORD runs only when every removal succeeded. Clone teardowns are REMOVE steps (subject = the
+  clone's workspace session, host = its daemon).
+- The codebase half is closed by one forwarded `CloseSession` per codebase daemon; the peer saying
+  "no such session" counts as gone, "no room" is refused (as `svc_paired_codebase_teardown`).
+- A `needs_confirmation` ending is task status `Completed(0)`, so a prompt is not a failed task.
+- A close keeps the tabs in `tabs.yaml` (unlike `close_tab`), so a Resume after Restore brings them
+  back.
+- A directory under `tmp/subagent-worktrees` that is not a git worktree is reported unreadable,
+  which blocks the close rather than deleting it.
+- DeleteSession refuses (`unavailable`) when a tab or conversation cannot be ended; with clones read
+  from the record, a restarted daemon with a recorded clone and no common room refuses the delete
+  instead of leaking the clone.
+- Web: when "Close them too" is chosen and the parent's close fails, no child is closed.
+
 ## Tests
 
 | Layer | File | Covers |
