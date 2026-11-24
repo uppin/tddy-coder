@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use tddy_cli_sessions::cli_session_manager::MAIN_TERMINAL_ID;
-use tddy_cli_sessions::tmux::tmux_session_alive;
+use tddy_cli_sessions::tmux::tmux_session_lives;
 use tddy_core::tab_roster::{
     read_tab_roster, LaunchNode, AGENT_KIND, HARNESS_PROPERTY, SESSION_PROPERTY, TMUX_ATTACH_KIND,
 };
@@ -26,35 +26,30 @@ pub(crate) struct SessionTab {
 
 impl DaemonSessionHost {
     /// Every tab of `session_id` beside its main — each its roster (`tabs.yaml`) records, each live
-    /// terminal, each jailed tab — by terminal id. A roster that cannot be read is logged, and the
-    /// live tabs are still listed.
-    pub(crate) async fn tabs_beside_main(&self, session_id: &str) -> Vec<SessionTab> {
+    /// terminal, each jailed tab — by terminal id. A roster that cannot be read is the error: a tab
+    /// recorded only there (a tmux tab whose daemon restarted holds no terminal for it) would be
+    /// neither ended nor checked. A session with no `tabs.yaml` records no tab.
+    pub(crate) async fn tabs_beside_main(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<SessionTab>, String> {
         let mut tabs: BTreeMap<String, SessionTab> = BTreeMap::new();
-        let roster = self.terminal_roster(self.session_tmux());
-        match roster
-            .session_dir(session_id)
-            .map(|dir| read_tab_roster(&dir))
-        {
-            Ok(Ok(recorded)) => {
-                for entry in recorded.tabs {
-                    tabs.insert(
-                        entry.terminal_id.clone(),
-                        SessionTab {
-                            label: label_of_chain(&entry.launch),
-                            tmux: wrapping_tmux(&entry.launch),
-                            terminal_id: entry.terminal_id,
-                        },
-                    );
-                }
-            }
-            Ok(Err(error)) => log::warn!(
-                "the tab roster of session {session_id} cannot be read; only its live tabs are \
-                 ended: {error:#}"
-            ),
-            Err(refusal) => log::warn!(
-                "session {session_id} names no session directory: {}",
-                refusal.message()
-            ),
+        let dir = self.session_dir_of(session_id)?;
+        let recorded = read_tab_roster(&dir).map_err(|error| {
+            format!(
+                "the tab roster of session {session_id} cannot be read, so not every tab of it can \
+                 be ended: {error:#}"
+            )
+        })?;
+        for entry in recorded.tabs {
+            tabs.insert(
+                entry.terminal_id.clone(),
+                SessionTab {
+                    label: label_of_chain(&entry.launch),
+                    tmux: wrapping_tmux(&entry.launch),
+                    terminal_id: entry.terminal_id,
+                },
+            );
         }
         for handle in self.cli_manager.list_terminals(session_id).await {
             tabs.entry(handle.terminal_id.clone())
@@ -76,7 +71,14 @@ impl DaemonSessionHost {
                 });
         }
         tabs.remove(MAIN_TERMINAL_ID);
-        tabs.into_values().collect()
+        Ok(tabs.into_values().collect())
+    }
+
+    /// The directory of `session_id`, which its tab roster is read from.
+    pub(crate) fn session_dir_of(&self, session_id: &str) -> Result<std::path::PathBuf, String> {
+        self.terminal_roster(self.session_tmux())
+            .session_dir(session_id)
+            .map_err(|refusal| refusal.message().to_string())
     }
 
     /// End `tab` of `session_id` with its session: its jail, the tmux session wrapping its agent
@@ -88,7 +90,7 @@ impl DaemonSessionHost {
         subject: Option<&str>,
     ) -> Result<(), String> {
         self.terminal_roster(self.session_tmux())
-            .end_with_its_session(session_id, &tab.terminal_id, subject)
+            .end_with_its_session(session_id, &tab.terminal_id, tab.tmux.as_ref(), subject)
             .await
     }
 
@@ -118,14 +120,7 @@ impl DaemonSessionHost {
             return Some("its jail is still running".to_string());
         }
         match tab.tmux.as_ref()? {
-            WrappingTmux::Here { name, os_user } => {
-                let (user, session) = (os_user.clone(), name.clone());
-                let alive =
-                    tokio::task::spawn_blocking(move || tmux_session_alive(&user, &session))
-                        .await
-                        .unwrap_or(true);
-                alive.then(|| format!("its tmux session {name:?} is still alive"))
-            }
+            WrappingTmux::Here { name, os_user } => local_tmux_survives(os_user, name).await,
             WrappingTmux::OnTarget { name } => {
                 match self
                     .terminal_roster(self.session_tmux())
@@ -143,6 +138,34 @@ impl DaemonSessionHost {
                 }
             }
         }
+    }
+}
+
+impl SessionTab {
+    /// This tab with no tmux session on the target to end: a closed session's (its
+    /// `worktree-removed` marker), whose close already ended that tmux session and checked it gone.
+    pub(crate) fn without_its_target_tmux(self) -> Self {
+        match self.tmux {
+            Some(WrappingTmux::OnTarget { .. }) => SessionTab { tmux: None, ..self },
+            _ => self,
+        }
+    }
+}
+
+/// Why `os_user`'s tmux session `name` on this host survived, or `None` once it is gone. A tmux
+/// that cannot be asked counts as surviving: nothing proves the session gone.
+pub(crate) async fn local_tmux_survives(os_user: &str, name: &str) -> Option<String> {
+    let (user, session) = (os_user.to_string(), name.to_string());
+    match tokio::task::spawn_blocking(move || tmux_session_lives(&user, &session)).await {
+        Ok(Ok(false)) => None,
+        Ok(Ok(true)) => Some(format!("its tmux session {name:?} is still alive")),
+        Ok(Err(refusal)) => Some(format!(
+            "whether its tmux session {name:?} ended cannot be told: {refusal}"
+        )),
+        Err(error) => Some(format!(
+            "whether its tmux session {name:?} ended cannot be told: the check did not finish: \
+             {error}"
+        )),
     }
 }
 

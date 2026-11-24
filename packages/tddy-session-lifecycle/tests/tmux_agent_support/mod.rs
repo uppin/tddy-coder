@@ -11,6 +11,7 @@
 #[path = "../close_events_support/mod.rs"]
 pub mod close_events;
 pub mod close_session;
+pub mod scripted_peer;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -63,9 +64,24 @@ pub enum AgentTemperament {
     /// Ignores SIGHUP and SIGTERM too, and never reads its pane: only SIGKILL ends it, so whatever
     /// ends it waits out its whole grace first.
     IgnoresHangupAndTerminationAndNeverReadsItsPane,
+    /// Writes the named file into its working directory (the session's worktree) when it is hung
+    /// up or terminated, then exits — an agent that saves its work as it is ended.
+    LeavesAFileWhenEnded(&'static str),
 }
 
 pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDaemon {
+    a_daemon_of(temperament, None).await
+}
+
+/// A daemon in a common room whose one peer is `peer`.
+pub async fn a_daemon_in_a_room_with(peer: Arc<scripted_peer::ScriptedPeer>) -> TmuxAgentDaemon {
+    a_daemon_of(AgentTemperament::HoldsItsPane, Some(peer)).await
+}
+
+async fn a_daemon_of(
+    temperament: AgentTemperament,
+    common_room: Option<Arc<scripted_peer::ScriptedPeer>>,
+) -> TmuxAgentDaemon {
     let tmux = PrivateTmux::started();
     let sessions_dir = tempfile::tempdir().unwrap();
     let stub_dir = tempfile::tempdir().unwrap();
@@ -82,12 +98,20 @@ pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDae
         AgentTemperament::IgnoresHangupAndTerminationAndNeverReadsItsPane => {
             stub = stub.with_prelude("trap '' HUP TERM");
         }
+        AgentTemperament::LeavesAFileWhenEnded(file) => {
+            stub = stub.with_prelude(&format!(
+                "trap 'echo \"written as it ended\" > {file}; exit 0' HUP TERM"
+            ));
+        }
     }
     let stub = stub
         .with_prelude(&format!("pwd -P > \"{}\"", working_directory.display()))
         .recording_env_to(&environment, &["CLAUDE_CODE_NO_FLICKER"])
         .appending_argv_to(&launches);
     let stub = match temperament {
+        // A trap runs once the foreground command returns: `wait` returns at once on a signal,
+        // where a foreground `sleep` would hold the trap until it finished.
+        AgentTemperament::LeavesAFileWhenEnded(_) => stub.then_running("sleep 120 & wait $!"),
         AgentTemperament::IgnoresHangupAndNeverReadsItsPane
         | AgentTemperament::IgnoresHangupAndTerminationAndNeverReadsItsPane => {
             // The pane's terminal stays its stdin/stdout/stderr: a process that closed every slave
@@ -101,10 +125,11 @@ pub async fn a_daemon_whose_agent(temperament: AgentTemperament) -> TmuxAgentDae
     let repo = a_registered_project(sessions_dir.path());
     let (config_dir, config) = a_config_running(&stub);
     let manager = Arc::new(CliSessionManager::new());
-    let host = a_session_host(
+    let host = a_session_host_in(
         config,
         sessions_dir.path().to_path_buf(),
         Arc::clone(&manager),
+        common_room.map(|peer| peer as Arc<dyn tddy_daemon_extensions::PeerForwarder>),
     );
     TmuxAgentDaemon {
         host,
@@ -146,9 +171,19 @@ fn a_config_running(stub_agent: &Path) -> (tempfile::TempDir, AConfigAndItsAgent
 }
 
 pub fn a_session_host(
+    config_and_agents: AConfigAndItsAgents,
+    sessions_base: PathBuf,
+    manager: Arc<CliSessionManager>,
+) -> Arc<DaemonSessionHost> {
+    a_session_host_in(config_and_agents, sessions_base, manager, None)
+}
+
+/// [`a_session_host`], in a common room forwarding through `common_room` when there is one.
+fn a_session_host_in(
     (config, agents): AConfigAndItsAgents,
     sessions_base: PathBuf,
     manager: Arc<CliSessionManager>,
+    common_room: Option<Arc<dyn tddy_daemon_extensions::PeerForwarder>>,
 ) -> Arc<DaemonSessionHost> {
     let data_dir = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver =
@@ -163,7 +198,15 @@ pub fn a_session_host(
         user_resolver,
         None,
         tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
-        tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+        tddy_session_lifecycle::peer_routing::PeerRouting::new(
+            config.clone(),
+            Arc::new(
+                tddy_host_service::multi_host::LocalOnlyEligibleDaemonSource::for_config(&config),
+            ),
+            common_room.map(|forwarder| {
+                tddy_daemon_kernel::peer_forwarding::CommonRoom::new(forwarder, &config)
+            }),
+        ),
         Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
         manager,
         agents,

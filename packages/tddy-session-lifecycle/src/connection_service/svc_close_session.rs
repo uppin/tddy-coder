@@ -28,6 +28,10 @@ mod worktree_reads;
 
 pub(crate) use closes_in_flight::SessionCloses;
 
+/// The id of a close task's one output channel, `progress`: a task with a single channel numbers it
+/// `0`, as the LSP task does.
+const PROGRESS_CHANNEL_ID: &str = "0";
+
 /// The session a close or its preview acts on, and who asked.
 pub(super) struct CloseContext {
     pub os_user: String,
@@ -40,6 +44,14 @@ pub(super) struct CloseContext {
 }
 
 impl DaemonSessionHost {
+    /// The conversations open on this host's sessions — which a close ends — for
+    /// [`crate::test_util`] to open one.
+    pub(crate) fn open_agent_conversations(
+        &self,
+    ) -> &Arc<tddy_session_agents::OpenAgentConversations> {
+        &self.agent_conversations
+    }
+
     /// What closing `request.session_id` would lose, per worktree it owns, and the tabs it would end.
     pub(crate) async fn preview_close_session_at_host(
         &self,
@@ -60,7 +72,8 @@ impl DaemonSessionHost {
         let ctx = self.close_context(&req.session_token, &req.session_id)?;
         let reservation = self.session_closes.reserve(&ctx.session_id)?;
         let (events, received) = tokio::sync::mpsc::unbounded_channel();
-        let progress = TaskChannel::output_only("0", "progress", ChannelKind::Combined);
+        let progress =
+            TaskChannel::output_only(PROGRESS_CHANNEL_ID, "progress", ChannelKind::Combined);
         let session_id = ctx.session_id.clone();
         self.task_registry
             .spawn(
@@ -116,11 +129,14 @@ impl DaemonSessionHost {
     }
 
     /// Force the session's own worktree on this host out of its project's clone (step 4 of a close:
-    /// the checks before it proved nothing unconfirmed is lost). One already gone counts as removed.
+    /// the checks before it proved nothing unconfirmed is lost). One already gone counts as removed;
+    /// one `planned_present` false that is there again is refused, since what it holds was never
+    /// shown.
     async fn remove_local_worktree(
         &self,
         ctx: &CloseContext,
         worktree: &Path,
+        planned_present: bool,
     ) -> Result<String, String> {
         let projects_dir = tddy_daemon_kernel::user_paths::projects_path_for_user(
             &ctx.os_user,
@@ -140,7 +156,12 @@ impl DaemonSessionHost {
             PathBuf::from(project.main_repo_path),
             worktree.to_path_buf(),
         );
-        let already_gone = !worktree.exists();
+        let there = tddy_worktree_service::worktrees::path_is_present(&worktree)
+            .map_err(|error| error.to_string())?;
+        if there && !planned_present {
+            return Err(close_task::reappeared());
+        }
+        let already_gone = !there;
         tokio::task::spawn_blocking(move || {
             tddy_worktree_service::worktrees::force_remove_worktree_under_repo(&repo, &worktree)
         })
@@ -177,18 +198,16 @@ impl DaemonSessionHost {
 }
 
 /// The record of the session in `session_dir`, refused as `DeleteSession` refuses a session this
-/// daemon does not hold.
+/// daemon does not hold. A record that cannot be read is `INTERNAL`, never that refusal: a
+/// parent closing its codebase half reads "not held here" as a checkout already gone.
 fn held_session(session_dir: &Path) -> Result<SessionMetadata, Status> {
-    let not_here = || {
-        Status::failed_precondition(
-            "session is not present on this daemon; use the daemon that owns it (check routing / host)",
-        )
-    };
     if !session_dir.is_dir() {
-        return Err(not_here());
+        return Err(Status::failed_precondition(
+            tddy_session_agents::peer_session_answer::SESSION_NOT_HELD_HERE,
+        ));
     }
     tddy_core::read_session_metadata(session_dir).map_err(|error| {
-        Status::failed_precondition(format!(
+        Status::internal(format!(
             "the record of the session in {} cannot be read: {error}",
             session_dir.display()
         ))

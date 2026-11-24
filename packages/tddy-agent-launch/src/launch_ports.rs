@@ -189,6 +189,17 @@ pub struct LaunchSessions {
     /// What ends a session's tabs beside its main, and the conversations open on it, when the
     /// session is deleted (docs/ft/daemon/session-liveness.md § Closing a session).
     pub session_tabs: Arc<dyn SessionTabEnding>,
+    /// The closes running on this host: a resume or a delete of a session being closed is refused.
+    pub session_closes: Arc<dyn SessionClosesInFlight>,
+}
+
+/// The closes running on this host (docs/ft/daemon/session-liveness.md § Closing a session), as the
+/// work a close must not race asks them: a resume would start an agent in a worktree the close is
+/// about to remove, and a delete would take the directory the close records its outcome in.
+pub trait SessionClosesInFlight: Send + Sync {
+    /// Refused `ALREADY_EXISTS`, naming the close, while a close of `session_id` runs. Not
+    /// `FAILED_PRECONDITION`: a peer forwarding a delete reads that as "no such session".
+    fn refuse_while_closing(&self, session_id: &str) -> Result<(), Status>;
 }
 
 /// Ends every tab of a session other than its main — each tab of its roster and each live

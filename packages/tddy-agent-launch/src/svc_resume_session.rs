@@ -49,6 +49,7 @@ impl LaunchSessions {
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
+        self.session_closes.refuse_while_closing(&req.session_id)?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
         let mut metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;

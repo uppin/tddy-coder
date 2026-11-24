@@ -46,8 +46,12 @@ pub(super) struct CloseTask {
 
 /// How a close ended.
 enum Ended {
-    /// Something unconfirmed (or unreadable) was at risk: nothing more was done.
-    NeedsConfirmation(CloseSessionPreview),
+    /// Something unconfirmed (or unreadable) was at risk: nothing more was done. `after_ending`:
+    /// the re-check after every tab ended found it, so the tabs were ended and no worktree removed.
+    NeedsConfirmation {
+        preview: CloseSessionPreview,
+        after_ending: bool,
+    },
     /// The close ran to its end.
     Outcome(CloseSessionOutcome),
 }
@@ -84,8 +88,12 @@ impl TaskBody for CloseTask {
         }));
         let ended = run.close(&task).await;
         let status = match &ended {
-            Ended::NeedsConfirmation(_) => {
-                run.note("needs confirmation: nothing was done");
+            Ended::NeedsConfirmation { after_ending, .. } => {
+                run.note(if *after_ending {
+                    "needs confirmation: every tab was ended, but no worktree was removed"
+                } else {
+                    "needs confirmation: nothing was done"
+                });
                 TaskStatus::Completed { exit_code: Some(0) }
             }
             Ended::Outcome(_) if task.is_cancelled() => TaskStatus::Cancelled,
@@ -100,7 +108,7 @@ impl TaskBody for CloseTask {
         // The session is free for the next close before the caller learns this one ended.
         drop(reservation);
         run.send(match ended {
-            Ended::NeedsConfirmation(preview) => {
+            Ended::NeedsConfirmation { preview, .. } => {
                 close_session_event::Event::NeedsConfirmation(preview)
             }
             Ended::Outcome(outcome) => close_session_event::Event::Outcome(outcome),
@@ -123,8 +131,14 @@ struct CloseRun {
 impl CloseRun {
     async fn close(&mut self, task: &TaskContext) -> Ended {
         let plan = self.host.plan_close(&self.ctx).await;
+        if let Some(ended) = self.refuse_unknown_tabs(&plan) {
+            return ended;
+        }
         if let Some(preview) = self.unconfirmed(&plan) {
-            return Ended::NeedsConfirmation(preview);
+            return Ended::NeedsConfirmation {
+                preview,
+                after_ending: false,
+            };
         }
         self.done(
             CloseSessionStepKind::Check,
@@ -146,7 +160,10 @@ impl CloseRun {
         // An agent may have written between the check and its end.
         let plan = self.host.plan_close(&self.ctx).await;
         if let Some(preview) = self.unconfirmed(&plan) {
-            return Ended::NeedsConfirmation(preview);
+            return Ended::NeedsConfirmation {
+                preview,
+                after_ending: true,
+            };
         }
         self.done(
             CloseSessionStepKind::Check,
@@ -167,6 +184,19 @@ impl CloseRun {
             );
         }
         self.outcome()
+    }
+
+    /// The close's end when `plan` could not read the session's tab roster: the check fails, and
+    /// nothing is ended or removed — a tab recorded only there would be neither ended nor checked.
+    fn refuse_unknown_tabs(&mut self, plan: &ClosePlan) -> Option<Ended> {
+        let reason = plan.unreadable_tabs.as_deref()?;
+        let session_id = self.ctx.session_id.clone();
+        self.failed(CloseSessionStepKind::Check, &session_id, "", reason);
+        self.skip_removing(
+            plan,
+            "not every tab of the session is known, so none is ended and no worktree is removed",
+        );
+        Some(self.outcome())
     }
 
     /// The fresh preview to ask with, when `plan` is not what the caller confirmed: a worktree that
@@ -208,7 +238,15 @@ impl CloseRun {
                 );
             }
         }
-        for tab in self.host.tabs_beside_main(&session_id).await {
+        let tabs = match self.host.tabs_beside_main(&session_id).await {
+            Ok(tabs) => tabs,
+            Err(reason) => {
+                all_ended = false;
+                self.failed(CloseSessionStepKind::Terminate, TAB_ROSTER, "", &reason);
+                Vec::new()
+            }
+        };
+        for tab in tabs {
             self.running(CloseSessionStepKind::Terminate, &tab.terminal_id, "");
             match self
                 .host
@@ -236,7 +274,9 @@ impl CloseRun {
         {
             let subject = conversation_tab_id(&conversation_id);
             match closed {
-                Ok(()) => ended.push(((subject, String::new()), EndedTab::Conversation)),
+                Ok(turn_loop) => {
+                    ended.push(((subject, String::new()), EndedTab::Conversation(turn_loop)))
+                }
                 Err(error) => {
                     all_ended = false;
                     self.failed(CloseSessionStepKind::Terminate, &subject, "", &error);
@@ -263,19 +303,37 @@ impl CloseRun {
         all_ended
     }
 
-    /// Remove every worktree of `plan`, one step each, every one attempted. Whether all went.
+    /// Remove every worktree of `plan`, one step each, every one attempted — but the session's own
+    /// worktree on this host, once a conversation worktree inside it failed to go: forcing it out
+    /// would delete that one's directory and leave its branch and base ref behind. Whether all
+    /// went.
     async fn remove_every_worktree(&mut self, plan: &ClosePlan) -> bool {
         let mut removed_all = true;
+        let mut a_nested_one_stayed = false;
         for worktree in &plan.worktrees {
             if matches!(worktree.removal, Removal::WithAnother) {
                 continue;
             }
             let (subject, host) = removal_subject(worktree);
+            if a_nested_one_stayed && matches!(worktree.removal, Removal::Local { .. }) {
+                removed_all = false;
+                self.skipped(
+                    CloseSessionStepKind::Remove,
+                    &subject,
+                    &host,
+                    "a conversation worktree inside it could not be removed, so it is kept",
+                );
+                continue;
+            }
             self.running(CloseSessionStepKind::Remove, &subject, &host);
             match self.remove(worktree).await {
                 Ok(note) => self.done(CloseSessionStepKind::Remove, &subject, &host, &note),
                 Err(error) => {
                     removed_all = false;
+                    a_nested_one_stayed |= matches!(
+                        worktree.removal,
+                        Removal::Conversation(_) | Removal::ConversationWithoutBase { .. }
+                    );
                     self.failed(CloseSessionStepKind::Remove, &subject, &host, &error);
                 }
             }
@@ -285,9 +343,22 @@ impl CloseRun {
 
     async fn remove(&self, worktree: &PlannedWorktree) -> Result<String, String> {
         match &worktree.removal {
-            Removal::Local { path } => self.host.remove_local_worktree(&self.ctx, path).await,
-            Removal::Target { worktree } => {
+            Removal::Local { path, present } => {
+                self.host
+                    .remove_local_worktree(&self.ctx, path, *present)
+                    .await
+            }
+            Removal::Target { worktree, present } => {
                 let shell = self.host.target_shell_of(&self.ctx)?;
+                let there = tddy_worktree_service::target_worktrees::target_path_is_present(
+                    shell.as_ref(),
+                    worktree,
+                )
+                .await
+                .map_err(|refusal| refusal.message().to_string())?;
+                if there && !present {
+                    return Err(reappeared());
+                }
                 tddy_worktree_service::target_worktrees::remove_target_worktree(
                     shell.as_ref(),
                     worktree,
@@ -333,8 +404,23 @@ impl CloseRun {
     async fn tear_down_every_clone(&mut self) -> bool {
         let roster = self.host.agent_roster();
         let session_id = self.ctx.session_id.clone();
+        let clones = match roster.every_agent_clone_of(&session_id) {
+            Ok(clones) => clones,
+            Err(refusal) => {
+                self.failed(
+                    CloseSessionStepKind::Remove,
+                    &session_id,
+                    "",
+                    &format!(
+                        "the agent clones of the session cannot be listed: {}",
+                        refusal.message()
+                    ),
+                );
+                return false;
+            }
+        };
         let mut torn_down_all = true;
-        for (daemon_instance_id, codebase_session_id) in roster.every_agent_clone_of(&session_id) {
+        for (daemon_instance_id, codebase_session_id) in clones {
             self.running(
                 CloseSessionStepKind::Remove,
                 &codebase_session_id,
@@ -379,15 +465,26 @@ impl CloseRun {
             self.skipped(CloseSessionStepKind::Remove, &subject, &host, why);
         }
         let session_id = self.ctx.session_id.clone();
-        for (daemon_instance_id, codebase_session_id) in
-            self.host.agent_roster().every_agent_clone_of(&session_id)
-        {
-            self.skipped(
+        match self.host.agent_roster().every_agent_clone_of(&session_id) {
+            Ok(clones) => {
+                for (daemon_instance_id, codebase_session_id) in clones {
+                    self.skipped(
+                        CloseSessionStepKind::Remove,
+                        &codebase_session_id,
+                        &daemon_instance_id,
+                        why,
+                    );
+                }
+            }
+            Err(refusal) => self.skipped(
                 CloseSessionStepKind::Remove,
-                &codebase_session_id,
-                &daemon_instance_id,
-                why,
-            );
+                &session_id,
+                "",
+                &format!(
+                    "{why}; the session's agent clones cannot be listed either: {}",
+                    refusal.message()
+                ),
+            ),
         }
         self.skipped(CloseSessionStepKind::Record, &session_id, "", why);
     }
@@ -435,6 +532,15 @@ impl CloseRun {
     fn skipped(&mut self, kind: CloseSessionStepKind, subject: &str, host: &str, message: &str) {
         self.step(kind, subject, host, CloseSessionStepState::Skipped, message);
     }
+}
+
+/// The TERMINATE step's subject when the session's tab roster cannot be read.
+const TAB_ROSTER: &str = "tabs.yaml";
+
+/// Why a worktree the plan found gone is not removed now that it is there again.
+pub(super) fn reappeared() -> String {
+    "it reappeared since it was checked, so what it holds was never shown; close the session again"
+        .to_string()
 }
 
 /// What a REMOVE step of `worktree` names: its path as recorded (the paired workspace session for

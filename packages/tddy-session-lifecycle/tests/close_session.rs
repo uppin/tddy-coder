@@ -13,17 +13,24 @@ mod tmux_agent_support;
 use pretty_assertions::assert_eq;
 use tddy_rpc::Code;
 use tddy_service::proto::session::{
-    CloseSessionDirtyFile, CloseSessionStepKind, CloseSessionStepState, CloseSessionWorktreeOwner,
+    close_session_event, CloseSessionDirtyFile, CloseSessionEvent, CloseSessionOutcome,
+    CloseSessionPreview, CloseSessionRequest, CloseSessionStarted, CloseSessionStepKind,
+    CloseSessionStepState, CloseSessionWorktree, CloseSessionWorktreeOwner, DeleteSessionRequest,
+    DeleteSessionResponse, PreviewCloseSessionRequest,
+};
+use tddy_service::proto::session_agents_svc::{
+    CancelAgentConversationRequest, CancelAgentConversationResponse,
 };
 use tddy_testing_commons::wait::eventually;
 
 use support::OBSERVE;
 use tddy_subagent_worktree::{ConversationId, ConversationWorktree, ConversationWorktrees};
-use tmux_agent_support::close_events::{failed_steps_of, CloseEvents};
+use tmux_agent_support::close_events::{failed_steps_of, CloseEvents, UnreadableUntilDropped};
 use tmux_agent_support::close_session::{a_close_request, WORKTREE_REMOVED_MARKER};
+use tmux_agent_support::scripted_peer::{ScriptedPeer, PEER};
 use tmux_agent_support::{
-    a_daemon_whose_agent, a_daemon_with_a_private_tmux, a_process_is_alive, AgentTemperament,
-    KilledOnDrop, TmuxAgentDaemon,
+    a_daemon_in_a_room_with, a_daemon_whose_agent, a_daemon_with_a_private_tmux,
+    a_process_is_alive, AgentTemperament, KilledOnDrop, TmuxAgentDaemon,
 };
 
 fn a_dirty(path: &str, change: &str) -> CloseSessionDirtyFile {
@@ -34,9 +41,7 @@ fn a_dirty(path: &str, change: &str) -> CloseSessionDirtyFile {
 }
 
 /// The paths and changes of a preview's only worktree, sorted by path.
-fn dirty_files_of_the_only_worktree(
-    preview: &tddy_service::proto::session::CloseSessionPreview,
-) -> Vec<CloseSessionDirtyFile> {
+fn dirty_files_of_the_only_worktree(preview: &CloseSessionPreview) -> Vec<CloseSessionDirtyFile> {
     assert_eq!(preview.worktrees.len(), 1, "{preview:?}");
     let mut files = preview.worktrees[0].dirty_files.clone();
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -842,18 +847,6 @@ async fn a_conversation_worktree_of(
         .expect("the conversation's worktree is cut")
 }
 
-/// Whether the project's repository still has `reference`.
-fn project_has_ref(daemon: &TmuxAgentDaemon, reference: &str) -> bool {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(daemon.project_repo())
-        .args(["rev-parse", "--verify", "--quiet", reference])
-        .output()
-        .expect("git runs")
-        .status
-        .success()
-}
-
 #[tokio::test]
 #[serial_test::serial]
 async fn the_preview_lists_a_conversation_worktree_with_its_dirty_files() {
@@ -932,9 +925,901 @@ async fn a_confirmed_close_removes_a_conversation_worktree_with_its_branch_and_b
             )),
             conversation.root().exists(),
             daemon.project_has_branch(conversation.branch()),
-            project_has_ref(&daemon, &base_ref),
+            daemon.project_has_ref(&base_ref),
         ),
         (true, true, false, false, false),
+        "{events:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A split session's codebase half
+// ---------------------------------------------------------------------------
+
+/// A daemon holding two running sessions, the first recording the second as its codebase half on
+/// this daemon (a jailed codebase): the split session, and the workspace session holding its
+/// checkout.
+async fn a_split_session_whose_codebase_half_is_on_this_daemon() -> (TmuxAgentDaemon, String, String)
+{
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (split, _split_tmux) = daemon.a_running_tmux_session().await;
+    let (workspace, _workspace_tmux) = daemon.a_running_tmux_session().await;
+    daemon.records_its_codebase_half_as(&split, &daemon.instance_id(), &workspace);
+    (daemon, split, workspace)
+}
+
+/// The owner, owner id and path of every worktree `preview` lists, in order.
+fn owners_of(preview: &CloseSessionPreview) -> Vec<(CloseSessionWorktreeOwner, String, String)> {
+    preview
+        .worktrees
+        .iter()
+        .map(|worktree| {
+            (
+                worktree.owner(),
+                worktree.owner_id.clone(),
+                worktree.path.clone(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_preview_lists_the_codebase_halfs_checkout_after_the_sessions_own_worktree() {
+    // Given
+    let (daemon, split, workspace) = a_split_session_whose_codebase_half_is_on_this_daemon().await;
+
+    // When
+    let preview = daemon.previews_closing(&split).await;
+
+    // Then
+    assert_eq!(
+        owners_of(&preview),
+        vec![
+            (
+                CloseSessionWorktreeOwner::Session,
+                String::new(),
+                daemon.recorded_worktree_of(&split)
+            ),
+            (
+                CloseSessionWorktreeOwner::Codebase,
+                workspace.clone(),
+                daemon.recorded_worktree_of(&workspace)
+            ),
+        ]
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_closes_the_codebase_half_and_removes_its_checkout() {
+    // Given
+    let (daemon, split, workspace) = a_split_session_whose_codebase_half_is_on_this_daemon().await;
+    let checkout = daemon.worktree_of(&workspace);
+
+    // When
+    let events = daemon.closes(&split).await;
+
+    // Then the checkout is gone, and the workspace session records its own removal
+    assert_eq!(
+        (
+            events.outcome().ok,
+            checkout.exists(),
+            daemon
+                .session_dir(&workspace)
+                .join(WORKTREE_REMOVED_MARKER)
+                .is_file(),
+        ),
+        (true, false, true),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_codebase_half_its_daemon_no_longer_holds_has_no_checkout_left_to_remove() {
+    // Given a split session whose workspace session is gone from its daemon
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (split, _tmux) = daemon.a_running_tmux_session().await;
+    daemon.records_its_codebase_half_as(&split, &daemon.instance_id(), "a-deleted-workspace");
+
+    // When
+    let preview = daemon.previews_closing(&split).await;
+    let events = daemon.closes(&split).await;
+
+    // Then only the session's own worktree is listed, and the close ends ok
+    assert_eq!(
+        (
+            owners_of(&preview)
+                .into_iter()
+                .map(|(owner, _, _)| owner)
+                .collect::<Vec<_>>(),
+            events.outcome().ok,
+        ),
+        (vec![CloseSessionWorktreeOwner::Session], true),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_codebase_half_whose_record_cannot_be_read_is_unreadable_not_gone() {
+    // Given a split session whose workspace session's record was left half-written
+    let (daemon, split, workspace) = a_split_session_whose_codebase_half_is_on_this_daemon().await;
+    daemon.record_is_left_half_written(&workspace);
+
+    // When
+    let preview = daemon.previews_closing(&split).await;
+
+    // Then the checkout is listed as one that could not be read, which needs confirming
+    let codebase = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.owner() == CloseSessionWorktreeOwner::Codebase);
+    assert_eq!(
+        (
+            codebase.map(|worktree| worktree.unavailable_reason.contains("cannot be read")),
+            preview.needs_confirmation,
+        ),
+        (Some(true), true),
+        "{preview:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_of_a_split_session_whose_codebase_record_cannot_be_read_ends_nothing() {
+    // Given
+    let (daemon, split, workspace) = a_split_session_whose_codebase_half_is_on_this_daemon().await;
+    let split_tmux = daemon.tmux_session_of(&split);
+    daemon.record_is_left_half_written(&workspace);
+
+    // When
+    let events = daemon.closes(&split).await;
+
+    // Then it asks, and the split session's agent still runs
+    assert_eq!(
+        (
+            events.needs_confirmation().needs_confirmation,
+            daemon.tmux.has_session(&split_tmux),
+        ),
+        (true, true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_codebase_half_on_a_daemon_this_one_cannot_reach_is_unreadable() {
+    // Given a split session whose codebase daemon is a peer, and no common room to reach it through
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (split, _tmux) = daemon.a_running_tmux_session().await;
+    daemon.records_its_codebase_half_as(&split, "a-peer-daemon", "its-workspace");
+
+    // When
+    let preview = daemon.previews_closing(&split).await;
+
+    // Then
+    let codebase = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.owner() == CloseSessionWorktreeOwner::Codebase)
+        .map(|worktree| {
+            (
+                worktree.host.clone(),
+                worktree.unavailable_reason.is_empty(),
+            )
+        });
+    assert_eq!(
+        (codebase, preview.needs_confirmation),
+        (Some(("a-peer-daemon".to_string(), false)), true),
+        "{preview:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// While a close runs
+// ---------------------------------------------------------------------------
+
+/// A refusal's code, and whether it says the session is being closed.
+fn refused_as_closing<T>(result: Result<T, tddy_rpc::Status>) -> Option<(Code, bool)> {
+    result
+        .err()
+        .map(|status| (status.code(), status.message().contains("being closed")))
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn while_a_session_is_being_closed_its_resume_a_new_tab_and_its_delete_are_refused() {
+    // Given a close under way, its agent holding it in the terminate's grace
+    let daemon =
+        a_daemon_whose_agent(AgentTemperament::IgnoresHangupAndTerminationAndNeverReadsItsPane)
+            .await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let _agent = KilledOnDrop(daemon.agent_pid_of(&session_id));
+    let mut close = daemon
+        .starts_closing(&session_id)
+        .await
+        .expect("the close starts");
+    futures_util::StreamExt::next(&mut close)
+        .await
+        .expect("the close streams its start")
+        .expect("the start is not an error");
+
+    // When
+    let resumed = daemon.resume_of(&session_id).await;
+    let tab = daemon.start_of_a_tmux_wrapped_agent_tab(&session_id).await;
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then each is refused naming the close, which still runs to its end
+    let refused = Some((Code::AlreadyExists, true));
+    assert_eq!(
+        (
+            refused_as_closing(resumed),
+            refused_as_closing(tab),
+            refused_as_closing(deleted),
+            CloseEvents::read_to_end(close).await.outcome().ok,
+        ),
+        (refused, refused, refused, true)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// What cannot be read stops the close
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_of_a_session_whose_tab_roster_cannot_be_read_fails_its_check_and_ends_nothing() {
+    // Given a running session whose tabs.yaml was left half-written
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, name) = daemon.a_running_tmux_session().await;
+    let worktree = daemon.worktree_of(&session_id);
+    daemon.tab_roster_is_left_half_written(&session_id);
+
+    // When
+    let events = daemon.closes(&session_id).await;
+
+    // Then the check failed, the removal was skipped, and the agent and its worktree are intact
+    let outcome = events.outcome();
+    assert_eq!(
+        (
+            outcome.ok,
+            failed_steps_of(outcome, CloseSessionStepKind::Check),
+            failed_steps_of(outcome, CloseSessionStepKind::Remove),
+            daemon.tmux.has_session(&name),
+            worktree.is_dir(),
+        ),
+        (
+            false,
+            vec![CloseSessionStepState::Failed],
+            vec![CloseSessionStepState::Skipped],
+            true,
+            true
+        ),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_session_whose_tab_roster_cannot_be_read_is_refused_and_keeps_its_record() {
+    // Given a running session whose tabs.yaml was left half-written
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    daemon.tab_roster_is_left_half_written(&session_id);
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            deleted
+                .err()
+                .map(|status| status.message().contains("tab roster")),
+            daemon.session_dir(&session_id).is_dir(),
+        ),
+        (Some(true), true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_conversation_worktrees_directory_that_cannot_be_read_is_listed_as_unreadable() {
+    // Given a running session whose conversation worktrees' directory cannot be read
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let conversations = daemon
+        .worktree_of(&session_id)
+        .join(tddy_subagent_worktree::SUBAGENT_WORKTREES_DIR);
+    std::fs::create_dir_all(&conversations).unwrap();
+    let _locked = UnreadableUntilDropped::made_of(conversations);
+
+    // When
+    let preview = daemon.previews_closing(&session_id).await;
+
+    // Then
+    let unreadable_conversation = preview.worktrees.iter().any(|worktree| {
+        worktree.owner() == CloseSessionWorktreeOwner::Conversation
+            && !worktree.unavailable_reason.is_empty()
+    });
+    assert_eq!(
+        (unreadable_conversation, preview.needs_confirmation),
+        (true, true),
+        "{preview:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_session_worktree_that_cannot_be_looked_at_is_listed_as_unreadable_not_gone() {
+    // Given a running session whose worktree's parent directory cannot be searched
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let worktrees = daemon
+        .worktree_of(&session_id)
+        .parent()
+        .expect("the worktree sits in its project's .worktrees")
+        .to_path_buf();
+    let _locked = UnreadableUntilDropped::made_of(worktrees);
+
+    // When
+    let preview = daemon.previews_closing(&session_id).await;
+
+    // Then
+    let own = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.owner() == CloseSessionWorktreeOwner::Session)
+        .map(|worktree| worktree.unavailable_reason.is_empty());
+    assert_eq!(
+        (own, preview.needs_confirmation),
+        (Some(false), true),
+        "{preview:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A codebase half on a peer
+// ---------------------------------------------------------------------------
+
+/// The workspace session holding a split session's checkout on [`PEER`].
+const PEER_WORKSPACE: &str = "peer-workspace";
+
+/// The words a daemon refuses a session it does not hold with.
+const NOT_HELD_HERE: &str =
+    "session is not present on this daemon; use the daemon that owns it (check routing / host)";
+
+/// What the peer previews closing [`PEER_WORKSPACE`] would remove: its clean checkout.
+fn the_peers_preview() -> CloseSessionPreview {
+    CloseSessionPreview {
+        worktrees: vec![CloseSessionWorktree {
+            path: "/peer/project/.worktrees/peer-workspace".to_string(),
+            owner: CloseSessionWorktreeOwner::Session as i32,
+            branch: "peer-branch".to_string(),
+            ..CloseSessionWorktree::default()
+        }],
+        fingerprint: "the-peers-fingerprint".to_string(),
+        ..CloseSessionPreview::default()
+    }
+}
+
+/// A peer whose close of [`PEER_WORKSPACE`] starts and ends ok.
+fn a_peer_closing_its_checkout_ok() -> std::sync::Arc<ScriptedPeer> {
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers("PreviewCloseSession", Ok(the_peers_preview()));
+    peer.streams(
+        "CloseSession",
+        vec![
+            an_event(close_session_event::Event::Started(CloseSessionStarted {
+                task_id: "peer-task".to_string(),
+                daemon_instance_id: PEER.to_string(),
+            })),
+            an_event(close_session_event::Event::Outcome(CloseSessionOutcome {
+                ok: true,
+                failed_steps: Vec::new(),
+            })),
+        ],
+    );
+    peer
+}
+
+fn an_event(event: close_session_event::Event) -> CloseSessionEvent {
+    CloseSessionEvent { event: Some(event) }
+}
+
+/// A daemon in a room with `peer`, and a running session recording [`PEER_WORKSPACE`] there as its
+/// codebase half.
+async fn a_split_session_whose_codebase_half_is_on(
+    peer: std::sync::Arc<ScriptedPeer>,
+) -> (TmuxAgentDaemon, String) {
+    let daemon = a_daemon_in_a_room_with(peer).await;
+    let (split, _tmux) = daemon.a_running_tmux_session().await;
+    daemon.records_its_codebase_half_as(&split, PEER, PEER_WORKSPACE);
+    (daemon, split)
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_preview_lists_the_checkout_the_peer_previews_as_the_codebase_half_on_that_peer() {
+    // Given
+    let peer = a_peer_closing_its_checkout_ok();
+    let (daemon, split) = a_split_session_whose_codebase_half_is_on(peer.clone()).await;
+
+    // When
+    let preview = daemon.previews_closing(&split).await;
+
+    // Then
+    let codebase: Vec<(String, String, String)> = preview
+        .worktrees
+        .iter()
+        .filter(|worktree| worktree.owner() == CloseSessionWorktreeOwner::Codebase)
+        .map(|worktree| {
+            (
+                worktree.host.clone(),
+                worktree.owner_id.clone(),
+                worktree.path.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        (
+            codebase,
+            peer.was_asked::<PreviewCloseSessionRequest>("PreviewCloseSession")
+                .into_iter()
+                .map(|asked| asked.session_id)
+                .collect::<Vec<_>>(),
+        ),
+        (
+            vec![(
+                PEER.to_string(),
+                PEER_WORKSPACE.to_string(),
+                "/peer/project/.worktrees/peer-workspace".to_string()
+            )],
+            vec![PEER_WORKSPACE.to_string()]
+        )
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_closes_the_codebase_half_on_its_peer_confirming_the_peers_preview() {
+    // Given
+    let peer = a_peer_closing_its_checkout_ok();
+    let (daemon, split) = a_split_session_whose_codebase_half_is_on(peer.clone()).await;
+
+    // When
+    let events = daemon.closes(&split).await;
+
+    // Then the peer was asked to close its workspace session, confirming what it previewed
+    let asked: Vec<(String, bool, String)> = peer
+        .was_asked::<CloseSessionRequest>("CloseSession")
+        .into_iter()
+        .map(|asked| {
+            (
+                asked.session_id,
+                asked.confirmed,
+                asked.confirmed_fingerprint,
+            )
+        })
+        .collect();
+    assert_eq!(
+        (events.outcome().ok, asked),
+        (
+            true,
+            vec![(
+                PEER_WORKSPACE.to_string(),
+                true,
+                "the-peers-fingerprint".to_string()
+            )]
+        ),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_peer_that_no_longer_holds_the_codebase_half_has_no_checkout_left_to_close() {
+    // Given a peer that holds no such workspace session
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers::<CloseSessionPreview>(
+        "PreviewCloseSession",
+        Err(tddy_rpc::Status::failed_precondition(NOT_HELD_HERE)),
+    );
+    let (daemon, split) = a_split_session_whose_codebase_half_is_on(peer.clone()).await;
+
+    // When
+    let events = daemon.closes(&split).await;
+
+    // Then the close ends ok without asking the peer to close anything
+    assert_eq!(
+        (
+            events.outcome().ok,
+            peer.was_asked::<CloseSessionRequest>("CloseSession").len()
+        ),
+        (true, 0),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_peer_refusing_the_codebase_preview_for_another_reason_leaves_an_unreadable_checkout() {
+    // Given a peer whose record of the workspace session cannot be read
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers::<CloseSessionPreview>(
+        "PreviewCloseSession",
+        Err(tddy_rpc::Status::failed_precondition(
+            "the record of the session in /peer/sessions/peer-workspace cannot be read",
+        )),
+    );
+    let (daemon, split) = a_split_session_whose_codebase_half_is_on(peer).await;
+
+    // When
+    let preview = daemon.previews_closing(&split).await;
+
+    // Then
+    let codebase = preview
+        .worktrees
+        .iter()
+        .find(|worktree| worktree.owner() == CloseSessionWorktreeOwner::Codebase)
+        .map(|worktree| worktree.unavailable_reason.contains("cannot be read"));
+    assert_eq!(
+        (codebase, preview.needs_confirmation),
+        (Some(true), true),
+        "{preview:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Agent clones
+// ---------------------------------------------------------------------------
+
+/// The workspace session holding a roster agent's clone on [`PEER`].
+const CLONE_WORKSPACE: &str = "clone-workspace";
+
+/// A daemon in a room with a peer that deletes whatever it is asked to, and a running session whose
+/// record names an agent reading a clone [`PEER`] holds as [`CLONE_WORKSPACE`].
+async fn a_session_with_a_recorded_clone() -> (TmuxAgentDaemon, String, std::sync::Arc<ScriptedPeer>)
+{
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers("DeleteSession", Ok(DeleteSessionResponse { ok: true }));
+    let daemon = a_daemon_in_a_room_with(peer.clone()).await;
+    let (session_id, _tmux) = daemon.a_running_tmux_session().await;
+    daemon.records_an_agent_reading_a_clone(&session_id, PEER, CLONE_WORKSPACE);
+    (daemon, session_id, peer)
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_tears_down_a_clone_the_record_names_on_the_daemon_holding_it() {
+    // Given
+    let (daemon, session_id, peer) = a_session_with_a_recorded_clone().await;
+
+    // When
+    let events = daemon.closes(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            events.outcome().ok,
+            events
+                .done_steps()
+                .contains(&(CloseSessionStepKind::Remove, CLONE_WORKSPACE.to_string())),
+            peer.was_asked::<DeleteSessionRequest>("DeleteSession")
+                .into_iter()
+                .map(|asked| asked.session_id)
+                .collect::<Vec<_>>(),
+        ),
+        (true, true, vec![CLONE_WORKSPACE.to_string()]),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_forgets_the_clone_it_tore_down_from_the_sessions_record() {
+    // Given
+    let (daemon, session_id, _peer) = a_session_with_a_recorded_clone().await;
+
+    // When
+    daemon.closes(&session_id).await.outcome();
+
+    // Then
+    assert_eq!(
+        daemon.clones_recorded_for(&session_id),
+        Vec::<String>::new()
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_closed_session_whose_clone_was_torn_down_needs_no_common_room() {
+    // Given a closed session whose clone went with the close, and a common room that is down
+    let (daemon, session_id, peer) = a_session_with_a_recorded_clone().await;
+    let closed = daemon.closes(&session_id).await;
+    peer.leaves_the_room();
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            closed.outcome().ok,
+            deleted.map_err(|status| status.message().to_string()),
+            daemon.session_dir(&session_id).exists(),
+        ),
+        (true, Ok(()), false)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_whose_clone_cannot_be_reached_fails_that_removal_and_records_nothing() {
+    // Given a session whose clone's daemon cannot be reached
+    let (daemon, session_id, peer) = a_session_with_a_recorded_clone().await;
+    peer.leaves_the_room();
+
+    // When
+    let events = daemon.closes(&session_id).await;
+
+    // Then
+    let outcome = events.outcome();
+    let clone_removal = outcome
+        .failed_steps
+        .iter()
+        .find(|step| step.subject == CLONE_WORKSPACE)
+        .map(|step| (step.kind(), step.state()));
+    assert_eq!(
+        (
+            outcome.ok,
+            clone_removal,
+            failed_steps_of(outcome, CloseSessionStepKind::Record),
+            daemon
+                .session_dir(&session_id)
+                .join(WORKTREE_REMOVED_MARKER)
+                .exists(),
+        ),
+        (
+            false,
+            Some((CloseSessionStepKind::Remove, CloseSessionStepState::Failed)),
+            vec![CloseSessionStepState::Skipped],
+            false
+        ),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_session_tears_down_a_clone_only_its_record_names() {
+    // Given a session whose clone this daemon knows from the record alone (as after a restart)
+    let (daemon, session_id, peer) = a_session_with_a_recorded_clone().await;
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            deleted.map_err(|status| status.message().to_string()),
+            peer.was_asked::<DeleteSessionRequest>("DeleteSession")
+                .into_iter()
+                .map(|asked| asked.session_id)
+                .collect::<Vec<_>>(),
+        ),
+        (Ok(()), vec![CLONE_WORKSPACE.to_string()])
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Conversations open on the session
+// ---------------------------------------------------------------------------
+
+/// A conversation open on a session, its turn loop on [`PEER`].
+const REMOTE_CONVERSATION: &str = "a-remote-conversation";
+
+/// A daemon in a room with `peer`, and a running session with [`REMOTE_CONVERSATION`] open on it.
+async fn a_session_with_a_conversation_on(
+    peer: std::sync::Arc<ScriptedPeer>,
+) -> (TmuxAgentDaemon, String) {
+    let daemon = a_daemon_in_a_room_with(peer).await;
+    let (session_id, _tmux) = daemon.a_running_tmux_session().await;
+    tddy_session_lifecycle::test_util::open_a_remote_conversation(
+        &daemon.host,
+        REMOTE_CONVERSATION,
+        &session_id,
+        &format!("explorer@{PEER}"),
+        PEER,
+    )
+    .await;
+    (daemon, session_id)
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_cancels_a_conversation_on_the_daemon_running_its_turn_loop() {
+    // Given
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers(
+        "CancelAgentConversation",
+        Ok(CancelAgentConversationResponse::default()),
+    );
+    let (daemon, session_id) = a_session_with_a_conversation_on(peer.clone()).await;
+
+    // When
+    let events = daemon.closes(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            events.outcome().ok,
+            events.done_steps().contains(&(
+                CloseSessionStepKind::Terminate,
+                format!("conversation:{REMOTE_CONVERSATION}")
+            )),
+            peer.was_asked::<CancelAgentConversationRequest>("CancelAgentConversation")
+                .into_iter()
+                .map(|asked| asked.conversation_id)
+                .collect::<Vec<_>>(),
+            tddy_session_lifecycle::test_util::conversation_is_open(
+                &daemon.host,
+                REMOTE_CONVERSATION
+            )
+            .await,
+        ),
+        (true, true, vec![REMOTE_CONVERSATION.to_string()], false),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_whose_conversation_cannot_be_cancelled_removes_no_worktree() {
+    // Given a session whose conversation's daemon refuses the cancel
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers::<CancelAgentConversationResponse>(
+        "CancelAgentConversation",
+        Err(tddy_rpc::Status::unavailable("the peer is restarting")),
+    );
+    let (daemon, session_id) = a_session_with_a_conversation_on(peer).await;
+    let worktree = daemon.worktree_of(&session_id);
+
+    // When
+    let events = daemon.closes(&session_id).await;
+
+    // Then
+    let outcome = events.outcome();
+    assert_eq!(
+        (
+            outcome.ok,
+            failed_steps_of(outcome, CloseSessionStepKind::Terminate),
+            failed_steps_of(outcome, CloseSessionStepKind::Remove),
+            worktree.is_dir(),
+        ),
+        (
+            false,
+            vec![CloseSessionStepState::Failed],
+            vec![CloseSessionStepState::Skipped],
+            true
+        ),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_session_whose_conversation_cannot_be_cancelled_is_refused() {
+    // Given
+    let peer = ScriptedPeer::in_the_room();
+    peer.answers::<CancelAgentConversationResponse>(
+        "CancelAgentConversation",
+        Err(tddy_rpc::Status::unavailable("the peer is restarting")),
+    );
+    let (daemon, session_id) = a_session_with_a_conversation_on(peer).await;
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            deleted.err().map(|status| status.code()),
+            daemon.session_dir(&session_id).is_dir(),
+        ),
+        (Some(Code::Unavailable), true)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The re-check after every tab ended, and a cancelled close
+// ---------------------------------------------------------------------------
+
+/// What the agent of [`AgentTemperament::LeavesAFileWhenEnded`] writes as it is ended.
+const WRITTEN_AS_IT_ENDED: &str = "late-notes.md";
+
+#[tokio::test]
+#[serial_test::serial]
+async fn an_agent_that_writes_as_it_is_ended_makes_the_close_ask_and_removes_nothing() {
+    // Given a clean session whose agent saves a file as it is ended
+    let daemon =
+        a_daemon_whose_agent(AgentTemperament::LeavesAFileWhenEnded(WRITTEN_AS_IT_ENDED)).await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let worktree = daemon.worktree_of(&session_id);
+
+    // When it is closed without a dialog
+    let events = daemon.closes(&session_id).await;
+
+    // Then its tab was ended, the close asks about the new file, and no removal was attempted
+    assert_eq!(
+        (
+            events
+                .done_steps()
+                .contains(&(CloseSessionStepKind::Terminate, "main".to_string())),
+            dirty_files_of_the_only_worktree(events.needs_confirmation()),
+            events.streamed_a_step_of(CloseSessionStepKind::Remove),
+            worktree.join(WRITTEN_AS_IT_ENDED).is_file(),
+        ),
+        (
+            true,
+            vec![a_dirty(WRITTEN_AS_IT_ENDED, "untracked")],
+            false,
+            true
+        ),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_close_cancelled_while_it_ends_the_tabs_skips_every_removal() {
+    // Given a close under way, its agent holding it in the terminate's grace
+    let daemon =
+        a_daemon_whose_agent(AgentTemperament::IgnoresHangupAndTerminationAndNeverReadsItsPane)
+            .await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let _agent = KilledOnDrop(daemon.agent_pid_of(&session_id));
+    let worktree = daemon.worktree_of(&session_id);
+    let mut close = daemon
+        .starts_closing(&session_id)
+        .await
+        .expect("the close starts");
+    let started = futures_util::StreamExt::next(&mut close)
+        .await
+        .expect("the close streams its start")
+        .expect("the start is not an error");
+    let task_id = CloseEvents(vec![started]).started().task_id.clone();
+
+    // When its task is cancelled
+    let cancelled = daemon
+        .host
+        .task_registry()
+        .cancel_task(&tddy_task::TaskId(task_id))
+        .await;
+
+    // Then the removal and the record are skipped as cancelled, and the worktree is intact
+    let events = CloseEvents::read_to_end(close).await;
+    let outcome = events.outcome();
+    let skipped_as_cancelled: Vec<CloseSessionStepKind> = outcome
+        .failed_steps
+        .iter()
+        .filter(|step| step.message.contains("cancelled"))
+        .map(|step| step.kind())
+        .collect();
+    assert_eq!(
+        (
+            cancelled,
+            outcome.ok,
+            skipped_as_cancelled,
+            worktree.is_dir()
+        ),
+        (
+            true,
+            false,
+            vec![CloseSessionStepKind::Remove, CloseSessionStepKind::Record],
+            true
+        ),
         "{events:?}"
     );
 }

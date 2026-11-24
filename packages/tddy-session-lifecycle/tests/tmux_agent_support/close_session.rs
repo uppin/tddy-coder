@@ -9,7 +9,8 @@ use tddy_cli_sessions::tmux::agent_tab_tmux_session_name;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::session::{
     CloseSessionPreview, CloseSessionRequest, DeleteSessionRequest, ListSessionsRequest,
-    PreviewCloseSessionRequest, SessionEntry, SessionService as SessionServiceTrait,
+    PreviewCloseSessionRequest, ResumeSessionRequest, SessionEntry,
+    SessionService as SessionServiceTrait,
 };
 use tddy_session_lifecycle::CloseSessionEventStream;
 use tddy_terminal_rpc::proto::terminal_session::{
@@ -209,11 +210,23 @@ impl TmuxAgentDaemon {
         );
     }
 
-    /// Open an agent tab of `session_id` wrapped in tmux, and wait until its tmux session is up.
-    /// Answers its terminal id and that tmux session.
-    pub async fn opens_a_tmux_wrapped_agent_tab(&self, session_id: &str) -> (String, String) {
-        let terminal_id = self
-            .host
+    /// Resume `session_id`, answering the refusal rather than expecting success.
+    pub async fn resume_of(&self, session_id: &str) -> Result<(), Status> {
+        self.host
+            .resume_session(Request::direct(ResumeSessionRequest {
+                session_token: VALID_TOKEN.to_string(),
+                session_id: session_id.to_string(),
+            }))
+            .await
+            .map(|_| ())
+    }
+
+    /// Start an agent tab of `session_id` wrapped in tmux: its terminal id, or the refusal.
+    pub async fn start_of_a_tmux_wrapped_agent_tab(
+        &self,
+        session_id: &str,
+    ) -> Result<String, Status> {
+        self.host
             .terminal_session_service()
             .start_terminal_session(Request::direct(StartTerminalSessionRequest {
                 session_token: VALID_TOKEN.to_string(),
@@ -227,9 +240,25 @@ impl TmuxAgentDaemon {
                 }],
             }))
             .await
-            .expect("a tmux-wrapped agent tab starts")
-            .into_inner()
-            .terminal_id;
+            .map(|started| started.into_inner().terminal_id)
+    }
+
+    /// `session_id`'s tab roster (`tabs.yaml`) can no longer be read: it was left half-written.
+    pub fn tab_roster_is_left_half_written(&self, session_id: &str) {
+        std::fs::write(
+            self.session_dir(session_id).join("tabs.yaml"),
+            "tabs: [half-written\n",
+        )
+        .unwrap();
+    }
+
+    /// Open an agent tab of `session_id` wrapped in tmux, and wait until its tmux session is up.
+    /// Answers its terminal id and that tmux session.
+    pub async fn opens_a_tmux_wrapped_agent_tab(&self, session_id: &str) -> (String, String) {
+        let terminal_id = self
+            .start_of_a_tmux_wrapped_agent_tab(session_id)
+            .await
+            .expect("a tmux-wrapped agent tab starts");
         let name = agent_tab_tmux_session_name(session_id, &terminal_id);
         eventually("the tab's tmux session to be up", OBSERVE, || {
             self.tmux
@@ -239,6 +268,83 @@ impl TmuxAgentDaemon {
         })
         .await;
         (terminal_id, name)
+    }
+
+    /// This daemon's instance id, as a split session's record names its codebase daemon.
+    pub fn instance_id(&self) -> String {
+        tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(self.host.config())
+    }
+
+    /// `session_id` records workspace session `codebase_session_id` on `daemon_instance_id` as its
+    /// codebase half — a split session whose checkout lives there.
+    pub fn records_its_codebase_half_as(
+        &self,
+        session_id: &str,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+    ) {
+        let mut metadata = self.metadata_of(session_id);
+        metadata.codebase_daemon_instance_id = Some(daemon_instance_id.to_string());
+        metadata.codebase_session_id = Some(codebase_session_id.to_string());
+        tddy_core::write_session_metadata(&self.session_dir(session_id), &metadata)
+            .expect("the session's .session.yaml is rewritten");
+    }
+
+    /// `session_id`'s record names a roster agent on `daemon_instance_id` reading the clone that
+    /// daemon holds as workspace session `codebase_session_id` — as an attach records one, and as
+    /// a restarted daemon knows it: from the record alone.
+    pub fn records_an_agent_reading_a_clone(
+        &self,
+        session_id: &str,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+    ) {
+        let mut metadata = self.metadata_of(session_id);
+        metadata.agents.push(tddy_core::SessionAgentRecord {
+            agent_id: format!("explorer@{daemon_instance_id}"),
+            name: "explorer".to_string(),
+            daemon_instance_id: daemon_instance_id.to_string(),
+            label: None,
+            model: String::new(),
+            replaces: Vec::new(),
+            tools: Vec::new(),
+            codebase_session_id: Some(codebase_session_id.to_string()),
+            kind: Default::default(),
+            harness: None,
+            placement: Default::default(),
+        });
+        tddy_core::write_session_metadata(&self.session_dir(session_id), &metadata)
+            .expect("the session's .session.yaml is rewritten");
+    }
+
+    /// The clones (their workspace sessions) `session_id`'s record names.
+    pub fn clones_recorded_for(&self, session_id: &str) -> Vec<String> {
+        self.metadata_of(session_id)
+            .agents
+            .into_iter()
+            .filter_map(|agent| agent.codebase_session_id)
+            .collect()
+    }
+
+    /// `session_id`'s record can no longer be read: its `.session.yaml` was left half-written.
+    pub fn record_is_left_half_written(&self, session_id: &str) {
+        std::fs::write(
+            self.session_dir(session_id).join(".session.yaml"),
+            "session_id: [half-written\n",
+        )
+        .unwrap();
+    }
+
+    /// Whether the project's repository still has `reference`.
+    pub fn project_has_ref(&self, reference: &str) -> bool {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(self.project_repo())
+            .args(["rev-parse", "--verify", "--quiet", reference])
+            .output()
+            .expect("git runs")
+            .status
+            .success()
     }
 
     /// From now on the daemon's tmux refuses to kill any session — every other tmux command runs

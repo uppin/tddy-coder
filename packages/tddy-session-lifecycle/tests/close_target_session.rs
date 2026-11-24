@@ -35,7 +35,7 @@ use agent_run_support::{read_agent_runs, AnAgentRun};
 use cli_harness_support::{
     a_daemon_config, create_test_repo_with_origin, register_project, session_host, VALID_TOKEN,
 };
-use close_events_support::CloseEvents;
+use close_events_support::{CloseEvents, UnreadableUntilDropped};
 
 const TEST_PROJECT_ID: &str = "close-target-project";
 /// The agent: `claude.yaml` under this id, so its sessions launch through the generic CLI path.
@@ -138,12 +138,29 @@ fn a_start_on_the_target() -> StartSessionRequest {
     }
 }
 
+/// A start of an `acme-cli` session whose agent runs in tmux on [`TARGET_ALIAS`].
+fn a_tmux_start_on_the_target() -> StartSessionRequest {
+    StartSessionRequest {
+        run_in_tmux: true,
+        ..a_start_on_the_target()
+    }
+}
+
 impl ADaemonWithATarget {
     /// A started session whose agent runs on the target, once its agent runs there.
     async fn a_running_session_on_the_target(&self) -> (String, AnAgentRun) {
+        self.a_running_session_started_with(a_start_on_the_target())
+            .await
+    }
+
+    /// The session `start` starts on the target, once its agent runs there.
+    async fn a_running_session_started_with(
+        &self,
+        start: StartSessionRequest,
+    ) -> (String, AnAgentRun) {
         let session_id = self
             .service
-            .start_session(Request::direct(a_start_on_the_target()))
+            .start_session(Request::direct(start))
             .await
             .expect("a start on a reachable target succeeds")
             .into_inner()
@@ -392,5 +409,64 @@ async fn deleting_a_target_session_whose_worktree_was_already_removed_succeeds()
             daemon.session_dir(&session_id).exists()
         ),
         (Ok(()), false)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn deleting_a_closed_tmux_run_target_session_needs_no_reachable_target() {
+    // Given a tmux-run session on the target, closed, whose target can no longer be reached
+    let daemon = a_daemon_with_a_reachable_target();
+    let (session_id, agent) = daemon
+        .a_running_session_started_with(a_tmux_start_on_the_target())
+        .await;
+    let preview = daemon.previews_closing(&session_id).await;
+    let closed = daemon
+        .closes_confirming(&session_id, &preview.fingerprint)
+        .await;
+    the_agent_has_ended(&agent).await;
+    daemon.the_target_becomes_unreachable();
+
+    // When
+    let deleted = daemon.delete_of(&session_id).await;
+
+    // Then the close already ended its tmux session there, so the delete asks nothing of the target
+    assert_eq!(
+        (
+            closed.outcome().ok,
+            deleted.map_err(|s| s.message().to_string()),
+            daemon.session_dir(&session_id).exists()
+        ),
+        (true, Ok(()), false),
+        "{closed:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_target_worktree_that_cannot_be_looked_at_is_listed_as_unreadable_not_gone() {
+    // Given a session on the target whose worktree's parent directory there cannot be searched
+    let daemon = a_daemon_with_a_reachable_target();
+    let (session_id, _agent) = daemon.a_running_session_on_the_target().await;
+    let worktrees = daemon
+        .target
+        .worktree_of(&session_id)
+        .parent()
+        .expect("the worktree sits in its clone's .worktrees")
+        .to_path_buf();
+    let _locked = UnreadableUntilDropped::made_of(worktrees);
+
+    // When
+    let preview = daemon.previews_closing(&session_id).await;
+
+    // Then
+    assert_eq!(
+        (
+            preview.needs_confirmation,
+            preview.worktrees.len(),
+            preview.worktrees[0].unavailable_reason.is_empty(),
+        ),
+        (true, 1, false),
+        "{preview:?}"
     );
 }

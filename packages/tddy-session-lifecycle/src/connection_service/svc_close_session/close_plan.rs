@@ -18,7 +18,9 @@ use tddy_session_activity::session_deletion::{
     is_daemon_managed_worktree, worktree_removal_applies_to,
 };
 use tddy_subagent_worktree::ConversationWorktree;
+use tddy_worktree_service::target_worktrees::target_path_is_present;
 use tddy_worktree_service::worktree_loss::read_target_worktree_loss;
+use tddy_worktree_service::worktrees::path_is_present;
 
 use super::super::DaemonSessionHost;
 use super::CloseContext;
@@ -38,10 +40,12 @@ pub(super) struct PlannedWorktree {
 
 /// How a planned worktree is removed.
 pub(super) enum Removal {
-    /// The session's own worktree on this host, forced out of its project's clone.
-    Local { path: PathBuf },
-    /// The session's own worktree on its target.
-    Target { worktree: String },
+    /// The session's own worktree on this host, forced out of its project's clone. `present`: the
+    /// plan found it on disk — one planned gone that is there again at removal is refused, since
+    /// what it holds was never shown.
+    Local { path: PathBuf, present: bool },
+    /// The session's own worktree on its target; `present` as for [`Removal::Local`].
+    Target { worktree: String, present: bool },
     /// A clone-placed conversation's worktree, with its branch and base ref.
     Conversation(ConversationWorktree),
     /// A conversation's worktree whose base ref is gone: the worktree alone, out of the session's
@@ -68,6 +72,9 @@ pub(super) struct ClosePlan {
     /// In removal order.
     pub worktrees: Vec<PlannedWorktree>,
     pub tabs: Vec<CloseSessionTab>,
+    /// Why the session's tab roster could not be read: then not every tab can be ended, and the
+    /// close fails its check.
+    pub unreadable_tabs: Option<String>,
     pub fingerprint: String,
 }
 
@@ -111,7 +118,11 @@ impl DaemonSessionHost {
         if let Some(own) = self.own_worktree_of(ctx).await {
             // Conversation worktrees are cut in a worktree on this host only: a conversation of a
             // remote agent works in that agent's clone, which the clone teardown removes.
-            if let Removal::Local { path } = &own.removal {
+            if let Removal::Local {
+                path,
+                present: true,
+            } = &own.removal
+            {
                 worktrees.extend(conversation_worktrees_in(path, &ctx.session_id).await);
             }
             worktrees.push(own);
@@ -125,8 +136,10 @@ impl DaemonSessionHost {
             );
         }
         let fingerprint = fingerprint_of(worktrees.iter().map(|worktree| &worktree.view));
+        let (tabs, unreadable_tabs) = self.tabs_a_close_ends(ctx).await;
         ClosePlan {
-            tabs: self.tabs_a_close_ends(ctx).await,
+            tabs,
+            unreadable_tabs,
             worktrees,
             fingerprint,
         }
@@ -145,25 +158,36 @@ impl DaemonSessionHost {
         let base = recorded_base(&ctx.session_dir);
         if let Some(target) = &metadata.target {
             let host = host_of_target(target);
-            let view = self
+            let (view, present) = self
                 .read_target_worktree(ctx, &recorded, base.as_deref())
                 .await;
             return Some(PlannedWorktree {
                 view: CloseSessionWorktree { host, ..view },
-                removal: Removal::Target { worktree: recorded },
+                removal: Removal::Target {
+                    worktree: recorded,
+                    present,
+                },
             });
         }
         let path = PathBuf::from(&recorded);
         if !is_daemon_managed_worktree(&path) {
             return None;
         }
-        let view = if path.exists() {
-            read_local_worktree(&path, base.as_deref()).await
-        } else {
-            CloseSessionWorktree {
-                branch: recorded_branch(&ctx.session_dir),
-                ..CloseSessionWorktree::default()
-            }
+        // Only "no such file" is gone: a worktree that cannot be looked at is never read as one
+        // that holds nothing.
+        let (view, present) = match path_is_present(&path) {
+            Ok(true) => (read_local_worktree(&path, base.as_deref()).await, true),
+            Ok(false) => (
+                CloseSessionWorktree {
+                    branch: recorded_branch(&ctx.session_dir),
+                    ..CloseSessionWorktree::default()
+                },
+                false,
+            ),
+            Err(error) => (
+                unavailable(CloseSessionWorktree::default(), error.to_string()),
+                false,
+            ),
         };
         Some(PlannedWorktree {
             view: CloseSessionWorktree {
@@ -171,17 +195,19 @@ impl DaemonSessionHost {
                 owner: CloseSessionWorktreeOwner::Session as i32,
                 ..view
             },
-            removal: Removal::Local { path },
+            removal: Removal::Local { path, present },
         })
     }
 
-    /// The session's worktree on its target, read through the shell its owner reaches it with.
+    /// The session's worktree on its target, read through the shell its owner reaches it with, and
+    /// whether it is there. One whose presence cannot be told
+    /// ([`target_path_is_present`]) could not be read.
     async fn read_target_worktree(
         &self,
         ctx: &CloseContext,
         worktree: &str,
         base: Option<&str>,
-    ) -> CloseSessionWorktree {
+    ) -> (CloseSessionWorktree, bool) {
         let view = CloseSessionWorktree {
             path: worktree.to_string(),
             owner: CloseSessionWorktreeOwner::Session as i32,
@@ -189,26 +215,26 @@ impl DaemonSessionHost {
         };
         let shell = match self.target_shell_of(ctx) {
             Ok(shell) => shell,
-            Err(reason) => return unavailable(view, reason),
+            Err(reason) => return (unavailable(view, reason), false),
         };
-        let exists = shell
-            .exec(tddy_remote_shell::ExecRequest::new(format!(
-                "test -e {}",
-                tddy_core::shell_single_quote(worktree)
-            )))
-            .await;
-        match exists {
-            Err(error) => unavailable(view, error.to_string()),
-            Ok(output) if output.status != 0 => CloseSessionWorktree {
-                branch: recorded_branch(&ctx.session_dir),
-                ..view
-            },
-            Ok(_) => match read_target_worktree_loss(shell.as_ref(), worktree, base).await {
-                Ok(loss) => CloseSessionWorktree {
-                    branch: target_branch(shell.as_ref(), worktree).await,
-                    ..with_loss(view, loss)
+        match target_path_is_present(shell.as_ref(), worktree).await {
+            Err(refusal) => (unavailable(view, refusal.message().to_string()), false),
+            Ok(false) => (
+                CloseSessionWorktree {
+                    branch: recorded_branch(&ctx.session_dir),
+                    ..view
                 },
-                Err(refusal) => unavailable(view, refusal.message().to_string()),
+                false,
+            ),
+            Ok(true) => match read_target_worktree_loss(shell.as_ref(), worktree, base).await {
+                Ok(loss) => (
+                    CloseSessionWorktree {
+                        branch: target_branch(shell.as_ref(), worktree).await,
+                        ..with_loss(view, loss)
+                    },
+                    true,
+                ),
+                Err(refusal) => (unavailable(view, refusal.message().to_string()), true),
             },
         }
     }
@@ -273,7 +299,9 @@ impl DaemonSessionHost {
         let preview = match previewed {
             Ok(preview) => preview,
             Err(refusal)
-                if tddy_session_agents::peer_session_answer::peer_has_no_such_session(&refusal) =>
+                if tddy_session_agents::peer_session_answer::peer_does_not_hold_the_session(
+                    &refusal,
+                ) =>
             {
                 log::info!(
                     "CloseSession: daemon {daemon_instance_id} no longer has workspace session \
@@ -343,8 +371,9 @@ impl DaemonSessionHost {
     }
 }
 
-/// A local peer refusal ("no common room configured") is `FAILED_PRECONDITION`, which a caller
-/// would read as "that daemon has no such session"; it is a checkout that could not be read.
+/// A local peer refusal ("no common room configured") is `FAILED_PRECONDITION`, the code a peer
+/// that holds no such session answers too; it is a checkout that could not be read, so it is
+/// answered as `UNAVAILABLE`.
 fn not_a_missing_session(refusal: Status) -> Status {
     Status::unavailable(refusal.message().to_string())
 }

@@ -4,7 +4,7 @@ use tddy_rpc::Request;
 use tddy_rpc::Status;
 use tddy_service::proto::session::CloseSessionEvent;
 use tddy_service::proto::session::{close_session_event, CloseSessionRequest};
-use tddy_session_agents::peer_session_answer::peer_has_no_such_session;
+use tddy_session_agents::peer_session_answer::peer_does_not_hold_the_session;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 impl CloseRun {
@@ -55,7 +55,7 @@ impl CloseRun {
                 "the checkout on daemon {daemon_instance_id} changed since it was checked; \
                  close the session again"
             )),
-            Err(refusal) if peer_has_no_such_session(&refusal) => Ok(format!(
+            Err(refusal) if peer_does_not_hold_the_session(&refusal) => Ok(format!(
                 "daemon {daemon_instance_id} no longer has workspace session {session_id}"
             )),
             Err(refusal) => Err(refusal.message().to_string()),

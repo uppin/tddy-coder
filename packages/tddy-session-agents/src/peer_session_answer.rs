@@ -5,6 +5,24 @@ pub fn peer_has_no_such_session(status: &Status) -> bool {
     )
 }
 
+/// How a daemon refuses a session it holds no directory for — `DeleteSession` (in
+/// `tddy-session-activity`'s `session_deletion`) and `PreviewCloseSession` / `CloseSession` say it
+/// in these words, as `FAILED_PRECONDITION`. The words are the marker
+/// [`peer_does_not_hold_the_session`] reads.
+pub const SESSION_NOT_HELD_HERE: &str =
+    "session is not present on this daemon; use the daemon that owns it (check routing / host)";
+
+/// Whether a peer's refusal says it holds no such session: `FAILED_PRECONDITION` carrying
+/// [`SESSION_NOT_HELD_HERE`].
+///
+/// Narrower than [`peer_has_no_such_session`], which reads every `FAILED_PRECONDITION` as "gone":
+/// a close acts on the answer by reporting a checkout removed, so any other refusal — a record
+/// that cannot be read, a common room this daemon cannot reach — must stay a refusal.
+pub fn peer_does_not_hold_the_session(status: &Status) -> bool {
+    status.code == tddy_rpc::Code::FailedPrecondition
+        && status.message.contains(SESSION_NOT_HELD_HERE)
+}
+
 use crate::exec_tool_caller;
 use std::path::{Path, PathBuf};
 use tddy_core::session_lifecycle::validate_session_id_segment;
@@ -77,4 +95,24 @@ pub fn resolve_worktree_root_in_session_dir(session_dir: &Path) -> Result<PathBu
         .as_ref()
         .map(PathBuf::from)
         .ok_or_else(|| Status::failed_precondition("session .session.yaml has no repo_path"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_not_held_here_refusal_reads_as_a_session_the_peer_does_not_hold() {
+        // Given a peer's three refusals of a close
+        let not_held = Status::failed_precondition(SESSION_NOT_HELD_HERE);
+        let relayed =
+            Status::failed_precondition(format!("peer daemon-2: {SESSION_NOT_HELD_HERE}"));
+        let unreadable = Status::failed_precondition("the record of the session cannot be read");
+
+        // When
+        let read = [&not_held, &relayed, &unreadable].map(peer_does_not_hold_the_session);
+
+        // Then
+        assert_eq!(read, [true, true, false]);
+    }
 }

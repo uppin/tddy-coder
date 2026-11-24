@@ -10,11 +10,12 @@ use async_trait::async_trait;
 use tddy_agent_launch::launch_ports::SessionTabEnding;
 use tddy_rpc::{Code, Status};
 
-use super::super::svc_terminal_ports::session_tabs::SessionTab;
+use super::super::svc_terminal_ports::session_tabs::{local_tmux_survives, SessionTab};
 use super::super::DaemonSessionHost;
 use super::CloseContext;
 use tddy_core::SessionMetadata;
 use tddy_service::proto::session::CloseSessionTab;
+use tddy_session_agents::ClosedTurnLoop;
 
 /// How long the tabs a close ended are given to be gone before one still there fails its step.
 pub(super) const ENDED_WITHIN: Duration = Duration::from_secs(10);
@@ -26,10 +27,15 @@ const ENDED_POLL: Duration = Duration::from_millis(200);
 pub(super) enum EndedTab {
     Main,
     Tab(SessionTab),
-    /// An open conversation: closed out of the conversation table, so nothing of it is left to
-    /// check once its close succeeded.
-    Conversation,
+    /// An open conversation, closed out of the conversation table: a local one's turn loop, to
+    /// check that its interrupted turn stopped; a remote one, cancelled on its daemon, leaves
+    /// nothing here to check.
+    Conversation(Option<ClosedTurnLoop>),
 }
+
+/// How the close of one conversation open on a session went: its id, and its turn loop when it ran
+/// here — or why it could not be closed.
+pub(super) type ClosedConversation = (String, Result<Option<ClosedTurnLoop>, String>);
 
 impl DaemonSessionHost {
     /// End the session's main agent as `SignalSession` SIGTERM does — a tmux-run main by killing
@@ -72,8 +78,8 @@ impl DaemonSessionHost {
         &self,
         session_id: &str,
         session_token: &str,
-    ) -> Vec<(String, Result<(), String>)> {
-        let closed = self
+    ) -> Vec<ClosedConversation> {
+        let (closed, mut loops) = self
             .agent_conversations
             .close_every_conversation_of(session_id)
             .await;
@@ -81,7 +87,11 @@ impl DaemonSessionHost {
         let mut ended = Vec::new();
         for conversation_id in closed.local {
             roster.conversation_closed(&conversation_id);
-            ended.push((conversation_id, Ok(())));
+            let turn_loop = loops
+                .iter()
+                .position(|(id, _)| *id == conversation_id)
+                .map(|at| loops.swap_remove(at).1);
+            ended.push((conversation_id, Ok(turn_loop)));
         }
         for (daemon_instance_id, conversation_id) in closed.remote {
             let cancelled = roster
@@ -93,7 +103,7 @@ impl DaemonSessionHost {
                     false,
                 )
                 .await
-                .map(|_| ())
+                .map(|_| None)
                 .map_err(|refusal| {
                     format!(
                         "could not cancel it on daemon {daemon_instance_id}, where its turn loop \
@@ -136,28 +146,28 @@ impl DaemonSessionHost {
                 self.tab_survives(&ctx.session_id, tab, ctx.subject.as_deref())
                     .await
             }
-            EndedTab::Conversation => None,
+            EndedTab::Conversation(Some(turn_loop)) if turn_loop.turn_still_runs() => Some(
+                "its interrupted turn is still running in the conversation's worktree".to_string(),
+            ),
+            EndedTab::Conversation(_) => None,
         }
     }
 
-    /// Why the session's main survived — its terminal or sandbox still held, or the tmux session it
-    /// ran in still alive here or on its target — or `None`.
+    /// Why the session's main survived — its terminal, sandbox or workspace jail still held, or the
+    /// tmux session it ran in still alive here or on its target — or `None`.
     async fn main_survives(&self, ctx: &CloseContext) -> Option<String> {
         let session_id = &ctx.session_id;
         if self.cli_manager.get(session_id).await.is_some() {
             return Some("its terminal is still live".to_string());
         }
+        // `stop` reaps the jail's runner and answers nothing; a jail registered again since (a tool
+        // call that re-provisioned it) is what can still be told.
+        if self.workspace_sandboxes.get(session_id).await.is_some() {
+            return Some("its workspace jail is running again".to_string());
+        }
         if let Some(name) = &ctx.metadata.tmux_session {
             let survived = match &ctx.metadata.target {
-                None => {
-                    let (user, session) = (ctx.os_user.clone(), name.clone());
-                    let alive = tokio::task::spawn_blocking(move || {
-                        tddy_cli_sessions::tmux::tmux_session_alive(&user, &session)
-                    })
-                    .await
-                    .unwrap_or(true);
-                    alive.then(|| format!("its tmux session {name:?} is still alive"))
-                }
+                None => local_tmux_survives(&ctx.os_user, name).await,
                 Some(_) => self.target_main_tmux_survives(ctx).await,
             };
             if survived.is_some() {
@@ -223,8 +233,12 @@ impl DaemonSessionHost {
     }
 
     /// The tabs a close of `ctx`'s session ends: its main while an agent of it is live or it runs
-    /// in tmux (whose agent outlives this daemon), each tab beside it, and each open conversation.
-    pub(super) async fn tabs_a_close_ends(&self, ctx: &CloseContext) -> Vec<CloseSessionTab> {
+    /// in tmux (whose agent outlives this daemon), each tab beside it, and each open conversation —
+    /// and, when its tab roster cannot be read, why (the tabs beside the main are then not listed).
+    pub(super) async fn tabs_a_close_ends(
+        &self,
+        ctx: &CloseContext,
+    ) -> (Vec<CloseSessionTab>, Option<String>) {
         let mut tabs = Vec::new();
         let live = self
             .launch_sessions()
@@ -237,15 +251,16 @@ impl DaemonSessionHost {
                 label: main_label(&ctx.metadata),
             });
         }
-        tabs.extend(
-            self.tabs_beside_main(&ctx.session_id)
-                .await
-                .into_iter()
-                .map(|tab| CloseSessionTab {
+        let unreadable = match self.tabs_beside_main(&ctx.session_id).await {
+            Ok(beside) => {
+                tabs.extend(beside.into_iter().map(|tab| CloseSessionTab {
                     tab_id: tab.terminal_id,
                     label: tab.label,
-                }),
-        );
+                }));
+                None
+            }
+            Err(reason) => Some(reason),
+        };
         tabs.extend(
             self.agent_conversations
                 .conversations_of(&ctx.session_id)
@@ -256,7 +271,7 @@ impl DaemonSessionHost {
                     label: agent_id,
                 }),
         );
-        tabs
+        (tabs, unreadable)
     }
 }
 
@@ -268,8 +283,21 @@ impl SessionTabEnding for DaemonSessionHost {
         session_token: &str,
     ) -> Result<(), Status> {
         let subject = (self.user_resolver)(session_token);
+        let tabs = self
+            .tabs_beside_main(session_id)
+            .await
+            .map_err(|reason| Status::internal(format!("{reason}; it was left in place")))?;
+        // A closed session's close ended every tab and checked each gone — on its target too —
+        // before it recorded the removal, so a target that can no longer be reached must not keep
+        // the record from going (docs/ft/daemon/session-liveness.md § Closing a session).
+        let closed = self.closed_session(session_id);
         let mut failures = Vec::new();
-        for tab in self.tabs_beside_main(session_id).await {
+        for tab in tabs {
+            let tab = if closed {
+                tab.without_its_target_tmux()
+            } else {
+                tab
+            };
             if let Err(error) = self
                 .end_tab_with_its_session(session_id, &tab, subject.as_deref())
                 .await
@@ -289,6 +317,17 @@ impl SessionTabEnding for DaemonSessionHost {
             "not every tab of session {session_id} could be ended, so it was left in place: {}",
             failures.join("; ")
         )))
+    }
+}
+
+impl DaemonSessionHost {
+    /// Whether `session_id` was closed: its directory holds the `worktree-removed` marker.
+    fn closed_session(&self, session_id: &str) -> bool {
+        self.session_dir_of(session_id)
+            .map(|dir| {
+                tddy_worktree_service::worktree_removed_marker::worktree_removal_recorded(&dir)
+            })
+            .unwrap_or(false)
     }
 }
 

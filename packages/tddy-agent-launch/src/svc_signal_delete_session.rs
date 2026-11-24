@@ -146,6 +146,9 @@ impl LaunchSessions {
         session_id: &str,
         session_token: &str,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
+        // A close of the session holds it until it ends: the delete would take the directory the
+        // close records its outcome in.
+        self.session_closes.refuse_while_closing(session_id)?;
         let sessions_base = self.sessions_base_for_delete(os_user)?;
         // Every part a peer holds is checked before anything here is torn down: a delete one of
         // them would refuse is refused with the session and its agent still running.
@@ -155,8 +158,19 @@ impl LaunchSessions {
         // anything else of the session is torn down: a refused kill refuses the delete with the
         // session intact, and a retry kills whatever is left.
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
-        self.end_tmux_run(os_user, session_id, &session_dir, session_token)
-            .await?;
+        // A close ended every tab and checked each gone — on the target too — before it recorded
+        // the removal (its `worktree-removed` marker): a target that can no longer be reached must
+        // not keep the record from going, so a closed session's tmux on its target is not asked
+        // for again. Here, the kill is cheap and still runs.
+        if closed_on_its_target(&session_dir) {
+            log::info!(
+                "DeleteSession: {session_id} was closed, which ended its tmux session on its \
+                 target; the target is not asked again"
+            );
+        } else {
+            self.end_tmux_run(os_user, session_id, &session_dir, session_token)
+                .await?;
+        }
         // Every other tab and every conversation goes the same way, for the same reason: a tab's
         // tmux session, here or on the target, would keep its agent running with no session left
         // to reclaim it.
@@ -365,6 +379,13 @@ fn is_tmux_run(session_dir: &Path) -> bool {
     read_session_metadata(session_dir)
         .map(|metadata| metadata.tmux_session.is_some())
         .unwrap_or(false)
+}
+
+/// Whether the session in `session_dir` ran its agent in tmux on a target and was closed since: its
+/// `worktree-removed` marker says the close ended and checked that tmux session.
+fn closed_on_its_target(session_dir: &Path) -> bool {
+    target_tmux_run_of(session_dir).is_some()
+        && tddy_worktree_service::worktree_removed_marker::worktree_removal_recorded(session_dir)
 }
 
 fn target_tmux_run_of(session_dir: &Path) -> Option<tddy_core::SessionTarget> {

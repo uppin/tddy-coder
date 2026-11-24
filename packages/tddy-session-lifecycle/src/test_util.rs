@@ -176,7 +176,9 @@ pub struct TestDaemon {
     inner: Arc<DaemonSessionHost>,
 }
 
-pub use crate::test_util::held_agents::HeldMain;
+pub use crate::test_util::held_agents::{
+    conversation_is_open, open_a_remote_conversation, HeldMain,
+};
 
 impl TestDaemon {
     #[must_use]

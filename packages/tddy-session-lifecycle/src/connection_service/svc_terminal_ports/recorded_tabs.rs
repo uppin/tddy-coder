@@ -299,17 +299,20 @@ impl CliManagerTerminalRoster {
     /// `subject` — and its terminal. Unlike a closed tab it stays in the roster, which the session
     /// keeps; and a tmux session that could not be ended is the error, since the session's end must
     /// know of a survivor.
+    ///
+    /// `tmux` is what the tab's recorded chain says wraps its agent, as the session's end read it
+    /// with the roster — never re-read here, where a roster that could not be read would end nothing.
     pub(super) async fn end_with_its_session(
         &self,
         session_id: &str,
         terminal_id: &str,
+        tmux: Option<&WrappingTmux>,
         subject: Option<&str>,
     ) -> Result<(), String> {
         if let Some(tabs) = &self.tab_jails {
             tabs.jails.stop(session_id, terminal_id).await;
         }
-        let recorded = self.recorded_chain(session_id, terminal_id);
-        let ended = self.end_wrapping_tmux(session_id, &recorded, subject).await;
+        let ended = self.end_tmux(session_id, tmux.cloned(), subject).await;
         self.manager.stop_terminal(session_id, terminal_id).await;
         ended
     }
@@ -325,7 +328,19 @@ impl CliManagerTerminalRoster {
         launch: &[LaunchNode],
         subject: Option<&str>,
     ) -> Result<(), String> {
-        match wrapping_tmux(launch) {
+        self.end_tmux(session_id, wrapping_tmux(launch), subject)
+            .await
+    }
+
+    /// End `tmux`, the tmux session wrapping a tab's agent: on the session's target, or here as its
+    /// user. No tmux session ends nothing.
+    async fn end_tmux(
+        &self,
+        session_id: &str,
+        tmux: Option<WrappingTmux>,
+        subject: Option<&str>,
+    ) -> Result<(), String> {
+        match tmux {
             None => Ok(()),
             Some(WrappingTmux::OnTarget { name }) => {
                 self.end_target_tmux_named(session_id, &name, subject).await

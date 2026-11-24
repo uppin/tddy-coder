@@ -7,20 +7,19 @@ use tddy_service::proto::session::{CloseSessionWorktree, CloseSessionWorktreeOwn
 use tddy_subagent_worktree::{ConversationId, ConversationWorktrees, SUBAGENT_WORKTREES_DIR};
 
 /// Every clone-placed conversation worktree under the session worktree `session_worktree`, each
-/// read for what removing it would lose (above the commit the conversation started from).
+/// read for what removing it would lose (above the commit the conversation started from). A
+/// directory of them that cannot be listed is one worktree that could not be read: removing the
+/// session's worktree would delete whatever it holds.
 pub(super) async fn conversation_worktrees_in(
     session_worktree: &Path,
     session_id: &str,
 ) -> Vec<PlannedWorktree> {
-    let Ok(entries) = std::fs::read_dir(session_worktree.join(SUBAGENT_WORKTREES_DIR)) else {
-        return Vec::new();
+    let directory = session_worktree.join(SUBAGENT_WORKTREES_DIR);
+    let names = match conversation_directory_names(&directory) {
+        Ok(names) => names,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => return vec![unlistable_conversations(&directory, &error)],
     };
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .collect();
-    names.sort();
     let worktrees = ConversationWorktrees::new(session_worktree, session_id);
     let mut planned = Vec::new();
     for name in names {
@@ -73,4 +72,54 @@ pub(super) async fn conversation_worktrees_in(
         });
     }
     planned
+}
+
+/// The name of every directory in `directory`, sorted. Only "there is no such directory" is no
+/// conversation; any other failure to read it, or one of its entries, is the error.
+fn conversation_directory_names(directory: &Path) -> std::io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(directory)? {
+        let path = entry?.path();
+        // `metadata` follows a link, as the directory walk of a removal does; a link to nothing
+        // holds nothing.
+        match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{} is not named in UTF-8", path.display()),
+                )
+            })?;
+        names.push(name.to_string());
+    }
+    names.sort();
+    Ok(names)
+}
+
+/// The conversation worktrees' `directory`, which could not be listed: one worktree that could not
+/// be read, which blocks the close. Removed, were the close ever to run, with the session's
+/// worktree it sits in.
+fn unlistable_conversations(directory: &Path, error: &std::io::Error) -> PlannedWorktree {
+    PlannedWorktree {
+        view: CloseSessionWorktree {
+            path: directory.to_string_lossy().into_owned(),
+            owner: CloseSessionWorktreeOwner::Conversation as i32,
+            ..unavailable(
+                CloseSessionWorktree::default(),
+                format!(
+                    "{} cannot be read, so the conversation worktrees in it cannot be listed; \
+                     removing the session's worktree would delete them: {error}",
+                    directory.display()
+                ),
+            )
+        },
+        removal: Removal::WithAnother,
+    }
 }

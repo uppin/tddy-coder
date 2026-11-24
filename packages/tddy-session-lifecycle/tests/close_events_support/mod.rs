@@ -1,9 +1,10 @@
 //! The events one `CloseSession` streamed, read to the stream's end, and what a test asks of them
-//! (docs/ft/daemon/session-liveness.md § Closing a session). Shared by the local close suite
-//! (through `tmux_agent_support`) and the target close suite.
+//! (docs/ft/daemon/session-liveness.md § Closing a session) — and a directory a close cannot read.
+//! Shared by the local close suite (through `tmux_agent_support`) and the target close suite.
 
 #![allow(dead_code)]
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -116,4 +117,27 @@ pub fn failed_steps_of(
         .filter(|step| step.kind == kind as i32)
         .map(|step| step.state())
         .collect()
+}
+
+/// Takes every permission off a directory until it is dropped, when they are given back — so a
+/// test can make a directory unreadable without leaving one its temporary directory cannot remove.
+pub struct UnreadableUntilDropped(pub PathBuf);
+
+impl UnreadableUntilDropped {
+    pub fn made_of(directory: PathBuf) -> Self {
+        set_mode(&directory, 0o000);
+        Self(directory)
+    }
+}
+
+impl Drop for UnreadableUntilDropped {
+    fn drop(&mut self) {
+        set_mode(&self.0, 0o755);
+    }
+}
+
+fn set_mode(directory: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(mode))
+        .unwrap_or_else(|e| panic!("chmod {mode:o} {}: {e}", directory.display()));
 }

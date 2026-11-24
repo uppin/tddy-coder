@@ -96,3 +96,35 @@ impl HeldMain {
         }
     }
 }
+
+/// Open a conversation of `session_id` with `agent_id` whose turn loop runs on
+/// `daemon_instance_id`, as the subagent route records a forwarded open — so a test can see what a
+/// close or a delete of the session does with it.
+pub async fn open_a_remote_conversation(
+    host: &crate::connection_service::DaemonSessionHost,
+    conversation_id: &str,
+    session_id: &str,
+    agent_id: &str,
+    daemon_instance_id: &str,
+) {
+    host.open_agent_conversations()
+        .insert(
+            conversation_id.to_string(),
+            tddy_session_agents::AgentConversation::Remote {
+                session_id: session_id.to_string(),
+                agent_id: agent_id.to_string(),
+                daemon_instance_id: daemon_instance_id.to_string(),
+            },
+        )
+        .await;
+}
+
+/// Whether `conversation_id` is still open on `host`.
+pub async fn conversation_is_open(
+    host: &crate::connection_service::DaemonSessionHost,
+    conversation_id: &str,
+) -> bool {
+    host.open_agent_conversations()
+        .contains(conversation_id)
+        .await
+}

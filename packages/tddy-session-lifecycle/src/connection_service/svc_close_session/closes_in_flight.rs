@@ -51,9 +51,29 @@ impl SessionCloses {
         })
     }
 
+    /// Refused `ALREADY_EXISTS`, naming the close, while a close holds `session_id`.
+    pub(crate) fn refuse_while_closing(&self, session_id: &str) -> Result<(), Status> {
+        match self.lock().get(session_id) {
+            None => Ok(()),
+            Some(close) => Err(Status::already_exists(match &close.task_id {
+                Some(task_id) => format!(
+                    "session {session_id} is being closed by task {task_id}; wait for the close \
+                     to end"
+                ),
+                None => format!("session {session_id} is being closed; wait for the close to end"),
+            })),
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, HashMap<String, RunningClose>> {
         // A map of plain records: a thread that panicked holding it left nothing half-written.
         self.running.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+impl tddy_agent_launch::launch_ports::SessionClosesInFlight for SessionCloses {
+    fn refuse_while_closing(&self, session_id: &str) -> Result<(), Status> {
+        SessionCloses::refuse_while_closing(self, session_id)
     }
 }
 
@@ -103,6 +123,7 @@ mod tests {
             .reserve("s-1")
             .err()
             .map(|status| status.message().to_string());
+        // Dropped at once: only whether the other session could be held matters here.
         let other = closes.reserve("s-2").is_ok();
         drop(first);
         let after = closes.reserve("s-1").is_ok();
@@ -115,6 +136,29 @@ mod tests {
                 after
             ),
             (Some(true), true, true)
+        );
+    }
+
+    #[test]
+    fn a_session_held_by_a_close_refuses_other_work_until_the_close_ends() {
+        // Given a close of one session running as a task
+        let closes = Arc::new(SessionCloses::default());
+        let close = closes.reserve("s-1").expect("the close is held");
+        close.runs_as("task-7");
+
+        // When work on it, and on another session, is asked for while it runs, and after
+        let while_closing = closes
+            .refuse_while_closing("s-1")
+            .err()
+            .map(|status| (status.code(), status.message().contains("task-7")));
+        let another = closes.refuse_while_closing("s-2").is_ok();
+        drop(close);
+        let after = closes.refuse_while_closing("s-1").is_ok();
+
+        // Then
+        assert_eq!(
+            (while_closing, another, after),
+            (Some((tddy_rpc::Code::AlreadyExists, true)), true, true)
         );
     }
 }
