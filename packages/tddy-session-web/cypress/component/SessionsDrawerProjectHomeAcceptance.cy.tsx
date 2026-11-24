@@ -31,6 +31,7 @@ import {
   sessionsDrawerProjectGroup,
   sessionsDrawerProjectGroupHeader,
   sessionsDrawerProjectHome,
+  TEST_IDS,
 } from "../support/testIds";
 
 const ALPHA = { projectId: "proj-alpha", name: "alpha" };
@@ -224,6 +225,26 @@ it("a session with the project-home role that is not the recorded main is an ord
     sessionsDrawerProjectHome(ALPHA.projectId),
     sessionsDrawerItem(ALPHA_REPLACED_MAIN.sessionId),
   ]);
+});
+
+it("with no active session, main stays pinned and every other session folds under More", () => {
+  // Given — alpha's main plus two ended orchestrators, nothing else live (the reported case: two
+  // idle orchestrator rows were listed bare instead of folding)
+  const endedOrchestrator = (sessionId: string) =>
+    aSession(sessionId, ALPHA.projectId, { isActive: false, status: "exited", pid: 0, recipe: "orchestrate-prs" });
+
+  // When
+  aDrawer([ALPHA_HOME_SESSION, endedOrchestrator("orch-1"), endedOrchestrator("orch-2")]);
+
+  // Then — main is outside the fold, the ended orchestrators are inside it, collapsed
+  rowOrderIn(ALPHA.projectId).its(0).should("equal", sessionsDrawerProjectHome(ALPHA.projectId));
+  drawer.mainEntry(ALPHA.projectId).should("be.visible");
+  byTestId(sessionsDrawerProjectGroup(ALPHA.projectId))
+    .find(`[data-testid='${TEST_IDS.sessionsDrawerSeparatorRemaining}']`)
+    .invoke("text")
+    .should("equal", "More (2)");
+  byTestId(sessionsDrawerItem("orch-1")).should("not.be.visible");
+  byTestId(sessionsDrawerItem("orch-2")).should("not.be.visible");
 });
 
 it("the pinned entry offers no Replace main — that lives in the settings pane", () => {

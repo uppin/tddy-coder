@@ -1,137 +1,134 @@
 import { describe, expect, it } from "bun:test";
 import { aSessionEntry } from "../../test-utils/builders";
+import type { SubagentSessionNode } from "../agentTree";
 import { groupSessionsByStack, partitionSessionsByActivity } from "./sessionStackGroups";
 
 /**
- * Tests for `groupSessionsByStack` — the util that partitions a session list into orchestrator
- * groups (parent + children) and flat (non-stack or orphan) entries.
+ * Tests for `groupSessionsByStack` — the util that folds a session list into the drawer's rows: each
+ * session that no other listed session started is a top-level row, and a session started by another
+ * (`orchestratorSessionId`) sits beneath its starter — and for `partitionSessionsByActivity`, which
+ * splits the list into active / remaining and orders each side.
+ *
+ * PRD: docs/ft/web/session-drawer.md § Row order
  */
 
-function aChildSession(sessionId: string, orchestratorSessionId: string, createdAt?: string) {
-  return aSessionEntry({ sessionId, createdAt: createdAt ?? "2026-06-26T10:00:00Z", orchestratorSessionId });
+/** The rows in drawer order, each as `<sessionId>@<depth>`. */
+function outline(rows: ReadonlyArray<SubagentSessionNode>, depth = 0): string[] {
+  return rows.flatMap((row) => [`${row.session.sessionId}@${depth}`, ...outline(row.children, depth + 1)]);
+}
+
+function aStartedSession(sessionId: string, createdAt: string, orchestratorSessionId = "") {
+  return aSessionEntry({ sessionId, createdAt, orchestratorSessionId });
+}
+
+/** An inactive session last updated at `updatedAt`, with its agent last seen at `lastActivityMs`. */
+function anEndedSession(
+  sessionId: string,
+  { updatedAt, lastActivityMs, orchestratorSessionId = "" }: { updatedAt: string; lastActivityMs?: number; orchestratorSessionId?: string },
+) {
+  return aSessionEntry({
+    sessionId,
+    isActive: false,
+    status: "exited",
+    pid: 0,
+    createdAt: "2026-11-01T00:00:00Z",
+    updatedAt,
+    orchestratorSessionId,
+    lastActivity: lastActivityMs === undefined ? undefined : { atUnixMs: BigInt(lastActivityMs), summary: "did a thing" },
+  });
 }
 
 describe("groupSessionsByStack", () => {
-  it("returns empty groups and flat when session list is empty", () => {
-    const result = groupSessionsByStack([]);
-    expect(result.groups).toEqual([]);
-    expect(result.flat).toEqual([]);
+  it("returns no rows for an empty session list", () => {
+    expect(groupSessionsByStack([]).rows).toEqual([]);
   });
 
-  it("puts plain non-stack sessions into flat", () => {
-    // Given — two sessions with no orchestratorSessionId
+  it("lists sessions nobody started newest-first", () => {
+    // Given — three plain sessions, listed out of order
     const sessions = [
-      aSessionEntry({ sessionId: "plain-1" }),
-      aSessionEntry({ sessionId: "plain-2" }),
+      aStartedSession("middle", "2026-11-20T10:00:00Z"),
+      aStartedSession("oldest", "2026-11-19T10:00:00Z"),
+      aStartedSession("newest", "2026-11-21T10:00:00Z"),
     ];
 
     // When
-    const result = groupSessionsByStack(sessions);
-
-    // Then — no groups, both in flat
-    expect(result.groups).toHaveLength(0);
-    expect(result.flat).toHaveLength(2);
-    const flatIds = result.flat.map((s) => s.sessionId);
-    expect(flatIds).toContain("plain-1");
-    expect(flatIds).toContain("plain-2");
-  });
-
-  it("groups parent and children — parent not in flat, children not in flat", () => {
-    // Given — one orchestrator and two children
-    const orchestrator = aSessionEntry({ sessionId: "orch-1", createdAt: "2026-06-26T08:00:00Z" });
-    const child1 = aChildSession("child-1", "orch-1", "2026-06-26T09:00:00Z");
-    const child2 = aChildSession("child-2", "orch-1", "2026-06-26T10:00:00Z");
-    const sessions = [orchestrator, child1, child2];
-
-    // When
-    const result = groupSessionsByStack(sessions);
+    const { rows } = groupSessionsByStack(sessions);
 
     // Then
-    expect(result.groups).toHaveLength(1);
-    const group = result.groups[0]!;
-    expect(group.parent.sessionId).toBe("orch-1");
-    expect(group.children).toHaveLength(2);
-    const childIds = group.children.map((c) => c.sessionId);
-    expect(childIds).toContain("child-1");
-    expect(childIds).toContain("child-2");
-
-    // Neither the parent nor children appear in flat
-    expect(result.flat).toHaveLength(0);
+    expect(outline(rows)).toEqual(["newest@0", "middle@0", "oldest@0"]);
   });
 
-  it("children within a group are sorted by createdAt ascending (oldest first)", () => {
-    // Given — children created in reverse order
-    const orch = aSessionEntry({ sessionId: "orch-sort", createdAt: "2026-06-26T06:00:00Z" });
-    const newerChild = aChildSession("child-newer", "orch-sort", "2026-06-26T12:00:00Z");
-    const olderChild = aChildSession("child-older", "orch-sort", "2026-06-26T07:00:00Z");
-    const sessions = [orch, newerChild, olderChild];
+  it("places a started session right after its starter, its children newest-first", () => {
+    // Given — an orchestrator with two children, and plain sessions started before and after it
+    const sessions = [
+      aStartedSession("older-plain", "2026-11-20T08:00:00Z"),
+      aStartedSession("child-first", "2026-11-20T10:00:00Z", "orch"),
+      aStartedSession("orch", "2026-11-20T09:00:00Z"),
+      aStartedSession("newer-plain", "2026-11-20T12:00:00Z"),
+      aStartedSession("child-second", "2026-11-20T11:00:00Z", "orch"),
+    ];
 
     // When
-    const result = groupSessionsByStack(sessions);
+    const { rows } = groupSessionsByStack(sessions);
 
-    // Then — older child first within the group
-    const children = result.groups[0]!.children;
-    expect(children[0]!.sessionId).toBe("child-older");
-    expect(children[1]!.sessionId).toBe("child-newer");
+    // Then — the orchestrator keeps its own place among the top-level rows; its children follow it
+    expect(outline(rows)).toEqual([
+      "newer-plain@0",
+      "orch@0",
+      "child-second@1",
+      "child-first@1",
+      "older-plain@0",
+    ]);
   });
 
-  it("puts a child with a missing orchestrator into flat (orphan child)", () => {
-    // Given — child references an orchestrator that is not in the list
-    const orphanChild = aChildSession("orphan-child", "missing-orch-99");
-    const sessions = [orphanChild];
+  it("nests a session started by a child under that child", () => {
+    // Given — orch started worker, and worker started helper
+    const sessions = [
+      aStartedSession("helper", "2026-11-20T11:00:00Z", "worker"),
+      aStartedSession("worker", "2026-11-20T10:00:00Z", "orch"),
+      aStartedSession("orch", "2026-11-20T09:00:00Z"),
+    ];
 
     // When
-    const result = groupSessionsByStack(sessions);
+    const { rows } = groupSessionsByStack(sessions);
 
-    // Then — no groups formed; orphan child ends up in flat
-    expect(result.groups).toHaveLength(0);
-    expect(result.flat).toHaveLength(1);
-    expect(result.flat[0]!.sessionId).toBe("orphan-child");
+    // Then — each session appears once, under its own starter
+    expect(outline(rows)).toEqual(["orch@0", "worker@1", "helper@2"]);
   });
 
-  it("handles multiple independent orchestrator groups alongside flat sessions", () => {
-    // Given — two separate stacks plus one plain session
-    const orch1 = aSessionEntry({ sessionId: "orch-A", createdAt: "2026-06-26T08:00:00Z" });
-    const child1 = aChildSession("child-of-A", "orch-A");
-    const orch2 = aSessionEntry({ sessionId: "orch-B", createdAt: "2026-06-26T09:00:00Z" });
-    const child2 = aChildSession("child-of-B", "orch-B");
-    const plain = aSessionEntry({ sessionId: "plain-solo" });
-    const sessions = [orch1, child1, orch2, child2, plain];
+  it("lists a session whose starter is not in the list as a top-level row", () => {
+    // Given — a child whose orchestrator is not listed
+    const sessions = [aStartedSession("orphan", "2026-11-20T10:00:00Z", "missing-orch")];
 
     // When
-    const result = groupSessionsByStack(sessions);
+    const { rows } = groupSessionsByStack(sessions);
 
-    // Then — two groups, one flat entry
-    expect(result.groups).toHaveLength(2);
-    expect(result.flat).toHaveLength(1);
-    expect(result.flat[0]!.sessionId).toBe("plain-solo");
-
-    const groupParentIds = result.groups.map((g) => g.parent.sessionId);
-    expect(groupParentIds).toContain("orch-A");
-    expect(groupParentIds).toContain("orch-B");
+    // Then
+    expect(outline(rows)).toEqual(["orphan@0"]);
   });
 
-  it("does not include the orchestrator session in flat when it has children", () => {
-    // Given — an orchestrator that is also a session in the list
-    const orch = aSessionEntry({ sessionId: "orch-present" });
-    const child = aChildSession("child-1", "orch-present");
-    const sessions = [orch, child];
+  it("keeps every session of an orchestrator cycle, each exactly once", () => {
+    // Given — two sessions naming each other as their orchestrator (the list merges several hosts'
+    // answers, so a cycle is a shape the drawer has to survive), plus one naming itself
+    const sessions = [
+      aStartedSession("ping", "2026-11-20T10:00:00Z", "pong"),
+      aStartedSession("pong", "2026-11-20T09:00:00Z", "ping"),
+      aStartedSession("narcissus", "2026-11-20T08:00:00Z", "narcissus"),
+    ];
 
     // When
-    const result = groupSessionsByStack(sessions);
+    const ids = outline(groupSessionsByStack(sessions).rows).map((row) => row.split("@")[0]);
 
-    // Then — orchestrator must not appear in flat
-    const flatIds = result.flat.map((s) => s.sessionId);
-    expect(flatIds).not.toContain("orch-present");
-    expect(result.groups).toHaveLength(1);
+    // Then
+    expect([...ids].sort()).toEqual(["narcissus", "ping", "pong"]);
   });
 });
 
 /**
- * Tests for `partitionSessionsByActivity` — splits a session list into an *active* partition
- * (green/yellow dots: `connectionStatusForSession !== "disconnected"`, i.e. `isActive`, whether or
- * not it is also eliciting) and a *remaining* partition (grey/disconnected), each independently
- * stack-grouped, with per-partition counts.
+ * `partitionSessionsByActivity` splits a session list into an *active* partition (green/yellow dots:
+ * `connectionStatusForSession !== "disconnected"`, i.e. `isActive`, whether or not it is also
+ * eliciting) and a *remaining* partition (grey/disconnected), each independently stack-folded and
+ * ordered, with per-partition counts.
  */
 describe("partitionSessionsByActivity", () => {
   it("returns empty active and remaining partitions for an empty list", () => {
@@ -139,10 +136,8 @@ describe("partitionSessionsByActivity", () => {
 
     expect(result.activeCount).toBe(0);
     expect(result.remainingCount).toBe(0);
-    expect(result.active.groups).toEqual([]);
-    expect(result.active.flat).toEqual([]);
-    expect(result.remaining.groups).toEqual([]);
-    expect(result.remaining.flat).toEqual([]);
+    expect(result.active.rows).toEqual([]);
+    expect(result.remaining.rows).toEqual([]);
   });
 
   it("routes a connected (green) session to active and a disconnected (grey) session to remaining", () => {
@@ -154,8 +149,8 @@ describe("partitionSessionsByActivity", () => {
     const result = partitionSessionsByActivity([green, grey]);
 
     // Then
-    expect(result.active.flat.map((s) => s.sessionId)).toEqual(["green-1"]);
-    expect(result.remaining.flat.map((s) => s.sessionId)).toEqual(["grey-1"]);
+    expect(outline(result.active.rows)).toEqual(["green-1@0"]);
+    expect(outline(result.remaining.rows)).toEqual(["grey-1@0"]);
     expect(result.activeCount).toBe(1);
     expect(result.remainingCount).toBe(1);
   });
@@ -169,9 +164,9 @@ describe("partitionSessionsByActivity", () => {
     const result = partitionSessionsByActivity([yellow]);
 
     // Then — the yellow session counts as active, not remaining
-    expect(result.active.flat.map((s) => s.sessionId)).toEqual(["yellow-1"]);
+    expect(outline(result.active.rows)).toEqual(["yellow-1@0"]);
     expect(result.activeCount).toBe(1);
-    expect(result.remaining.flat).toEqual([]);
+    expect(result.remaining.rows).toEqual([]);
     expect(result.remainingCount).toBe(0);
   });
 
@@ -192,48 +187,61 @@ describe("partitionSessionsByActivity", () => {
     expect(result.remainingCount).toBe(1);
   });
 
-  it("preserves stack-group nesting within the active partition", () => {
-    // Given — an active orchestrator with an active child
-    const orch = aSessionEntry({ sessionId: "orch-a", isActive: true, createdAt: "2026-06-26T08:00:00Z" });
-    const child = aSessionEntry({
-      sessionId: "child-a",
-      isActive: true,
-      orchestratorSessionId: "orch-a",
-      createdAt: "2026-06-26T09:00:00Z",
-    });
+  it("orders the active partition newest-started first, each child right after its starter", () => {
+    // Given — live sessions, one stack among them
+    const sessions = [
+      aSessionEntry({ sessionId: "old", isActive: true, createdAt: "2026-11-20T08:00:00Z" }),
+      aSessionEntry({ sessionId: "orch", isActive: true, createdAt: "2026-11-20T09:00:00Z" }),
+      aSessionEntry({ sessionId: "kid-1", isActive: true, createdAt: "2026-11-20T10:00:00Z", orchestratorSessionId: "orch" }),
+      aSessionEntry({ sessionId: "kid-2", isActive: true, createdAt: "2026-11-20T11:00:00Z", orchestratorSessionId: "orch" }),
+      aSessionEntry({ sessionId: "new", isActive: true, createdAt: "2026-11-20T12:00:00Z" }),
+    ];
 
     // When
-    const result = partitionSessionsByActivity([orch, child]);
+    const result = partitionSessionsByActivity(sessions);
 
-    // Then — the stack stays nested inside the active partition
-    expect(result.active.groups).toHaveLength(1);
-    expect(result.active.groups[0]!.parent.sessionId).toBe("orch-a");
-    expect(result.active.groups[0]!.children.map((c) => c.sessionId)).toEqual(["child-a"]);
-    expect(result.remaining.groups).toHaveLength(0);
+    // Then
+    expect(outline(result.active.rows)).toEqual(["new@0", "orch@0", "kid-2@1", "kid-1@1", "old@0"]);
   });
 
-  it("preserves stack-group nesting within the remaining partition", () => {
-    // Given — a disconnected orchestrator with a disconnected child
-    const orch = aSessionEntry({
-      sessionId: "orch-d",
-      isActive: false,
-      createdAt: "2026-06-26T08:00:00Z",
-    });
-    const child = aSessionEntry({
-      sessionId: "child-d",
-      isActive: false,
-      orchestratorSessionId: "orch-d",
-      createdAt: "2026-06-26T09:00:00Z",
-    });
+  it("orders the remaining partition by the later of last activity and last update, most recent first", () => {
+    // Given — ended sessions whose latest moment is, in turn, an update or an agent activity
+    const sessions = [
+      // Updated (e.g. stopped) most recently, though its agent went quiet long before
+      anEndedSession("stopped-last", { updatedAt: "2026-11-24T12:00:00Z", lastActivityMs: Date.parse("2026-11-20T00:00:00Z") }),
+      // Agent active more recently than anything else here except stopped-last's update
+      anEndedSession("active-late", { updatedAt: "2026-11-21T00:00:00Z", lastActivityMs: Date.parse("2026-11-24T11:00:00Z") }),
+      // No observed activity at all — its update time alone places it
+      anEndedSession("quiet", { updatedAt: "2026-11-23T00:00:00Z" }),
+      anEndedSession("ancient", { updatedAt: "2026-11-01T00:00:00Z", lastActivityMs: Date.parse("2026-11-02T00:00:00Z") }),
+    ];
 
     // When
-    const result = partitionSessionsByActivity([orch, child]);
+    const result = partitionSessionsByActivity(sessions);
 
-    // Then — the stack stays nested inside the remaining partition
-    expect(result.remaining.groups).toHaveLength(1);
-    expect(result.remaining.groups[0]!.parent.sessionId).toBe("orch-d");
-    expect(result.remaining.groups[0]!.children.map((c) => c.sessionId)).toEqual(["child-d"]);
-    expect(result.active.groups).toHaveLength(0);
+    // Then
+    expect(outline(result.remaining.rows)).toEqual(["stopped-last@0", "active-late@0", "quiet@0", "ancient@0"]);
+  });
+
+  it("orders an ended stack's children by the same recency, right after their starter", () => {
+    // Given — an ended orchestrator and two ended children, the earlier-started one stopping last
+    const sessions = [
+      anEndedSession("orch", { updatedAt: "2026-11-22T00:00:00Z" }),
+      anEndedSession("kid-stopped-first", { updatedAt: "2026-11-21T00:00:00Z", orchestratorSessionId: "orch" }),
+      anEndedSession("kid-stopped-last", { updatedAt: "2026-11-23T00:00:00Z", orchestratorSessionId: "orch" }),
+      anEndedSession("plain", { updatedAt: "2026-11-24T00:00:00Z" }),
+    ];
+
+    // When
+    const result = partitionSessionsByActivity(sessions);
+
+    // Then
+    expect(outline(result.remaining.rows)).toEqual([
+      "plain@0",
+      "orch@0",
+      "kid-stopped-last@1",
+      "kid-stopped-first@1",
+    ]);
   });
 
   it("splits a mixed-activity stack across partitions by each session's own status", () => {
@@ -248,11 +256,9 @@ describe("partitionSessionsByActivity", () => {
     // When
     const result = partitionSessionsByActivity([orch, child]);
 
-    // Then — the parent is a flat row in active (its only child left the partition);
-    // the child is a flat orphan row in remaining (its parent is absent there).
-    expect(result.active.groups).toHaveLength(0);
-    expect(result.active.flat.map((s) => s.sessionId)).toEqual(["orch-m"]);
-    expect(result.remaining.groups).toHaveLength(0);
-    expect(result.remaining.flat.map((s) => s.sessionId)).toEqual(["child-m"]);
+    // Then — the parent is a childless row in active (its only child left the partition); the child
+    // is a top-level row in remaining (its parent is absent there).
+    expect(outline(result.active.rows)).toEqual(["orch-m@0"]);
+    expect(outline(result.remaining.rows)).toEqual(["child-m@0"]);
   });
 });
