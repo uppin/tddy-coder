@@ -1,13 +1,16 @@
 # Brief templates
 
-Fill every `<…>`. Keep the forbidden list verbatim. "Back channel" = your harness's session-message
-tool to the orchestrator.
+Fill every `<…>`. Keep the forbidden list verbatim. `<back channel>` is the exact route the child
+reports on — for a tddy session on this host, `tddy-tools send --to <orchestrator session id>`; see
+[SKILL.md § 6.1](../SKILL.md#61-ask-for-reports-in-every-brief). Set up your watch on the child right
+after starting it (§ 6.2).
 
 ## Shared footer (append to every brief)
 
 ```
-REPORTING: via the back channel only, before every turn ends and at least every ~50 minutes:
-a one-line status. Final: "✅ <PR> <sha> + full check counts (pass/fail)".
+REPORTING: via <back channel> only — no other route — on start, at each milestone, at once on any
+blocker or decision, before every turn ends, and at least every <N> minutes: a one-line status.
+Final: "✅ <PR> <sha> + full check counts (pass/fail)".
 PRE-APPROVED: scoped build/test/lint, commits, leased pushes to <branch>, rebasing <branch>,
 reading CI, deleting your own build outputs.
 FORBIDDEN: merging; auto-merge / force-merge / force-build tokens; dispatching workflows;
