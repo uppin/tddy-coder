@@ -139,7 +139,8 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         record_hook_answer_wait(session_dir, hooks)?;
     }
     let hook_token = hooks.as_ref().map(|hooks| hooks.hook_token.as_str());
-    let back_channel = reports_to.and_then(|to| to.guidance_at(spec, on_target, hook_token));
+    let back_channel =
+        reports_to.and_then(|to| to.guidance_at(spec, on_target.then_some(worktree), hook_token));
     let mut process_env =
         session_tool_env(config, session_id, session_tool_token, agent_tool_socket);
     let mut tool_server_env: Vec<(String, String)> = Vec::new();

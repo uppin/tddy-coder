@@ -142,7 +142,7 @@ fn a_claude_child_on_a_target_reports_through_its_hook_log_not_natively() {
         &child,
         ChildPlacement::Target {
             hook_token: HOOK_TOKEN,
-            hook_log_path: HOOK_LOG,
+            hook_log_path: HOOK_LOG.to_string(),
         },
     ));
     let guidance = back_channel_guidance(ORCHESTRATOR, &channel);

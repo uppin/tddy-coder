@@ -19,13 +19,12 @@ use crate::cursor_from_spec::node_launcher_of;
 
 pub(super) fn log_hooks_on_the_target(
     target: &Option<tddy_core::SessionTarget>,
+    worktree_path: &std::path::Path,
     wiring: &mut crate::cli_agent_steps::SessionWiring,
 ) {
     if target.is_some() {
         if let Some(hooks) = &mut wiring.hooks {
-            // Relative to the worktree the agent runs in: the hook appends there, on the
-            // target, wherever that worktree is.
-            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+            hooks.point_at_the_target_log(worktree_path);
         }
     }
 }

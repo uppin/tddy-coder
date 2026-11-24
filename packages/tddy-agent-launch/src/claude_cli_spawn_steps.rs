@@ -48,6 +48,15 @@ impl ClaudeCliHooks {
             route_env: &self.route_env,
         }
     }
+
+    /// Point every hook at the hook log of a session whose agent runs on a target, its worktree
+    /// there being `worktree`: each hook appends to that log instead of running
+    /// `tddy-tools session-hook`.
+    pub(super) fn point_at_the_target_log(&mut self, worktree: &Path) {
+        // FIXME(red): still the relative path the target launch has always given its hooks.
+        let _ = worktree;
+        self.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+    }
 }
 
 /// A claude-cli start's hooks, with a fresh per-session token.
@@ -174,3 +183,6 @@ pub(super) fn record_role_of_session_type_before_spawn(
 
 #[cfg(test)]
 mod claude_cli_spawn_steps_tests;
+
+#[cfg(test)]
+mod target_hook_log_tests;

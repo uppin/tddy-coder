@@ -301,7 +301,7 @@ async fn resume_cli_harness_session(
     )
     .await?;
     let remote_host = remote_host_of(&meta);
-    hooks_append_to_the_target_log(&meta, &mut wiring);
+    hooks_append_to_the_target_log(&meta, &worktree_path, &mut wiring);
     let toolset = std::mem::take(&mut wiring.toolset);
     let hook_params = wiring.hook_params(spec, session_id, os_user, &route.plain_env);
     let mut slots = render_host_launch_slots(
@@ -402,14 +402,16 @@ fn remote_host_of(meta: &SessionMetadata) -> Option<&str> {
     })
 }
 
-fn hooks_append_to_the_target_log(meta: &SessionMetadata, wiring: &mut ResumedWiring) {
+fn hooks_append_to_the_target_log(
+    meta: &SessionMetadata,
+    worktree_path: &Path,
+    wiring: &mut ResumedWiring,
+) {
     // Every resume renders its hooks again from the recorded token, argv and file alike. On a
     // target they append to the hook log there, which this launch recreates and follows again.
     if meta.target.is_some() {
         if let Some(hooks) = &mut wiring.hooks {
-            // Relative to the worktree the agent runs in: the hook appends there, on the
-            // target, wherever that worktree is.
-            hooks.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+            hooks.point_at_the_target_log(worktree_path);
         }
     }
 }
