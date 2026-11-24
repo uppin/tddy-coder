@@ -124,6 +124,10 @@ impl SessionWatchStore {
         if watch_ids.is_empty() {
             return Err(StreamRefusal::NoWatchNamed);
         }
+        // A wake still pasting the owner's records holds this; wait for it rather than hand them
+        // again. One call is one locked step, so the guard is never held across a stream's wait.
+        let guard = self.delivery_guard(owner);
+        let _handing_over = guard.lock().await;
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
 

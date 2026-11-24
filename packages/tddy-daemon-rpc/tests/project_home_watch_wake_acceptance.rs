@@ -251,7 +251,7 @@ impl RecordingAgent {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nstty raw -echo\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
+                "#!/bin/sh\nstty raw echo -echoctl\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
                 record.display()
             ),
         )

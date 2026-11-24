@@ -45,14 +45,19 @@ pub enum ModelReportSource {
 impl ModelReportSource {
     /// Whether the source is read on a report of `event`.
     pub fn applies_to(&self, event: &str) -> bool {
-        let _ = event;
-        todo!("ModelReportSource::applies_to")
+        let events = match self {
+            Self::HookField { events, .. } | Self::Usage { events, .. } => events,
+        };
+        events.is_empty() || events.iter().any(|named| named == event)
     }
 
     /// `model` when it is a model to relaunch on: non-blank and not one of the source's `ignore`.
     pub fn accepts<'m>(&self, model: &'m str) -> Option<&'m str> {
-        let _ = model;
-        todo!("ModelReportSource::accepts")
+        let ignore = match self {
+            Self::HookField { ignore, .. } | Self::Usage { ignore, .. } => ignore,
+        };
+        let model = model.trim();
+        (!model.is_empty() && !ignore.iter().any(|ignored| ignored == model)).then_some(model)
     }
 }
 
@@ -62,6 +67,20 @@ pub(crate) fn validate_model_report(
     sources: &[ModelReportSource],
     has_usage: bool,
 ) -> Result<(), String> {
-    let _ = (sources, has_usage);
+    for source in sources {
+        match source {
+            ModelReportSource::HookField { field, .. } if field.trim().is_empty() => {
+                return Err("a hook_field source names no field".to_string());
+            }
+            ModelReportSource::Usage { .. } if !has_usage => {
+                return Err(
+                    "a usage source reads the agent's usage binding, which it does not declare \
+                     (coding_agent.usage)"
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
     Ok(())
 }

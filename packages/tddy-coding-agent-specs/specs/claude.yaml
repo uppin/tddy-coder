@@ -114,6 +114,13 @@ extensions:
     # How a new turn reaches a running session (`SendSessionMessage`, `#orchestrators` 4/11): pasted into
     # the TUI, then submitted.
     turn_input: { kind: terminal_paste, submit_key: Enter }
+    # Where a running session reports the model it is on now, so a model picked with `/model` is
+    # the one its resume relaunches on. Claude Code's hooks name the model on `SessionStart` only;
+    # after a turn, the transcript's last assistant message names the model that answered (the
+    # `usage` binding above reads it). `<synthetic>` marks a message Claude Code wrote itself.
+    model_report:
+      - { kind: hook_field, field: model, events: [SessionStart] }
+      - { kind: usage, events: [Stop], ignore: ["<synthetic>"] }
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
     # --- Headless (`#agent-tools 6/12`): one `claude -p` per turn, for the workflow backend
     # (`tddy-coder --agent claude`) and a headless coding subagent. It renders byte-for-byte what

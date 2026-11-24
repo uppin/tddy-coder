@@ -176,6 +176,43 @@ pub(super) fn apply_delivery(
     }
 }
 
+/// Commit to `state` a delivery [`apply_delivery`] planned on a copy of it (`planned`), after the
+/// copy was taken and the project lock dropped: each of `owner`'s watches still live advances to
+/// the position the plan gave it — never back, so a stream or a collection that moved it further
+/// meanwhile keeps its place — and the endings the delivery handed (`handed_endings`) are taken.
+/// A watch cancelled meanwhile is simply gone.
+pub(super) fn commit_delivery(
+    state: &mut ProjectWatches,
+    planned: &ProjectWatches,
+    owner: &WatchOwner,
+    handed_endings: &[String],
+    log: &ProjectNotificationLog,
+    now_unix_ms: u64,
+) {
+    end_finished(state, owner, log, now_unix_ms);
+    for watch in state
+        .watches
+        .iter_mut()
+        .filter(|watch| &watch.owner == owner)
+    {
+        let Some(position) = planned
+            .watches
+            .iter()
+            .find(|done| done.watch_id == watch.watch_id)
+            .map(|done| done.position)
+        else {
+            continue;
+        };
+        if position > watch.position {
+            watch.position = position;
+            watch.acked_above.retain(|seq| *seq > position);
+        }
+    }
+    state.ended.retain(|pending| {
+        !(&pending.owner == owner && handed_endings.contains(&pending.end.watch_id))
+    });
+}
+
 /// Move `owner`'s watches that have ended out of the live set, to be reported once by its next
 /// delivery. Whether any moved.
 pub(super) fn end_finished(

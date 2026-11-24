@@ -367,6 +367,7 @@ impl ExecToolRpcHandler {
                     pasted.store(true, Ordering::SeqCst);
                     paste_and_submit_to(&terminals, &session_id, &wake_text(&delivery), &submit_key)
                         .await
+                        .map(|_echo_seen| ())
                 }
             })
             .await;

@@ -106,14 +106,21 @@ impl Typing {
     }
 }
 
-/// [`encode_keys`], kept as the two writes [`type_into`] types it in.
+/// [`encode_keys`], kept as the two writes [`type_into`] types it in: the same refusals, and the
+/// same bytes once the two are joined.
 pub fn encode_typing(
     text: Option<&str>,
     keys: &[String],
     bracketed_paste: bool,
 ) -> Result<Typing, String> {
-    let _ = (text, keys, bracketed_paste);
-    todo!("encode_typing")
+    let text = text.filter(|text| !text.is_empty());
+    let all = encode_keys(text, keys, bracketed_paste)?;
+    let text_len = text.map_or(0, |text| text_bytes(text, bracketed_paste).len());
+    let (text, keys) = all.split_at(text_len);
+    Ok(Typing {
+        text: text.to_vec(),
+        keys: keys.to_vec(),
+    })
 }
 
 /// The terminal [`type_into`] types into: where its output stands, and a writer to its input.
@@ -151,6 +158,26 @@ impl Default for EchoWait {
     }
 }
 
+/// Why [`type_into`] stopped, and how far it got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TypingError {
+    /// Nothing was written.
+    NothingSent(String),
+    /// The text was written; the keys after it were not.
+    KeysNotSent(String),
+}
+
+impl std::fmt::Display for TypingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NothingSent(e) => write!(f, "{e}; nothing was sent"),
+            Self::KeysNotSent(e) => write!(f, "{e}; the text was typed but the keys were not"),
+        }
+    }
+}
+
+impl std::error::Error for TypingError {}
+
 /// What [`type_into`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Typed {
@@ -163,11 +190,81 @@ pub struct Typed {
 
 /// Type `typing` into `terminal`: the text as one write, then — once the application has echoed
 /// it — the keys as a write of their own.
+///
+/// Why the wait: an application may treat bytes that arrive in the same read as the end of a paste
+/// as part of it. Cursor Agent holds every byte after `ESC[201~` until its *next* input, so a paste
+/// and Enter in one read leave the text unsubmitted. Writing them apart is not enough — a transport
+/// in between (tmux, `coder ssh`) merges writes made back to back into one read — so the keys wait
+/// until the application has visibly read the text: its output offset moves past where it stood
+/// before the text was written, then holds still for [`EchoWait::quiet`] (or
+/// [`EchoWait::settle_cap`] passes, for an application whose screen never holds still).
+///
+/// With text and no keys, or keys and no text, there is one write and nothing is waited on.
 pub async fn type_into(
     terminal: &dyn TypingTerminal,
     typing: Typing,
     wait: &EchoWait,
-) -> Result<Typed, String> {
-    let _ = (terminal, typing, wait);
-    todo!("type_into")
+) -> Result<Typed, TypingError> {
+    let sent_bytes = typing.len();
+    let Typing { text, keys } = typing;
+    if text.is_empty() || keys.is_empty() {
+        let only = if text.is_empty() { keys } else { text };
+        terminal.write(only).await.map_err(TypingError::NothingSent)?;
+        return Ok(Typed {
+            sent_bytes,
+            echo_seen: None,
+        });
+    }
+    let before = terminal
+        .output_offset()
+        .await
+        .map_err(TypingError::NothingSent)?;
+    terminal.write(text).await.map_err(TypingError::NothingSent)?;
+    let echo_seen = until_echoed_past(terminal, before, wait)
+        .await
+        .map_err(TypingError::KeysNotSent)?;
+    if !echo_seen {
+        // Deliberate, operator-approved (2026-11-24): with no echo the keys are pressed anyway,
+        // and the answer says so (`echo_seen: false`), rather than leaving the text typed and the
+        // turn unsubmitted. An application that draws nothing as it is typed into still gets them.
+        log::warn!(
+            "typing: no echo within {:?} of the text; pressing the keys anyway",
+            wait.no_echo_timeout
+        );
+    }
+    terminal.write(keys).await.map_err(TypingError::KeysNotSent)?;
+    Ok(Typed {
+        sent_bytes,
+        echo_seen: Some(echo_seen),
+    })
+}
+
+/// Wait for the output offset to move past `before` and then settle: `true` once it has, `false`
+/// when it never moved within [`EchoWait::no_echo_timeout`].
+async fn until_echoed_past(
+    terminal: &dyn TypingTerminal,
+    before: u64,
+    wait: &EchoWait,
+) -> Result<bool, String> {
+    let started = tokio::time::Instant::now();
+    let echo_began = loop {
+        tokio::time::sleep(wait.poll).await;
+        if terminal.output_offset().await? > before {
+            break tokio::time::Instant::now();
+        }
+        if started.elapsed() >= wait.no_echo_timeout {
+            return Ok(false);
+        }
+    };
+    let mut last = terminal.output_offset().await?;
+    let mut still_since = tokio::time::Instant::now();
+    while still_since.elapsed() < wait.quiet && echo_began.elapsed() < wait.settle_cap {
+        tokio::time::sleep(wait.poll).await;
+        let now = terminal.output_offset().await?;
+        if now != last {
+            last = now;
+            still_since = tokio::time::Instant::now();
+        }
+    }
+    Ok(true)
 }

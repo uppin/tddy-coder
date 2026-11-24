@@ -78,7 +78,7 @@ fn a_host_delivering_by(delivery: TurnDelivery) -> FakeHost {
     FakeHost {
         asked: Mutex::new(Vec::new()),
         delivery,
-        outcome: ResumeOutcome::Resumed,
+        outcome: ResumeOutcome::Resumed { message: None },
         refusal: None,
     }
 }
@@ -86,14 +86,14 @@ fn a_host_delivering_by(delivery: TurnDelivery) -> FakeHost {
 fn a_host_resuming_with(outcome: ResumeOutcome) -> FakeHost {
     FakeHost {
         outcome,
-        ..a_host_delivering_by(TurnDelivery::TerminalPaste)
+        ..a_host_delivering_by(TurnDelivery::TerminalPaste { echo_seen: true })
     }
 }
 
 fn a_host_refusing(reason: &str) -> FakeHost {
     FakeHost {
         refusal: Some(reason.to_string()),
-        ..a_host_delivering_by(TurnDelivery::TerminalPaste)
+        ..a_host_delivering_by(TurnDelivery::TerminalPaste { echo_seen: true })
     }
 }
 
@@ -239,7 +239,7 @@ fn refusal_of(outcome: &ToolOutcome) -> String {
 #[tokio::test]
 async fn a_message_reaches_the_port_for_its_target_and_answers_how_it_was_delivered() {
     // Given a host that delivers by terminal paste
-    let host = a_host_delivering_by(TurnDelivery::TerminalPaste);
+    let host = a_host_delivering_by(TurnDelivery::TerminalPaste { echo_seen: true });
 
     // When the home agent sends the child a message
     let outcome = calling(
@@ -259,7 +259,7 @@ async fn a_message_reaches_the_port_for_its_target_and_answers_how_it_was_delive
     );
     assert_eq!(
         answer_of(&outcome),
-        json!({ "session_id": CHILD, "delivered_via": "terminal_paste" })
+        json!({ "session_id": CHILD, "delivered_via": "terminal_paste", "echo_seen": true })
     );
 }
 
@@ -283,7 +283,7 @@ async fn an_acp_delivery_answers_acp_prompt() {
 #[tokio::test]
 async fn an_empty_message_is_refused_before_the_port_is_asked() {
     // Given a host
-    let host = a_host_delivering_by(TurnDelivery::TerminalPaste);
+    let host = a_host_delivering_by(TurnDelivery::TerminalPaste { echo_seen: true });
 
     // When the home agent sends a message that is only whitespace
     let outcome = calling(
@@ -305,7 +305,7 @@ async fn an_empty_message_is_refused_before_the_port_is_asked() {
 #[tokio::test]
 async fn a_message_to_a_session_of_another_project_is_refused_before_the_port_is_asked() {
     // Given a host holding a session of another project
-    let host = a_host_delivering_by(TurnDelivery::TerminalPaste);
+    let host = a_host_delivering_by(TurnDelivery::TerminalPaste { echo_seen: true });
 
     // When the home agent sends it a message
     let outcome = calling(
@@ -346,7 +346,9 @@ async fn a_refusal_of_the_port_comes_back_naming_the_tool_and_why() {
 #[tokio::test]
 async fn a_resume_passes_its_message_to_the_port_and_answers_the_outcome() {
     // Given a host that resumes
-    let host = a_host_resuming_with(ResumeOutcome::Resumed);
+    let host = a_host_resuming_with(ResumeOutcome::Resumed {
+        message: Some(TurnDelivery::TerminalPaste { echo_seen: false }),
+    });
 
     // When the home agent resumes the child with a message
     let outcome = calling(
@@ -356,7 +358,8 @@ async fn a_resume_passes_its_message_to_the_port_and_answers_the_outcome() {
     )
     .await;
 
-    // Then the port was asked for that session and message, and the answer is resumed
+    // Then the port was asked for that session and message, and the answer is resumed, saying the
+    // resumed agent showed no echo of its first message before it was submitted
     assert_eq!(
         host.asked(),
         vec![Asked::Resume {
@@ -366,7 +369,7 @@ async fn a_resume_passes_its_message_to_the_port_and_answers_the_outcome() {
     );
     assert_eq!(
         answer_of(&outcome),
-        json!({ "session_id": CHILD, "outcome": "resumed" })
+        json!({ "session_id": CHILD, "outcome": "resumed", "echo_seen": false })
     );
 }
 

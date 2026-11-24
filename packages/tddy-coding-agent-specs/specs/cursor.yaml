@@ -69,6 +69,12 @@ extensions:
     # How a new turn reaches a running session (`SendSessionMessage`, `#orchestra` 7/9): pasted into
     # the TUI, then submitted with Enter, as an operator would.
     turn_input: { kind: terminal_paste, submit_key: Enter }
+    # Where a running session reports the model it is on now, so a model picked with `/model` in
+    # the TUI is the one its resume relaunches on: every hook event carries `model` (seen
+    # 2026-11-24: `glm-5p3-flash-high` after picking GLM 5.3 Flash; `auto` reports itself as
+    # `auto-smart`), and `--model` takes it as reported.
+    model_report:
+      - { kind: hook_field, field: model }
     models:
       default: composer-2.5
       curated:
