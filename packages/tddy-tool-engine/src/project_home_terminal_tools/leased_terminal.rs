@@ -27,6 +27,8 @@ impl TypingTerminal for LeasedTerminal<'_> {
     }
 
     async fn write(&self, bytes: Vec<u8>) -> Result<(), String> {
-        self.port.send_keys(self.target, self.screen_id, bytes).await
+        self.port
+            .send_keys(self.target, self.screen_id, bytes)
+            .await
     }
 }

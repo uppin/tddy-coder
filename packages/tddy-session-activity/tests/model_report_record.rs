@@ -105,7 +105,10 @@ impl AnActivityHost {
     /// Claude Code has written the main conversation's transcript, one assistant message per
     /// model, in order.
     fn claude_answered_with(&self, models: &[&str]) -> &Self {
-        let dir = self.agent_home.path().join(".claude/projects/-home-ada-work");
+        let dir = self
+            .agent_home
+            .path()
+            .join(".claude/projects/-home-ada-work");
         std::fs::create_dir_all(&dir).expect("the projects dir");
         let lines: String = models
             .iter()

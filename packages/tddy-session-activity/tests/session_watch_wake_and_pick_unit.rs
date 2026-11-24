@@ -589,17 +589,19 @@ async fn watch_operations_are_not_held_up_while_a_wake_is_being_delivered() {
     let (delivering, delivery_started) = tokio::sync::oneshot::channel::<()>();
     let (echoed, until_echoed) = tokio::sync::oneshot::channel::<()>();
     let orchestrator = the_orchestrator();
-    let wake = host
-        .watches
-        .deliver_wake_with(&orchestrator, &host.log, NOW + 1, |_delivery| async move {
-            delivering.send(()).ok();
-            until_echoed.await.ok();
-            Ok(())
-        });
+    let wake =
+        host.watches
+            .deliver_wake_with(&orchestrator, &host.log, NOW + 1, |_delivery| async move {
+                delivering.send(()).ok();
+                until_echoed.await.ok();
+                Ok(())
+            });
 
     // When watch operations are made while the wake is in flight
     let meanwhile = async {
-        delivery_started.await.expect("the wake reaches its delivery");
+        delivery_started
+            .await
+            .expect("the wake reaches its delivery");
         let created = tokio::time::timeout(
             NOT_HELD_UP,
             host.watches.create(
@@ -656,17 +658,19 @@ async fn what_a_wake_is_delivering_is_not_handed_to_its_owner_again_meanwhile() 
     let (delivering, delivery_started) = tokio::sync::oneshot::channel::<()>();
     let (echoed, until_echoed) = tokio::sync::oneshot::channel::<()>();
     let orchestrator = the_orchestrator();
-    let wake = host
-        .watches
-        .deliver_wake_with(&orchestrator, &host.log, NOW + 1, |_delivery| async move {
-            delivering.send(()).ok();
-            until_echoed.await.ok();
-            Ok(())
-        });
+    let wake =
+        host.watches
+            .deliver_wake_with(&orchestrator, &host.log, NOW + 1, |_delivery| async move {
+                delivering.send(()).ok();
+                until_echoed.await.ok();
+                Ok(())
+            });
 
     // When the orchestrator collects its watches' events while the wake is in flight
     let meanwhile = async {
-        delivery_started.await.expect("the wake reaches its delivery");
+        delivery_started
+            .await
+            .expect("the wake reaches its delivery");
         let collect = host
             .watches
             .take_delivery(&orchestrator, &host.log, NOW + 2);

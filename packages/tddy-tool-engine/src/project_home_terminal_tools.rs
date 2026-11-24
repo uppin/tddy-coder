@@ -31,8 +31,8 @@ use crate::project_home_tools::{
 use crate::terminal_keys::{encode_typing, type_into, EchoWait};
 
 mod leased_terminal;
-use leased_terminal::LeasedTerminal;
 use crate::ToolOutcome;
+use leased_terminal::LeasedTerminal;
 
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
 pub const CLAIM_SESSION_TERMINAL: &str = "ClaimSessionTerminal";

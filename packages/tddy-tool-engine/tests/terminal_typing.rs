@@ -236,9 +236,7 @@ async fn the_keys_are_pressed_after_the_timeout_when_no_echo_comes() {
 
     // When the message and Enter are typed
     let typing = encode_typing(Some(MESSAGE), &enter(), true).unwrap();
-    let typed = type_into(&tui, typing, &a_short_echo_wait())
-        .await
-        .unwrap();
+    let typed = type_into(&tui, typing, &a_short_echo_wait()).await.unwrap();
     tui.settle().await;
 
     // Then Enter is still pressed, on its own, once the wait for an echo runs out — and the
@@ -256,14 +254,18 @@ async fn keys_alone_are_pressed_without_waiting() {
     // When only keys are typed
     let typing = encode_typing(None, &["C-c".to_string()], true).unwrap();
     let started = tokio::time::Instant::now();
-    let typed = type_into(&tui, typing, &a_short_echo_wait())
-        .await
-        .unwrap();
+    let typed = type_into(&tui, typing, &a_short_echo_wait()).await.unwrap();
 
     // Then they are one write, made at once, and nothing was waited on
     assert_eq!(tui.writes(), vec![vec![0x03]]);
     assert_eq!(started.elapsed(), Duration::ZERO);
-    assert_eq!(typed, Typed { sent_bytes: 1, echo_seen: None });
+    assert_eq!(
+        typed,
+        Typed {
+            sent_bytes: 1,
+            echo_seen: None
+        }
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -273,9 +275,7 @@ async fn text_alone_is_one_write_with_nothing_waited_on() {
 
     // When only text is typed
     let typing = encode_typing(Some(MESSAGE), &[], true).unwrap();
-    let typed = type_into(&tui, typing, &a_short_echo_wait())
-        .await
-        .unwrap();
+    let typed = type_into(&tui, typing, &a_short_echo_wait()).await.unwrap();
 
     // Then it is one paste, and there was nothing after it to wait for an echo before
     assert_eq!(tui.writes(), vec![pasted(MESSAGE)]);

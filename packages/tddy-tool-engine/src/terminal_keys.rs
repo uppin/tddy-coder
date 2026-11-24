@@ -220,7 +220,10 @@ pub async fn type_into(
     let Typing { text, keys } = typing;
     if text.is_empty() || keys.is_empty() {
         let only = if text.is_empty() { keys } else { text };
-        terminal.write(only).await.map_err(TypingError::NothingSent)?;
+        terminal
+            .write(only)
+            .await
+            .map_err(TypingError::NothingSent)?;
         return Ok(Typed {
             sent_bytes,
             echo_seen: None,
@@ -230,7 +233,10 @@ pub async fn type_into(
         .output_offset()
         .await
         .map_err(TypingError::NothingSent)?;
-    terminal.write(text).await.map_err(TypingError::NothingSent)?;
+    terminal
+        .write(text)
+        .await
+        .map_err(TypingError::NothingSent)?;
     let echo_seen = until_echoed_past(terminal, before, wait)
         .await
         .map_err(TypingError::KeysNotSent)?;
@@ -243,7 +249,10 @@ pub async fn type_into(
             wait.no_echo_timeout
         );
     }
-    terminal.write(keys).await.map_err(TypingError::KeysNotSent)?;
+    terminal
+        .write(keys)
+        .await
+        .map_err(TypingError::KeysNotSent)?;
     Ok(Typed {
         sent_bytes,
         echo_seen: Some(echo_seen),

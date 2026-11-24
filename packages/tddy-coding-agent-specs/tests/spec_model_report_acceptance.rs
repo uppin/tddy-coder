@@ -123,7 +123,10 @@ fn a_blank_or_ignored_value_is_no_model() {
     };
 
     // Then only a real model name is accepted
-    assert_eq!(usage.accepts("claude-sonnet-5-5"), Some("claude-sonnet-5-5"));
+    assert_eq!(
+        usage.accepts("claude-sonnet-5-5"),
+        Some("claude-sonnet-5-5")
+    );
     assert_eq!(usage.accepts("<synthetic>"), None);
     assert_eq!(usage.accepts("  "), None);
 }
