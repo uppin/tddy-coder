@@ -1,0 +1,139 @@
+# Changeset: session-close-and-remove
+
+**Type:** Feature
+**Packages:** `tddy-service`, `tddy-session-lifecycle`, `tddy-agent-launch`, `tddy-worktree-service`,
+`tddy-session-agents`, `tddy-daemon-kernel`, `tddy-changeset`, `tddy-session-activity`,
+`tddy-client-web`, `tddy-session-web`
+PRDs (target): [`docs/ft/web/session-drawer.md`](../../ft/web/session-drawer.md) § Closing a session,
+[`docs/ft/daemon/session-liveness.md`](../../ft/daemon/session-liveness.md) § Closing a session
+Design brief: the orchestrator-approved proposal (local `plans/session-close-and-remove-design.md`, not versioned); decisions recorded below.
+
+## Decisions (orchestrator, 2026-11-24)
+
+- Commits no remote holds **do** warrant the dialog, for every worktree.
+- The session record and its branch are **kept**; the session lists as ended, without a worktree.
+- × on active rows; a mini trash bin on inactive rows that still hold a worktree.
+- A session that started others: the dialog **asks** whether to close them too.
+- An unreadable worktree: the dialog shows why and offers **Retry**; no "close anyway".
+- The split session's codebase half is checked and closed (forwarded to its daemon).
+- DeleteSession's three gaps are fixed in this PR; one PR, not a stack.
+
+## Problem
+
+An operator who is done with a session has no single action that ends it **and** gives back its
+disk. Terminate (`SignalSession` SIGTERM) ends only the main agent; every other tab — tmux tabs,
+subagent conversations — keeps running, and the worktree stays. Delete removes the worktree but
+only for a session that is already inactive, never asks about uncommitted work, and has three
+gaps of its own:
+
+1. **Non-main tmux tabs survive** `DeleteSession`/`SignalSession`: `cli_manager.stop_session`
+   cancels only each tab's tmux *client*; nothing reads `tabs.yaml` to kill the tab tmux sessions,
+   locally or on a target.
+2. **Open subagent conversations are not cancelled** on delete (`forget_session_state` never
+   touches `OpenAgentConversations`).
+3. **Agent clones are missed after a daemon restart**: `SessionAgentCloneStore` is in memory only,
+   while `.session.yaml agents[]` records `daemon_instance_id` + `codebase_session_id` for each.
+
+## State A
+
+| Piece | Where |
+|---|---|
+| Terminate | `SignalSession` → `LaunchSessions::terminate_session_dir` (tmux-aware since #1024), main agent only |
+| Delete | `LaunchSessions::delete_session_as` (`tddy-agent-launch/src/svc_signal_delete_session.rs`) |
+| Per-tab stop | `CliManagerTerminalRoster::close_tab` / `end` (`svc_terminal_ports/recorded_tabs.rs`), refuses `main` |
+| Dirty reader | `worktree_sync::dirty_files` — local only |
+| Target removal | `target_worktrees::remove_target_worktree` — fails on a worktree that is already gone |
+| Drawer row | `SessionDrawerItem` — no per-row action |
+
+## State B
+
+### Daemon — `session.SessionService`
+
+```proto
+rpc PreviewCloseSession(PreviewCloseSessionRequest) returns (CloseSessionPreview);
+rpc CloseSession(CloseSessionRequest) returns (stream CloseSessionEvent);
+```
+
+**What a close covers.** Every agent tab of the session — main (tmux-aware), every tab in
+`tabs.yaml` and every live terminal (tmux tabs local and on a target, jailed tabs), every open
+subagent conversation of the session (local and forwarded) — and every worktree the session owns:
+
+| Owner | Worktree | Removed by |
+|---|---|---|
+| `SESSION` | `repo_path`, local or on the session's target | force removal (local) / `remove_target_worktree` (target) |
+| `CONVERSATION` | `<session wt>/tmp/subagent-worktrees/<conv>` (clone placement) | `ConversationWorktree::remove` (worktree, branch, base ref) |
+| `CODEBASE` | the split session's checkout on its codebase daemon | `CloseSession` forwarded to that daemon for the paired `workspace` session |
+| `CLONE` | an agent clone on another daemon (a mirror; holds no unique work, never checked) | the existing clone teardown, from the store **and** `.session.yaml agents[]` |
+
+**What counts as a loss** (per worktree): every `git status --porcelain --untracked-files=all`
+entry (staged, unstaged, deleted, renamed, untracked-not-ignored), and every commit on the
+worktree's `HEAD` that no remote-tracking ref and not the session's recorded base contains
+(`git log HEAD --not --remotes [<base>]`, listed up to 20, counted in full). Read through the
+session's `RemoteShell` for a target worktree, by forwarding `PreviewCloseSession` for the
+codebase half. A worktree that cannot be read carries `unavailable_reason`.
+
+**Preview.** `needs_confirmation` is true when any worktree has a loss or an
+`unavailable_reason`. `fingerprint` is a SHA-256 over every worktree's (owner, path, sorted
+losses); an unavailable worktree contributes its reason.
+
+**CloseSession**, run as a `TaskRegistry` task of kind `close_session` (the `StreamStartSession`
+pattern: first event `started{task_id, daemon_instance_id}`, typed steps on the stream, each step
+also written as a line to the task's `progress` channel):
+
+1. **Check.** Recompute the preview. Any `unavailable_reason` → terminal `needs_confirmation`,
+   nothing done (the web offers Retry). A loss and `!confirmed`, or `confirmed` and the fingerprint
+   differs from `confirmed_fingerprint` → terminal `needs_confirmation`, nothing done.
+2. **Terminate** every tab, one step each. Then verify: no live terminal of the session, no
+   recorded tmux session alive (local `tmux has-session`, target through its shell), within a
+   bounded wait. A survivor fails its step, **every removal is skipped**, and the outcome names it.
+3. **Re-check** (an agent wrote between the dialog and its end): the set at risk is recomputed; if
+   it is no longer the accepted fingerprint (or no longer empty, on the no-dialog path) → terminal
+   `needs_confirmation`, nothing removed. Running the close again is safe.
+4. **Remove** each worktree, one step each, every one attempted. Already gone counts as done.
+5. **Record**: `.session.yaml` `worktree_removed_at` (RFC 3339). The record and the session branch
+   are kept; the session lists as ended with `holds_worktree = false`.
+
+Outcome: `ok`, or `failed_steps` (each with subject and message). No step falls back to anything:
+an unreachable target or peer fails its step with the reason.
+
+**`SessionEntry.holds_worktree`** — true when the session's type owns a worktree, it records one,
+`worktree_removed_at` is unset, and (local) the path exists. `RestoreSessionWorktree` clears
+`worktree_removed_at`.
+
+**DeleteSession** ends every tab and conversation through the same helper (gaps 1–2), tears down
+clones from the record too (gap 3), and treats an already-removed worktree — local or on a target —
+as done.
+
+### Web — `tddy-session-web`
+
+- `SessionDrawerItem` gets an **×** (`sessions-drawer-item-close-<id>`) on an active row, and a mini
+  **trash bin** (`sessions-drawer-item-remove-worktree-<id>`) on an inactive row with
+  `holdsWorktree`. Both run the same close, routed to the owning host.
+- Click → `PreviewCloseSession`. The close runs at once when nothing needs confirming and the
+  session started no live child; otherwise `CloseSessionDialog` opens:
+  - one section per worktree: host, owner, branch, files with their change, unpushed commits;
+  - a worktree that could not be read shows its reason and a **Retry** (re-runs the preview);
+    Confirm stays disabled while any is unreadable;
+  - a session that started others (`orchestratorSessionId` = this session, active or holding a
+    worktree) asks **Leave them running** (default) / **Close them too**; choosing the latter adds
+    each child's own losses to the dialog, and each child is closed after the parent with its own
+    fingerprint;
+  - Confirm → `CloseSession(confirmed=true, fingerprint)`. A `needs_confirmation` event re-opens
+    the dialog with the new list.
+- While running the row shows **Closing…** (`sessions-drawer-item-closing-<id>`) with the current
+  step; failed steps land in the drawer notices, naming each step and host; then the list refreshes.
+
+## Tests
+
+| Layer | File | Covers |
+|---|---|---|
+| Rust unit | `tddy-worktree-service/src/worktree_loss.rs` (unit) | porcelain parsing per change kind, ignored excluded, unpushed vs remotes and base, target reader over `InMemoryShell` |
+| Daemon integration | `tddy-session-lifecycle/tests/close_session.rs` | preview of clean / dirty / committed-not-pushed; unconfirmed dirty close does nothing; confirmed close ends main + tmux tab + conversation and removes worktrees, keeps record and branch; fingerprint drift refused; a surviving tab skips removal; `holds_worktree` false after close |
+| Daemon integration | `tddy-session-lifecycle/tests/close_target_session.rs` | target worktree preview and removal over the stand-in target; unreachable target → `unavailable_reason`, nothing done |
+| Daemon integration | `tddy-session-lifecycle/tests/delete_session.rs` (extended) | delete kills non-main tmux tab sessions; delete of a closed (worktree-removed) session succeeds |
+| Cypress component | `tddy-session-web/cypress/component/SessionsDrawerClose.cy.tsx` | × only on active rows, trash only on inactive rows holding a worktree; clean → no dialog; dirty → dialog per worktree; Cancel sends nothing; Confirm sends confirmed + fingerprint; unreadable → Retry; children choice; failure notice |
+
+## Refactoring Needed
+
+### From /red (TDD Red Phase)
+- [ ] (filled in after the red phase)

@@ -134,6 +134,52 @@ older daemon, or whose start could not be read) is checked against the start rea
 one whose recorded start is not a number of seconds, which is logged. Start times have a resolution of one
 second, so a pid reissued to a process that started within the same second as the agent is not told apart.
 
+## Closing a session
+
+**Status:** 🚧 In progress (changeset `docs/dev/1-WIP/2026-11-24-session-close-and-remove.md`)
+
+`session.SessionService/CloseSession` terminates **every agent tab of a session** and removes
+**every worktree it owns**, as one task; `PreviewCloseSession` reports first what that would lose.
+It backs the sessions drawer's × ([Closing a session](../web/session-drawer.md#closing-a-session)).
+
+**Tabs:** the main agent (a tmux-run main as [above](#deleting-a-tmux-run-session)), every tab of
+the [tab roster](#the-tab-roster) and every live terminal — tmux tabs here and on a target, jailed
+tabs — and every open subagent conversation of the session, here or forwarded to the daemon that
+runs it.
+
+**Worktrees:**
+
+| Owner | Worktree | Removed by |
+|---|---|---|
+| session | its `repo_path`, here or on its target | `git worktree remove --force` here; `remove_target_worktree` on the target |
+| conversation | a clone-placed conversation's `<worktree>/tmp/subagent-worktrees/<conversation>` | the worktree, its branch and its base ref |
+| codebase | a split session's checkout on its codebase daemon | `CloseSession` forwarded to that daemon for the paired `workspace` session |
+| clone | an agent clone on another daemon — a mirror, never checked | the clone teardown, from the clone store and from `.session.yaml agents[]` |
+
+**What would be lost**, per worktree: every `git status --porcelain --untracked-files=all` entry
+(ignored files are not), and every commit on its `HEAD` that no remote-tracking ref and not the
+session's recorded base holds. A target worktree is read through the session's remote shell; the
+codebase half by forwarding the preview. A worktree that cannot be read is reported with the reason.
+The preview carries a fingerprint of all of it.
+
+**The task** (`TaskRegistry` kind `close_session`; the stream's first event names it):
+
+1. **Check.** Anything unreadable, or a loss the request did not confirm (`confirmed`, and the
+   fingerprint it saw), ends the task with `needs_confirmation` — nothing done.
+2. **Terminate** every tab, then verify none is left: no live terminal, no recorded tmux session
+   alive here or on the target. A survivor fails its step and **no worktree is removed**.
+3. **Re-check**: what is at risk now must still be what was confirmed (nothing, when nothing was);
+   otherwise `needs_confirmation`, nothing removed.
+4. **Remove** each worktree — every one attempted, each its own step; one already gone counts as
+   removed, so running a failed close again is safe.
+5. **Record** `worktree_removed_at` in `.session.yaml`. The record and the branch are kept;
+   `SessionEntry.holds_worktree` turns false. `RestoreSessionWorktree` clears it.
+
+The outcome lists every failed step with its reason. No step falls back to anything else.
+
+`DeleteSession` ends tabs and conversations through the same path, tears down agent clones from the
+record as well as the clone store, and treats a worktree that is already gone as removed.
+
 ## Tool sessions as a process tab
 
 A tool session's `tddy-coder` is registered, as soon as its spawn returns, as a **process tab** of its
