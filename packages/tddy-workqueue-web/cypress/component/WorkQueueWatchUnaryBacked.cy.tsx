@@ -1,5 +1,5 @@
 /**
- * The watch fallback registered in `cypress/support/component.ts`: a backend that stubs only the unary
+ * The unary-backed watch registered in `cypress/support/component.ts`: a backend that stubs only the unary
  * `getWorkQueue` answers `watchWorkQueue` with that stub's queue as its first snapshot, then keeps the
  * watch open — as the daemon's does until something changes — until the client cancels it. The stub is
  * asked with a `GetWorkQueueRequest` naming the watched queue as its `stack`.
@@ -14,7 +14,7 @@ import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
 import { aPlannedNode, aWorkQueueJson } from "../support/rpc/prStackFixtures";
 
 const QUEUE_JSON = aWorkQueueJson(1, [aPlannedNode({ itemId: "n1", title: "Add token store" })], 5);
-const ADDRESS = { projectId: "proj-fallback", queueId: "queue-fallback", daemonInstanceId: "host-a" };
+const ADDRESS = { projectId: "proj-unary-backed", queueId: "queue-unary-backed", daemonInstanceId: "host-a" };
 
 /** What a watcher saw: its first snapshot, whether the watch was still open a moment later, and how it ended once cancelled. */
 interface WatchOutcome {

@@ -1,5 +1,5 @@
 /**
- * The testkit's server-stream fallback, registered globally in `cypress/support/component.ts`:
+ * The testkit's unary-backed stream, registered globally in `cypress/support/component.ts`:
  * a backend that serves the unary `startSession` but not `streamStartSession` answers the stream by
  * running the unary handler and emitting its answer as the stream's only `result` event.
  *
@@ -46,7 +46,7 @@ async function collectOutcome(
   return { events, failure };
 }
 
-describe("registerServerStreamFallback: StartSession over a stream", () => {
+describe("registerUnaryBackedStream: StartSession over a stream", () => {
   it("answers streamStartSession with a single result carrying the unary startSession answer", () => {
     const backend = aBackendServingOnlyUnaryStartSession();
 
@@ -67,7 +67,7 @@ describe("registerServerStreamFallback: StartSession over a stream", () => {
     });
   });
 
-  it("delivers an explicit streamStartSession implementation's events instead of the fallback", () => {
+  it("delivers an explicit streamStartSession implementation's events instead of the unary-backed stream", () => {
     const backend = aBackendServingOnlyUnaryStartSession().implement(SessionService, {
       streamStartSession: async function* () {
         yield { event: { case: "result" as const, value: { sessionId: "streamed-session-1" } } };
@@ -103,7 +103,7 @@ describe("registerServerStreamFallback: StartSession over a stream", () => {
     });
   });
 
-  it("records the fallback's request under the unary startSession method", () => {
+  it("records the unary-backed stream's request under the unary startSession method", () => {
     const backend = aBackendServingOnlyUnaryStartSession();
 
     streamStartSessionOn(backend).then(() => {
@@ -112,7 +112,7 @@ describe("registerServerStreamFallback: StartSession over a stream", () => {
     });
   });
 
-  it("gives no fallback to a backend serving neither startSession nor streamStartSession", () => {
+  it("backs no stream for a backend serving neither startSession nor streamStartSession", () => {
     const backend = anInMemoryRpcBackend();
 
     streamStartSessionOn(backend).then(({ events, failure }) => {

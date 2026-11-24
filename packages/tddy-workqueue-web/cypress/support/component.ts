@@ -2,7 +2,7 @@ import React from "react";
 import { mount } from "cypress/react";
 import type { ReactElement, ReactNode } from "react";
 import { create } from "@bufbuild/protobuf";
-import { registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { registerUnaryBackedStream, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { GetWorkQueueRequestSchema, WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
 import { revisionOf } from "../../src/queueRevision";
 import { type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
@@ -38,7 +38,7 @@ Cypress.Commands.add("mountWithClients", (jsx: ReactElement, backend: InMemoryRp
 /** The view watches its queue over `WatchWorkQueue`. Specs that stub only the unary `getWorkQueue` keep
  *  working: the watch answers that stub's queue as its first snapshot and then stays open, as the
  *  daemon's does until something changes. A spec that implements the watch itself wins. */
-registerServerStreamFallback({
+registerUnaryBackedStream({
   unary: WorkQueueService.method.getWorkQueue,
   stream: WorkQueueService.method.watchWorkQueue,
   toEvent: (answer) =>

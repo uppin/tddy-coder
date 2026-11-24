@@ -2,7 +2,7 @@ import React from "react";
 import { mount } from "cypress/react";
 import type { ReactElement, ReactNode } from "react";
 import { create } from "@bufbuild/protobuf";
-import { anInMemoryRpcBackend, registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { anInMemoryRpcBackend, registerUnaryBackedStream, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
 import { aClientsPortDouble, type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
 import { StartPassphraseProvider } from "../../src";
@@ -48,7 +48,7 @@ Cypress.Commands.add("mountWithClients", (jsx: ReactElement, backend: InMemoryRp
 /** The form always starts a session over `StreamStartSession`, whose last event is the unary answer.
  *  Specs that stub only the unary `startSession` keep working: the stream runs that handler and emits
  *  its answer as the single `result` event. A spec that implements the stream itself wins. */
-registerServerStreamFallback({
+registerUnaryBackedStream({
   unary: SessionService.method.startSession,
   stream: SessionService.method.streamStartSession,
   toEvent: (result) => create(StartSessionEventSchema, { event: { case: "result", value: result } }),

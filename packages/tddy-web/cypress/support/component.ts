@@ -9,7 +9,7 @@ import { AppPortsScope, type AppPorts } from "../../src/app/ports";
 import { hashNavigationPort } from "../../src/routing/useAppLocation";
 import { livekitPorts } from "tddy-livekit-web";
 import { create } from "@bufbuild/protobuf";
-import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
+import { registerUnaryBackedStream } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
 
 /** The Agent Activity and session-notification stores are app-lifetime module singletons; component
@@ -75,7 +75,7 @@ Cypress.Commands.add("mountWithRpc", mountWithRpc);
 /** The form always starts a session over `StreamStartSession`, whose last event is the unary answer.
  *  Specs that stub only the unary `startSession` keep working: the stream runs that handler and emits
  *  its answer as the single `result` event. A spec that implements the stream itself wins. */
-registerServerStreamFallback({
+registerUnaryBackedStream({
   unary: SessionService.method.startSession,
   stream: SessionService.method.streamStartSession,
   toEvent: (result) => create(StartSessionEventSchema, { event: { case: "result", value: result } }),

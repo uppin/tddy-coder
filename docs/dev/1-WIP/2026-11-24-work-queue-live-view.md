@@ -55,10 +55,18 @@ open. The tab stayed empty until the operator left it and came back.
 - **Callers** (`tddy-session-web`): `SessionWorkQueueTab`, the only place `WorkQueueView` is rendered,
   resolves `watchClient` with `useHostClient(WorkQueueService, session.daemonInstanceId ||
   selectedInstanceId)`.
-- **Test infrastructure** (`tddy-connectrpc-testkit`): `ServerStreamFallback.holdOpen` keeps a fallback
-  stream open after its one event until the client cancels it. `tddy-workqueue-web` and
-  `tddy-session-web` register `getWorkQueue → watchWorkQueue` with `holdOpen`, so specs that stub only
-  `getWorkQueue` still load.
+- **Test infrastructure** (`tddy-connectrpc-testkit`): the test-only `registerServerStreamFallback` /
+  `ServerStreamFallback` is renamed **`registerUnaryBackedStream` / `UnaryBackedStream`**, since it is a
+  test fake that lets a unary stub serve a stream, not a runtime fallback. Every Cypress support file
+  that registers it is updated (`tddy-web`, `tddy-session-web`, `tddy-session-create-web`,
+  `tddy-workqueue-web`), and so is `tddy-web`'s spec, now `UnaryBackedStream.cy.tsx`. It gains two
+  options:
+  - `holdOpen` keeps the stream open after its one event until the client cancels it, as a watch does.
+  - `toRequest` maps the stream's request onto the unary's shape.
+  `tddy-workqueue-web` and `tddy-session-web` register `getWorkQueue → watchWorkQueue` with both
+  (`queue` → `stack`), so specs that stub only `getWorkQueue` still load the view. **The view itself
+  never falls back to `GetWorkQueue`**: a failed or unavailable watch shows the load-error or
+  interrupted state.
 - `docs/dev/todo/2026-11-22-work-queue-status-stream-is-local-only.md` is **closed**: the web opens the
   status stream on the holding host.
 
@@ -71,7 +79,8 @@ open. The tab stayed empty until the operator left it and came back.
 | `tddy-work-queue` | `ChannelStream<T>` (status and watch streams); `WorkQueueHandler::watch_work_queue` |
 | `tddy-daemon-rpc` | `queue_watch.rs`, `queue_changes.rs` (+ `notify = "7"`, operator-approved); status stream wakes on queue changes |
 | `tddy-client-web` | regenerated `work_queue_pb.ts` |
-| `tddy-connectrpc-testkit` | `ServerStreamFallback.holdOpen` |
+| `tddy-connectrpc-testkit` | `registerServerStreamFallback` renamed `registerUnaryBackedStream`; `holdOpen`, `toRequest` |
+| `tddy-web`, `tddy-session-create-web` | Cypress support: the renamed registration; `tddy-web` spec renamed `UnaryBackedStream.cy.tsx` |
 | `tddy-workqueue-web` | `useWorkQueueWatch`, `queueRevision`, `WorkQueueLiveStatus`, required `watchClient`, status stream on it, `workQueue.ts` doc |
 | `tddy-session-web` | `SessionWorkQueueTab` resolves `watchClient` on the holding host |
 
@@ -98,12 +107,15 @@ open. The tab stayed empty until the operator left it and came back.
   - a failed load says why instead of showing an empty queue
   - a dropped watch shows "Reconnecting" and is resynced
   - a removed queue ends the watch for good
-- `tddy-workqueue-web/cypress/component/WorkQueueWatchFallback.cy.tsx`: the `holdOpen` fallback.
+- `tddy-workqueue-web/cypress/component/WorkQueueWatchUnaryBacked.cy.tsx`: a `getWorkQueue` stub,
+  asked with the watched queue as its `stack`, backs the watch, which stays open until cancelled.
 
 ## Docs updated at wrap
 
 - `docs/ft/coder/pr-stacking.md`: § *The queue view stays current* (added), § *Live checks on the row*
   and § *Opening a session's work queue* (updated in this change).
+- `packages/tddy-session-web/docs/indexing-indicator.md`, `packages/tddy-session-create-web/docs/start-progress.md`:
+  the renamed `registerUnaryBackedStream`.
 
 ## Wrap
 

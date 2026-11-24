@@ -56,11 +56,13 @@ export interface RecordedUnaryCall<M extends DescMethodUnary> {
 }
 
 /**
- * A rule for a service that offers one operation both as a unary call and as a server stream whose
- * last event is the unary answer: a backend that serves the unary method but not the stream answers
- * the stream by running the unary handler and emitting `toEvent(answer)` as the only event.
+ * A test-only rule for a service that offers one operation both as a unary call and as a server
+ * stream: a backend whose spec stubs the unary method but not the stream answers the stream by
+ * running that stub and emitting `toEvent(answer)` as the only event. It exists so the specs written
+ * against the unary stub keep serving the component that now reads the stream; it is a test fake,
+ * never a runtime path from a failed stream to the unary call.
  */
-export interface ServerStreamFallback<
+export interface UnaryBackedStream<
   U extends DescMethodUnary = DescMethodUnary,
   S extends DescMethodServerStreaming = DescMethodServerStreaming,
 > {
@@ -81,17 +83,17 @@ export interface ServerStreamFallback<
   readonly toRequest?: (request: MessageShape<S["input"]>) => MessageShape<U["input"]>;
 }
 
-const serverStreamFallbacks: ServerStreamFallback[] = [];
+const unaryBackedStreams: UnaryBackedStream[] = [];
 
 /**
- * Register a {@link ServerStreamFallback} for every backend built afterwards (process-wide). An
- * explicit implementation of the stream method on a backend always wins over the fallback.
+ * Register a {@link UnaryBackedStream} for every backend built afterwards (process-wide). An
+ * explicit implementation of the stream method on a backend always wins over the unary-backed one.
  */
-export function registerServerStreamFallback<
+export function registerUnaryBackedStream<
   U extends DescMethodUnary,
   S extends DescMethodServerStreaming,
->(fallback: ServerStreamFallback<U, S>): void {
-  serverStreamFallbacks.push(fallback as unknown as ServerStreamFallback);
+>(stream: UnaryBackedStream<U, S>): void {
+  unaryBackedStreams.push(stream as unknown as UnaryBackedStream);
 }
 
 // Internal accumulator for service/method registrations
@@ -200,12 +202,12 @@ export class InMemoryRpcBackend {
     const services = [...this.services];
     const methods = [...this.methods];
 
-    const streamFallbacks = serverStreamFallbacks.flatMap((fallback) => {
-      const unaryImpl = findImpl(services, methods, fallback.unary);
-      if (unaryImpl === undefined || findImpl(services, methods, fallback.stream) !== undefined) {
+    const backedStreams = unaryBackedStreams.flatMap((backed) => {
+      const unaryImpl = findImpl(services, methods, backed.unary);
+      if (unaryImpl === undefined || findImpl(services, methods, backed.stream) !== undefined) {
         return [];
       }
-      return [{ fallback, unaryImpl }];
+      return [{ backed, unaryImpl }];
     });
 
     this.cachedTransport = createRouterTransport(
@@ -216,18 +218,18 @@ export class InMemoryRpcBackend {
         for (const { method, impl } of methods) {
           router.rpc(method, impl);
         }
-        for (const { fallback, unaryImpl } of streamFallbacks) {
-          router.rpc(fallback.stream, async function* (req: unknown, ctx: unknown) {
+        for (const { backed, unaryImpl } of backedStreams) {
+          router.rpc(backed.stream, async function* (req: unknown, ctx: unknown) {
             // The unary handler is called directly, so the call is recorded here as the unary
             // interceptor would have; a thrown ConnectError becomes the stream's error.
-            const unaryRequest = fallback.toRequest ? fallback.toRequest(req as never) : req;
-            const key = requestKey(fallback.unary.parent.typeName, fallback.unary.name);
+            const unaryRequest = backed.toRequest ? backed.toRequest(req as never) : req;
+            const key = requestKey(backed.unary.parent.typeName, backed.unary.name);
             const bucket = recording.get(key) ?? [];
             bucket.push(unaryRequest);
             recording.set(key, bucket);
             const answer = await (unaryImpl as (r: unknown, c: unknown) => unknown)(unaryRequest, ctx);
-            yield fallback.toEvent(answer as never);
-            if (fallback.holdOpen) await untilAborted((ctx as HandlerContext).signal);
+            yield backed.toEvent(answer as never);
+            if (backed.holdOpen) await untilAborted((ctx as HandlerContext).signal);
           } as unknown as MethodImpl<DescMethod>);
         }
       },
