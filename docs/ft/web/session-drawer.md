@@ -88,10 +88,10 @@ activity alerts, and what an orchestrator's tools report (`display_name`).
   (`ActivityService.RenameOwnSession`); the agent's appended guidance names it.
 - A rename is not pushed to other open browsers: they see it on their next list refresh.
 
-Sessions are ordered newest-first by `createdAt` (`sortSessionsByCreation()`). Within that order
-the list is split into an **Active** and a **Remaining** partition (see
-[Active / Remaining Partition Separator](#active--remaining-partition-separator)); there is no
-per-session active-first re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
+The list is split into an **Active** and a **Remaining** partition (see
+[Active / Remaining Partition Separator](#active--remaining-partition-separator)), and each
+partition has its own order — see [Row order](#row-order). There is no per-session active-first
+re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
 ## Project Groups
 
@@ -106,8 +106,8 @@ a session row's status dot; the collapse chevron sits in the gutter left of it.
 - **Other**: sessions with no project, or whose project the drawer does not know, form a trailing
   **Other** group. It is absent when it would be empty.
 - **Body**: inside a group the drawer keeps the active / remaining (**More**) partition and the stack-group
-  nesting below, computed over that group's sessions only. A group with sessions in only one
-  partition shows no separators.
+  nesting below, computed over that group's sessions only. A group with no inactive session shows
+  no **More**; a group with only inactive sessions shows its pinned main (if any) and **More**.
 - **Collapse**: clicking a header collapses or expands the group; groups start expanded. The
   collapsed set is remembered per viewer in browser storage (`tddy.sessionsDrawer.collapsedProjects`,
   keyed by project id, `other` for the trailing group). Storage that cannot be read means every group
@@ -262,9 +262,28 @@ stays nested inside one partition. A **mixed-activity** stack (e.g. a live child
 orchestrator) splits: each session lands in the partition matching its own dot, and a child whose
 orchestrator is not present in the same partition renders as a flat row there.
 
-**More only appears when both partitions are non-empty.** When every session is active
-(or every session is disconnected) the drawer renders a single plain list with no toggle —
-identical to the pre-partition layout.
+**More appears whenever the remaining partition is non-empty** — also when nothing is active. A
+project whose sessions have all ended shows its [pinned main](#pinned-main-entry) (which is never
+inside the fold) and a collapsed **More**, not a bare list of ended rows. When every session is
+active there is no toggle.
+
+### Row order
+
+- **Active partition — newest-started first** (`createdAt` descending, `sortSessionsByCreation`).
+- **Remaining partition — most recently touched first**: by the later of the agent's last observed
+  activity (`lastActivity.atUnixMs`) and the session's last metadata update (`updatedAt`)
+  (`sortSessionsByLastTouched`), so the session that stopped most recently leads. A session with
+  neither time known sorts last. Ties break by `sessionId`.
+- **Started sessions sit right after their starter.** A session whose `orchestratorSessionId` names
+  a session in the same partition is listed directly beneath it, indented; siblings use the
+  partition's order, and nesting is recursive (a session started by a child sits under that child).
+  The starter keeps its own place among the top-level rows.
+- The project's [pinned main](#pinned-main-entry) always comes first, above both partitions.
+
+Known gap: the daemon does not record the moment a session stops. `updatedAt` moves at a
+hook-reported end (claude-cli's SessionEnd), but not when an agent crashes or its tmux session is
+killed, so such a session is placed by its last hook report. See
+[`docs/dev/todo/2026-11-24-session-stop-time-not-recorded.md`](../../dev/todo/2026-11-24-session-stop-time-not-recorded.md).
 
 **Collapse behaviour** mirrors the PR-stack group: clicking **More** toggles the remaining rows. The
 active rows have no toggle.
@@ -275,7 +294,8 @@ existing selection (insertion) order.
 
 Utility: `partitionSessionsByActivity(sessions)` in `utils/sessionStackGroups.ts` returns
 `{ active, remaining, activeCount, remainingCount }` where `active`/`remaining` are each a
-`SessionStackGroupResult` (`groups` + `flat`). Components: `SessionDrawerSeparator`
+`SessionStackGroupResult` (`rows`: the partition's top-level rows in order, each carrying the
+sessions it started). Components: `SessionDrawerSeparator`
 (`packages/tddy-session-web/src/SessionDrawerSeparator.tsx`) renders one collapsible header + its partition body.
 
 ## Cross-Host Active Sessions
@@ -848,34 +868,38 @@ non-child sessions.
 
 ### Grouping Logic
 
-`groupSessionsByStack(sessions)` (in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`) partitions the
-session list:
+`groupSessionsByStack(sessions, order)` (in `packages/tddy-session-web/src/utils/sessionStackGroups.ts`)
+sorts the list by `order` (newest-started first by default) and folds it with
+`sessionStackForest` (`packages/tddy-session-web/src/agentTree.ts`, beside the inspector's
+`subagentSessionNodes`) into `rows`:
 
-- **Group** — an orchestrator session paired with one or more children that reference it.
-  Children sorted oldest-first by `createdAt`.
-- **Flat** — plain sessions (no `orchestratorSessionId`) and orphan children whose
-  orchestrator is not in the current list.
-
-Groups are sorted newest-first by the orchestrator's `createdAt`.
+- A **top-level row** is every session no listed session started: plain sessions, orchestrators,
+  and orphan children whose orchestrator is not in the list.
+- Each row carries the sessions that name it as `orchestratorSessionId`, recursively, in the same
+  order — so children follow their starter, newest first in the active partition.
+- Every session appears exactly once. A session naming itself is a top-level row; sessions whose
+  links only form a cycle are entered at their first member and listed after the other rows.
 
 ### Drawer Rendering
 
 `SessionDrawer.tsx` renders:
 
 ```
-<details data-testid="sessions-drawer-stack-{orch-id}" open>
-  <summary>
-    <SessionDrawerItem session={parent} />     ← orchestrator row
-  </summary>
-  <SessionDrawerItem session={child} depth={1} />  ← each child, indented
-</details>
+<div data-testid="sessions-drawer-stack-{orch-id}">
+  <SessionDrawerItem session={parent} />            ← orchestrator row
+  <details><summary /></details>                     ← the fold toggle
+  <SessionDrawerItem session={child} depth={1} />   ← each descendant, depth-first,
+  <SessionDrawerItem session={grandchild} depth={2} />  indented by its depth
+</div>
 ```
+
+A top-level row that started nothing renders as a plain `SessionDrawerItem`, with no toggle.
 
 - `open` attribute: groups start expanded.
 - Clicking `<summary>` collapses/expands the group (native browser `<details>` behaviour).
 - `SessionDrawerItem` uses the `depth` prop to set `data-depth` and left-padding, giving
   child sessions a visual indent.
-- Orphan children (orchestrator absent from list) appear in the flat section without a group.
+- Orphan children (orchestrator absent from list) render as top-level rows without a group.
 
 ### Stack Parent Picker
 

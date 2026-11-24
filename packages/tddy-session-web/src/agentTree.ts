@@ -45,3 +45,41 @@ export function subagentSessionNodes(
 
   return childrenOf(rootSessionId, new Set([rootSessionId]));
 }
+
+/**
+ * Fold the whole flat list into a forest: every session no listed session started is a root, and
+ * each started session sits beneath its starter, following `orchestrator_session_id` recursively.
+ * The sessions drawer renders it, one partition at a time.
+ *
+ * Unlike {@link subagentSessionNodes}, nothing is dropped — every session lands exactly once. A
+ * session naming itself, or one whose orchestrator is not listed, is a root. Sessions whose
+ * orchestrator links only form a cycle have no root to hang from; each such cycle is entered at its
+ * first member in input order and appended after the other roots, so the drawer still lists them.
+ *
+ * Roots and siblings keep the input list's order: the caller sorts first.
+ *
+ * Feature: docs/ft/web/session-drawer.md § Row order.
+ */
+export function sessionStackForest(sessions: ReadonlyArray<SessionEntry>): SubagentSessionNode[] {
+  const listed = new Set(sessions.map((session) => session.sessionId));
+  const placed = new Set<string>();
+
+  const fold = (session: SessionEntry): SubagentSessionNode => {
+    placed.add(session.sessionId);
+    const children = sessions.filter(
+      (child) => child.orchestratorSessionId === session.sessionId && !placed.has(child.sessionId),
+    );
+    return { session, children: children.map(fold) };
+  };
+
+  const isRoot = (session: SessionEntry) =>
+    session.orchestratorSessionId === "" ||
+    session.orchestratorSessionId === session.sessionId ||
+    !listed.has(session.orchestratorSessionId);
+
+  const roots = sessions.filter(isRoot).map(fold);
+  for (const session of sessions) {
+    if (!placed.has(session.sessionId)) roots.push(fold(session));
+  }
+  return roots;
+}

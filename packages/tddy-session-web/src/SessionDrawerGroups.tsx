@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import type { SessionEntry } from "tddy-client-web/gen/session_pb";
 import type { SessionMetadata } from "./lib/sessionParticipantMetadata";
 import { partitionSessionsByActivity, type SessionStackGroupResult } from "./utils/sessionStackGroups";
+import type { SubagentSessionNode } from "./agentTree";
 import type { ProjectSessionGroup } from "./utils/sessionProjectGroups";
 import { projectGroupKey } from "./SessionProjectGroup";
 import { Tooltip, TooltipTrigger, TooltipContent, cn } from "tddy-ui-web";
@@ -24,11 +25,6 @@ export interface OwningHostInfo {
   hostLabelForInstance: (instanceId: string) => string;
 }
 
-interface StackGroup {
-  parent: SessionEntry;
-  children: SessionEntry[];
-}
-
 /** Resolve the owning-host badge label for a row, or `null` when it belongs to the selected host. */
 function badgeHostLabel(session: SessionEntry, info: OwningHostInfo): string | null {
   const owner = session.daemonInstanceId.trim() || info.selectedInstanceId;
@@ -47,37 +43,47 @@ function badgeCodebaseHostLabel(session: SessionEntry, info: OwningHostInfo): st
   return info.hostLabelForInstance(codebaseHost);
 }
 
-function SessionStackGroup({
-  group,
-  selectedSessionId,
-  onSelectSession,
-  owningHost,
-  sessionMetadataBySessionId,
-  selectedForDelete,
-  onToggleSelect,
-}: {
-  group: StackGroup;
+/** The props every drawer row shares, whichever session it renders. */
+interface DrawerRowProps {
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   owningHost: OwningHostInfo;
   sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
   selectedForDelete?: ReadonlySet<string>;
   onToggleSelect?: (sessionId: string) => void;
-}) {
+}
+
+function DrawerRow({ session, depth, ...props }: DrawerRowProps & { session: SessionEntry; depth?: number }) {
+  return (
+    <SessionDrawerItem
+      session={session}
+      isSelected={session.sessionId === props.selectedSessionId}
+      onClick={props.onSelectSession}
+      depth={depth}
+      hostLabel={badgeHostLabel(session, props.owningHost)}
+      codebaseHostLabel={badgeCodebaseHostLabel(session, props.owningHost)}
+      sessionMetadata={props.sessionMetadataBySessionId.get(session.sessionId)}
+      selected={props.selectedForDelete?.has(session.sessionId)}
+      onToggleSelect={props.onToggleSelect}
+    />
+  );
+}
+
+/** The sessions `nodes` started, depth-first, so each lands right after its starter. */
+function descendantRows(
+  nodes: ReadonlyArray<SubagentSessionNode>,
+  depth: number,
+): Array<{ session: SessionEntry; depth: number }> {
+  return nodes.flatMap((node) => [{ session: node.session, depth }, ...descendantRows(node.children, depth + 1)]);
+}
+
+/** A starter's row with every session beneath it, behind one toggle that folds them. */
+function SessionStackGroup({ node, ...rowProps }: DrawerRowProps & { node: SubagentSessionNode }) {
   const [isOpen, setIsOpen] = useState(true);
 
   return (
-    <div data-testid={`sessions-drawer-stack-${group.parent.sessionId}`}>
-      <SessionDrawerItem
-        session={group.parent}
-        isSelected={group.parent.sessionId === selectedSessionId}
-        onClick={onSelectSession}
-        hostLabel={badgeHostLabel(group.parent, owningHost)}
-        codebaseHostLabel={badgeCodebaseHostLabel(group.parent, owningHost)}
-        sessionMetadata={sessionMetadataBySessionId.get(group.parent.sessionId)}
-        selected={selectedForDelete?.has(group.parent.sessionId)}
-        onToggleSelect={onToggleSelect}
-      />
+    <div data-testid={`sessions-drawer-stack-${node.session.sessionId}`}>
+      <DrawerRow session={node.session} {...rowProps} />
       {/* <details> provides the <summary> toggle target; children visibility is controlled explicitly via React state */}
       <details>
         <summary
@@ -89,19 +95,8 @@ function SessionStackGroup({
         />
       </details>
       <div style={isOpen ? undefined : { display: "none" }}>
-        {group.children.map((child) => (
-          <SessionDrawerItem
-            key={child.sessionId}
-            session={child}
-            isSelected={child.sessionId === selectedSessionId}
-            onClick={onSelectSession}
-            depth={1}
-            hostLabel={badgeHostLabel(child, owningHost)}
-            codebaseHostLabel={badgeCodebaseHostLabel(child, owningHost)}
-            sessionMetadata={sessionMetadataBySessionId.get(child.sessionId)}
-            selected={selectedForDelete?.has(child.sessionId)}
-            onToggleSelect={onToggleSelect}
-          />
+        {descendantRows(node.children, 1).map(({ session, depth }) => (
+          <DrawerRow key={session.sessionId} session={session} depth={depth} {...rowProps} />
         ))}
       </div>
     </div>
@@ -144,56 +139,26 @@ export function CollapsedSessionDot({
   );
 }
 
-/** Renders one partition's stack groups followed by its flat rows. */
-function SessionPartitionBody({
-  partition,
-  selectedSessionId,
-  onSelectSession,
-  owningHost,
-  sessionMetadataBySessionId,
-  selectedForDelete,
-  onToggleSelect,
-}: {
-  partition: SessionStackGroupResult;
-  selectedSessionId: string | null;
-  onSelectSession: (sessionId: string) => void;
-  owningHost: OwningHostInfo;
-  sessionMetadataBySessionId: ReadonlyMap<string, SessionMetadata>;
-  selectedForDelete?: ReadonlySet<string>;
-  onToggleSelect?: (sessionId: string) => void;
-}) {
+/** Renders one partition's rows in order: a starter with its started sessions as a group, the rest bare. */
+function SessionPartitionBody({ partition, ...rowProps }: DrawerRowProps & { partition: SessionStackGroupResult }) {
   return (
     <>
-      {partition.groups.map((group) => (
-        <SessionStackGroup
-          key={group.parent.sessionId}
-          group={group}
-          selectedSessionId={selectedSessionId}
-          onSelectSession={onSelectSession}
-          owningHost={owningHost}
-          sessionMetadataBySessionId={sessionMetadataBySessionId}
-          selectedForDelete={selectedForDelete}
-          onToggleSelect={onToggleSelect}
-        />
-      ))}
-      {partition.flat.map((session) => (
-        <SessionDrawerItem
-          key={session.sessionId}
-          session={session}
-          isSelected={session.sessionId === selectedSessionId}
-          onClick={onSelectSession}
-          hostLabel={badgeHostLabel(session, owningHost)}
-          codebaseHostLabel={badgeCodebaseHostLabel(session, owningHost)}
-          sessionMetadata={sessionMetadataBySessionId.get(session.sessionId)}
-          selected={selectedForDelete?.has(session.sessionId)}
-          onToggleSelect={onToggleSelect}
-        />
-      ))}
+      {partition.rows.map((node) =>
+        node.children.length > 0 ? (
+          <SessionStackGroup key={node.session.sessionId} node={node} {...rowProps} />
+        ) : (
+          <DrawerRow key={node.session.sessionId} session={node.session} {...rowProps} />
+        ),
+      )}
     </>
   );
 }
 
-/** One project group's body: its active sessions, then the rest under a collapsed **More**, each stack-nested. */
+/**
+ * One project group's body: its active sessions newest-started first, then the rest under a
+ * collapsed **More**, most recently touched first — each stack-nested, a started session right
+ * after its starter.
+ */
 export function SessionGroupBody({
   sessions,
   selectionMode,
@@ -203,30 +168,24 @@ export function SessionGroupBody({
   selectionMode: boolean;
   partitionBodyProps: Omit<React.ComponentProps<typeof SessionPartitionBody>, "partition">;
 }) {
-  const { active, remaining, activeCount, remainingCount } = partitionSessionsByActivity(sessions);
-  const isPartitioned = activeCount > 0 && remainingCount > 0;
+  const { active, remaining, remainingCount } = partitionSessionsByActivity(sessions);
 
-  if (!isPartitioned) {
-    return (
-      <SessionPartitionBody
-        partition={activeCount > 0 ? active : remaining}
-        {...partitionBodyProps}
-      />
-    );
-  }
-  // Active sessions are listed bare; the rest fold under a collapsed "More".
+  // Active sessions are listed bare; the rest always fold under a collapsed "More" — also when
+  // nothing is active, so an idle project shows only its pinned main and the fold.
   return (
     <>
       <SessionPartitionBody partition={active} {...partitionBodyProps} />
-      <SessionDrawerSeparator
-        testId="sessions-drawer-separator-remaining"
-        label="More"
-        count={remainingCount}
-        defaultOpen={false}
-        forceOpen={selectionMode}
-      >
-        <SessionPartitionBody partition={remaining} {...partitionBodyProps} />
-      </SessionDrawerSeparator>
+      {remainingCount > 0 && (
+        <SessionDrawerSeparator
+          testId="sessions-drawer-separator-remaining"
+          label="More"
+          count={remainingCount}
+          defaultOpen={false}
+          forceOpen={selectionMode}
+        >
+          <SessionPartitionBody partition={remaining} {...partitionBodyProps} />
+        </SessionDrawerSeparator>
+      )}
     </>
   );
 }
