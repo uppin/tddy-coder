@@ -3,7 +3,7 @@
 mod handler;
 mod service;
 
-pub use handler::{SessionHandler, SessionStartEventStream};
+pub use handler::{CloseSessionEventStream, SessionHandler, SessionStartEventStream};
 pub use service::{build_session_entry, SessionServiceImpl};
 
 /// Why a session operation could not be completed.

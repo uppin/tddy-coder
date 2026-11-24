@@ -172,10 +172,13 @@ The preview carries a fingerprint of all of it.
    otherwise `needs_confirmation`, nothing removed.
 4. **Remove** each worktree — every one attempted, each its own step; one already gone counts as
    removed, so running a failed close again is safe.
-5. **Record** `worktree_removed_at` in `.session.yaml`. The record and the branch are kept;
-   `SessionEntry.holds_worktree` turns false. `RestoreSessionWorktree` clears it.
+5. **Record** the removal: a `worktree-removed` marker in the session directory. The record and the branch are kept;
+   `SessionEntry.holds_worktree` turns false. `RestoreSessionWorktree` removes the marker.
 
 The outcome lists every failed step with its reason. No step falls back to anything else.
+
+Closes of different sessions run at once, each its own task. A second `CloseSession` for a session
+whose close is still running is refused (`already_exists`, naming the running task).
 
 `DeleteSession` ends tabs and conversations through the same path, tears down agent clones from the
 record as well as the clone store, and treats a worktree that is already gone as removed.

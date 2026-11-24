@@ -14,6 +14,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
+    CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
+};
+use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
@@ -348,6 +351,7 @@ impl Deref for TestDaemon {
 #[async_trait]
 impl SessionService for TestDaemon {
     type StreamStartSessionStream = crate::SessionStartEventStream;
+    type CloseSessionStream = crate::CloseSessionEventStream;
 
     async fn list_sessions(
         &self,
@@ -448,6 +452,27 @@ impl SessionService for TestDaemon {
             .get_worktree_snapshot(request)
             .await
     }
+
+    async fn preview_close_session(
+        &self,
+        request: Request<PreviewCloseSessionRequest>,
+    ) -> Result<Response<CloseSessionPreview>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .preview_close_session(request)
+            .await
+    }
+
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<Self::CloseSessionStream>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .close_session(request)
+            .await
+    }
+
 }
 
 /// Build a [`TestDaemon`] wired to `sessions_base` with the standard test resolvers.

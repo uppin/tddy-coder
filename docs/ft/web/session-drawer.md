@@ -138,8 +138,10 @@ Both are routed to the session's owning host, as Terminate and Delete are.
 4. If the daemon finds more at risk than the operator confirmed (an agent wrote in the meantime),
    the dialog opens again with the new list; nothing was removed.
 
-While the close runs the row shows **Closing…** (`sessions-drawer-item-closing-<id>`) and the step
-in progress. A step that fails — a tab that would not end, a worktree that could not be removed, a
+While the close runs, the row's × (or trash bin) is replaced by a **mini spinner**
+(`sessions-drawer-item-closing-<id>`), its hover text the step in progress. A close never blocks the
+drawer: the operator can close another session right away, and any number of closes run at once,
+each tracked on its own row. A row that is closing cannot be closed again until its close ends. A step that fails — a tab that would not end, a worktree that could not be removed, a
 host that could not be reached — is reported in the drawer notices, naming the step and the host;
 when a tab survives, nothing is removed. The list is refreshed when the close ends.
 

@@ -12,10 +12,17 @@ use tddy_service::proto::session::{
     RenameSessionResponse, ResumeSessionRequest, ResumeSessionResponse, SignalSessionRequest,
     SignalSessionResponse, StartSessionEvent, StartSessionRequest, StartSessionResponse,
 };
+use tddy_service::proto::session::{
+    CloseSessionEvent, CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
+};
 
 /// Server-streaming output for [`SessionHandler::stream_start_session`].
 pub type SessionStartEventStream =
     Pin<Box<dyn Stream<Item = Result<StartSessionEvent, Status>> + Send>>;
+
+/// Server-streaming output for [`SessionHandler::close_session`].
+pub type CloseSessionEventStream =
+    Pin<Box<dyn Stream<Item = Result<CloseSessionEvent, Status>> + Send>>;
 
 /// What the nine session-lifecycle RPCs need from the host process.
 #[async_trait]
@@ -71,4 +78,16 @@ pub trait SessionHandler: Send + Sync {
         &self,
         request: Request<GetWorktreeSnapshotRequest>,
     ) -> Result<Response<GetWorktreeSnapshotResponse>, Status>;
+
+    /// What closing the session would lose (docs/ft/daemon/session-liveness.md § Closing a session).
+    async fn preview_close_session(
+        &self,
+        request: Request<PreviewCloseSessionRequest>,
+    ) -> Result<Response<CloseSessionPreview>, Status>;
+
+    /// Terminate every agent tab of the session, then remove every worktree it owns, as one task.
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<CloseSessionEventStream>, Status>;
 }

@@ -17,6 +17,8 @@ Design brief: the orchestrator-approved proposal (local `plans/session-close-and
 - An unreadable worktree: the dialog shows why and offers **Retry**; no "close anyway".
 - The split session's codebase half is checked and closed (forwarded to its daemon).
 - DeleteSession's three gaps are fixed in this PR; one PR, not a stack.
+- (later) A running close shows a mini spinner on its row; the operator can start another close
+  right away — closes are concurrent and never block the drawer.
 
 ## Problem
 
@@ -90,15 +92,20 @@ also written as a line to the task's `progress` channel):
    it is no longer the accepted fingerprint (or no longer empty, on the no-dialog path) → terminal
    `needs_confirmation`, nothing removed. Running the close again is safe.
 4. **Remove** each worktree, one step each, every one attempted. Already gone counts as done.
-5. **Record**: `.session.yaml` `worktree_removed_at` (RFC 3339). The record and the session branch
+5. **Record**: a `worktree-removed` marker in the session directory (its content the RFC 3339
+   time). Not a `.session.yaml` field: that struct is built literally in ~100 places and refuses
+   unknown fields, so an older daemon could no longer read the record. The record and the session branch
    are kept; the session lists as ended with `holds_worktree = false`.
+
+Closes of different sessions run concurrently; a second close of a session whose close is still
+running is refused `already_exists`, naming the running task.
 
 Outcome: `ok`, or `failed_steps` (each with subject and message). No step falls back to anything:
 an unreachable target or peer fails its step with the reason.
 
 **`SessionEntry.holds_worktree`** — true when the session's type owns a worktree, it records one,
-`worktree_removed_at` is unset, and (local) the path exists. `RestoreSessionWorktree` clears
-`worktree_removed_at`.
+no `worktree-removed` marker is present, and (local) the path exists. `RestoreSessionWorktree`
+removes the marker.
 
 **DeleteSession** ends every tab and conversation through the same helper (gaps 1–2), tears down
 clones from the record too (gap 3), and treats an already-removed worktree — local or on a target —
@@ -120,18 +127,20 @@ as done.
     fingerprint;
   - Confirm → `CloseSession(confirmed=true, fingerprint)`. A `needs_confirmation` event re-opens
     the dialog with the new list.
-- While running the row shows **Closing…** (`sessions-drawer-item-closing-<id>`) with the current
-  step; failed steps land in the drawer notices, naming each step and host; then the list refreshes.
+- While running, the row's × / trash bin is replaced by a **mini spinner**
+  (`sessions-drawer-item-closing-<id>`, hover text = current step). Closes are tracked per session
+  and never block the drawer: another row can be closed right away, closes run concurrently.
+  Failed steps land in the drawer notices, naming each step and host; then the list refreshes.
 
 ## Tests
 
 | Layer | File | Covers |
 |---|---|---|
 | Rust unit | `tddy-worktree-service/src/worktree_loss.rs` (unit) | porcelain parsing per change kind, ignored excluded, unpushed vs remotes and base, target reader over `InMemoryShell` |
-| Daemon integration | `tddy-session-lifecycle/tests/close_session.rs` | preview of clean / dirty / committed-not-pushed; unconfirmed dirty close does nothing; confirmed close ends main + tmux tab + conversation and removes worktrees, keeps record and branch; fingerprint drift refused; a surviving tab skips removal; `holds_worktree` false after close |
+| Daemon integration | `tddy-session-lifecycle/tests/close_session.rs` | preview of clean / dirty / committed-not-pushed; unconfirmed dirty close does nothing; confirmed close ends main + tmux tab + conversation and removes worktrees, keeps record and branch; fingerprint drift refused; a surviving tab skips removal; `holds_worktree` false after close; two sessions close concurrently; a second close of a closing session is refused |
 | Daemon integration | `tddy-session-lifecycle/tests/close_target_session.rs` | target worktree preview and removal over the stand-in target; unreachable target → `unavailable_reason`, nothing done |
 | Daemon integration | `tddy-session-lifecycle/tests/delete_session.rs` (extended) | delete kills non-main tmux tab sessions; delete of a closed (worktree-removed) session succeeds |
-| Cypress component | `tddy-session-web/cypress/component/SessionsDrawerClose.cy.tsx` | × only on active rows, trash only on inactive rows holding a worktree; clean → no dialog; dirty → dialog per worktree; Cancel sends nothing; Confirm sends confirmed + fingerprint; unreadable → Retry; children choice; failure notice |
+| Cypress component | `tddy-session-web/cypress/component/SessionsDrawerClose.cy.tsx` | × only on active rows, trash only on inactive rows holding a worktree; clean → no dialog; dirty → dialog per worktree; Cancel sends nothing; Confirm sends confirmed + fingerprint; unreadable → Retry; children choice; failure notice; spinner while closing; a second row closes while the first is still running |
 
 ## Refactoring Needed
 

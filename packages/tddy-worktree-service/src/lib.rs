@@ -18,6 +18,7 @@ pub mod session_target;
 pub mod target_worktree_stats;
 pub mod target_worktrees;
 pub mod worktree_files;
+pub mod worktree_loss;
 pub mod worktree_measurement;
 pub mod worktree_sync;
 pub mod worktrees;

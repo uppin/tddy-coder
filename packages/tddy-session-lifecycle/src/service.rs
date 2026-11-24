@@ -5,6 +5,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
+    CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
+};
+use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
@@ -29,6 +32,7 @@ impl<H> SessionServiceImpl<H> {
 #[async_trait]
 impl<H: SessionHandler + 'static> SessionService for SessionServiceImpl<H> {
     type StreamStartSessionStream = SessionStartEventStream;
+    type CloseSessionStream = crate::CloseSessionEventStream;
 
     async fn list_sessions(
         &self,
@@ -99,6 +103,21 @@ impl<H: SessionHandler + 'static> SessionService for SessionServiceImpl<H> {
     ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
         self.host.get_worktree_snapshot(request).await
     }
+
+    async fn preview_close_session(
+        &self,
+        request: Request<PreviewCloseSessionRequest>,
+    ) -> Result<Response<CloseSessionPreview>, Status> {
+        self.host.preview_close_session(request).await
+    }
+
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<Self::CloseSessionStream>, Status> {
+        self.host.close_session(request).await
+    }
+
 }
 
 /// Registers `session.SessionService` on the RPC transport.
