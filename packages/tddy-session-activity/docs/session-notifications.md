@@ -171,8 +171,9 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
 - **Delivery.** `SessionWatchStore::take_delivery(owner, log, now)` ends what has ended, then reads
   each live watch's records after its position, unions the matches by `seq`, takes the oldest 50
   (`MAX_EVENTS_PER_ANSWER`), advances each watch's position past what it delivered, adds evictions
-  to `lost`, and persists — one async lock per project serialises every operation, which is what
-  makes delivery exactly-once across concurrent calls. Nothing waiting is an empty delivery and no
+  to `lost`, and persists — one async lock per project serialises every operation on its state,
+  and a per-owner **delivery guard** serialises every hand-over to one owner (below); together they
+  make delivery exactly-once across concurrent calls. Nothing waiting is an empty delivery and no
   write. The daemon attaches a non-empty delivery to the orchestrator's tool answers as
   `watchEvents` (`tddy-daemon-rpc`); the store only hands it over.
 - **Endings**, checked at every operation on the owner's watches: `now ≥ expires_at` is `expired`;
@@ -192,6 +193,21 @@ notification log and a required TTL of at most 24 hours (`MAX_WATCH_TTL_SECS` = 
   moves and nothing is persisted, so a wake whose paste failed delivers nothing and what was
   waiting waits on. Nothing waiting never calls `deliver`. A quiet watch's events and endings wait
   for a stream or `take_delivery`.
+- **A wake's paste holds no project state.** `deliver` pastes into the orchestrator's terminal and
+  waits for its echo — up to 5 s for an agent that never echoes — so it runs outside the project
+  lock. Under the lock, `plan_delivery` (`session_watches/delivery.rs`) runs `apply_delivery` on a
+  copy of the state and returns a `PlannedDelivery { delivery, commit: DeliveryCommit }`; the lock is
+  dropped and `deliver` runs; only on success is the lock taken again and `commit_delivery` applies
+  the `DeliveryCommit` — each of the owner's watches still live advances to its planned position,
+  never back (a stream or collection that moved it further meanwhile keeps its place), the handed
+  endings are taken, and a watch cancelled meanwhile is simply gone. A refused delivery commits
+  nothing, so there is nothing to roll back.
+- **Per-owner delivery guard.** `SessionWatchStore::deliveries` holds one async mutex per owner
+  (`delivery_guard`). Every hand-over to that owner holds it — `deliver_wake_with` for its whole
+  paste, `take_delivery`, and `take_stream_batch_picking` for its one locked step, never across a
+  stream's wait — so what a wake is still pasting is never handed to the same owner again. Only that
+  owner's own hand-overs wait; every other watch operation of the project goes on. The map keeps one
+  small entry per owner ever seen and is not pruned.
 - **Streaming.** `SessionWatchStore::take_stream_batch(owner, stream_id, watch_ids, ack_seq, log,
   now)` (`#activity-wake` 4/5) hands an orchestrator's watch events to a caller of
   `WaitSessionWatchEvents` — the agent itself or `tddy-tools monitor` — instead of to tool answers
@@ -357,6 +373,7 @@ Telegram surface is unaffected, and web-started and resumed sessions publish nor
 | `project_home_watch_tools` | `tddy-tool-engine` | the tools offered to the project-home role; `ttl_seconds` required in the schema; the port handed what was asked, with every kind by default; bad arguments refused before the port; renew and cancel naming the watch |
 | `project_home_session_watch_acceptance` | `tddy-daemon-rpc` | the tools and `watchEvents` through the harness: a permission prompt riding on the next answer, delivered once; kinds and sessions told apart; list, renew and cancel; sessions-ended reported once; every refusal; an error answer consuming nothing |
 | `session_watch_stream_unit` | `tddy-session-activity` | a stream batch not advancing until acknowledged; `ack_seq` past what was handed refused; `take_delivery` and `deliver_with` skipping a streamed watch; the lease lapsing after its grace; a new stream taking over from the old one |
+| `session_watch_wake_and_pick_unit` | `tddy-session-activity` | a watch waking nobody unless it opts in; the wake carrying only waking watches' events; stream picks by count, kind and session leaving the rest pending; watch operations of the project completing while a wake's paste is held open; neither a collection nor a stream call during the paste handed the pasted record; a watch cancelled during the paste staying cancelled |
 | `session_messages_unit` | `tddy-session-activity` | a message record round-tripping through the log; the inbox position advancing past what is read; an inbox watch matching only what is addressed to its owner; delivered once across reads and watches; the kind matching only message records; the 8 KiB limit |
 | `session_messages_acceptance` | `tddy-daemon-rpc` | the tools through the exec-tool harness with real session records: a child messaging its orchestrator and being read; `reply_to` carried and a reply to a message never received refused; every out-of-rule address refused naming the reaches; the message absent from `ReadProjectNotifications`; each message read once; an orchestrator's `message` watch and the wake; a session's own inbox watch and no other; a Cursor session reading its messages |
 | `work_queue_activity_acceptance` | `tddy-session-activity` | a user reorder and a parents change published on the queue owner, naming the item, the change and the actor; the owner's own moves not waking it; the kind named `work_queue` |

@@ -2,8 +2,10 @@ use crate::project_notification_log::ProjectNotificationLog;
 use crate::session_messages::{a_message_to, InboxMessage, InboxRead};
 use crate::session_watches::a_watch_has_delivered;
 use crate::session_watches::delivery::apply_delivery;
+use crate::session_watches::delivery::commit_delivery;
 use crate::session_watches::delivery::end_expired;
 use crate::session_watches::delivery::end_finished;
+use crate::session_watches::delivery::plan_delivery;
 use crate::session_watches::delivery::DeliveryScope;
 use crate::session_watches::delivery::WatchDelivery;
 use crate::session_watches::inbox_position_of;
@@ -38,6 +40,7 @@ impl SessionWatchStore {
                     projects: Mutex::new(projects),
                     leases: Mutex::default(),
                     stream_lease_grace: STREAM_LEASE_GRACE,
+                    deliveries: Mutex::default(),
                 });
             }
             Err(e) => return Err(anyhow::anyhow!("read {}: {e}", dir.display())),
@@ -62,6 +65,7 @@ impl SessionWatchStore {
             projects: Mutex::new(projects),
             leases: Mutex::default(),
             stream_lease_grace: STREAM_LEASE_GRACE,
+            deliveries: Mutex::default(),
         })
     }
 
@@ -225,6 +229,8 @@ impl SessionWatchStore {
         log: &ProjectNotificationLog,
         now_unix_ms: u64,
     ) -> WatchDelivery {
+        let guard = self.delivery_guard(owner);
+        let _handing_over = guard.lock().await;
         let project = self.project_of(&owner.project_id);
         let mut state = project.lock().await;
         let streamed = self.streamed_watch_ids(owner, now_unix_ms);
@@ -245,8 +251,15 @@ impl SessionWatchStore {
     /// Hand what `owner`'s **waking** watches ([`SessionWatch::wake_when_idle`]) have waiting to
     /// `deliver`, and advance past it only if `deliver` succeeds (`#activity-wake` 3/3): a wake
     /// whose paste failed delivers nothing, and what was waiting waits on. A quiet watch's events
-    /// and endings are never handed here; they wait for a stream or a tool answer. `Ok(true)` when something was delivered, `Ok(false)` when nothing was
-    /// waiting (and `deliver` was not called); `Err` with `deliver`'s refusal, nothing moved.
+    /// and endings are never handed here; they wait for a stream or a tool answer. `Ok(true)` when
+    /// something was delivered, `Ok(false)` when nothing was waiting (and `deliver` was not
+    /// called); `Err` with `deliver`'s refusal, nothing moved.
+    ///
+    /// `deliver` pastes into the owner's terminal and waits for its echo — up to seconds — so it
+    /// runs **outside** the project lock: the delivery is planned on a copy of the state, the lock
+    /// is dropped, and only a successful delivery is committed, under the lock again. The owner's
+    /// delivery guard is held throughout, so its other deliveries wait for this one rather than
+    /// hand the same records again; every other watch operation goes on.
     pub async fn deliver_wake_with<F, Fut>(
         &self,
         owner: &WatchOwner,
@@ -258,36 +271,45 @@ impl SessionWatchStore {
         F: FnOnce(WatchDelivery) -> Fut + Send,
         Fut: std::future::Future<Output = Result<(), String>> + Send,
     {
+        let guard = self.delivery_guard(owner);
+        let _handing_over = guard.lock().await;
         let project = self.project_of(&owner.project_id);
-        let mut state = project.lock().await;
-        let before = state.clone();
-        let streamed = self.streamed_watch_ids(owner, now_unix_ms);
-        let delivery = apply_delivery(
-            &mut state,
-            owner,
-            log,
-            now_unix_ms,
-            &streamed,
-            DeliveryScope::Waking,
-        );
-        if delivery.is_empty() {
+        let plan = {
+            let state = project.lock().await;
+            let streamed = self.streamed_watch_ids(owner, now_unix_ms);
+            plan_delivery(
+                &state,
+                owner,
+                log,
+                now_unix_ms,
+                &streamed,
+                DeliveryScope::Waking,
+            )
+        };
+        if plan.delivery.is_empty() {
             return Ok(false);
         }
-        match deliver(delivery).await {
-            Ok(()) => {
-                self.persist_best_effort(&owner.project_id, &state);
-                Ok(true)
-            }
-            Err(e) => {
-                *state = before;
-                log::warn!(
-                    target: "tddy_session_activity::session_watches",
-                    "a delivery to {} was refused, so nothing was delivered: {e}",
-                    owner.session_id
-                );
-                Err(e)
-            }
+        if let Err(e) = deliver(plan.delivery).await {
+            log::warn!(
+                target: "tddy_session_activity::session_watches",
+                "a delivery to {} was refused, so nothing was delivered: {e}",
+                owner.session_id
+            );
+            return Err(e);
         }
+        let mut state = project.lock().await;
+        commit_delivery(&mut state, owner, &plan.commit, log, now_unix_ms);
+        self.persist_best_effort(&owner.project_id, &state);
+        Ok(true)
+    }
+
+    /// The guard every hand-over to `owner` holds ([`SessionWatchStore::deliveries`]).
+    pub(crate) fn delivery_guard(&self, owner: &WatchOwner) -> Arc<tokio::sync::Mutex<()>> {
+        let mut deliveries = self
+            .deliveries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(deliveries.entry(owner.clone()).or_default())
     }
 
     /// Whether `owner` holds a watch that wakes it when idle and has not ended at `now_unix_ms`.

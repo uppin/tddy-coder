@@ -31,6 +31,7 @@ pub use crate::spec::argv::ModelsSection;
 pub use crate::spec::effort_slot::{EffortCarry, EffortSlot};
 pub use crate::spec::headless_section::HeadlessPermissionPolicy;
 pub use crate::spec::headless_section::HeadlessSection;
+pub use crate::spec::model_report_slot::ModelReportSource;
 pub use crate::spec::route_slot::routed_agent;
 pub use crate::spec::route_slot::Placement;
 pub use crate::spec::route_slot::PlacementError;

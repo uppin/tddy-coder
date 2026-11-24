@@ -140,6 +140,11 @@ pub struct SessionWatchStore {
     leases: Mutex<stream::StreamLeases>,
     /// How long a watch stays streamed after its stream's last call.
     stream_lease_grace: Duration,
+    /// One guard per owner, held by every call that hands that owner's watch events over — a
+    /// wake's delivery for its whole paste, a collection, a stream call — so a record a wake is
+    /// still pasting is not handed to its owner a second time. The project lock is held only to
+    /// read and to commit, never across a paste.
+    deliveries: Mutex<HashMap<WatchOwner, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl SessionWatchStore {

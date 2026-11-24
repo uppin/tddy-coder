@@ -11,9 +11,9 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_service::proto::session::ResumeSessionRequest;
 use tddy_session_lifecycle::terminal_session_adapter::DaemonTerminalSessionStore;
 use tddy_terminal_rpc::bridge::MAIN_TERMINAL_ID;
-use tddy_terminal_rpc::session::TerminalSessionStore;
+use tddy_terminal_rpc::session::{TerminalSession, TerminalSessionStore};
 use tddy_tool_engine::project_home_turn_tools::{ProjectHomeTurnPort, ResumeOutcome, TurnDelivery};
-use tddy_tool_engine::terminal_keys::encode_keys;
+use tddy_tool_engine::terminal_keys::{encode_typing, type_into, EchoWait, TypingTerminal};
 use tddy_worktree_service::session_target::SessionTarget;
 
 /// How long a resumed agent's terminal is given to draw its first screen before its first message
@@ -40,9 +40,10 @@ impl ProjectHomeTurnPort for DaemonProjectHome {
         }
         self.refuse_while_waiting_on_an_answer(target)?;
         let submit_key = terminal_submit_key(&target.session_id, slot)?;
-        self.paste_and_submit(&target.session_id, text, &submit_key)
+        let echo_seen = self
+            .paste_and_submit(&target.session_id, text, &submit_key)
             .await?;
-        Ok(TurnDelivery::TerminalPaste)
+        Ok(TurnDelivery::TerminalPaste { echo_seen })
     }
 
     /// Resume `target` as the web's Resume does, then give `message`, if any, to the resumed agent as
@@ -71,14 +72,17 @@ impl ProjectHomeTurnPort for DaemonProjectHome {
             }))
             .await
             .map_err(|status| format!("cannot resume: {}", status.message()))?;
+        let mut delivered = None;
         if let (Some(message), Some(submit_key)) = (message, submit_key) {
             self.until_the_terminal_has_drawn(&target.session_id)
                 .await?;
-            self.paste_and_submit(&target.session_id, message, &submit_key)
+            let echo_seen = self
+                .paste_and_submit(&target.session_id, message, &submit_key)
                 .await
                 .map_err(|e| format!("resumed, but the message was not delivered: {e}"))?;
+            delivered = Some(TurnDelivery::TerminalPaste { echo_seen });
         }
-        Ok(ResumeOutcome::Resumed)
+        Ok(ResumeOutcome::Resumed { message: delivered })
     }
 }
 
@@ -157,14 +161,15 @@ impl DaemonProjectHome {
     }
 
     /// Type `text` into the session's main terminal — as a bracketed paste when the terminal turned
-    /// it on — then `submit_key`, in one write. The control lease is neither read nor changed:
-    /// the daemon is the writer, and the terminal's holder keeps it.
+    /// it on — then, once the agent has echoed it, `submit_key` as a write of its own
+    /// ([`type_into`]). Answers whether the echo was seen. The control lease is neither read nor
+    /// changed: the daemon is the writer, and the terminal's holder keeps it.
     pub(crate) async fn paste_and_submit(
         &self,
         session_id: &str,
         text: &str,
         submit_key: &str,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         paste_and_submit_to(&self.terminals, session_id, text, submit_key).await
     }
 
@@ -199,13 +204,14 @@ impl DaemonProjectHome {
 }
 
 /// [`DaemonProjectHome::paste_and_submit`] over a terminal store alone, for the watch waker
-/// (`#activity-wake` 3/3), which holds the store and no project-home caller.
+/// (`#activity-wake` 3/3), which holds the store and no project-home caller. Answers whether the
+/// agent echoed the paste before the submit key was pressed.
 pub(crate) async fn paste_and_submit_to(
     terminals: &DaemonTerminalSessionStore,
     session_id: &str,
     text: &str,
     submit_key: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let terminal = terminals
         .get_terminal(session_id, MAIN_TERMINAL_ID)
         .await
@@ -217,7 +223,33 @@ pub(crate) async fn paste_and_submit_to(
         .text_grid()
         .ok_or_else(|| format!("session {session_id}'s terminal size is not known yet"))?
         .bracketed_paste;
-    let bytes = encode_keys(Some(text), &[submit_key.to_string()], bracketed_paste)?;
-    terminal.send_input(bytes.into(), 0);
-    Ok(())
+    let typing = encode_typing(Some(text), &[submit_key.to_string()], bracketed_paste)?;
+    let typed = type_into(
+        &LiveTerminal(terminal.as_ref()),
+        typing,
+        &EchoWait::default(),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(typed.echo_seen.unwrap_or(false))
+}
+
+/// A session's live terminal as [`type_into`] types into it: the output offset its capture has
+/// reached, and its input.
+struct LiveTerminal<'a>(&'a dyn TerminalSession);
+
+#[async_trait]
+impl TypingTerminal for LiveTerminal<'_> {
+    async fn output_offset(&self) -> Result<u64, String> {
+        self.0
+            .capture()
+            .lock()
+            .map(|capture| capture.end_offset())
+            .map_err(|_| "the terminal capture is poisoned".to_string())
+    }
+
+    async fn write(&self, bytes: Vec<u8>) -> Result<(), String> {
+        self.0.send_input(bytes.into(), 0);
+        Ok(())
+    }
 }

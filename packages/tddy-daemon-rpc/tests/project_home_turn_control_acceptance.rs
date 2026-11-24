@@ -3,8 +3,9 @@
 //! and `ResumeSession` resumes a stopped one with an optional first message (`#orchestrators` 4/11).
 //!
 //! A running session's agent is stood in for by a shell script on its main terminal that puts the
-//! terminal in raw mode, turns bracketed paste on as Claude Code's TUI does, announces itself and
-//! then records every byte it is typed into a file — so a test reads exactly what reached the
+//! terminal in raw mode (echoing what it is typed, as a TUI draws its input box), turns bracketed
+//! paste on as Claude Code's TUI does, announces itself and then records every byte it is typed
+//! into a file — so a test reads exactly what reached the
 //! agent's PTY. A resumed session's agent is a stub `claude` the host really spawns, recording the
 //! same way and also the argv it was launched with.
 //!
@@ -60,11 +61,12 @@ fn a_pasted_and_submitted(text: &str) -> Vec<u8> {
     .concat()
 }
 
-/// The shell that puts a PTY in raw mode, turns bracketed paste on, announces itself and then
-/// appends every byte it is typed to `record`.
+/// The shell that puts a PTY in raw mode, echoing what it is typed as a TUI draws it — delivery
+/// presses the submit key once it sees that echo — turns bracketed paste on, announces itself and
+/// then appends every byte it is typed to `record`.
 fn a_recording_agent_script(record: &Path) -> String {
     format!(
-        "stty raw -echo\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
+        "stty raw echo -echoctl\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
         record.display()
     )
 }
@@ -338,10 +340,15 @@ async fn main_sends_a_running_claude_cli_session_a_turn_without_taking_its_termi
     // When main sends it a message
     let sent = world.main_sends(&session, MESSAGE).await;
 
-    // Then it is answered as delivered by terminal paste ...
+    // Then it is answered as delivered by terminal paste, the agent having echoed the paste before
+    // Enter was pressed ...
     assert_eq!(
         sent.assert_answered(),
-        serde_json::json!({ "session_id": session, "delivered_via": "terminal_paste" })
+        serde_json::json!({
+            "session_id": session,
+            "delivered_via": "terminal_paste",
+            "echo_seen": true
+        })
     );
     // ... the agent was typed the message as a paste, then Enter: a new turn ...
     let expected = a_pasted_and_submitted(MESSAGE);
@@ -411,7 +418,11 @@ async fn a_message_to_a_session_waiting_for_input_is_delivered() {
     // Then it is delivered by terminal paste, and the agent was typed the message
     assert_eq!(
         sent.assert_answered(),
-        serde_json::json!({ "session_id": session, "delivered_via": "terminal_paste" })
+        serde_json::json!({
+            "session_id": session,
+            "delivered_via": "terminal_paste",
+            "echo_seen": true
+        })
     );
     let expected = a_pasted_and_submitted(MESSAGE);
     assert_eq!(
@@ -582,7 +593,11 @@ async fn resume_session_with_a_message_resumes_it_and_delivers_the_message() {
     // Then it is answered as resumed ...
     assert_eq!(
         resumed.assert_answered(),
-        serde_json::json!({ "session_id": world.stopped, "outcome": "resumed" })
+        serde_json::json!({
+            "session_id": world.stopped,
+            "outcome": "resumed",
+            "echo_seen": true
+        })
     );
     // ... claude was launched again, resuming the session's own conversation ...
     let launches = world.claude.launches();

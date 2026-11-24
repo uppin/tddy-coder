@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 use tddy_task::GridRegion;
 use tddy_tool_engine::project_home_terminal_tools::terminal_grid_answer;
-use tddy_tool_engine::terminal_keys::encode_keys;
+use tddy_tool_engine::terminal_keys::{encode_typing, type_into, EchoWait, TypingTerminal};
 
 use crate::session::DriverSession;
 
@@ -117,7 +117,7 @@ impl DriverServer {
     }
 
     #[tool(
-        description = "Type into the session's terminal: text first, then named keys, encoded as SendSessionKeys encodes them (the text as one paste when the terminal enabled bracketed paste). Answers {sent_bytes}. Nothing is sent when a key name is unknown or the session has exited."
+        description = "Type into the session's terminal: text first, then named keys, encoded and typed as SendSessionKeys does (the text as one paste when the terminal enabled bracketed paste; the keys once the application has echoed the text, or after 5 seconds with no echo). Answers {sent_bytes}, plus echo_seen when keys followed text. Nothing is sent when a key name is unknown or the session has exited."
     )]
     async fn send_keys(
         &self,
@@ -128,11 +128,12 @@ impl DriverServer {
             Some(_) => self.session.grid().await?.bracketed_paste,
             None => false,
         };
-        let bytes = encode_keys(text, &args.keys.unwrap_or_default(), bracketed_paste)
+        let typing = encode_typing(text, &args.keys.unwrap_or_default(), bracketed_paste)
             .map_err(|refusal| format!("{refusal}; nothing was sent"))?;
-        let sent_bytes = bytes.len();
-        self.session.send(bytes).await?;
-        Ok(json!({ "sent_bytes": sent_bytes }).to_string())
+        let typed = type_into(&*self.session, typing, &EchoWait::default())
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(typed.answer().to_string())
     }
 
     #[tool(
@@ -217,5 +218,17 @@ impl rmcp::ServerHandler for DriverServer {
              start_session, watch it with read_terminal and wait_for_text, type with send_keys, and \
              end it with stop_session.",
         )
+    }
+}
+
+/// The driven session as [`type_into`] types into it: its screen's output offset, and its input.
+#[async_trait::async_trait]
+impl TypingTerminal for DriverSession {
+    async fn output_offset(&self) -> Result<u64, String> {
+        Ok(self.grid().await?.offset)
+    }
+
+    async fn write(&self, bytes: Vec<u8>) -> Result<(), String> {
+        self.send(bytes).await
     }
 }

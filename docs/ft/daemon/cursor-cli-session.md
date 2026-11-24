@@ -43,11 +43,12 @@ The session directory `~/.tddy/sessions/<session-id>/` contains `.session.yaml` 
 - `cursor_chat_id: <chat-id>` (the chat every resume reattaches to)
 - `status: active`
 
-`ListSessions` shows `workflow_goal`, `workflow_state`, and `elapsed_display` as `—`, `model` as the selected model, and `agent` as `cursor-cli`.
+`ListSessions` shows `workflow_goal`, `workflow_state`, and `elapsed_display` as `—`, `model` as the recorded model (the selected one, until the agent reports another — see [Resume](#resume-connect-signal-delete)), and `agent` as `cursor-cli`.
 
 ## Resume, connect, signal, delete
 
 - **Resume** — when the agent process exits, status becomes `inactive`; **Resume** relaunches the `cursor` definition on the host in the existing worktree, into the recorded chat (`--resume <cursor_chat_id>`), without replaying the initial prompt. It keeps the hooks file its start wrote. A session recorded with no chat id adopts a fresh one on its first resume and pins it.
+  The resume runs `--model` with the model the session last reported, not the one it started on: `cursor.yaml`'s `coding_agent.model_report` reads the `model` field of the main conversation's own hook events (`sessionStart`, `beforeSubmitPrompt`, `stop` — see [Activity status hooks](#activity-status-hooks-cursorhooksjson)), and a value differing from `.session.yaml` `model` replaces it. A model picked with `/model` inside the TUI therefore survives a resume. Cursor's `/model` also rewrites its global default (`~/.cursor/cli-config.json`), so leaving `--model` off a resume would land on whatever another session picked last; only the session's own report says what it was on. The model is recorded as Cursor reports it: `auto` reports itself as `auto-smart` (an operator decision to keep it), and `agent --model` takes the reported ids.
 - **Connect** — when the process is still running, `ConnectSession` reattaches to the existing PTY.
 - **Signal** — `SignalSession` delivers to the agent PTY process.
 - **Delete** — SIGTERM, wait, remove session directory and worktree.
@@ -112,6 +113,8 @@ duplicate a row the pair already reports.
 therefore records `Started` in `.session.yaml` at spawn instead of waiting for the hook.
 
 **`WaitingForInput`** is not produced — Cursor hooks have no permission-prompt equivalent in v1.
+
+**The model the session is on.** Every Cursor hook event carries the session's current `model` (`glm-5p3-flash-high` after picking GLM 5.3 Flash in `/model`), and `ReportSessionStatus` carries it in `hook_fields`. `cursor.yaml` declares `model_report: [{ kind: hook_field, field: model, events: [sessionStart, beforeSubmitPrompt, stop] }]`, so the daemon records it in `.session.yaml` `model` — read on the main conversation's own events only, so a subagent's tool call on another model never re-points the session. Since a tddy launch fires no `sessionStart` (above), the report arrives with `beforeSubmitPrompt` and `stop`. See [Coding agent specs § Model report](../../../packages/tddy-coding-agent-specs/docs/coding-agent-specs.md#model-report-coding_agentmodel_report).
 
 Hooks use a fail-quiet contract (a 2-second ceiling per report, exit 0 on no-op events), matching the Claude CLI hook path.
 
@@ -203,12 +206,14 @@ A workflow turn is a `SpecHeadlessBackend` turn rendered from `cursor.yaml`'s `c
 
 - **Jail authentication:** a sandboxed `agent` cannot reach macOS Keychain — the host (`tddy-daemon` / `tddy-sandbox-app`) is an unsigned Rust binary with no `keychain-access-group` entitlement, so `securityd` rejects `SecItem*` calls with `errSecMissingEntitlement` (-34018) and the CLI hangs/times out ("Failed to store authentication tokens: Security command failed: Security process exited with code: 36"). `cursor.yaml`'s `files:` overlays set `CURSOR_SKIP_KEYCHAIN=1` + `CI=true` (Cursor's own CI convention) so the agent never probes Keychain. The caller must still supply `CURSOR_API_KEY` (User API key from the Cursor dashboard — admin keys are rejected) or pre-seed `~/.cursor/auth.json` (seeded once into the persistent home). True Keychain *access* from the jail would require codesigning the host with `keychain-access-group` and a TCC grant — recorded as a follow-up, not pursued; the current stance is fail-closed with `CURSOR_API_KEY`/seeded `auth.json`.
 - **Jailed resume:** a sandboxed cursor-cli resume relaunches on the host PTY; a jailed resume is not implemented.
+- **Replies are not in the transcript.** A cursor-cli session's ACP transcript (`ReadSessionTranscript`, the web's Activities view) holds its tool calls but never what Cursor said. The reply arrives on `afterAgentResponse` (`text`) and the prompt on `beforeSubmitPrompt` (`prompt`), but the transcript writer matches Claude's event names, `afterAgentResponse` is not installed, a report with no status change never reaches the daemon, and Cursor's chat id is not counted as the session's own conversation. Recorded in the backlog as 2026-11-24-cursor-reply-text-not-in-transcript.md.
+- **The start-option model list lacks models the TUI offers.** `DescribeSessionStartOptions` lists Cursor's models from `agent --list-models`, which (Cursor Agent 2026.11.22) omits models the TUI's `/model` picker offers, such as GLM 5.3 Flash. `agent --model` accepts them all the same, and a session already on one keeps it across a resume. The gap is Cursor's; recorded in the backlog as 2026-11-24-cursor-model-list-lacks-tui-models.md.
 
 ## Out of scope (v1)
 
 - **`WaitingForInput`** activity status (Cursor hooks have no permission-prompt equivalent — documented gap)
 - TDD/bugfix workflow integration (no recipe)
-- Model switching after session start
+- Switching a session's model from tddy after its start (a `/model` pick inside the TUI is followed — see [Resume](#resume-connect-signal-delete))
 - Session chaining (`previous_session_id`)
 - LiveKit presence for cursor-cli processes
 - **`ConnectionScreen`** legacy inline start form third session type (CreateSessionPane is primary)

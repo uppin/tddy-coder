@@ -674,7 +674,7 @@ fn conflicts_in(answer: &Value) -> Vec<String> {
 /// appends every byte it is typed to `record`.
 fn a_recording_agent_script(record: &Path) -> String {
     format!(
-        "stty raw -echo\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
+        "stty raw echo -echoctl\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
         record.display()
     )
 }

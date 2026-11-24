@@ -107,7 +107,7 @@ impl DeliveryScope {
 /// Compute `owner`'s delivery over the watches `scope` covers from `state` and advance it past what
 /// the delivery hands over: positions move past the delivered records (and past what the log
 /// evicted), and the watches that ended are taken to be reported. Shared by `take_delivery`, which
-/// commits at once, and `deliver_wake_with`, which rolls `state` back when its delivery is refused.
+/// applies it to the state itself, and [`plan_delivery`], which applies it to a copy.
 pub(super) fn apply_delivery(
     state: &mut ProjectWatches,
     owner: &WatchOwner,
@@ -174,6 +174,87 @@ pub(super) fn apply_delivery(
         lost,
         ended,
     }
+}
+
+/// A delivery planned on a copy of the state: what to hand over, and what to commit once it has
+/// been.
+pub(super) struct PlannedDelivery {
+    pub(super) delivery: WatchDelivery,
+    pub(super) commit: DeliveryCommit,
+}
+
+/// What committing a handed-over delivery changes.
+pub(super) struct DeliveryCommit {
+    /// Each of the owner's live watches and the position the delivery advances it to.
+    positions: Vec<(String, u64)>,
+    /// The ended watches the delivery reported.
+    handed_endings: Vec<String>,
+}
+
+/// Plan `owner`'s delivery over the watches `scope` covers, leaving `state` as it is: what
+/// [`apply_delivery`] would hand over, and where it would leave each watch.
+pub(super) fn plan_delivery(
+    state: &ProjectWatches,
+    owner: &WatchOwner,
+    log: &ProjectNotificationLog,
+    now_unix_ms: u64,
+    streamed: &HashSet<String>,
+    scope: DeliveryScope,
+) -> PlannedDelivery {
+    let mut planned = state.clone();
+    let delivery = apply_delivery(&mut planned, owner, log, now_unix_ms, streamed, scope);
+    let positions = planned
+        .watches
+        .iter()
+        .filter(|watch| &watch.owner == owner)
+        .map(|watch| (watch.watch_id.clone(), watch.position))
+        .collect();
+    let handed_endings = delivery
+        .ended
+        .iter()
+        .map(|end| end.watch_id.clone())
+        .collect();
+    PlannedDelivery {
+        delivery,
+        commit: DeliveryCommit {
+            positions,
+            handed_endings,
+        },
+    }
+}
+
+/// Commit to `state` a delivery planned with [`plan_delivery`] — after the project lock was dropped
+/// and the delivery handed over: each of `owner`'s watches still live advances to its planned
+/// position, never back, so a stream or a collection that moved it further meanwhile keeps its
+/// place; the handed endings are taken; a watch cancelled meanwhile is simply gone.
+pub(super) fn commit_delivery(
+    state: &mut ProjectWatches,
+    owner: &WatchOwner,
+    commit: &DeliveryCommit,
+    log: &ProjectNotificationLog,
+    now_unix_ms: u64,
+) {
+    let DeliveryCommit {
+        positions,
+        handed_endings,
+    } = commit;
+    end_finished(state, owner, log, now_unix_ms);
+    for watch in state
+        .watches
+        .iter_mut()
+        .filter(|watch| &watch.owner == owner)
+    {
+        let Some(&(_, position)) = positions.iter().find(|(id, _)| id == &watch.watch_id) else {
+            continue;
+        };
+        if position > watch.position {
+            watch.position = position;
+            watch.acked_above.retain(|seq| *seq > position);
+        }
+    }
+    state.ended.retain(|pending| {
+        !(&pending.owner == owner && handed_endings.contains(&pending.end.watch_id))
+    });
 }
 
 /// Move `owner`'s watches that have ended out of the live set, to be reported once by its next

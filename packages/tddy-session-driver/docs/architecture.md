@@ -61,14 +61,16 @@ add variables for a one-off check. The driver also passes the worktree's clone r
 Served with `rmcp` 1.x on stdio (`server.rs`). **stdout carries only MCP frames**; every diagnostic
 goes to stderr. Screen and key semantics are the orchestrator's own: `read_terminal` answers through
 `tddy_tool_engine::project_home_terminal_tools::terminal_grid_answer` (what `ReadSessionTerminal`
-answers) and `send_keys` encodes through `tddy_tool_engine::terminal_keys::encode_keys` (what
-`SendSessionKeys` types).
+answers) and `send_keys` encodes through `tddy_tool_engine::terminal_keys::encode_typing` and types
+through `type_into` (what `SendSessionKeys` does): `DriverSession` implements `TypingTerminal`, its
+output offset the screen grid's `offset` and each write a `send`, so keys after text are pressed once
+the agent has echoed the text, or after 5 s with no echo.
 
 | Tool | Answers |
 |---|---|
 | `start_session` | `{state: "running", after_ms}`, or the launch's failure verbatim — for an agent that exited while starting, its exit and last screen lines. A second start is refused: one driver, one session |
 | `read_terminal` | `{lines, cursor, cols, rows, offset}`; `styles: true` adds `styles` and `highlighted_rows`; `region {row, col, rows, cols}` crops to that box |
-| `send_keys` | `{sent_bytes}` for `text` then named `keys` (bracketed paste when the terminal enabled it). No lease. Nothing is sent for an unknown key name or an exited session |
+| `send_keys` | `{sent_bytes, echo_seen?}` for `text` then named `keys` (bracketed paste when the terminal enabled it; the keys once the agent has echoed the text). `echo_seen` is answered when keys followed text: `false` means no echo came within 5 s and the keys were pressed anyway. No lease. Nothing is sent for an unknown key name or an exited session; a failure after the text was written says the keys were not |
 | `wait_for_text` | `{matched, exited, lines}`, once the screen contains `text` with whitespace ignored on both sides (TUIs place words by cursor moves), the session exits, or `timeout_secs` (default 30) passes |
 | `session_status` | `{state: "not_started"}`, `{state: "running"}`, or `{state: "exited", exit, last_output}` / `{state: "exited", failure}`. On a target `exit` is the agent's own status, read through the transport (`InteractiveExit`) — on Coder, from the CLI's last line rather than its constant 1 |
 | `stop_session` | `{state: "exited"}` once the terminal ended. On a remote target it first kills the agent by the pid this session's launch recorded at `<worktree>/.tddy/agents/<session id>.pid` (`remote_agent_pid_file`), and removes that file in the same command, since ending the local client does not end the agent there. Sessions sharing a worktree each stop only their own agent |

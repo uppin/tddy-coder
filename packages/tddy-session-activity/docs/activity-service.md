@@ -190,6 +190,33 @@ session directory, never the worktree, so worktree sync never carries it, and se
 removes it with the directory. A marker a crash left behind is cleared by `Disarm` on the next report
 that cannot complete the rotation.
 
+## Following the reported model
+
+After `follow_conversation_rotation`, `ReportSessionStatus` runs `follow_reported_model`
+(`service/model_report.rs`): the report goes through the session's agent spec's
+`coding_agent.model_report` sources
+([coding-agent-specs.md § Model report](../../tddy-coding-agent-specs/docs/coding-agent-specs.md#model-report-coding_agentmodel_report)),
+and a model they yield that differs from `.session.yaml` `model` replaces it. Every resume path
+renders `--model` from that field, so a model the operator picked inside the agent (`/model`)
+survives a resume; the resume code reads the record and knows nothing of the report.
+
+- **`reported_model`** tries the sources in order, each only on the events it names
+  (`ModelReportSource::applies_to`); the first whose value `ModelReportSource::accepts` wins. A
+  `hook_field` source reads `req.hook_fields`. A `usage` source evaluates the session's usage
+  binding (`ActivityPorts::usage_bindings`, `tddy_usage::account`) over its current main
+  conversation — the last of `agent_conversations`, else the `usage-context.json` one — in
+  `spawn_blocking`, with an empty `fallback_model`: a transcript naming no model yields none rather
+  than the start's model. A failed read logs a warning and yields none.
+- **Re-read before writing.** `record_model` reads `.session.yaml` again after the transcript
+  read's await and writes only the `model` field onto that copy, so a status or rotation another
+  report wrote meanwhile is kept. An unchanged model writes nothing.
+- An agent without the slot, or a session type no coding agent declares, records nothing.
+
+Tests: `tests/model_report_record.rs` — a Cursor session recording its hooks' model and what `auto`
+reports itself as, a report naming no model leaving the record alone, a tool call on another model not
+re-pointing a Cursor session, a Claude session recording its `SessionStart` model and a mid-session
+pick from its transcript, a `<synthetic>` message being no model, and a prompt reading no transcript.
+
 ## What is deliberately not here
 
 `daemon_instance_id` routing, for the reason node 6's `tddy-session-files` gives: forwarding a call
@@ -242,6 +269,7 @@ written twice. See
 | `path_grants.rs` | 76 | `PathGrantStore`, `PathGrant`, `PathGrantMode`: an orchestrator session's operator-granted paths, persisted as `<session_dir>/path-grants.json` (read by the daemon's read reach — [project concept § Read reach](../../../docs/ft/daemon/project-concept.md#read-reach)) |
 | `path_access.rs` | 225 | `PathAccessRequests`: an orchestrator's `RequestPathAccess` requests held in memory for the operator — record, list, answer (Allow writes a `PathGrant` per path), withdraw, and a bounded wait (`PATH_ACCESS_WAIT`, 10 min) that times out as unanswered; `mode_name` and `PendingPathAccess::into_proto` for the wire ([project concept § Access requests](../../../docs/ft/daemon/project-concept.md#access-requests)) |
 | `service/hook_reports.rs` | 215 | the two hook reports' bodies, `report_session_status_impl` and `report_agent_activity_impl`, as inherent methods: a trait impl cannot be split across files and `restructure`'s `extract_method` is refused inside an `#[async_trait]` impl, so the trait methods delegate here |
+| `service/model_report.rs` | 123 | `follow_reported_model`, `reported_model` and `record_model`: the session record following the model its agent reports (`coding_agent.model_report`) |
 | `service/transcript_messages.rs` | 54 | `record_spoken_message`: a status report's `prompt` (`UserPromptSubmit`) and `last_assistant_message` (`Stop`) appended to `acp-transcript.jsonl` as user and agent message frames, for the session's own conversation only |
 
 Production lines are counted to the first `#[cfg(test)]`; the budget is 500.

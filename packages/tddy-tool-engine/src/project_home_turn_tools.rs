@@ -43,8 +43,9 @@ pub fn is_project_home_turn_tool(name: &str) -> bool {
 /// How a message reached the session's agent: the `delivered_via` of a `SendSessionMessage` answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnDelivery {
-    /// Pasted into the session's main terminal, then the submit key its spec names.
-    TerminalPaste,
+    /// Pasted into the session's main terminal, then — once the agent echoed the paste, or after
+    /// the wait for an echo ran out (`echo_seen: false`) — the submit key its spec names.
+    TerminalPaste { echo_seen: bool },
     /// Sent as a prompt over the session's ACP connection.
     AcpPrompt,
 }
@@ -53,8 +54,17 @@ impl TurnDelivery {
     /// The word the answer spells it with: `terminal_paste` or `acp_prompt`.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::TerminalPaste => "terminal_paste",
+            Self::TerminalPaste { .. } => "terminal_paste",
             Self::AcpPrompt => "acp_prompt",
+        }
+    }
+
+    /// Whether the agent echoed a pasted message before it was submitted; `None` for a delivery
+    /// that pastes nothing.
+    pub fn echo_seen(self) -> Option<bool> {
+        match self {
+            Self::TerminalPaste { echo_seen } => Some(echo_seen),
+            Self::AcpPrompt => None,
         }
     }
 }
@@ -62,8 +72,9 @@ impl TurnDelivery {
 /// What a `ResumeSession` did: the `outcome` of its answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResumeOutcome {
-    /// The session was stopped and is now resumed (and its message, if any, delivered).
-    Resumed,
+    /// The session was stopped and is now resumed, and its first message, if any, delivered as
+    /// `message` says.
+    Resumed { message: Option<TurnDelivery> },
     /// The session was already running; nothing was done.
     Running,
 }
@@ -72,8 +83,17 @@ impl ResumeOutcome {
     /// The word the answer spells it with: `resumed` or `running`.
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Resumed => "resumed",
+            Self::Resumed { .. } => "resumed",
             Self::Running => "running",
+        }
+    }
+
+    /// Whether the resumed agent echoed its pasted first message before it was submitted; `None`
+    /// when no message was pasted.
+    pub fn echo_seen(self) -> Option<bool> {
+        match self {
+            Self::Resumed { message } => message.and_then(TurnDelivery::echo_seen),
+            Self::Running => None,
         }
     }
 }
@@ -83,7 +103,7 @@ pub fn project_home_turn_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             SEND_SESSION_MESSAGE,
-            "Give a running session of this project a new turn: text is delivered to its agent the way the agent's spec declares (pasted into its terminal and submitted, or sent as an ACP prompt), as if its operator had typed it. Takes no terminal control: a person watching the session keeps control, and you need not ClaimSessionTerminal. Answers session_id and delivered_via (terminal_paste or acp_prompt). A stopped session is refused: resume it with ResumeSession. A session waiting on a permission prompt or a question is refused: answer it with AnswerSessionPermission or AnswerSessionQuestion. A session whose agent declares no way to take a turn is refused naming the agent. Read the result with ReadSessionActivity, ReadSessionTranscript or ReadSessionTerminal, or wait for its turn to end with WaitProjectNotifications.",
+            "Give a running session of this project a new turn: text is delivered to its agent the way the agent's spec declares (pasted into its terminal and submitted, or sent as an ACP prompt), as if its operator had typed it. Takes no terminal control: a person watching the session keeps control, and you need not ClaimSessionTerminal. Answers session_id and delivered_via (terminal_paste or acp_prompt); a terminal paste also answers echo_seen — false means the agent showed no echo of the paste within 5 seconds and the submit key was pressed anyway. A stopped session is refused: resume it with ResumeSession. A session waiting on a permission prompt or a question is refused: answer it with AnswerSessionPermission or AnswerSessionQuestion. A session whose agent declares no way to take a turn is refused naming the agent. Read the result with ReadSessionActivity, ReadSessionTranscript or ReadSessionTerminal, or wait for its turn to end with WaitProjectNotifications.",
             json!({
                 "type": "object",
                 "properties": {
@@ -223,10 +243,14 @@ async fn send_session_message(
         Err(outcome) => return outcome,
     };
     match port.send_session_message(&target, &args.text).await {
-        Ok(delivery) => ToolOutcome::ok(
-            json!({ "session_id": target.session_id, "delivered_via": delivery.as_str() })
-                .to_string(),
-        ),
+        Ok(delivery) => {
+            let mut answer =
+                json!({ "session_id": target.session_id, "delivered_via": delivery.as_str() });
+            if let Some(echo_seen) = delivery.echo_seen() {
+                answer["echo_seen"] = json!(echo_seen);
+            }
+            ToolOutcome::ok(answer.to_string())
+        }
         Err(e) => ToolOutcome::err(format!("{SEND_SESSION_MESSAGE}: {e}")),
     }
 }
@@ -248,9 +272,14 @@ async fn resume_session(
     };
     let message = args.message.as_deref().filter(|m| !m.trim().is_empty());
     match port.resume_session(&target, message).await {
-        Ok(outcome) => ToolOutcome::ok(
-            json!({ "session_id": target.session_id, "outcome": outcome.as_str() }).to_string(),
-        ),
+        Ok(outcome) => {
+            let mut answer =
+                json!({ "session_id": target.session_id, "outcome": outcome.as_str() });
+            if let Some(echo_seen) = outcome.echo_seen() {
+                answer["echo_seen"] = json!(echo_seen);
+            }
+            ToolOutcome::ok(answer.to_string())
+        }
         Err(e) => ToolOutcome::err(format!("{RESUME_SESSION}: {e}")),
     }
 }

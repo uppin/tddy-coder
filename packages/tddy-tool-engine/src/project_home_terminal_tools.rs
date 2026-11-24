@@ -28,8 +28,11 @@ use crate::project_home_tools::resolve_target;
 use crate::project_home_tools::{
     target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
-use crate::terminal_keys::encode_keys;
+use crate::terminal_keys::{encode_typing, type_into, EchoWait};
 use crate::ToolOutcome;
+
+mod leased_terminal;
+use leased_terminal::LeasedTerminal;
 
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
 pub const CLAIM_SESSION_TERMINAL: &str = "ClaimSessionTerminal";
@@ -131,7 +134,7 @@ fn terminal_keys_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             SEND_SESSION_KEYS,
-            "Type into a session's main terminal while you hold its control (ClaimSessionTerminal). Refused, naming who holds control, when you do not, and nothing is sent: claim it again. `text` is typed first, as a bracketed paste when the terminal has enabled that (text holding the paste-end sequence ESC[201~ is then refused); `keys` follow in order. Key names: Enter, Escape, Tab, BTab, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, Space, C-a to C-z (control keys, C-c interrupts), F1 to F12. An unknown key name is refused before anything is sent. Read the result with ReadSessionTerminal.",
+            "Type into a session's main terminal while you hold its control (ClaimSessionTerminal). Refused, naming who holds control, when you do not, and nothing is sent: claim it again. `text` is typed first, as a bracketed paste when the terminal has enabled that (text holding the paste-end sequence ESC[201~ is then refused); `keys` follow in order, pressed once the application has echoed the text (it may otherwise read them as part of the paste), or after 5 seconds with no echo. Answers sent_bytes and, when keys followed text, echo_seen: false means no echo came and the keys were pressed anyway. Key names: Enter, Escape, Tab, BTab, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, Space, C-a to C-z (control keys, C-c interrupts), F1 to F12. An unknown key name is refused before anything is sent. Read the result with ReadSessionTerminal.",
             json!({
                 "type": "object",
                 "properties": {
@@ -443,10 +446,12 @@ async fn claim_session_terminal(
     }
 }
 
-/// `SendSessionKeys`: encode the text and keys, then write them under this home session's lease.
-/// The text is encoded as a paste only when the target's terminal has enabled bracketed paste, so
-/// that is read first, and only when there is text to type. Every refusal leaves nothing typed.
-/// Answers `{sent_bytes}`, the number of bytes written.
+/// `SendSessionKeys`: encode the text and keys, then type them under this home session's lease —
+/// the text, then, once the application has echoed it, the keys ([`type_into`]). The text is
+/// encoded as a paste only when the target's terminal has enabled bracketed paste, so that is read
+/// first, and only when there is text to type. Every refusal before the first write leaves nothing
+/// typed. Answers `{sent_bytes}`, the number of bytes written, and — when keys followed text —
+/// `echo_seen`, whether the application echoed the text before the keys were pressed.
 async fn send_session_keys(
     port: &dyn ProjectHomeTerminalPort,
     home: &HomeCaller,
@@ -473,16 +478,18 @@ async fn send_session_keys(
             }
         },
     };
-    let bytes = match encode_keys(typing_text, &args.keys, bracketed_paste) {
-        Ok(bytes) => bytes,
+    let typing = match encode_typing(typing_text, &args.keys, bracketed_paste) {
+        Ok(typing) => typing,
         Err(e) => return ToolOutcome::err(format!("{SEND_SESSION_KEYS}: {e}; nothing was sent")),
     };
-    let sent_bytes = bytes.len();
-    match port
-        .send_keys(&target, &project_home_screen_id(home), bytes)
-        .await
-    {
-        Ok(()) => ToolOutcome::ok(json!({ "sent_bytes": sent_bytes }).to_string()),
-        Err(e) => ToolOutcome::err(format!("{SEND_SESSION_KEYS}: {e}; nothing was sent")),
+    let screen_id = project_home_screen_id(home);
+    let terminal = LeasedTerminal {
+        port,
+        target: &target,
+        screen_id: &screen_id,
+    };
+    match type_into(&terminal, typing, &EchoWait::default()).await {
+        Ok(typed) => ToolOutcome::ok(typed.answer().to_string()),
+        Err(e) => ToolOutcome::err(format!("{SEND_SESSION_KEYS}: {e}")),
     }
 }

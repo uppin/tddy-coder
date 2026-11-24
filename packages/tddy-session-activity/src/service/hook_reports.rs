@@ -201,6 +201,7 @@ impl ActivityServiceImpl {
             .map_err(|e| Status::internal(format!("failed to update activity status: {}", e)))?;
 
         self.follow_conversation_rotation(&session_dir, &req)?;
+        self.follow_reported_model(&session_dir, &req).await?;
         self.record_spoken_message(&session_dir, &req)?;
 
         // What the session waits on is kept next to the status that says it waits: a reader that is
