@@ -225,11 +225,29 @@ impl CloseRun {
         let mut ended: Vec<((String, String), EndedTab)> = Vec::new();
         let mut all_ended = true;
 
+        self.end_the_main(main_host, &mut ended, &mut all_ended)
+            .await;
+        self.end_every_tab_beside_main(&session_id, &mut ended, &mut all_ended)
+            .await;
+        self.end_every_conversation(&session_id, &mut ended, &mut all_ended)
+            .await;
+
+        self.check_that_no_tab_survived(session_id, ended, all_ended)
+            .await
+    }
+
+    /// End the session's main, one TERMINATE step; an end that succeeded joins `ended`.
+    async fn end_the_main(
+        &mut self,
+        main_host: String,
+        ended: &mut Vec<((String, String), EndedTab)>,
+        all_ended: &mut bool,
+    ) {
         self.running(CloseSessionStepKind::Terminate, MAIN_TAB, &main_host);
         match self.host.end_main(&self.ctx).await {
             Ok(()) => ended.push(((MAIN_TAB.to_string(), main_host), EndedTab::Main)),
             Err(error) => {
-                all_ended = false;
+                *all_ended = false;
                 self.failed(
                     CloseSessionStepKind::Terminate,
                     MAIN_TAB,
@@ -238,10 +256,20 @@ impl CloseRun {
                 );
             }
         }
-        let tabs = match self.host.tabs_beside_main(&session_id).await {
+    }
+
+    /// End each tab beside the main, one TERMINATE step each; a roster that cannot be read fails a
+    /// step of its own.
+    async fn end_every_tab_beside_main(
+        &mut self,
+        session_id: &str,
+        ended: &mut Vec<((String, String), EndedTab)>,
+        all_ended: &mut bool,
+    ) {
+        let tabs = match self.host.tabs_beside_main(session_id).await {
             Ok(tabs) => tabs,
             Err(reason) => {
-                all_ended = false;
+                *all_ended = false;
                 self.failed(CloseSessionStepKind::Terminate, TAB_ROSTER, "", &reason);
                 Vec::new()
             }
@@ -250,14 +278,14 @@ impl CloseRun {
             self.running(CloseSessionStepKind::Terminate, &tab.terminal_id, "");
             match self
                 .host
-                .end_tab_with_its_session(&session_id, &tab, self.ctx.subject.as_deref())
+                .end_tab_with_its_session(session_id, &tab, self.ctx.subject.as_deref())
                 .await
             {
                 Ok(()) => {
                     ended.push(((tab.terminal_id.clone(), String::new()), EndedTab::Tab(tab)))
                 }
                 Err(error) => {
-                    all_ended = false;
+                    *all_ended = false;
                     self.failed(
                         CloseSessionStepKind::Terminate,
                         &tab.terminal_id,
@@ -267,9 +295,18 @@ impl CloseRun {
                 }
             }
         }
+    }
+
+    /// Close each conversation open on the session, one TERMINATE step each.
+    async fn end_every_conversation(
+        &mut self,
+        session_id: &str,
+        ended: &mut Vec<((String, String), EndedTab)>,
+        all_ended: &mut bool,
+    ) {
         for (conversation_id, closed) in self
             .host
-            .end_conversations_of(&session_id, &self.ctx.session_token)
+            .end_conversations_of(session_id, &self.ctx.session_token)
             .await
         {
             let subject = conversation_tab_id(&conversation_id);
@@ -278,12 +315,21 @@ impl CloseRun {
                     ended.push(((subject, String::new()), EndedTab::Conversation(turn_loop)))
                 }
                 Err(error) => {
-                    all_ended = false;
+                    *all_ended = false;
                     self.failed(CloseSessionStepKind::Terminate, &subject, "", &error);
                 }
             }
         }
+    }
 
+    /// Stop what holds the worktree, then wait for every tab in `ended` to be gone: each settles its
+    /// TERMINATE step. Whether every tab ended.
+    async fn check_that_no_tab_survived(
+        &mut self,
+        session_id: String,
+        ended: Vec<((String, String), EndedTab)>,
+        mut all_ended: bool,
+    ) -> bool {
         self.host.stop_what_holds_the_worktree(&session_id).await;
         let survivors = self.host.survivors_of(&self.ctx, &ended).await;
         for ((subject, host), _) in &ended {
