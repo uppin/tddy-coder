@@ -148,6 +148,18 @@ impl WorkQueueService for TestDaemon {
             .await
     }
 
+    type WatchWorkQueueStream = tddy_work_queue::rpc::WorkQueueWatchStream;
+
+    async fn watch_work_queue(
+        &self,
+        request: Request<tddy_service::proto::work_queue::WatchWorkQueueRequest>,
+    ) -> Result<Response<Self::WatchWorkQueueStream>, Status> {
+        self.handlers
+            .work_queue_service()
+            .watch_work_queue(request)
+            .await
+    }
+
     async fn assign_work_item_pr(
         &self,
         request: Request<tddy_service::proto::work_queue::AssignWorkItemPrRequest>,

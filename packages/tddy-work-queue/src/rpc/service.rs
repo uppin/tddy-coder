@@ -93,7 +93,9 @@ use tddy_service::proto::work_queue::StreamWorkQueueStatusRequest;
 
 use tddy_rpc::Request;
 
-use super::WorkQueueStatusStream;
+use super::{WorkQueueStatusStream, WorkQueueWatchStream};
+
+use tddy_service::proto::work_queue::WatchWorkQueueRequest;
 
 use tddy_service::proto::work_queue::WorkQueueService;
 
@@ -120,6 +122,15 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<StreamWorkQueueStatusRequest>,
     ) -> Result<Response<Self::StreamWorkQueueStatusStream>, Status> {
         self.host.stream_work_queue_status(request).await
+    }
+
+    type WatchWorkQueueStream = WorkQueueWatchStream;
+
+    async fn watch_work_queue(
+        &self,
+        request: Request<WatchWorkQueueRequest>,
+    ) -> Result<Response<Self::WatchWorkQueueStream>, Status> {
+        self.host.watch_work_queue(request).await
     }
 
     async fn add_work_item(

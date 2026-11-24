@@ -62,6 +62,7 @@ async fn a_met_armed_merge_runs_the_engine_once_and_is_disarmed_in_the_store() {
             })
             .to_vec(),
         schedules: vec![merge.clone(), propagate.clone()],
+        ..WorkQueue::default()
     };
     host.orchestrator("owner", queue);
     let store = tddy_core::work_queue_store::WorkQueueStore::new(host.base());
@@ -124,6 +125,7 @@ async fn two_runners_seeing_the_same_arming_met_run_the_engine_once() {
                 ..WorkItem::default()
             }],
             schedules: vec![merge.clone()],
+            ..WorkQueue::default()
         },
     );
     let store = tddy_core::work_queue_store::WorkQueueStore::new(host.base());
@@ -175,6 +177,7 @@ async fn a_firing_tells_the_queues_owner_once_naming_who_armed_it() {
                 ..WorkItem::default()
             }],
             schedules: vec![merge.clone()],
+            ..WorkQueue::default()
         },
     );
     let recorded = Arc::new(RecordingSessionNotificationSubscriber::new());

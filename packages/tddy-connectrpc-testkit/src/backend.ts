@@ -66,6 +66,12 @@ export interface ServerStreamFallback<
   readonly unary: U;
   readonly stream: S;
   readonly toEvent: (answer: MessageShape<U["output"]>) => MessageShape<S["output"]>;
+  /**
+   * Keep the stream open after its one event until the client cancels it — how a **watch** behaves
+   * (a snapshot, then nothing until something changes), as opposed to an operation whose stream
+   * ends with its answer. Default `false`.
+   */
+  readonly holdOpen?: boolean;
 }
 
 const serverStreamFallbacks: ServerStreamFallback[] = [];
@@ -213,6 +219,7 @@ export class InMemoryRpcBackend {
             recording.set(key, bucket);
             const answer = await (unaryImpl as (r: unknown, c: unknown) => unknown)(req, ctx);
             yield fallback.toEvent(answer as never);
+            if (fallback.holdOpen) await untilAborted((ctx as { signal: AbortSignal }).signal);
           } as unknown as MethodImpl<DescMethod>);
         }
       },
@@ -295,4 +302,10 @@ function findImpl(
 
 function requestKey(serviceTypeName: string, methodName: string): string {
   return `${serviceTypeName}/${methodName}`;
+}
+
+/** Resolves once `signal` aborts — immediately when it already has. */
+function untilAborted(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 }

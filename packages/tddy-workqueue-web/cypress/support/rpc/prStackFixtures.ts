@@ -160,10 +160,11 @@ export function aPullBaseIntoBranchResponse(fx: {
   };
 }
 
-/** Serialize a `Stack` fixture to the `work_queue_json` wire format. */
-export function aWorkQueueJson(version: number, nodes: WorkItemFixture[]): string {
+/** Serialize a `Stack` fixture to the `work_queue_json` wire format, at `revision` when given. */
+export function aWorkQueueJson(version: number, nodes: WorkItemFixture[], revision?: number): string {
   return JSON.stringify({
     version,
+    ...(revision === undefined ? {} : { revision }),
     nodes: nodes.map((n) => ({
       node_id: n.itemId,
       title: n.title,

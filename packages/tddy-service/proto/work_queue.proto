@@ -76,6 +76,12 @@ service WorkQueueService {
   // `#workqueue` 6/14: the queue's PR state and check counts per item — a snapshot, then a new one
   // whenever the daemon's GitHub inbox reports a change to a PR or its checks. No browser polls.
   rpc StreamWorkQueueStatus(StreamWorkQueueStatusRequest) returns (stream WorkQueueStatusView);
+  // The queue itself, live: its current snapshot first, then one per new revision — every write,
+  // whoever makes it (an agent's tool, another session, this or any other view, a schedule firing).
+  // Each snapshot is the whole queue, so a client replaces what it holds with the newest revision it
+  // has seen; a reconnect's first snapshot resyncs it. Ends with `not_found` when the queue goes.
+  // Served by the daemon that holds the queue: a client opens it on that host.
+  rpc WatchWorkQueue(WatchWorkQueueRequest) returns (stream WorkQueueSnapshot);
   // `#workqueue` 7/14: labels and keyed badges on a work item; each answers the queue after the change.
   rpc SetWorkItemLabels(SetWorkItemLabelsRequest) returns (WorkItemLinksResponse);
   rpc SetWorkItemBadge(SetWorkItemBadgeRequest) returns (WorkItemLinksResponse);
@@ -517,6 +523,21 @@ message WorkItemLinksResponse {
   string work_queue_json = 1;
 }
 
+
+message WatchWorkQueueRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+}
+
+// One revision of a work queue.
+message WorkQueueSnapshot {
+  // The queue's revision — the same number as `revision` inside `work_queue_json`. It only grows: a
+  // client ignores a snapshot (or a mutation's answer) no newer than the one it holds.
+  uint64 revision = 1;
+  // The whole queue, same wire shape as `GetWorkQueueResponse.work_queue_json`.
+  string work_queue_json = 2;
+  WorkQueueSummary summary = 3;
+}
 
 message StreamWorkQueueStatusRequest {
   string session_token = 1;

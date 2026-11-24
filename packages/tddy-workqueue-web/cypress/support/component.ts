@@ -1,7 +1,9 @@
 import React from "react";
 import { mount } from "cypress/react";
 import type { ReactElement, ReactNode } from "react";
-import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { create } from "@bufbuild/protobuf";
+import { registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
 import { type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
 import { StartPassphraseProvider } from "tddy-session-create-web";
 import "tddy-ui-web/theme.css";
@@ -31,3 +33,27 @@ Cypress.Commands.add("mount", (jsx, options = {}) => mount(jsx, { strict: false,
 Cypress.Commands.add("mountWithClients", (jsx: ReactElement, backend: InMemoryRpcBackend, overrides?: MountWithClientsOverrides) =>
   mount(aPrStackHost(jsx, backend, overrides), { strict: false }),
 );
+
+/** The view watches its queue over `WatchWorkQueue`. Specs that stub only the unary `getWorkQueue` keep
+ *  working: the watch answers that stub's queue as its first snapshot and then stays open, as the
+ *  daemon's does until something changes. A spec that implements the watch itself wins. */
+registerServerStreamFallback({
+  unary: WorkQueueService.method.getWorkQueue,
+  stream: WorkQueueService.method.watchWorkQueue,
+  toEvent: (answer) =>
+    create(WorkQueueSnapshotSchema, {
+      revision: BigInt(revisionIn(answer.workQueueJson)),
+      workQueueJson: answer.workQueueJson,
+      summary: answer.summary,
+    }),
+  holdOpen: true,
+});
+
+function revisionIn(workQueueJson: string): number {
+  try {
+    const revision = (JSON.parse(workQueueJson) as { revision?: unknown }).revision;
+    return typeof revision === "number" ? revision : 0;
+  } catch {
+    return 0;
+  }
+}

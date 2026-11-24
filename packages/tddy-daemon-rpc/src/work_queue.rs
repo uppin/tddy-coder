@@ -85,10 +85,13 @@ pub(crate) mod commit_flow;
 pub(crate) mod land;
 mod lineage;
 mod links;
+mod queue_watch;
 #[cfg(test)]
 mod repoint_github_token_unit_tests;
 pub(crate) mod schedule_watch;
 pub(crate) mod schedules;
 mod status_stream;
+#[cfg(test)]
+mod status_stream_wake_unit_tests;
 mod waves;
 mod work_queue_queries;

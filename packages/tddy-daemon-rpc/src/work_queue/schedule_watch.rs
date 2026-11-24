@@ -336,6 +336,7 @@ mod tests {
                 armed_at: "2026-11-23T10:00:00Z".to_string(),
                 armed_by: os_user.to_string(),
             }],
+            ..WorkQueue::default()
         }
     }
 
