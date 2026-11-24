@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -236,6 +236,16 @@ impl AMachine {
     /// [`Self::fire_hook`], returning what the hook printed once it ended: the decision Claude Code
     /// would read from a hook that waits for an answer.
     pub fn fire_hook_printing(&self, event: &str, payload: &Value) -> String {
+        self.fire_hook_printing_in(&self.worktree(), event, payload)
+    }
+
+    /// Fire `event` as [`Self::fire_hook`] does, from `dir` instead of the worktree: Claude Code
+    /// runs a hook in the agent's current directory, which follows the agent's `cd`.
+    pub fn fire_hook_in(&self, dir: &Path, event: &str, payload: &Value) {
+        self.fire_hook_printing_in(dir, event, payload);
+    }
+
+    fn fire_hook_printing_in(&self, dir: &Path, event: &str, payload: &Value) -> String {
         use std::io::Write as _;
         let command = self
             .installed_hook(event)
@@ -243,7 +253,7 @@ impl AMachine {
         let mut hook = std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(&command)
-            .current_dir(self.worktree())
+            .current_dir(dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

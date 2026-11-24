@@ -86,9 +86,9 @@ A session whose agent's spec declares the `hooks` capability has its lifecycle h
 followed exactly as a daemon start on a target wires and follows them (`hooks.rs`), on every target
 — a local one included:
 
-- a fresh hook token, and the hook slots rendered with `HookCommandParams::remote_log` set to
-  `tddy_core::REMOTE_HOOK_LOG`, so every hook is the shell one-liner that appends
-  `<event>\t<token>\t<payload>` to `.tddy/hooks.log` in the worktree; the hooks file is written into
+- a fresh hook token, and the hook slots rendered with `HookCommandParams::remote_log` set to the
+  absolute path `create_remote_hook_log` returned, so every hook is the shell one-liner that appends
+  `<event>\t<token>\t<payload>` to `<worktree>/.tddy/hooks.log` wherever the agent has `cd`-ed to; the hooks file is written into
   the worktree with the launch's other slot files (through the port on a target);
 - the log created before the launch with `remote_hook_follower::create_remote_hook_log`, through the
   session's shell — the target's, or `tddy_remote_shell::LocalShell` for a local session;

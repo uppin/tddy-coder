@@ -230,6 +230,59 @@ async fn a_local_session_s_hooks_reach_the_driver_the_same_way() {
 }
 
 #[tokio::test]
+async fn a_coder_session_s_hooks_reach_the_driver_after_the_agent_changed_directory() {
+    // Given a hooked agent started on a Coder workspace, which has since `cd`-ed into a
+    // subdirectory of its worktree that holds no `.tddy` of its own
+    let machine = AMachine::with_agent(AN_AGENT_THAT_WAITS);
+    let mut driver =
+        ADriver::started(machine.driver_of("acme-hooked", "coder:ada/devbox", &[])).await;
+    started(&mut driver, &machine).await;
+    let subdirectory = machine.worktree().join("model-hound");
+    std::fs::create_dir_all(&subdirectory).expect("the agent's subdirectory");
+
+    // When a tool call and the turn's end fire their hooks there, as Claude Code runs a hook in
+    // the agent's current directory
+    machine.fire_hook_in(
+        &subdirectory,
+        "PostToolUse",
+        &json!({
+            "hook_event_name": "PostToolUse",
+            "session_id": "conv-1",
+            "tool_name": "Bash",
+            "tool_input": { "command": "cd model-hound" },
+            "tool_response": { "stdout": "" },
+        }),
+    );
+    machine.fire_hook_in(
+        &subdirectory,
+        "Stop",
+        &json!({ "hook_event_name": "Stop", "session_id": "conv-1" }),
+    );
+    let waited = driver
+        .answer(
+            "wait_for_hook",
+            json!({ "event": "Stop", "timeout_secs": 20 }),
+        )
+        .await;
+    let read = driver.answer("read_hooks", json!({})).await;
+    let _ = driver.answer("stop_session", json!({})).await;
+
+    // Then both reached the worktree's hook log and the driver, and none was written beside the
+    // agent's current directory
+    assert_eq!(waited["matched"], json!(true), "{waited}");
+    assert_eq!(
+        (
+            hooks_and_reports(&read)
+                .into_iter()
+                .map(|(event, _)| event)
+                .collect::<Vec<_>>(),
+            subdirectory.join(".tddy").exists(),
+        ),
+        (vec!["PostToolUse".to_string(), "Stop".to_string()], false)
+    );
+}
+
+#[tokio::test]
 async fn a_driven_session_s_permission_prompt_is_left_to_the_agent_s_terminal_at_once() {
     // Given a hooked agent started on this machine, with no orchestrator to answer it
     let machine = AMachine::with_agent(AN_AGENT_THAT_WAITS);

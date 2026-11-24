@@ -219,8 +219,7 @@ pub async fn create_remote_hook_log(
     shell: &dyn RemoteShell,
     worktree: &Path,
 ) -> Result<String, RemoteShellError> {
-    let log_path = worktree.join(tddy_core::REMOTE_HOOK_LOG);
-    let log = log_path.to_string_lossy().into_owned();
+    let log = tddy_core::remote_hook_log_in(worktree);
     let exclude_command = format!(
         "if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
          mkdir -p \"$(dirname \"$exclude\")\"; \
@@ -242,10 +241,7 @@ pub async fn remove_remote_hook_log(
     shell: &dyn RemoteShell,
     worktree: &Path,
 ) -> Result<(), RemoteShellError> {
-    let log = worktree
-        .join(tddy_core::REMOTE_HOOK_LOG)
-        .to_string_lossy()
-        .into_owned();
+    let log = tddy_core::remote_hook_log_in(worktree);
     let answers = worktree
         .join(tddy_core::REMOTE_ANSWERS_DIR)
         .to_string_lossy()

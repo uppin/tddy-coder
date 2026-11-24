@@ -14,6 +14,8 @@
 //! A session's peer name is a function of its id ([`native_peer_name_of`]), so nothing extra is
 //! recorded: whoever knows a session id and its agent knows how to address it natively.
 
+use std::path::Path;
+
 use tddy_coding_agent_specs::CodingAgentSpec;
 
 /// The report a target child's hook-log line carried, addressed by the session that wrote it.
@@ -47,23 +49,25 @@ pub enum ChildPlacement<'a> {
     /// On a target: its hook token and its hook log's path there.
     Target {
         hook_token: &'a str,
-        hook_log_path: &'a str,
+        hook_log_path: String,
     },
 }
 
 impl<'a> ChildPlacement<'a> {
-    /// Where a child runs: on a target when `on_target`, reporting over the hook log its
-    /// `hook_token` authenticates; `None` for a target child with no hook token, whose log nobody
-    /// follows and which therefore has no channel.
-    pub fn of(on_target: bool, hook_token: Option<&'a str>) -> Option<Self> {
-        if !on_target {
+    /// Where a child runs: on a target when `target_worktree` names its worktree there, reporting
+    /// over that worktree's hook log, which its `hook_token` authenticates; `None` for a target
+    /// child with no hook token, whose log nobody follows and which therefore has no channel.
+    pub fn of(target_worktree: Option<&Path>, hook_token: Option<&'a str>) -> Option<Self> {
+        let Some(worktree) = target_worktree else {
             return Some(Self::Local);
-        }
+        };
+        // Absolute, as the session's own hooks name it: the child runs the line from whatever
+        // directory it has entered.
         hook_token
             .filter(|token| !token.is_empty())
             .map(|hook_token| Self::Target {
                 hook_token,
-                hook_log_path: tddy_core::REMOTE_HOOK_LOG,
+                hook_log_path: tddy_core::remote_hook_log_in(worktree),
             })
     }
 }
@@ -86,7 +90,7 @@ pub fn native_peer_name_of(session_id: &str) -> String {
 
 /// The channel a child described by `inputs` reports back over.
 pub fn back_channel_for(inputs: &BackChannelInputs<'_>) -> BackChannel {
-    match inputs.placement {
+    match &inputs.placement {
         ChildPlacement::Target {
             hook_token,
             hook_log_path,
@@ -197,20 +201,21 @@ impl ReportsTo<'_> {
                     hook_token,
                     hook_log_path,
                 },
-            ) => hook_log_channel(hook_token, hook_log_path),
+            ) => hook_log_channel(hook_token, &hook_log_path),
         };
         back_channel_guidance(&self.orchestrator_session_id, &channel)
     }
 
-    /// The guidance for a child running `child_agent`, on a target when `on_target` with its
-    /// `hook_token`; `None` for a target child with no hook token ([`ChildPlacement::of`]).
+    /// The guidance for a child running `child_agent`, on a target when `target_worktree` names its
+    /// worktree there, with its `hook_token`; `None` for a target child with no hook token
+    /// ([`ChildPlacement::of`]).
     pub fn guidance_at(
         &self,
         child_agent: &CodingAgentSpec,
-        on_target: bool,
+        target_worktree: Option<&Path>,
         hook_token: Option<&str>,
     ) -> Option<String> {
-        ChildPlacement::of(on_target, hook_token)
+        ChildPlacement::of(target_worktree, hook_token)
             .map(|placement| self.guidance_for(child_agent, placement))
     }
 }

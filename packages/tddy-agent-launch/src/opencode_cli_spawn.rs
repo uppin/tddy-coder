@@ -245,7 +245,7 @@ pub(crate) async fn start_cli_harness_session(
 
     // On a target the agent's hooks append to its hook log there, not to a daemon it cannot
     // reach: the launch creates that log and follows it.
-    log_hooks_on_the_target(&target, &mut wiring);
+    log_hooks_on_the_target(&target, &worktree_path, &mut wiring);
     let launch_model = routed_launch_model(
         &agent.spec,
         route.as_ref().map(|route| route.args.as_slice()),

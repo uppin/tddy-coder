@@ -29,10 +29,10 @@ fn agent(id: &str) -> CodingAgentSpec {
 
 /// The one shell line the guidance of a Claude child on a target tells it to run, with `report`
 /// in place of the placeholder — exactly what the agent pastes into its Bash tool.
-fn the_report_command_a_target_child_is_told_to_run(report: &str) -> String {
+fn the_report_command_a_target_child_is_told_to_run(report: &str, worktree: &Path) -> String {
     let claude = agent("claude");
-    let placement =
-        ChildPlacement::of(true, Some(HOOK_TOKEN)).expect("a target child with a hook token");
+    let placement = ChildPlacement::of(Some(worktree), Some(HOOK_TOKEN))
+        .expect("a target child with a hook token");
     let channel = back_channel_for(&BackChannelInputs {
         orchestrator_session_id: ORCHESTRATOR,
         orchestrator_agent: &claude,
@@ -86,7 +86,7 @@ fn a_target_worktree() -> tempfile::TempDir {
 fn a_report_run_from_a_zsh_login_shell_is_a_message_line_the_follower_accepts() {
     // Given a Claude child on a target whose login shell is zsh, and the command its guidance names
     let worktree = a_target_worktree();
-    let command = the_report_command_a_target_child_is_told_to_run("Step 1 done.");
+    let command = the_report_command_a_target_child_is_told_to_run("Step 1 done.", worktree.path());
 
     // When the child runs it from its worktree
     run_in("zsh", &command, worktree.path());
@@ -106,5 +106,32 @@ fn a_report_run_from_a_zsh_login_shell_is_a_message_line_the_follower_accepts() 
         texts,
         vec![Some("Step 1 done.".to_string())],
         "hook log lines: {lines:?}"
+    );
+}
+
+#[test]
+fn a_report_run_after_the_child_changed_directory_reaches_its_worktree_s_log() {
+    // Given a Claude child on a target that has `cd`-ed into a subdirectory of its worktree, which
+    // holds no `.tddy` of its own
+    let worktree = a_target_worktree();
+    let subdirectory = worktree.path().join("model-hound");
+    std::fs::create_dir_all(&subdirectory).unwrap();
+    let command = the_report_command_a_target_child_is_told_to_run("Step 2 done.", worktree.path());
+
+    // When the child runs the command its guidance names from there
+    run_in("sh", &command, &subdirectory);
+
+    // Then the report is a message line in the worktree's hook log
+    let texts: Vec<Option<String>> = hook_log_lines(worktree.path())
+        .iter()
+        .map(|line| {
+            HookLine::parse(line, HOOK_TOKEN)
+                .ok()
+                .and_then(|hook| hook.payload["text"].as_str().map(str::to_string))
+        })
+        .collect();
+    assert_eq!(
+        (texts, subdirectory.join(".tddy").exists()),
+        (vec![Some("Step 2 done.".to_string())], false)
     );
 }

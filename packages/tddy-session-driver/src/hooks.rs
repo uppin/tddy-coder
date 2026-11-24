@@ -3,7 +3,7 @@
 //!
 //! Every target is treated as a daemon treats a target, a local one included: the agent's hooks
 //! are rendered with `HookCommandParams::remote_log`, so each one is the shell one-liner that
-//! appends `<event>\t<token>\t<payload>` to `.tddy/hooks.log` in the worktree
+//! appends `<event>\t<token>\t<payload>` to `<worktree>/.tddy/hooks.log`, named by its absolute path
 //! (`tddy_core::remote_hook_command`); the log is created with
 //! `remote_hook_follower::create_remote_hook_log` and read with a `RemoteHookFollower` through the
 //! session's shell (`LocalShell` on this machine); and each line is mapped to the daemon's two
@@ -240,7 +240,8 @@ impl SessionHooks {
     }
 
     /// The hooks' command parameters, as a daemon start on a target renders them: every hook
-    /// appends to the log relative to the worktree the agent runs in.
+    /// appends to the log the session created, by its absolute path, so a hook still finds it once
+    /// the agent has entered another directory.
     pub fn params<'a>(
         &'a self,
         spec: &CodingAgentSpec,
@@ -254,7 +255,7 @@ impl SessionHooks {
             hook_token: &self.hook_token,
             daemon_socket: None,
             answer_wait_secs: spec.answer_wait_secs(),
-            remote_log: Some(tddy_core::REMOTE_HOOK_LOG),
+            remote_log: Some(&self.log_path),
             route_env: &[],
         }
     }

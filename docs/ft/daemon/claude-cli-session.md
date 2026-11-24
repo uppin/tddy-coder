@@ -855,13 +855,20 @@ the wait ends.
 On a target session (a Coder workspace or an SSH host, with no tddy software on it) the settings
 carry the remote carrier instead. With `HookCommandParams.remote_log` set, every reporting event's
 command is `tddy_core::remote_hook_command` — a `printf` one-liner appending the event, the hook token
-and the payload to `.tddy/hooks.log` in the worktree. The daemon follows the log through the
+and the payload to `.tddy/hooks.log` in the worktree. The command names the log by its **absolute**
+path on the target (`tddy_core::remote_hook_log_in(<worktree>)`, single-quoted for the shell): Claude
+Code runs a hook in the agent's current directory, which follows the agent's `cd`, so a relative
+`.tddy/hooks.log` failed in every subdirectory — and under `dash`, a Debian or Ubuntu target's
+`/bin/sh`, the failed append exits 2, which Claude reads as a blocking error, so the failing
+`PreToolUse` hook refused every tool. The launch creates the log (and its `.tddy` directory) before
+the agent starts, and the daemon follows it through the
 session's remote shell (`tddy_agent_launch::remote_hook_follower`) into the same
-`ReportSessionStatus` / `ReportAgentActivity` handling.
+`ReportSessionStatus` / `ReportAgentActivity` handling. A hook that cannot append still fails loudly;
+nothing turns that failure into a success.
 
 `PermissionRequest` is installed there as a **waiting** hook, still POSIX shell only
 (`tddy_core::remote_answering_hook_command`). It mints a nonce, appends
-`PermissionRequest@<nonce>\t<token>\t<payload>` to the log, then polls `.tddy/answers/<nonce>` once a
+`PermissionRequest@<nonce>\t<token>\t<payload>` to the log, then polls `<worktree>/.tddy/answers/<nonce>` (absolute, as the log is) once a
 second for `<wait + 5>` seconds and prints that file as its only output. Claude's hook `timeout` is
 `<wait + 10>`, as for a local session. The follower reports the line like a local hook: the
 permission becomes the session's pending question, with its tool, its input and a `request_id`. It
@@ -889,7 +896,7 @@ questions) is an empty file, and Claude shows its own question dialog. The catch
 The log carries one event no hooks adapter installs: **`TddyMessage`**
 (`tddy_core::REMOTE_MESSAGE_EVENT`), the line a child of an orchestrator reports to it with, since a
 target has no `tddy-tools`. The child pipes `{"text": "<report>"}` into
-`sh -c '<remote_hook_command("TddyMessage", <hook token>, ".tddy/hooks.log")>'`, the command its
+`sh -c '<remote_hook_command("TddyMessage", <hook token>, "<worktree>/.tddy/hooks.log")>'`, the command its
 back-channel guidance spells out, and the follower posts the text to the orchestrator as a session
 message ([Project concept § Reporting to the orchestrator](project-concept.md#reporting-to-the-orchestrator)).
 The explicit `sh` matters: a hook reads its payload as its own stdin, but the child's command is the

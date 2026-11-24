@@ -23,7 +23,9 @@ not the other way round, so the edge runs one way, engine → backend.
 crate boundary. It is not API.
 
 **Remote hook command** (`remote_hook_command.rs`): the hook command of a session whose agent
-runs on a target. `REMOTE_HOOK_LOG` (`.tddy/hooks.log`) and
+runs on a target. `REMOTE_HOOK_LOG` (`.tddy/hooks.log`, relative to the worktree),
+`remote_hook_log_in(worktree)` — the log's absolute path, which every caller passes as `log_path`,
+never `REMOTE_HOOK_LOG` alone, since an agent runs each hook in its current directory — and
 `remote_hook_command(event, hook_token, log_path)`, selected by
 `HookCommandParams.remote_log`: a `printf` one-liner using only `printf`, `cat` and `tr` that
 appends `<event>\t<hook token>\t<payload, newlines removed>` to the log in one write, so two
