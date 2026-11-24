@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use pretty_assertions::assert_eq;
 use tddy_changeset::work_queue_fixtures::seed_session_stack;
 use tddy_coding_agent_specs::CodingAgentRegistry;
-use tddy_core::changeset::{write_changeset, Changeset, WorkItem, WorkQueue};
+use tddy_core::changeset::{read_session_stack, write_changeset, Changeset, WorkItem, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::session_metadata::{
     write_initial_tool_session_metadata, InitialToolSessionMetadataOpts,
@@ -108,10 +108,15 @@ fn a_session_owning_no_queue_lists_no_stack_plan() {
 fn a_session_owning_a_queue_lists_it() {
     // Given
     let host = a_host();
-    let queue = a_legacy_stack();
-    let expected = serde_json::to_string(&queue).expect("serialize the queue");
-    let session = host.with_a_session("sess-owner", "proj-auth", queue, true);
+    let session = host.with_a_session("sess-owner", "proj-auth", a_legacy_stack(), true);
+    // The queue as the session's record holds it — numbered by the store (`WorkQueue.revision`).
+    let stored = read_session_stack(&session)
+        .expect("read the queue")
+        .expect("the session owns a queue");
 
     // When / Then
-    assert_eq!(the_listed_stack_plan_json(&session), expected);
+    assert_eq!(
+        the_listed_stack_plan_json(&session),
+        serde_json::to_string(&stored).expect("serialize the queue")
+    );
 }
