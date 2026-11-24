@@ -37,6 +37,10 @@ export const TEST_IDS = {
   createSessionSubmitBtn: "create-session-submit-btn",
   /** The stack view — one project stack opened by its id (`#orchestrators` 9/11). */
   workQueueView: "work-queue-view",
+  /** Why the queue could not be loaded — shown instead of an empty queue. */
+  workQueueLoadError: "work-queue-load-error",
+  /** The loaded queue is no longer live: reconnecting, or ended with a reason. */
+  workQueueLiveNotice: "work-queue-live-notice",
   prStackPlannedPrList: "work-item-list",
   agentChat: "agent-chat",
   agentChatMessages: "agent-chat-messages",

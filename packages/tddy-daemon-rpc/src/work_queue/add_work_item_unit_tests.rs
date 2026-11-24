@@ -41,7 +41,7 @@ fn make_unit_stack_service(
     )))
 }
 
-fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
+pub(super) fn make_unit_connection(sessions_base: std::path::PathBuf) -> DaemonSessionHost {
     let config = make_unit_config();
     let base = sessions_base.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));

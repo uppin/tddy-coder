@@ -81,6 +81,6 @@ ignores them: a `keepAlive` is not mistaken for the result and changes no step.
 | `cypress/component/CreateSessionAttachmentProgress.cy.tsx` | per-attachment progress, and a start with nothing attached going through the stream |
 | `cypress/component/CreateSessionPane.cy.tsx` (29) | the form, started through the streamed start |
 
-Component specs here start over the stream through `registerServerStreamFallback`
+Component specs here start over the stream through `registerUnaryBackedStream`
 (`tddy-connectrpc-testkit`), registered in `cypress/support/component.ts` as `tddy-web` does — see
 [indexing-indicator.md § Testing](../../tddy-session-web/docs/indexing-indicator.md#testing).

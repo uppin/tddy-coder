@@ -23,6 +23,15 @@ pub struct WorkQueue {
     /// fired by `#workqueue` 14/14.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub schedules: Vec<Schedule>,
+    /// How many times the queue has been written: 1 when its session creates it, one more on every
+    /// write after, whoever makes it. Stored with the queue, so it never goes back — a reader holding
+    /// two copies keeps the higher. `0` is a queue that was never stored.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub revision: u64,
+}
+
+fn is_zero(revision: &u64) -> bool {
+    *revision == 0
 }
 
 /// What a schedule fires.

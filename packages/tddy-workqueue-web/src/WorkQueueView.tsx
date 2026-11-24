@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import type { SessionEntry, SessionService } from "tddy-client-web/gen/session_pb";
 import type { ProjectService } from "tddy-client-web/gen/project_pb";
@@ -13,6 +13,8 @@ import { connectorEdgesOf, useWorkQueueGraph } from "./useWorkQueueGraph";
 import { SchedulesPanel, type ScheduleViewModel } from "./SchedulesPanel";
 import { AddWorkItemForm, type AddWorkItemFormSubmission } from "./AddWorkItemForm";
 import { parseWorkQueue, type WorkItem } from "./workQueue";
+import { useWorkQueueWatch } from "./useWorkQueueWatch";
+import { failedToLoad, WorkQueueLiveNotice, WorkQueueLoadError } from "./WorkQueueLiveStatus";
 import { hydrateWorkItems } from "./hydrateWorkItems";
 import { workItemSessions, type StackChildMetadata } from "./workItemSessions";
 import { useQueryBranch } from "./useQueryBranch";
@@ -20,9 +22,8 @@ import { buildBranchQueries } from "./branchQueries";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { DirtyWorktreeDialog, type DirtyWorktreePrompt } from "./DirtyWorktreeDialog";
 import { resolveRepointTarget } from "./startBlockers";
-import { CreateSessionDialog, remoteTrackingName, type CreateSessionInitialValues } from "tddy-session-create-web";
-import { deriveStackBaseBranch } from "./deriveStackBaseBranch";
-import { baseBranchChoice } from "./baseBranchChoice";
+import { CreateSessionDialog } from "tddy-session-create-web";
+import { startSessionInitialValues } from "./startSessionInitialValues";
 import { WorkItemChainHealthContext, type ItemChainHealth } from "./WorkItemChainHealth";
 import { LandPropagateContext, LandWaves, useLandPropagate } from "./landPropagate";
 import { WorkItemCommitCountsContext, useWorkQueueCommitCounts } from "./workItemCommitCounts";
@@ -46,8 +47,15 @@ export interface WorkQueueViewProps {
    * session starts, so the view never makes one.
    */
   address: WorkQueueAddress;
-  /** `work_queue.WorkQueueService` — `GetWorkQueue`, `QueryBranch` and every planned-PR control. */
+  /** `work_queue.WorkQueueService` — `QueryBranch` and every planned-PR control. */
   workQueueClient?: Client<typeof WorkQueueService>;
+  /**
+   * `work_queue.WorkQueueService` on **the host that holds the queue** (`address.daemon_instance_id`):
+   * the queue is loaded and kept current through its `WatchWorkQueue`, and its item status through its
+   * `StreamWorkQueueStatus` — streams are served only by that host. `null` when that host is not
+   * reachable from here: the view then says so instead of showing a queue.
+   */
+  watchClient: Client<typeof WorkQueueService> | null;
   sessionToken?: string;
   /** The full session list (all hosts) — each planned node's child session is resolved from it. */
   sessions?: SessionEntry[];
@@ -87,6 +95,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
   const {
     address,
     workQueueClient,
+    watchClient,
     sessionToken = "",
     sessions = [],
     sessionMetadataBySessionId = NO_SESSION_METADATA,
@@ -102,8 +111,15 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     taskClient,
     renderSessionIndicator,
   } = props;
-  const [workQueueJson, setWorkQueueJson] = useState("");
-  const [createdBySessionId, setCreatedBySessionId] = useState("");
+  // The queue, live from the host that holds it; every mutation's answer is offered to it too, and
+  // the newest copy wins (a late snapshot never undoes an edit).
+  const {
+    workQueueJson,
+    createdBySessionId,
+    loaded,
+    liveness,
+    apply: applyWorkQueueJson,
+  } = useWorkQueueWatch(watchClient, sessionToken, address);
   const [isAddingPlannedPr, setIsAddingPlannedPr] = useState(false);
   const [startSessionNode, setStartSessionNode] = useState<WorkItem | null>(null);
   const [repointErrorByNodeId, setRepointErrorByNodeId] = useState<Record<string, string>>({});
@@ -113,23 +129,6 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
   const [syncErrorByNodeId, setSyncErrorByNodeId] = useState<Record<string, string>>({});
   const [dirtyWorktreePrompt, setDirtyWorktreePrompt] = useState<DirtyWorktreePrompt | null>(null);
 
-  // Load the stack by its address; a mutation's response replaces the plan it answers with.
-  useEffect(() => {
-    if (!workQueueClient) return;
-    let cancelled = false;
-    workQueueClient
-      .getWorkQueue({ sessionToken, stack: address })
-      .then((res) => {
-        if (cancelled) return;
-        setWorkQueueJson(res.workQueueJson);
-        setCreatedBySessionId(res.summary?.createdBySessionId ?? "");
-      })
-      .catch(() => undefined); // keep what is shown: a failed read must not blank a plan already loaded
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workQueueClient, sessionToken, address.projectId, address.queueId, address.daemonInstanceId]);
 
   const stack = useMemo(() => parseWorkQueue(workQueueJson), [workQueueJson]);
   const commitCounts = useWorkQueueCommitCounts(workQueueClient, sessionToken, address, workQueueJson);
@@ -176,7 +175,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       parents: input.parents,
       childRecipe: "",
     });
-    setWorkQueueJson(res.workQueueJson);
+    applyWorkQueueJson(res.workQueueJson);
     if (input.startSession) {
       const added = parseWorkQueue(res.workQueueJson).nodes.find((node) => node.itemId === res.itemId);
       if (!added) {
@@ -203,7 +202,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         itemId,
         targetBaseBranch: resolveRepointTarget(node, nodes, branchResolutionByBranch, defaultBranch),
       });
-      setWorkQueueJson(res.workQueueJson);
+      applyWorkQueueJson(res.workQueueJson);
     } catch (err) {
       setRepointErrorByNodeId((errors) => ({ ...errors, [itemId]: failureReason(err) }));
     } finally {
@@ -220,16 +219,17 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
   const landPropagate = useLandPropagate(workQueueClient, sessionToken, address, () => {
     workQueueClient
       ?.getWorkQueue({ sessionToken, stack: address })
-      .then((res) => setWorkQueueJson(res.workQueueJson))
+      .then((res) => applyWorkQueueJson(res.workQueueJson))
       .catch(() => undefined); // keep what is shown; the next status update brings the change
   });
   // `#workqueue` 6/14: a row's PR and session links, and its live check counts.
   const workItemLinks = useWorkItemLinksState({
     workQueueClient,
+    statusClient: watchClient,
     sessionToken,
     address,
     sessions,
-    onWorkQueueJson: setWorkQueueJson,
+    onWorkQueueJson: applyWorkQueueJson,
     onChainHealth: setChainHealth,
     onSchedules: setSchedules,
     onWaveCount: setWaveCount,
@@ -252,7 +252,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
         itemId,
         direction,
       });
-      setWorkQueueJson(res.workQueueJson);
+      applyWorkQueueJson(res.workQueueJson);
     } catch (err) {
       setReorderErrorByNodeId((errors) => ({ ...errors, [itemId]: failureReason(err) }));
     } finally {
@@ -350,35 +350,13 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
     setStartSessionNode(node);
   };
 
-  const remote = defaultRemote || "origin";
-  const ownedBranch = startSessionNode?.branch ?? "";
-  const choice = startSessionNode
-    ? baseBranchChoice(startSessionNode, nodes, defaultBranch)
-    : { options: [], selected: "" };
-  const baseBranchOptions = choice.options.map((option) => {
-    const ref = remoteTrackingName(option.value, remote);
-    return { value: ref, label: option.label === option.value ? ref : option.label };
-  });
-  const startSessionInitialValues: CreateSessionInitialValues | undefined = startSessionNode
-    ? {
-        projectId: address.projectId,
-        daemonInstanceId: address.daemonInstanceId,
+  const startSessionInitial = startSessionNode
+    ? startSessionInitialValues(startSessionNode, nodes, {
+        address,
+        defaultBranch,
+        remote: defaultRemote || "origin",
         workQueueParent: createdBySessionId,
-        workItemId: startSessionNode.itemId,
-        branchIntent: ownedBranch ? "work_on_selected_branch" : "new_branch_from_base",
-        selectedBranch: ownedBranch,
-        newBranchName: ownedBranch ? "" : (startSessionNode.branchSuggestion ?? ""),
-        baseBranchLabel: remoteTrackingName(
-          deriveStackBaseBranch(startSessionNode, nodes, defaultBranch),
-          remote,
-        ),
-        baseBranchOptions,
-        selectedBaseBranch: remoteTrackingName(choice.selected, remote),
-        createRemoteBranch: true,
-        initialPrompt: [startSessionNode.title, startSessionNode.description]
-          .filter(Boolean)
-          .join("\n\n"),
-      }
+      })
     : undefined;
 
   const handleChildSessionCreated = (sessionId: string) => {
@@ -434,6 +412,11 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
           </select>
         </div>
       )}
+      {failedToLoad(loaded, liveness) ? (
+        <WorkQueueLoadError liveness={liveness} />
+      ) : (
+      <>
+      {loaded && <WorkQueueLiveNotice liveness={liveness} />}
       <WorkItemLinksContext.Provider value={workItemLinks}>
       <WorkItemCommitCountsContext.Provider value={commitCounts}>
       <WorkItemChainHealthContext.Provider value={chainHealth}>
@@ -465,6 +448,8 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
       </WorkItemChainHealthContext.Provider>
       </WorkItemCommitCountsContext.Provider>
       </WorkItemLinksContext.Provider>
+      </>
+      )}
       {landPropagate.canLand && waveCount > 0 && (
         <LandWaves waveCount={waveCount} onLand={landPropagate.land} results={landPropagate.results} />
       )}
@@ -489,7 +474,7 @@ export function WorkQueueView(props: WorkQueueViewProps): React.ReactElement {
           worktreeClient={worktreeClient}
           taskClient={taskClient}
           sessionToken={sessionToken}
-          initialValues={startSessionInitialValues}
+          initialValues={startSessionInitial}
           onClose={() => setStartSessionNode(null)}
           onCreated={handleChildSessionCreated}
         />

@@ -22,27 +22,32 @@ use tddy_service::proto::work_queue::{
     ResolveWorkItemBaseResponse, ScheduleWorkItemRequest, ScheduleWorkItemResponse,
     ScheduleWorkQueueWaveRequest, SetWorkItemBadgeRequest, SetWorkItemLabelsRequest,
     SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
-    UnlinkWorkItemSessionRequest, UnscheduleWorkItemRequest, WorkItemInboxResponse,
-    WorkItemLinksResponse, WorkItemOutboxResponse, WorkQueueCommitCountsResponse,
-    WorkQueueGraphResponse, WorkQueueStatusView, WorkQueueWavesResponse,
+    UnlinkWorkItemSessionRequest, UnscheduleWorkItemRequest, WatchWorkQueueRequest,
+    WorkItemInboxResponse, WorkItemLinksResponse, WorkItemOutboxResponse,
+    WorkQueueCommitCountsResponse, WorkQueueGraphResponse, WorkQueueSnapshot, WorkQueueStatusView,
+    WorkQueueWavesResponse,
 };
 
-/// The frames of `StreamWorkQueueStatus`: a channel the handler's task feeds, ended when either side
-/// goes away.
-pub struct WorkQueueStatusStream {
-    rx: tokio::sync::mpsc::UnboundedReceiver<Result<WorkQueueStatusView, Status>>,
+/// The frames of a server stream: a channel the handler's task feeds, ended when either side goes
+/// away.
+pub struct ChannelStream<T> {
+    rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>,
 }
 
-impl From<tokio::sync::mpsc::UnboundedReceiver<Result<WorkQueueStatusView, Status>>>
-    for WorkQueueStatusStream
-{
-    fn from(rx: tokio::sync::mpsc::UnboundedReceiver<Result<WorkQueueStatusView, Status>>) -> Self {
+/// The frames of `StreamWorkQueueStatus`.
+pub type WorkQueueStatusStream = ChannelStream<WorkQueueStatusView>;
+
+/// The frames of `WatchWorkQueue`.
+pub type WorkQueueWatchStream = ChannelStream<WorkQueueSnapshot>;
+
+impl<T> From<tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>> for ChannelStream<T> {
+    fn from(rx: tokio::sync::mpsc::UnboundedReceiver<Result<T, Status>>) -> Self {
         Self { rx }
     }
 }
 
-impl futures_util::Stream for WorkQueueStatusStream {
-    type Item = Result<WorkQueueStatusView, Status>;
+impl<T> futures_util::Stream for ChannelStream<T> {
+    type Item = Result<T, Status>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
@@ -52,9 +57,9 @@ impl futures_util::Stream for WorkQueueStatusStream {
     }
 }
 
-impl std::fmt::Debug for WorkQueueStatusStream {
+impl<T> std::fmt::Debug for ChannelStream<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("WorkQueueStatusStream")
+        f.write_str("ChannelStream")
     }
 }
 
@@ -266,6 +271,12 @@ pub trait WorkQueueHandler: Send + Sync {
         &self,
         request: Request<StreamWorkQueueStatusRequest>,
     ) -> Result<Response<WorkQueueStatusStream>, Status>;
+
+    /// The queue itself, live: its snapshot, then one per new revision, whoever wrote it.
+    async fn watch_work_queue(
+        &self,
+        request: Request<WatchWorkQueueRequest>,
+    ) -> Result<Response<WorkQueueWatchStream>, Status>;
 }
 
 mod service;

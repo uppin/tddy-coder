@@ -25,7 +25,7 @@ the web app or on LiveKit.
   session list and unlinks one; a refusal is shown inline on that row. An item with an assigned PR
   shows its checks' running, failed and succeeded counts and, expanded, each check as the session PR
   tab's `CheckRow` (this package depends on `tddy-workspace-web` for it), kept live by the queue's
-  `StreamWorkQueueStatus` — never polled
+  `StreamWorkQueueStatus`, opened on the host that holds the queue — never polled
   ([pr-stacking.md § An item's assigned PR and linked sessions](../coder/pr-stacking.md#an-items-assigned-pr-and-linked-sessions-added-2026-11-22)).
 - A work-item row shows its labels as chips and its badges by tone, apart from the derived status badge;
   a label selector above the list filters the queue to the items carrying a chosen label, and an

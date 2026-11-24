@@ -72,7 +72,8 @@ function theSessionsScreenWithBetasStacks() {
         workQueueJson: BILLING_PLAN,
       }),
     );
-  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  // host-b, which holds BILLING_STACK, is reachable: the stack view watches the queue on it.
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />, [DEFAULT_TEST_DAEMON, { instanceId: "host-b", label: "host-b" }]), backend);
   return backend;
 }
 

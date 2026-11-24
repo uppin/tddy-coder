@@ -32,6 +32,14 @@ export const workQueueViewPage = {
   view: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.workQueueView, { timeout: 5000, ...options }),
 
+  /** Why the queue could not be loaded, shown in place of the list. */
+  loadError: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.workQueueLoadError, { timeout: 5000, ...options }),
+
+  /** The notice that the shown queue is no longer live. */
+  liveNotice: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.workQueueLiveNotice, { timeout: 5000, ...options }),
+
   /** The stack was read from the daemon by its address — `GetWorkQueue` named it. */
   expectStackReadAt(backend: InMemoryRpcBackend, address: ExpectedStackAddress) {
     cy.wrap(backend).should((b) => {

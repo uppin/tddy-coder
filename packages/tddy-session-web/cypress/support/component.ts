@@ -1,8 +1,10 @@
 import { mount } from "cypress/react";
 import { createElement, type ReactElement } from "react";
 import { create } from "@bufbuild/protobuf";
-import { anInMemoryRpcBackend, registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
+import { anInMemoryRpcBackend, registerUnaryBackedStream, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
+import { GetWorkQueueRequestSchema, WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
+import { revisionOf } from "tddy-workqueue-web";
 import { MediaPortProvider, PresencePortProvider, RoomRpcPortProvider } from "tddy-client-web";
 import {
   aMediaDouble,
@@ -85,8 +87,24 @@ Cypress.Commands.add("mountWithClients", (jsx: ReactElement, backend: InMemoryRp
 /** The form always starts a session over `StreamStartSession`, whose last event is the unary answer.
  *  Specs that stub only the unary `startSession` keep working: the stream runs that handler and emits
  *  its answer as the single `result` event. A spec that implements the stream itself wins. */
-registerServerStreamFallback({
+registerUnaryBackedStream({
   unary: SessionService.method.startSession,
   stream: SessionService.method.streamStartSession,
   toEvent: (result) => create(StartSessionEventSchema, { event: { case: "result", value: result } }),
+});
+
+/** The work-queue view watches its queue over `WatchWorkQueue`. Specs that stub only the unary
+ *  `getWorkQueue` keep working: the watch answers that stub's queue as its first snapshot and then
+ *  stays open, as the daemon's does until something changes. A spec that implements the watch wins. */
+registerUnaryBackedStream({
+  unary: WorkQueueService.method.getWorkQueue,
+  stream: WorkQueueService.method.watchWorkQueue,
+  toEvent: (answer) =>
+    create(WorkQueueSnapshotSchema, {
+      revision: BigInt(revisionOf(answer.workQueueJson)),
+      workQueueJson: answer.workQueueJson,
+      summary: answer.summary,
+    }),
+  holdOpen: true,
+  toRequest: (watch) => create(GetWorkQueueRequestSchema, { sessionToken: watch.sessionToken, stack: watch.queue }),
 });

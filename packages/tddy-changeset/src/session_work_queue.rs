@@ -121,6 +121,7 @@ impl SessionWorkQueues {
                 queue: WorkQueue {
                     version: 1,
                     nodes: Vec::new(),
+                    revision: 1,
                     ..Default::default()
                 },
             };
@@ -138,6 +139,11 @@ impl SessionWorkQueues {
     }
 
     /// Change `session_id`'s queue under its record lock; `NoQueue` when it owns none.
+    ///
+    /// A change raises the queue's [`revision`](WorkQueue::revision) by one — whatever `change` set it
+    /// to — and writes the record. An update that leaves the queue as it was writes nothing and
+    /// keeps its revision, so nobody watching the record hears of it. Either way the queue is
+    /// answered as it stands.
     pub fn update<F: FnOnce(&mut WorkQueue)>(
         &self,
         session_id: &str,
@@ -148,7 +154,13 @@ impl SessionWorkQueues {
             let mut record = read_record(&path)?.ok_or_else(|| SessionWorkQueueError::NoQueue {
                 session_id: session_id.to_string(),
             })?;
+            let before = record.queue.clone();
             change(&mut record.queue);
+            record.queue.revision = before.revision;
+            if record.queue == before {
+                return Ok(record);
+            }
+            record.queue.revision = before.revision + 1;
             write_record(&path, &record)?;
             Ok(record)
         })
@@ -178,6 +190,12 @@ impl SessionWorkQueues {
             }
         }
         Ok(found)
+    }
+
+    /// The file `session_id`'s queue is stored in — whether or not it owns one. Every write to the
+    /// queue replaces this file, so watching it hears every change.
+    pub fn record_path(&self, session_id: &str) -> Result<PathBuf, SessionWorkQueueError> {
+        self.queue_path(session_id)
     }
 
     /// Where `session_id`'s queue journals an in-flight merge or repoint, beside the queue.

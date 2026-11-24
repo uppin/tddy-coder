@@ -133,6 +133,14 @@ impl WorkQueueStore {
         Ok(WorkQueueRecord::of(record))
     }
 
+    /// The file the queue `queue_id` is stored in, in its owning session's directory. Every write to
+    /// the queue replaces it.
+    pub fn record_path(&self, queue_id: &str) -> Result<PathBuf, WorkQueueStoreError> {
+        self.queues()
+            .record_path(queue_id)
+            .map_err(|e| store_error(e, ""))
+    }
+
     /// Where the queue `queue_id` journals an in-flight merge or repoint: beside it, in its owning
     /// session's directory.
     pub fn op_journal_path(&self, queue_id: &str) -> Result<PathBuf, WorkQueueStoreError> {

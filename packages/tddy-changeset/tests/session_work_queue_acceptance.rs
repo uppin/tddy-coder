@@ -215,3 +215,127 @@ fn a_queues_operation_journal_sits_beside_it_and_survives_the_upgrade_drop() {
     );
     assert!(queues.op_journal_path("../escape").is_err());
 }
+
+// ── revision: every change is numbered, so a reader keeps the newest copy ────────────────────────
+
+/// The record's identity on disk: every write replaces the file (an atomic rename), so a write that
+/// happened shows as a new inode.
+fn record_identity(host: &AHost, session_id: &str) -> (u64, String) {
+    use std::os::unix::fs::MetadataExt;
+    let path = host
+        .root
+        .path()
+        .join("sessions")
+        .join(session_id)
+        .join(WORK_QUEUE_FILE);
+    (
+        std::fs::metadata(&path).expect("the record").ino(),
+        std::fs::read_to_string(&path).expect("the record"),
+    )
+}
+
+#[test]
+fn a_new_queue_is_revision_one_and_every_change_after_raises_it_by_one() {
+    // Given
+    let host = AHost::with_sessions(&[("sess-a", "proj-1")]);
+    let queues = host.queues();
+
+    // When
+    let created = queues
+        .create_for_session("sess-a", "proj-1", T0)
+        .expect("created");
+    let added = queues
+        .update("sess-a", |queue| queue.nodes.push(an_item("n1")))
+        .expect("updated");
+    let added_again = queues
+        .update("sess-a", |queue| queue.nodes.push(an_item("n2")))
+        .expect("updated");
+
+    // Then
+    assert_eq!(
+        (
+            created.queue.revision,
+            added.queue.revision,
+            added_again.queue.revision
+        ),
+        (1, 2, 3)
+    );
+}
+
+#[test]
+fn an_update_that_changes_nothing_keeps_the_revision_and_writes_nothing() {
+    // Given
+    let host = AHost::with_sessions(&[("sess-a", "proj-1")]);
+    let queues = host.queues();
+    queues
+        .create_for_session("sess-a", "proj-1", T0)
+        .expect("created");
+    queues
+        .update("sess-a", |queue| queue.nodes.push(an_item("n1")))
+        .expect("updated");
+    let before = record_identity(&host, "sess-a");
+
+    // When — one update touches nothing, another only claims a revision of its own
+    let untouched = queues.update("sess-a", |_| {}).expect("answered");
+    let claimed = queues
+        .update("sess-a", |queue| queue.revision = 99)
+        .expect("answered");
+
+    // Then — both answer the queue as it stands, and the record was not rewritten
+    assert_eq!((untouched.queue.revision, claimed.queue.revision), (2, 2));
+    assert_eq!(record_identity(&host, "sess-a"), before);
+}
+
+#[test]
+fn a_change_cannot_set_its_own_revision() {
+    // Given
+    let host = AHost::with_sessions(&[("sess-a", "proj-1")]);
+    let queues = host.queues();
+    queues
+        .create_for_session("sess-a", "proj-1", T0)
+        .expect("created");
+    queues
+        .update("sess-a", |queue| queue.nodes.push(an_item("n1")))
+        .expect("updated");
+
+    // When — one change resets it to a fresh queue, another claims a revision far ahead
+    let reset = queues
+        .update("sess-a", |queue| *queue = Default::default())
+        .expect("updated");
+    let claimed = queues
+        .update("sess-a", |queue| {
+            queue.nodes.push(an_item("n2"));
+            queue.revision = 99;
+        })
+        .expect("updated");
+
+    // Then
+    assert_eq!((reset.queue.revision, claimed.queue.revision), (3, 4));
+}
+
+#[test]
+fn the_revision_is_stored_with_the_queue_and_carried_in_its_json() {
+    // Given
+    let host = AHost::with_sessions(&[("sess-a", "proj-1")]);
+    host.queues()
+        .create_for_session("sess-a", "proj-1", T0)
+        .expect("created");
+    host.queues()
+        .update("sess-a", |queue| queue.nodes.push(an_item("n1")))
+        .expect("updated");
+
+    // When — read back through a handle that never wrote it
+    let record = host
+        .queues()
+        .read("sess-a")
+        .expect("read")
+        .expect("a queue");
+    let json: serde_json::Value =
+        serde_json::to_value(&record.queue).expect("the queue serializes");
+
+    // Then
+    assert_eq!(
+        (record.queue.revision, json["revision"].as_u64()),
+        (2, Some(2))
+    );
+}

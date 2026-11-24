@@ -109,6 +109,13 @@ impl WorkQueueHandler for WorkQueueRpcHandler {
         self.stream_work_queue_status_rpc(request).await
     }
 
+    async fn watch_work_queue(
+        &self,
+        request: Request<tddy_service::proto::work_queue::WatchWorkQueueRequest>,
+    ) -> Result<Response<tddy_work_queue::rpc::WorkQueueWatchStream>, Status> {
+        self.watch_work_queue_rpc(request).await
+    }
+
     async fn assign_work_item_pr(
         &self,
         request: Request<AssignWorkItemPrRequest>,
