@@ -3,6 +3,9 @@
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::session::{
+    CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
+};
+use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
     GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, RenameSessionRequest,
@@ -120,12 +123,27 @@ impl SessionHandler for DaemonSessionHost {
             .get_worktree_snapshot_at_session_coordinate(request)
             .await
     }
+
+    async fn preview_close_session(
+        &self,
+        request: Request<PreviewCloseSessionRequest>,
+    ) -> Result<Response<CloseSessionPreview>, Status> {
+        self.preview_close_session_at_host(request).await
+    }
+
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<crate::CloseSessionEventStream>, Status> {
+        self.close_session_at_host(request).await
+    }
 }
 
 /// Legacy direct calls on [`DaemonSessionHost`] in acceptance tests and internal helpers.
 #[async_trait]
 impl SessionService for DaemonSessionHost {
     type StreamStartSessionStream = crate::SessionStartEventStream;
+    type CloseSessionStream = crate::CloseSessionEventStream;
 
     async fn list_sessions(
         &self,
@@ -195,6 +213,20 @@ impl SessionService for DaemonSessionHost {
         request: Request<GetWorktreeSnapshotRequest>,
     ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
         SessionHandler::get_worktree_snapshot(self, request).await
+    }
+
+    async fn preview_close_session(
+        &self,
+        request: Request<PreviewCloseSessionRequest>,
+    ) -> Result<Response<CloseSessionPreview>, Status> {
+        SessionHandler::preview_close_session(self, request).await
+    }
+
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<Self::CloseSessionStream>, Status> {
+        SessionHandler::close_session(self, request).await
     }
 }
 

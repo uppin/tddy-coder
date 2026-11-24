@@ -93,6 +93,62 @@ The list is split into an **Active** and a **Remaining** partition (see
 partition has its own order — see [Row order](#row-order). There is no per-session active-first
 re-sort (contrast with `sortSessionsForDisplay` used by `ConnectionScreen`).
 
+## Closing a session
+
+**Status:** ✅ Implemented (2026-11-24)
+
+An operator done with a session closes it from its row in one action: **every agent tab of the
+session is terminated and every worktree it owns is removed**, as one daemon task
+(`CloseSession`, [Closing a session](../daemon/session-liveness.md#closing-a-session)). The
+session's record and its branch are kept, so it then lists as ended under **More**, with no
+worktree; Restore in the inspector can recreate it from the branch, and Delete stays the separate
+step that removes the record.
+
+- An **active** row shows an **×** (`sessions-drawer-item-close-<id>`, label "Close session
+  <label>").
+- An **inactive** row whose session still holds a worktree (`SessionEntry.holdsWorktree`) shows a
+  mini **trash bin** (`sessions-drawer-item-remove-worktree-<id>`, label "Remove worktree of
+  <label>"). It runs the same close: any tab still running is terminated too.
+- The [pinned main](#pinned-main-entry) shows neither.
+
+Both are routed to the session's owning host, as Terminate and Delete are.
+
+### What a click does
+
+1. The drawer asks the owning host what the close would lose (`PreviewCloseSession`): per worktree
+   — the session's own (local, on its target, or on its codebase daemon), and each subagent
+   conversation's clone — its uncommitted files (staged, unstaged, deleted, renamed, untracked and
+   not ignored) and its commits that no remote has.
+2. **Nothing to lose and no live child**: the close runs at once, with no dialog.
+3. Otherwise the **close dialog** (`close-session-dialog`) opens **before anything is terminated
+   or removed**:
+   - one section per worktree (`close-session-dialog-worktree-<n>`): the host it is on, whose it is
+     (the session, conversation `<id>`, the codebase half), its branch, each file with its change,
+     each commit not on any remote;
+   - a worktree that could not be read (target unreachable, Coder vault locked, codebase daemon
+     offline) shows the reason and **Retry** (`close-session-dialog-retry`), which asks again;
+     **Confirm stays disabled** while any worktree is unreadable — a close never proceeds blind;
+   - a session that started others (rows whose `orchestratorSessionId` is this session and that
+     are active or hold a worktree) asks what to do with them: **Leave them running** (default,
+     `close-session-dialog-children-leave`) or **Close them too**
+     (`close-session-dialog-children-close`), which adds each child's own losses to the dialog;
+   - **Cancel** (`close-session-dialog-cancel`) closes the dialog and changes nothing;
+     **Terminate and remove** (`close-session-dialog-confirm`) runs the close with the list the
+     operator saw (its fingerprint). Children chosen are closed after the parent, each with its own —
+     and only once the parent's close succeeded: when it fails, no child is closed, the parent's
+     failure is shown, and the operator retries the parent and then its children.
+4. If the daemon finds more at risk than the operator confirmed (an agent wrote in the meantime),
+   the dialog opens again with the new list; nothing was removed.
+
+While the close runs, the row's × (or trash bin) is replaced by a **mini spinner**
+(`sessions-drawer-item-closing-<id>`), its hover text the step in progress. A close never blocks the
+drawer: the operator can close another session right away, and any number of closes run at once,
+each tracked on its own row. A row that is closing cannot be closed again until its close ends;
+while it runs the host also refuses a Resume, a new tab and a Delete of that session. A step that
+fails — a tab that would not end, a worktree that could not be removed, a host that could not be
+reached, a tab roster that could not be read — is reported in the drawer notices, naming the step
+and the host; when a tab survives, nothing is removed. The list is refreshed when the close ends.
+
 ## Project Groups
 
 The open drawer groups its sessions per project. Each group is a collapsible header showing the

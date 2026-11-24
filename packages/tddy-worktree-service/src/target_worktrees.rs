@@ -152,20 +152,79 @@ pub(crate) async fn run_on_target(
     Ok(output.stdout)
 }
 
+/// Whether `path` is on the target, through `shell`. Absence is answered only when it can be told:
+/// the nearest ancestor of `path` that is there is a directory this account can search. A path
+/// whose ancestor cannot be searched — `test -e` failing on a permission, not on absence — is the
+/// error, never read as gone.
+pub async fn target_path_is_present(shell: &dyn RemoteShell, path: &str) -> Result<bool, Status> {
+    let probe = format!(
+        "p={}; if [ -e \"$p\" ]; then echo present; exit 0; fi; d=$(dirname -- \"$p\"); \
+         while [ ! -e \"$d\" ]; do d=$(dirname -- \"$d\"); done; \
+         if [ -d \"$d\" ] && [ -x \"$d\" ]; then echo absent; \
+         else echo \"$d cannot be searched, so whether $p is there cannot be told\" >&2; exit 3; fi",
+        quoted(path)
+    );
+    let answer = run_on_target(shell, probe).await?;
+    match String::from_utf8_lossy(&answer).trim() {
+        "present" => Ok(true),
+        "absent" => Ok(false),
+        other => Err(Status::internal(format!(
+            "whether {path} is on the target cannot be told: the probe answered {other:?}"
+        ))),
+    }
+}
+
 /// Remove a target session's worktree on its target, through `shell`: the worktree, the pointer
 /// inside it, and the clone's registration of it (`git worktree remove`, then `prune`), so the
-/// clone does not keep a dangling entry.
+/// clone does not keep a dangling entry. Then checked: a worktree still on the target, or still
+/// listed by its clone, fails the removal.
+///
+/// A worktree already gone counts as removed: one removed before leaves nothing to do, and one
+/// whose directory was deleted outside git leaves only its registration, which the prune clears.
+/// `git worktree remove` runs only while the directory is there, since git refuses a path it does
+/// not list. A worktree whose presence cannot be told ([`target_path_is_present`]) is refused.
 pub async fn remove_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> Result<(), Status> {
     let root = checkout_root_of(worktree)?;
-    for command in [
-        format!(
-            "git -C {} worktree remove --force {}",
-            quoted(&root),
-            quoted(worktree)
-        ),
-        format!("git -C {} worktree prune", quoted(&root)),
-    ] {
-        run_on_target(shell, command).await?;
+    if target_path_is_present(shell, worktree).await? {
+        run_on_target(
+            shell,
+            format!(
+                "git -C {} worktree remove --force {}",
+                quoted(&root),
+                quoted(worktree)
+            ),
+        )
+        .await?;
+    }
+    run_on_target(shell, format!("git -C {} worktree prune", quoted(&root))).await?;
+    target_worktree_is_gone(shell, &root, worktree).await
+}
+
+/// The post-condition of a target removal: `worktree` is neither on the target nor among the
+/// worktrees of its clone at `root`.
+async fn target_worktree_is_gone(
+    shell: &dyn RemoteShell,
+    root: &str,
+    worktree: &str,
+) -> Result<(), Status> {
+    if target_path_is_present(shell, worktree).await? {
+        return Err(Status::internal(format!(
+            "{worktree} is still on the target after its removal"
+        )));
+    }
+    let listed = run_on_target(
+        shell,
+        format!("git -C {} worktree list --porcelain", quoted(root)),
+    )
+    .await?;
+    let still_listed = String::from_utf8_lossy(&listed)
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|path| path.trim_end_matches('/') == worktree.trim_end_matches('/'));
+    if still_listed {
+        return Err(Status::internal(format!(
+            "the target's clone still lists {worktree} among its worktrees after its removal"
+        )));
     }
     Ok(())
 }
@@ -267,9 +326,25 @@ mod tests {
 
     #[tokio::test]
     async fn removing_a_target_worktree_unregisters_it_from_the_clone() {
-        // Given a target that answers every command with success
+        // Given a target holding the worktree until git removes it, and answering every other
+        // command with success
         let target = InMemoryShell::new("coder.remote-dev");
-        target.answers_when(|_| Some(ExecOutput::succeeded(Vec::new())));
+        let removed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = std::sync::Arc::clone(&removed);
+        target.answers_when(move |command| {
+            use std::sync::atomic::Ordering;
+            if command.command.contains("worktree remove --force") {
+                seen.store(true, Ordering::SeqCst);
+            }
+            let answer = if !command.command.contains("echo present") {
+                ""
+            } else if seen.load(Ordering::SeqCst) {
+                "absent\n"
+            } else {
+                "present\n"
+            };
+            Some(ExecOutput::succeeded(answer.as_bytes().to_vec()))
+        });
 
         // When
         remove_target_worktree(&target, WORKTREE)

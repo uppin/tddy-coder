@@ -376,6 +376,34 @@ fn proto_context_doc_kind(kind: ContextDocKind) -> ProtoContextDocKind {
     }
 }
 
+/// Whether the session in `session_dir` still holds a worktree a close would remove: its type owns
+/// one ([`crate::session_deletion::worktree_removal_applies_to`]), it records one, no close removed
+/// it (the directory's `worktree-removed` marker), and — on this host — it is a daemon-managed
+/// worktree whose path exists. A worktree on the session's target counts as held until a close
+/// removes it: telling otherwise would take a round trip to the target per listed session.
+pub fn holds_worktree(
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+    session_dir: &Path,
+) -> bool {
+    let Ok(meta) = tddy_core::read_session_metadata(session_dir) else {
+        return false;
+    };
+    let session_type = meta.session_type.as_deref().unwrap_or_default();
+    let Some(worktree) = meta.repo_path.as_deref() else {
+        return false;
+    };
+    if !crate::session_deletion::worktree_removal_applies_to(agents, session_type)
+        || tddy_worktree_service::worktree_removed_marker::worktree_removal_recorded(session_dir)
+    {
+        return false;
+    }
+    if meta.target.is_some() {
+        return true;
+    }
+    let worktree = Path::new(worktree);
+    crate::session_deletion::is_daemon_managed_worktree(worktree) && worktree.exists()
+}
+
 /// Copies enrichment display strings into a proto `SessionEntry` (daemon list path).
 pub fn apply_session_list_status_to_proto(
     agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
@@ -397,6 +425,7 @@ pub fn apply_session_list_status_to_proto(
     entry.orchestrator_session_id = status.orchestrator_session_id;
     entry.work_queue_json = status.work_queue_json;
     entry.owns_work_queue = !status.queue_id.is_empty();
+    entry.holds_worktree = holds_worktree(agents, session_dir);
     entry.work_queue_id = status.queue_id;
     entry.branch = status.branch;
     entry.pending_elicitation =

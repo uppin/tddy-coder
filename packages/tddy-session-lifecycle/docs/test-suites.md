@@ -136,3 +136,23 @@ pid whose start time changed is never signalled, and a tmux-run session records 
 node. The old "ignores hangup" case was removed: its stub died on the closed pty, not on a signal. `tests/agent_run_support/`
 holds `AnAgentRun` and the run-file reader of `coder_target_session_acceptance` and `remote_target_session_acceptance`.
 The tool-host fixtures of every suite are `tddy_test_hosts::a_tool_host()`.
+
+### Closing a session
+
+`close_session` drives `PreviewCloseSession` and `CloseSession` against the tmux-agent fixture
+(`tests/tmux_agent_support/`): its `close_session.rs` module reads and shapes the session around a close
+(listing, git state, a tmux-wrapped tab, a split session's codebase half, a recorded agent clone, a
+half-written record or tab roster, a refusing tmux), and `scripted_peer.rs` is a common-room peer that
+answers `PreviewCloseSession`, `CloseSession`, `DeleteSession` and `CancelAgentConversation` as
+scripted (`a_daemon_in_a_room_with`), with no LiveKit. `AgentTemperament::LeavesAFileWhenEnded` is an
+agent that writes into its worktree as it is ended — the re-check's case.
+`test_util::open_a_remote_conversation` opens a forwarded conversation on a session.
+`close_target_session` closes a session on the stand-in ssh target. `close_events_support/` reads a
+close's events (`CloseEvents`) and holds `UnreadableUntilDropped`, a directory with its permissions
+taken off for the test.
+
+| Suite | What it pins |
+|---|---|
+| `close_session` | the preview (clean, dirty, unpushed, ignored files, fingerprint, tabs, a conversation worktree); confirmation and fingerprint drift; a close ends the main and a tmux tab, removes the worktrees and records the removal, keeping record and branch; a surviving tab skips every removal; concurrent closes and a refused second close; resume, a new tab and delete refused while a close runs; the re-check after an agent wrote as it ended; a cancelled close; an unreadable tab roster (close and delete), conversations directory or worktree parent; the codebase half here and on a peer; agent clones from the record; a remote conversation cancelled, or not |
+| `close_target_session` | the target worktree read and removed over ssh; an unreachable target; a target worktree whose parent cannot be searched; deleting a target session whose worktree is gone, and a closed tmux-run one whose target is unreachable |
+| `delete_session` | delete kills the tmux sessions of every tab; a closed session, and one whose worktree was removed outside the daemon, delete |

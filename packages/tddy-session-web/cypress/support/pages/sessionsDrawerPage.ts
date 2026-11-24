@@ -85,6 +85,19 @@ export const sessionsDrawerPage = {
   drawerOpenOverlayBtn: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsDrawerOpenOverlayBtn, { timeout: 5000, ...options }),
 
+  /**
+   * Every session row button in the drawer, in order — not the row controls beside them (the ×
+   * `sessions-drawer-item-close-<id>` and the trash bin `sessions-drawer-item-remove-worktree-<id>`
+   * share the row's test-id prefix).
+   */
+  rowButtons: (options?: Parameters<typeof cy.get>[1]) =>
+    cy.get(
+      "button[data-testid^='sessions-drawer-item-']" +
+        ":not([data-testid^='sessions-drawer-item-close-'])" +
+        ":not([data-testid^='sessions-drawer-item-remove-worktree-'])",
+      { timeout: 5000, ...options },
+    ),
+
   /** A single clickable drawer item for the given session id. */
   drawerItem: (sessionId: string, options?: Parameters<typeof cy.get>[1]) =>
     byTestId(sessionsDrawerItem(sessionId), { timeout: 5000, ...options }),

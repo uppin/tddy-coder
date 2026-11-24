@@ -344,15 +344,12 @@ pub fn kill_tmux_session(os_user: &str, name: &str) -> Result<(), TmuxError> {
 }
 
 /// Whether `os_user`'s tmux has a session `name`. A run that is refused (not as that user, or
-/// tmux not installed) answers `false`, and the reason is logged rather than dropped.
+/// tmux not installed) answers `false`, and the reason is logged rather than dropped. A caller that
+/// must not read "could not ask" as "gone" — a check that a session survived its end — asks
+/// [`tmux_session_lives`] instead.
 pub fn tmux_session_alive(os_user: &str, name: &str) -> bool {
-    let args = vec![
-        "has-session".to_string(),
-        "-t".to_string(),
-        exact_target(name),
-    ];
-    match run_tmux_as_user(os_user, &args) {
-        Ok(output) => output.status.success(),
+    match tmux_session_lives(os_user, name) {
+        Ok(alive) => alive,
         Err(refusal) => {
             log::warn!(
                 target: "tddy_daemon::tmux",
@@ -361,6 +358,17 @@ pub fn tmux_session_alive(os_user: &str, name: &str) -> bool {
             false
         }
     }
+}
+
+/// Whether `os_user`'s tmux has a session `name`, or why that cannot be told: tmux could not be run
+/// as that user. A tmux with no server running has no session, which is an answer.
+pub fn tmux_session_lives(os_user: &str, name: &str) -> Result<bool, TmuxError> {
+    let args = vec![
+        "has-session".to_string(),
+        "-t".to_string(),
+        exact_target(name),
+    ];
+    run_tmux_as_user(os_user, &args).map(|output| output.status.success())
 }
 
 /// The pid of the process in the first pane of `os_user`'s tmux session `name`.

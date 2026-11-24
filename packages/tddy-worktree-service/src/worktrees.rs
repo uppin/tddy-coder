@@ -1,16 +1,10 @@
 //! Git worktree listing, stats cache, path policy, and removal helpers (Worktrees manager PRD).
 
-use std::collections::HashMap;
-use std::fs;
-use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, Semaphore};
 
 /// One row from `git worktree list` after parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,6 +41,19 @@ pub enum RemoveWorktreeError {
     NotListed,
     CannotRemovePrimary,
     Io(String),
+}
+
+impl std::fmt::Display for RemoveWorktreeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GitFailed { message } => f.write_str(message),
+            Self::NotListed => f.write_str("the path is not one of the repository's worktrees"),
+            Self::CannotRemovePrimary => {
+                f.write_str("the repository's main worktree is never removed")
+            }
+            Self::Io(message) => write!(f, "git could not run: {message}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,12 +195,7 @@ pub fn validate_worktree_path_within_repo_root(
     Ok(resolved)
 }
 
-#[derive(Serialize, Deserialize)]
-struct WorktreeStatsCacheFile {
-    snapshots: Vec<WorktreeStatSnapshot>,
-}
-
-fn git_worktree_list_stdout(main_repo: &Path) -> String {
+pub(crate) fn git_worktree_list_stdout(main_repo: &Path) -> String {
     match Command::new("git")
         .current_dir(main_repo)
         .args(["worktree", "list"])
@@ -214,599 +216,16 @@ fn git_worktree_list_stdout(main_repo: &Path) -> String {
     }
 }
 
-fn build_worktree_stat_snapshots(rows: &[WorktreeListRow]) -> Vec<WorktreeStatSnapshot> {
-    let mut snapshots = Vec::with_capacity(rows.len());
-    for row in rows {
-        let disk_bytes = directory_size_bytes_best_effort(&row.path);
-        let numstat = git_diff_numstat(&row.path);
-        let updated_at_unix_ms = chrono::Utc::now().timestamp_millis();
-        snapshots.push(WorktreeStatSnapshot {
-            path: row.path.clone(),
-            branch_label: row.branch_label.clone(),
-            disk_bytes,
-            changed_files: numstat.changed_files,
-            lines_added: numstat.lines_added,
-            lines_removed: numstat.lines_removed,
-            updated_at_unix_ms,
-            stale: false,
-        });
-    }
-    snapshots
-}
+pub use crate::worktree_stats_cache::WorktreeStatsCache;
 
-fn write_worktree_stats_cache_file(path: &Path, snapshots: Vec<WorktreeStatSnapshot>) {
-    let payload = WorktreeStatsCacheFile { snapshots };
-    match serde_json::to_string_pretty(&payload) {
-        Ok(json) => {
-            if let Err(e) = tddy_core::atomic_file::write_atomic(path, json) {
-                warn!("write_worktree_stats_cache_file: write {:?}: {}", path, e);
-            } else {
-                debug!("write_worktree_stats_cache_file: wrote {:?}", path);
-            }
-        }
-        Err(e) => warn!("write_worktree_stats_cache_file: serialize: {}", e),
-    }
-}
+pub use crate::worktree_sizes::{
+    WorktreeSizeCalculator, WorktreeSizeState, WorktreeSizeStatus, WorktreeSizeUpdate,
+    DAEMON_SIZE_WALK_PERMITS,
+};
 
-/// Tracks expensive git/stat work; used by acceptance tests to ensure list RPC does not re-diff.
-pub struct WorktreeStatsCache {
-    root: PathBuf,
-    /// Simulates `git diff` / stat work invoked during refresh.
-    pub test_git_diff_invocations: AtomicU64,
-}
+pub use crate::worktree_diff::{git_diff_numstat, parse_git_diff_numstat, WorktreeNumstat};
 
-impl WorktreeStatsCache {
-    pub fn new(root: PathBuf) -> Self {
-        info!("WorktreeStatsCache::new root={:?}", root);
-        Self {
-            root,
-            test_git_diff_invocations: AtomicU64::new(0),
-        }
-    }
-
-    pub fn cache_root(&self) -> &Path {
-        &self.root
-    }
-
-    fn project_cache_dir(&self, project_id: &str) -> PathBuf {
-        let safe = project_id.replace(['/', '\\', ':'], "_");
-        self.root.join(safe)
-    }
-
-    fn cache_file_path(&self, project_id: &str) -> PathBuf {
-        self.project_cache_dir(project_id)
-            .join("worktree_stats.json")
-    }
-
-    /// Background / explicit refresh: runs `git worktree list` and per-worktree diff/size once per call, persists.
-    pub fn refresh_stats_for_project(&self, project_id: &str, main_repo: &Path) {
-        debug!(
-            "refresh_stats_for_project: project_id={} main_repo={:?}",
-            project_id, main_repo
-        );
-        let dir = self.project_cache_dir(project_id);
-        if let Err(e) = fs::create_dir_all(&dir) {
-            warn!("refresh_stats_for_project: create_dir_all {:?}: {}", dir, e);
-        }
-
-        let list_out = git_worktree_list_stdout(main_repo);
-
-        let rows = parse_git_worktree_list(&list_out);
-        info!(
-            "refresh_stats_for_project: {} worktree row(s) for project {}",
-            rows.len(),
-            project_id
-        );
-
-        let snapshots = build_worktree_stat_snapshots(&rows);
-
-        self.test_git_diff_invocations
-            .fetch_add(1, Ordering::SeqCst);
-
-        let path = self.cache_file_path(project_id);
-        write_worktree_stats_cache_file(&path, snapshots);
-    }
-
-    /// List path used by RPC: must serve last snapshot without re-running diff each time.
-    pub fn list_cached_stats(&self, project_id: &str) -> Vec<WorktreeStatSnapshot> {
-        debug!("list_cached_stats: project_id={}", project_id);
-        let path = self.cache_file_path(project_id);
-        let data = match fs::read_to_string(&path) {
-            Ok(s) => s,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                debug!("list_cached_stats: no cache file yet {:?}", path);
-                return Vec::new();
-            }
-            Err(e) => {
-                warn!("list_cached_stats: read {:?}: {}", path, e);
-                return Vec::new();
-            }
-        };
-        match serde_json::from_str::<WorktreeStatsCacheFile>(&data) {
-            Ok(f) => {
-                info!(
-                    "list_cached_stats: served {} snapshot(s) from disk for {}",
-                    f.snapshots.len(),
-                    project_id
-                );
-                f.snapshots
-            }
-            Err(e) => {
-                warn!("list_cached_stats: parse {:?}: {}", path, e);
-                Vec::new()
-            }
-        }
-    }
-
-    pub fn invalidate_project(&self, project_id: &str) {
-        debug!("invalidate_project: {}", project_id);
-        let path = self.cache_file_path(project_id);
-        match fs::remove_file(&path) {
-            Ok(()) => info!("invalidate_project: removed {:?}", path),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                debug!("invalidate_project: no file {:?}", path)
-            }
-            Err(e) => warn!("invalidate_project: remove {:?}: {}", path, e),
-        }
-    }
-}
-
-/// Lifecycle of a worktree's on-disk size calculation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WorktreeSizeStatus {
-    /// Never calculated and no walk currently in flight.
-    None,
-    /// A size walk is in progress (queued or running).
-    Calculating,
-    /// A size has been computed (in memory or persisted) and is available.
-    Cached,
-}
-
-/// The current known size state of a single worktree.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeSizeState {
-    pub status: WorktreeSizeStatus,
-    pub disk_bytes: Option<u64>,
-    pub calculated_at_unix_ms: Option<i64>,
-}
-
-impl WorktreeSizeState {
-    fn none() -> Self {
-        Self {
-            status: WorktreeSizeStatus::None,
-            disk_bytes: None,
-            calculated_at_unix_ms: None,
-        }
-    }
-}
-
-/// A published state transition for one worktree, delivered over the per-project broadcast channel.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeSizeUpdate {
-    pub path: PathBuf,
-    pub status: WorktreeSizeStatus,
-    pub disk_bytes: Option<u64>,
-    pub calculated_at_unix_ms: Option<i64>,
-}
-
-/// One persisted worktree size entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedWorktreeSize {
-    disk_bytes: u64,
-    calculated_at_unix_ms: i64,
-}
-
-/// On-disk shape of `{root}/{project}/worktree_sizes.json` (map of worktree path -> size).
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct WorktreeSizesCacheFile {
-    sizes: HashMap<String, PersistedWorktreeSize>,
-}
-
-/// In-memory state shared between the calculator handle and its spawned walk tasks.
-#[derive(Default)]
-struct WorktreeSizeInner {
-    /// (project_id, worktree_path) -> current state.
-    states: HashMap<(String, PathBuf), WorktreeSizeState>,
-    /// project_id -> broadcast sender for that project's updates.
-    senders: HashMap<String, broadcast::Sender<WorktreeSizeUpdate>>,
-}
-
-/// Capacity of each project's broadcast channel; ample so a slow subscriber created before a walk
-/// still observes the full `Calculating` -> `Cached` sequence.
-const SIZE_UPDATE_CHANNEL_CAPACITY: usize = 1024;
-
-/// The daemon-wide cap on concurrent size walks, shared by every calculator a daemon builds.
-pub const DAEMON_SIZE_WALK_PERMITS: usize = 2;
-
-/// Lazy, semaphore-bounded per-worktree disk-size calculator.
-///
-/// Sizes are computed off the async runtime via `spawn_blocking`, capped by a central semaphore so
-/// at most `permits` walks run at once. Results are broadcast per project and persisted separately
-/// from [`WorktreeStatsCache`] so a fresh calculator over the same `root` serves cached sizes
-/// without re-walking.
-pub struct WorktreeSizeCalculator {
-    root: PathBuf,
-    sizer: Arc<dyn Fn(&Path) -> u64 + Send + Sync>,
-    semaphore: Arc<Semaphore>,
-    inner: Arc<Mutex<WorktreeSizeInner>>,
-    /// Serializes read-modify-write of each project's persisted sizes file.
-    persist_lock: Arc<Mutex<()>>,
-}
-
-impl WorktreeSizeCalculator {
-    /// Production constructor: uses the real best-effort directory walk as the sizer.
-    pub fn new(root: PathBuf, permits: usize) -> Self {
-        let sizer: Arc<dyn Fn(&Path) -> u64 + Send + Sync> =
-            Arc::new(directory_size_bytes_best_effort);
-        Self::with_sizer(root, permits, sizer)
-    }
-
-    /// Constructor with an injectable sizer (used by tests to observe concurrency and gate walks).
-    pub fn with_sizer(
-        root: PathBuf,
-        permits: usize,
-        sizer: Arc<dyn Fn(&Path) -> u64 + Send + Sync>,
-    ) -> Self {
-        info!(
-            "WorktreeSizeCalculator::with_sizer root={:?} permits={}",
-            root, permits
-        );
-        Self {
-            root,
-            sizer,
-            semaphore: Arc::new(Semaphore::new(permits)),
-            inner: Arc::new(Mutex::new(WorktreeSizeInner::default())),
-            persist_lock: Arc::new(Mutex::new(())),
-        }
-    }
-
-    /// Current size state of one worktree.
-    ///
-    /// Reads in-memory state first; if unknown there, lazily falls back to the persisted file so a
-    /// freshly-constructed calculator reports `Cached` without triggering a walk. Reports `None`
-    /// only when nothing has ever been computed and no walk is in flight.
-    pub fn state(&self, project_id: &str, path: &Path) -> WorktreeSizeState {
-        let key = (project_id.to_string(), path.to_path_buf());
-        {
-            let inner = self.inner.lock().unwrap();
-            if let Some(state) = inner.states.get(&key) {
-                return state.clone();
-            }
-        }
-        if let Some(persisted) = self.load_persisted_entry(project_id, path) {
-            let state = WorktreeSizeState {
-                status: WorktreeSizeStatus::Cached,
-                disk_bytes: Some(persisted.disk_bytes),
-                calculated_at_unix_ms: Some(persisted.calculated_at_unix_ms),
-            };
-            let mut inner = self.inner.lock().unwrap();
-            return inner.states.entry(key).or_insert(state).clone();
-        }
-        WorktreeSizeState::none()
-    }
-
-    /// Subscribe to a project's stream of size updates. Creates the channel on first use.
-    pub fn subscribe(&self, project_id: &str) -> broadcast::Receiver<WorktreeSizeUpdate> {
-        let mut inner = self.inner.lock().unwrap();
-        Self::sender_for(&mut inner, project_id).subscribe()
-    }
-
-    /// Start (or de-duplicate) a size calculation for one worktree.
-    ///
-    /// Synchronously marks the worktree `Calculating` and broadcasts that update, then spawns a task
-    /// that acquires one semaphore permit, runs the sizer under `spawn_blocking`, and on completion
-    /// persists it, then marks it `Cached` and broadcasts. Re-enqueuing a worktree that is already
-    /// `Calculating` is a no-op (the in-flight walk is reused).
-    pub async fn enqueue(&self, project_id: &str, path: &Path) {
-        let key = (project_id.to_string(), path.to_path_buf());
-        {
-            let mut inner = self.inner.lock().unwrap();
-            if let Some(state) = inner.states.get(&key) {
-                if state.status == WorktreeSizeStatus::Calculating {
-                    debug!(
-                        "WorktreeSizeCalculator::enqueue: {:?} already calculating; reusing walk",
-                        path
-                    );
-                    return;
-                }
-            }
-            inner.states.insert(
-                key.clone(),
-                WorktreeSizeState {
-                    status: WorktreeSizeStatus::Calculating,
-                    disk_bytes: None,
-                    calculated_at_unix_ms: None,
-                },
-            );
-            let update = WorktreeSizeUpdate {
-                path: path.to_path_buf(),
-                status: WorktreeSizeStatus::Calculating,
-                disk_bytes: None,
-                calculated_at_unix_ms: None,
-            };
-            let _ = Self::sender_for(&mut inner, project_id).send(update);
-        }
-
-        let sizer = Arc::clone(&self.sizer);
-        let semaphore = Arc::clone(&self.semaphore);
-        let inner = Arc::clone(&self.inner);
-        let persist_lock = Arc::clone(&self.persist_lock);
-        let root = self.root.clone();
-        let project_id = project_id.to_string();
-        let path = path.to_path_buf();
-
-        tokio::spawn(async move {
-            let _permit = match semaphore.acquire().await {
-                Ok(permit) => permit,
-                Err(e) => {
-                    warn!("WorktreeSizeCalculator: semaphore closed: {}", e);
-                    return;
-                }
-            };
-
-            let sizer_path = path.clone();
-            let bytes = match tokio::task::spawn_blocking(move || sizer(&sizer_path)).await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    warn!(
-                        "WorktreeSizeCalculator: size walk for {:?} panicked: {}",
-                        path, e
-                    );
-                    return;
-                }
-            };
-            let calculated_at_unix_ms = chrono::Utc::now().timestamp_millis();
-
-            // Persist before publishing `Cached`: a reader that sees the update and opens a fresh
-            // calculator over the same root must find the size on disk.
-            persist_worktree_size(
-                &root,
-                &persist_lock,
-                &project_id,
-                &path,
-                bytes,
-                calculated_at_unix_ms,
-            );
-
-            {
-                let mut guard = inner.lock().unwrap();
-                guard.states.insert(
-                    (project_id.clone(), path.clone()),
-                    WorktreeSizeState {
-                        status: WorktreeSizeStatus::Cached,
-                        disk_bytes: Some(bytes),
-                        calculated_at_unix_ms: Some(calculated_at_unix_ms),
-                    },
-                );
-                if let Some(sender) = guard.senders.get(&project_id) {
-                    let _ = sender.send(WorktreeSizeUpdate {
-                        path: path.clone(),
-                        status: WorktreeSizeStatus::Cached,
-                        disk_bytes: Some(bytes),
-                        calculated_at_unix_ms: Some(calculated_at_unix_ms),
-                    });
-                }
-            }
-
-            debug!(
-                "WorktreeSizeCalculator: cached {:?} = {} bytes",
-                path, bytes
-            );
-        });
-    }
-
-    /// Snapshot of every known worktree's state in a project (the stream's first frame). Merges
-    /// persisted entries with the (authoritative) in-memory states.
-    pub fn snapshot(&self, project_id: &str) -> Vec<WorktreeSizeUpdate> {
-        let mut merged: HashMap<PathBuf, WorktreeSizeState> = HashMap::new();
-
-        let cache = read_worktree_sizes_file(&project_sizes_file(&self.root, project_id));
-        for (path, persisted) in cache.sizes {
-            merged.insert(
-                PathBuf::from(path),
-                WorktreeSizeState {
-                    status: WorktreeSizeStatus::Cached,
-                    disk_bytes: Some(persisted.disk_bytes),
-                    calculated_at_unix_ms: Some(persisted.calculated_at_unix_ms),
-                },
-            );
-        }
-        {
-            let inner = self.inner.lock().unwrap();
-            for ((proj, path), state) in inner.states.iter() {
-                if proj == project_id {
-                    merged.insert(path.clone(), state.clone());
-                }
-            }
-        }
-
-        merged
-            .into_iter()
-            .map(|(path, state)| WorktreeSizeUpdate {
-                path,
-                status: state.status,
-                disk_bytes: state.disk_bytes,
-                calculated_at_unix_ms: state.calculated_at_unix_ms,
-            })
-            .collect()
-    }
-
-    fn sender_for<'a>(
-        inner: &'a mut WorktreeSizeInner,
-        project_id: &str,
-    ) -> &'a broadcast::Sender<WorktreeSizeUpdate> {
-        inner
-            .senders
-            .entry(project_id.to_string())
-            .or_insert_with(|| broadcast::channel(SIZE_UPDATE_CHANNEL_CAPACITY).0)
-    }
-
-    fn load_persisted_entry(&self, project_id: &str, path: &Path) -> Option<PersistedWorktreeSize> {
-        let file = project_sizes_file(&self.root, project_id);
-        let cache = read_worktree_sizes_file(&file);
-        cache.sizes.get(&worktree_size_key(path)).cloned()
-    }
-}
-
-/// Persisted-sizes file path for a project: `{root}/{sanitized_project}/worktree_sizes.json`.
-/// Sanitization matches [`WorktreeStatsCache`] so the two caches share a per-project directory
-/// while keeping distinct files.
-fn project_sizes_file(root: &Path, project_id: &str) -> PathBuf {
-    let safe = project_id.replace(['/', '\\', ':'], "_");
-    root.join(safe).join("worktree_sizes.json")
-}
-
-fn worktree_size_key(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
-fn read_worktree_sizes_file(file: &Path) -> WorktreeSizesCacheFile {
-    match fs::read_to_string(file) {
-        Ok(data) => serde_json::from_str(&data).unwrap_or_else(|e| {
-            warn!("read_worktree_sizes_file: parse {:?}: {}", file, e);
-            WorktreeSizesCacheFile::default()
-        }),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => WorktreeSizesCacheFile::default(),
-        Err(e) => {
-            warn!("read_worktree_sizes_file: read {:?}: {}", file, e);
-            WorktreeSizesCacheFile::default()
-        }
-    }
-}
-
-fn persist_worktree_size(
-    root: &Path,
-    persist_lock: &Mutex<()>,
-    project_id: &str,
-    path: &Path,
-    disk_bytes: u64,
-    calculated_at_unix_ms: i64,
-) {
-    let _guard = persist_lock.lock().unwrap();
-    let file = project_sizes_file(root, project_id);
-    if let Some(dir) = file.parent() {
-        if let Err(e) = fs::create_dir_all(dir) {
-            warn!("persist_worktree_size: create_dir_all {:?}: {}", dir, e);
-            return;
-        }
-    }
-    let mut cache = read_worktree_sizes_file(&file);
-    cache.sizes.insert(
-        worktree_size_key(path),
-        PersistedWorktreeSize {
-            disk_bytes,
-            calculated_at_unix_ms,
-        },
-    );
-    match serde_json::to_string_pretty(&cache) {
-        Ok(json) => {
-            if let Err(e) = tddy_core::atomic_file::write_atomic(&file, json) {
-                warn!("persist_worktree_size: write {:?}: {}", file, e);
-            }
-        }
-        Err(e) => warn!("persist_worktree_size: serialize: {}", e),
-    }
-}
-
-fn directory_size_bytes_best_effort(path: &Path) -> u64 {
-    let walk_root = path.to_path_buf();
-    let mut total = 0u64;
-    if let Ok(m) = fs::metadata(path) {
-        if m.is_file() {
-            return m.len();
-        }
-    }
-    let mut stack = vec![walk_root.clone()];
-    while let Some(p) = stack.pop() {
-        let read_dir = match fs::read_dir(&p) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        for ent in read_dir.flatten() {
-            let meta = match ent.metadata() {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            if meta.is_dir() {
-                if paths_equal(&p, &walk_root)
-                    && ent.file_name().as_os_str() == std::ffi::OsStr::new(".worktrees")
-                {
-                    continue;
-                }
-                stack.push(ent.path());
-            } else {
-                total += meta.len();
-            }
-        }
-    }
-    total
-}
-
-/// One `git diff --numstat HEAD` run: the paths it named, in git's order, and the totals over them.
-///
-/// The paths are what the Worktrees screen throws away and a session room's metadata keeps, so both
-/// read the same measurement rather than each running their own diff and disagreeing about it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WorktreeNumstat {
-    /// The paths exactly as git printed them. Without `-z`, git C-quotes any path that is not plain
-    /// ASCII (`"src/caf\303\251.rs"`) and writes a rename as `{old => new}`, so these are for
-    /// display and comparison between two runs — not for opening a file with.
-    pub paths: Vec<String>,
-    pub changed_files: u32,
-    pub lines_added: i64,
-    pub lines_removed: i64,
-}
-
-/// Run `git diff --numstat HEAD` in `cwd` and parse it.
-///
-/// A repository git cannot read reports as no changes: this feeds a status display and a room
-/// summary, neither of which has anywhere to put an error.
-pub fn git_diff_numstat(cwd: &Path) -> WorktreeNumstat {
-    let out = match Command::new("git")
-        .current_dir(cwd)
-        .args(["diff", "--numstat", "HEAD"])
-        .output()
-    {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return WorktreeNumstat::default(),
-    };
-    parse_git_diff_numstat(&out)
-}
-
-/// Parse `git diff --numstat` output. Each line is `added\tremoved\tpath`, with `-\t-` in place of
-/// the counts for a binary file — which still changed, so it counts toward `changed_files` while
-/// contributing no lines.
-///
-/// Shared with [`crate::session_room`], which runs the same command under its own deadline: the
-/// room and the Worktrees screen must never quote different totals for one checkout, and one parser
-/// is how that stays true.
-pub fn parse_git_diff_numstat(stdout: &str) -> WorktreeNumstat {
-    let mut summary = WorktreeNumstat::default();
-    for line in stdout.lines() {
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.trim().is_empty() {
-            continue;
-        }
-        let mut fields = line.splitn(3, '\t');
-        let (a, b, path) = (fields.next(), fields.next(), fields.next());
-        if a == Some("-") && b == Some("-") {
-            summary.changed_files += 1;
-            summary.paths.extend(path.map(str::to_string));
-            continue;
-        }
-        if let (Some(a), Some(b)) = (a, b) {
-            if let (Ok(ai), Ok(bi)) = (a.trim().parse::<i64>(), b.trim().parse::<i64>()) {
-                summary.changed_files += 1;
-                summary.lines_added += ai;
-                summary.lines_removed += bi;
-                summary.paths.extend(path.map(str::to_string));
-            }
-        }
-    }
-    summary
-}
-
-fn paths_equal(a: &Path, b: &Path) -> bool {
+pub(crate) fn paths_equal(a: &Path, b: &Path) -> bool {
     lexical_normalize(a) == lexical_normalize(b)
 }
 
@@ -815,68 +234,9 @@ fn worktree_path_in_rows(rows: &[WorktreeListRow], worktree_path: &Path) -> bool
     rows.iter().any(|r| paths_equal(&r.path, worktree_path))
 }
 
-/// A worktree's identity plus its git diff summary, but **without** the on-disk size walk.
-///
-/// The streaming size RPC ([`crate::connection_service`]) builds rows from this and fills each
-/// worktree's disk size lazily via [`WorktreeSizeCalculator`], so it never pays for the eager
-/// directory walk that [`WorktreeStatsCache::refresh_stats_for_project`] performs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeDiffRow {
-    pub path: PathBuf,
-    pub branch_label: String,
-    pub changed_files: u32,
-    pub lines_added: i64,
-    pub lines_removed: i64,
-}
-
-/// List `main_repo`'s worktrees with each one's `git diff --numstat` summary, skipping disk-size
-/// calculation. Reuses the same `git worktree list` parse and diff summary as the stats refresh.
-pub fn list_worktree_diff_rows(main_repo: &Path) -> Vec<WorktreeDiffRow> {
-    let stdout = git_worktree_list_stdout(main_repo);
-    let rows = parse_git_worktree_list(&stdout);
-    info!(
-        "list_worktree_diff_rows: {} worktree row(s) for repo {:?}",
-        rows.len(),
-        main_repo
-    );
-    rows.into_iter()
-        .map(|row| {
-            let numstat = git_diff_numstat(&row.path);
-            WorktreeDiffRow {
-                path: row.path,
-                branch_label: row.branch_label,
-                changed_files: numstat.changed_files,
-                lines_added: numstat.lines_added,
-                lines_removed: numstat.lines_removed,
-            }
-        })
-        .collect()
-}
-
-/// What the Worktrees screen's snapshot holds for one worktree: its diff summary and the size state
-/// the daemon's calculator has for it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorktreeSnapshotRow {
-    pub diff: WorktreeDiffRow,
-    pub size: WorktreeSizeState,
-}
-
-/// The snapshot of `main_repo`'s worktrees that `StreamWorktreeStats` opens with and the project-home
-/// `ListWorktrees` tool reads: every worktree with its diff summary, and the size state `calculator`
-/// holds for it now. Starts no size walk; that is the caller's to ask for.
-pub fn project_worktree_snapshot(
-    main_repo: &Path,
-    calculator: &WorktreeSizeCalculator,
-    project_id: &str,
-) -> Vec<WorktreeSnapshotRow> {
-    list_worktree_diff_rows(main_repo)
-        .into_iter()
-        .map(|diff| {
-            let size = calculator.state(project_id, &diff.path);
-            WorktreeSnapshotRow { diff, size }
-        })
-        .collect()
-}
+pub use crate::worktree_diff::{
+    list_worktree_diff_rows, project_worktree_snapshot, WorktreeDiffRow, WorktreeSnapshotRow,
+};
 
 /// True when `worktree_path` appears in `git worktree list` for `repo_root`. Used to gate
 /// filesystem access to a worktree behind git's own membership view.
@@ -951,6 +311,104 @@ pub fn remove_worktree_under_repo(
     Ok(())
 }
 
+/// Remove `worktree` from `repo_root`'s repository whatever it holds — `git worktree remove
+/// --force`, then `git worktree prune` — for a caller that has already established that nothing in
+/// it would be lost (a confirmed close). A worktree already gone counts as removed: one removed
+/// before leaves nothing to do, and one whose directory was deleted outside git leaves only its
+/// registration, which the prune clears. `git worktree remove` runs only while the directory is
+/// there, since git refuses a path it does not list.
+pub fn force_remove_worktree_under_repo(
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<(), RemoveWorktreeError> {
+    info!(
+        "force_remove_worktree_under_repo: repo_root={:?} worktree_path={:?}",
+        repo_root, worktree_path
+    );
+    let wt_str = worktree_path
+        .to_str()
+        .ok_or_else(|| RemoveWorktreeError::Io("worktree path is not valid UTF-8".to_string()))?;
+    if path_is_present(worktree_path)? {
+        run_worktree_command(repo_root, &["worktree", "remove", "--force", wt_str])?;
+    }
+    run_worktree_command(repo_root, &["worktree", "prune"])?;
+    worktree_is_gone_from(repo_root, worktree_path)
+}
+
+/// Whether `path` is on disk. Only "no such file" is absence: a path that cannot be looked at (a
+/// parent that cannot be searched) is the error, never read as gone.
+pub fn path_is_present(path: &Path) -> Result<bool, RemoveWorktreeError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(RemoveWorktreeError::Io(format!(
+            "{} cannot be looked at: {error}",
+            path.display()
+        ))),
+    }
+}
+
+/// The post-condition of a removal: `worktree_path` is neither on disk nor among `repo_root`'s
+/// worktrees.
+fn worktree_is_gone_from(
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<(), RemoveWorktreeError> {
+    if path_is_present(worktree_path)? {
+        return Err(RemoveWorktreeError::Io(format!(
+            "{} is still there after its removal",
+            worktree_path.display()
+        )));
+    }
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .map_err(|e| RemoveWorktreeError::Io(e.to_string()))?;
+    if !out.status.success() {
+        return Err(RemoveWorktreeError::GitFailed {
+            message: format!(
+                "git worktree list failed ({:?}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim_end()
+            ),
+        });
+    }
+    let still_listed = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|listed| paths_equal(Path::new(listed), worktree_path));
+    if still_listed {
+        return Err(RemoveWorktreeError::GitFailed {
+            message: format!(
+                "the repository still lists {} among its worktrees after its removal",
+                worktree_path.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// `git <args>` in `repo_root`, its stderr the error's message when it fails.
+fn run_worktree_command(repo_root: &Path, args: &[&str]) -> Result<(), RemoveWorktreeError> {
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(args)
+        .output()
+        .map_err(|e| RemoveWorktreeError::Io(e.to_string()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(RemoveWorktreeError::GitFailed {
+        message: format!(
+            "git {} failed ({:?}): {}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim_end()
+        ),
+    })
+}
+
 /// Clear a secondary worktree in place with `git clean -fdx` (drops untracked + ignored files,
 /// e.g. build output, to reclaim disk without removing the worktree). The path must appear in
 /// `git worktree list` for `repo_root` and must not be the primary (first-listed) worktree.
@@ -1006,6 +464,10 @@ pub fn clean_worktree_under_repo(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use crate::worktree_sizes::directory_size_bytes_best_effort;
+
     use super::*;
 
     /// BUG: When the main repo has linked worktrees under `.worktrees/` (a subdirectory of the
@@ -1079,5 +541,97 @@ mod tests {
         match err {
             WorktreePathError::OutsideRepoRoot { .. } => {}
         }
+    }
+
+    /// `git -C <dir> <args>`, which must succeed.
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    fn set_mode(directory: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(directory, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn a_forced_removal_of_a_worktree_that_cannot_be_looked_at_is_refused_and_keeps_it() {
+        // Given a repository whose worktree sits in a directory that cannot be searched
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let worktree = repo.join(".worktrees").join("wt1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt1",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        set_mode(&repo.join(".worktrees"), 0o000);
+
+        // When
+        let removed = force_remove_worktree_under_repo(&repo, &worktree);
+        set_mode(&repo.join(".worktrees"), 0o755);
+
+        // Then
+        assert_eq!(
+            (
+                removed.map_err(|error| error.to_string().contains("cannot be looked at")),
+                worktree.is_dir(),
+            ),
+            (Err(true), true)
+        );
+    }
+
+    #[test]
+    fn a_forced_removal_leaves_the_worktree_neither_on_disk_nor_listed() {
+        // Given a repository with a dirty worktree
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let worktree = repo.join(".worktrees").join("wt1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt1",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        fs::write(worktree.join("notes.md"), "dirty\n").unwrap();
+
+        // When
+        let removed = force_remove_worktree_under_repo(&repo, &worktree);
+
+        // Then
+        assert_eq!(
+            (
+                removed.map_err(|error| error.to_string()),
+                worktree.exists(),
+                worktree_path_is_listed(&repo, &worktree),
+            ),
+            (Ok(()), false, false)
+        );
     }
 }

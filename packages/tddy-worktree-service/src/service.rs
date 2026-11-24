@@ -28,8 +28,8 @@ use tddy_task::IdleTimeoutTracker;
 use crate::project_storage;
 use crate::pull_request_view::SessionPullRequests;
 use crate::service_helpers::{
-    blocking_within, map_clean_worktree_error, map_remove_worktree_error,
-    proto_worktree_size_status, worktree_row_from_diff,
+    blocking_within, forget_a_recorded_removal, map_clean_worktree_error,
+    map_remove_worktree_error, proto_worktree_size_status, worktree_row_from_diff,
 };
 use crate::stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};
 use crate::worktree_sync::{pull_fast_forward, push_branch, read_sync_state};
@@ -311,6 +311,7 @@ impl WorktreeService for WorktreeServiceImpl {
             let shell = self.shell_of_target(&req.session_token, &session).await?;
             let worktree_path =
                 crate::target_worktrees::restore_target_worktree(shell.as_ref(), &session).await?;
+            forget_a_recorded_removal(&session_dir)?;
             self.worktree_stats_cache.invalidate_project(project_id);
             return Ok(Response::new(RestoreSessionWorktreeResponse {
                 ok: true,
@@ -345,6 +346,7 @@ impl WorktreeService for WorktreeServiceImpl {
 
         match restored {
             Ok(path) => {
+                forget_a_recorded_removal(&session_dir)?;
                 self.worktree_stats_cache.invalidate_project(project_id);
                 Ok(Response::new(RestoreSessionWorktreeResponse {
                     ok: true,

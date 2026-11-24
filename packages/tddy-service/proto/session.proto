@@ -60,6 +60,15 @@ service SessionService {
   // codebase daemon would take of itself. One round trip per poll rather than three, because the
   // measurement is assembled where the files are.
   rpc GetWorktreeSnapshot(GetWorktreeSnapshotRequest) returns (GetWorktreeSnapshotResponse);
+  // What closing a session would lose: per worktree it owns, its uncommitted files and its commits
+  // no remote holds, and the tabs a close would terminate (docs/ft/daemon/session-liveness.md
+  // § Closing a session). Read-only and advisory: CloseSession checks again. Answered by the daemon
+  // holding the session, as DeleteSession is.
+  rpc PreviewCloseSession(PreviewCloseSessionRequest) returns (CloseSessionPreview);
+  // Close a session as one task: terminate every agent tab of it, then remove every worktree it
+  // owns, keeping its record and branch. The first event names the task; exactly one terminal
+  // event follows — `needs_confirmation` (nothing more was done) or `outcome`.
+  rpc CloseSession(CloseSessionRequest) returns (stream CloseSessionEvent);
 }
 
 message AgentClonePlacement {
@@ -444,6 +453,10 @@ message SessionEntry {
   // Whether this session owns a work queue (`#workqueue` 5/14) — the inspector shows the Work queue
   // tab, and opens on it, exactly when it does.
   bool owns_work_queue = 44;
+  // Whether the session still holds a worktree a close would remove: its type owns one, it records
+  // one, no close removed it (the session directory's `worktree-removed` marker), and — when it is on this
+  // host — the path exists. The drawer offers an inactive row's trash bin exactly when it does.
+  bool holds_worktree = 45;
 }
 
 // A machine a session's agent runs on that the serving daemon reaches through a remote shell, with
@@ -901,4 +914,135 @@ message StartSessionResponse {
   // requested branch. `session_id` is then empty: no session directory, no branch and no worktree
   // were created. See docs/ft/daemon/session-branch-conflict.md.
   BranchConflict branch_conflict = 5;
+}
+
+// ───────────────────────────────────────────── closing a session ─────────────
+
+message PreviewCloseSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+}
+
+message CloseSessionRequest {
+  string session_token = 1;
+  string session_id = 2;
+  // The operator saw the preview's losses and accepted them.
+  bool confirmed = 3;
+  // `CloseSessionPreview.fingerprint` of the preview the operator accepted. A close whose losses no
+  // longer match it asks again instead of acting.
+  string confirmed_fingerprint = 4;
+}
+
+// Whose a worktree a close would remove is.
+enum CloseSessionWorktreeOwner {
+  CLOSE_SESSION_WORKTREE_OWNER_UNSPECIFIED = 0;
+  // The session's own worktree, on this host or on its target.
+  CLOSE_SESSION_WORKTREE_OWNER_SESSION = 1;
+  // A clone-placed subagent conversation's worktree (`owner_id` = the conversation).
+  CLOSE_SESSION_WORKTREE_OWNER_CONVERSATION = 2;
+  // A split session's checkout on its codebase daemon (`owner_id` = the paired workspace session).
+  CLOSE_SESSION_WORKTREE_OWNER_CODEBASE = 3;
+}
+
+message CloseSessionDirtyFile {
+  string path = 1;
+  // `modified` / `staged` / `untracked` / `deleted` / `renamed`.
+  string change = 2;
+}
+
+message CloseSessionCommit {
+  string sha = 1;
+  string subject = 2;
+}
+
+// One worktree a close would remove, and what removing it would lose.
+message CloseSessionWorktree {
+  string path = 1;
+  // Where it is: empty for this daemon's host; otherwise the target (ssh host, Coder workspace) or
+  // the codebase daemon it is on, as the operator knows it.
+  string host = 2;
+  CloseSessionWorktreeOwner owner = 3;
+  // The conversation or workspace session the worktree belongs to; empty for SESSION.
+  string owner_id = 4;
+  string branch = 5;
+  // Uncommitted files: staged, unstaged, deleted, renamed, and untracked files that are not ignored.
+  repeated CloseSessionDirtyFile dirty_files = 6;
+  // Commits on the worktree's HEAD that no remote-tracking ref and not the session's recorded base
+  // hold — at most 20, newest first.
+  repeated CloseSessionCommit unpushed_commits = 7;
+  // How many such commits there are in all (may exceed the listed ones).
+  uint32 unpushed_commit_count = 8;
+  // Why the worktree could not be read (target unreachable, vault locked, codebase daemon offline);
+  // empty when it was. A close never proceeds past an unreadable worktree.
+  string unavailable_reason = 9;
+}
+
+// One agent tab a close would terminate.
+message CloseSessionTab {
+  // `main`, a terminal id, or `conversation:<id>`.
+  string tab_id = 1;
+  // How the operator knows it (agent kind, tmux session, conversation's agent).
+  string label = 2;
+}
+
+message CloseSessionPreview {
+  repeated CloseSessionWorktree worktrees = 1;
+  repeated CloseSessionTab tabs = 2;
+  // A digest of every worktree's owner, path and losses (or unavailable reason). CloseSession
+  // compares it with the one the operator confirmed.
+  string fingerprint = 3;
+  // True when any worktree would lose something or could not be read: the operator is asked.
+  bool needs_confirmation = 4;
+}
+
+message CloseSessionStarted {
+  string task_id = 1;
+  string daemon_instance_id = 2;
+}
+
+enum CloseSessionStepKind {
+  CLOSE_SESSION_STEP_KIND_UNSPECIFIED = 0;
+  CLOSE_SESSION_STEP_KIND_CHECK = 1;
+  CLOSE_SESSION_STEP_KIND_TERMINATE = 2;
+  CLOSE_SESSION_STEP_KIND_REMOVE = 3;
+  CLOSE_SESSION_STEP_KIND_RECORD = 4;
+}
+
+enum CloseSessionStepState {
+  CLOSE_SESSION_STEP_STATE_UNSPECIFIED = 0;
+  CLOSE_SESSION_STEP_STATE_RUNNING = 1;
+  CLOSE_SESSION_STEP_STATE_DONE = 2;
+  CLOSE_SESSION_STEP_STATE_FAILED = 3;
+  // Not attempted, because an earlier step failed (a tab survived, so no worktree is removed).
+  CLOSE_SESSION_STEP_STATE_SKIPPED = 4;
+}
+
+message CloseSessionStep {
+  CloseSessionStepKind kind = 1;
+  // What the step acts on: a tab id, a worktree path, the session.
+  string subject = 2;
+  CloseSessionStepState state = 3;
+  // Why it failed or was skipped; a short note otherwise.
+  string message = 4;
+  // Where it ran: empty for this daemon's host, else the target or peer daemon.
+  string host = 5;
+}
+
+message CloseSessionOutcome {
+  // True when every tab ended and every worktree was removed.
+  bool ok = 1;
+  // Every step that failed or was skipped, in order.
+  repeated CloseSessionStep failed_steps = 2;
+}
+
+message CloseSessionEvent {
+  oneof event {
+    CloseSessionStarted started = 1;
+    CloseSessionStep step = 2;
+    // Terminal: the close found something unconfirmed (or unreadable) at risk and did nothing
+    // further. Carries the fresh preview to show the operator.
+    CloseSessionPreview needs_confirmation = 3;
+    // Terminal: the close ran to its end.
+    CloseSessionOutcome outcome = 4;
+  }
 }

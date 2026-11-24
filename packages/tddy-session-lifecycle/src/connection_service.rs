@@ -272,6 +272,9 @@ pub struct DaemonSessionHost {
     /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host the
     /// daemon runtime did not build.
     askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,
+    /// The close running for each session (docs/ft/daemon/session-liveness.md § Closing a
+    /// session): closes of different sessions run at once, a second of one session is refused.
+    session_closes: Arc<svc_close_session::SessionCloses>,
 }
 
 pub use session_worktree_observer::SessionWorktreeObserver;
@@ -401,6 +404,7 @@ mod svc_activity_ports;
 pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
+mod svc_close_session;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;

@@ -242,6 +242,42 @@ impl AgentRoster {
                  (last agent detached)"
             );
         }
+        self.forget_the_torn_down_clone(session_id, daemon_instance_id, codebase_session_id)
+            .await
+    }
+
+    /// Take a torn-down clone out of the session's record (`.session.yaml agents[]`): every agent
+    /// reading it goes with it. Left there, every later close or delete would try to tear down a
+    /// clone that is gone — refused for good whenever the common room is down. A session with no
+    /// record names no clone to forget; one already forgotten (a detach) writes nothing.
+    async fn forget_the_torn_down_clone(
+        &self,
+        session_id: &str,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+    ) -> Result<(), Status> {
+        let session_dir = session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)?;
+        if !records_a_session(&session_dir)? {
+            return Ok(());
+        }
+        let forgot = self
+            .session_agent_rosters
+            .forget_clone(
+                session_id,
+                &session_dir,
+                daemon_instance_id,
+                codebase_session_id,
+            )
+            .map_err(|refusal| {
+                Status::internal(format!(
+                    "session {session_id}'s clone {codebase_session_id} on daemon \
+                     {daemon_instance_id} was torn down, but its record still names it: {}",
+                    refusal.message()
+                ))
+            })?;
+        if forgot {
+            self.publish_roster_change(session_id, &session_dir).await;
+        }
         Ok(())
     }
 
@@ -249,8 +285,8 @@ impl AgentRoster {
     /// recorded clone while this daemon has no common room configured or joined — read-only, so
     /// `DeleteSession` can refuse before it tears anything down (`#agent-tools 30/32`).
     pub async fn refuse_an_unreachable_clone_host(&self, session_id: &str) -> Result<(), Status> {
-        let clones = self.session_agent_clones.for_session(session_id);
-        let Some((daemon_instance_id, clone)) = clones.into_iter().next() else {
+        let clones = self.every_agent_clone_of(session_id)?;
+        let Some((daemon_instance_id, codebase_session)) = clones.into_iter().next() else {
             return Ok(());
         };
         let reachable = match self.peer_routing.common_room_slot("DeleteSession") {
@@ -260,7 +296,6 @@ impl AgentRoster {
         if reachable {
             return Ok(());
         }
-        let codebase_session = &clone.codebase_session_id;
         Err(Status::failed_precondition(format!(
             "cannot reach the common room to delete session {session_id}'s clone \
              {codebase_session} on daemon {daemon_instance_id}, so its checkout is still \
@@ -279,16 +314,61 @@ impl AgentRoster {
         session_id: &str,
         session_token: &str,
     ) -> Result<(), Status> {
-        for (daemon_instance_id, clone) in self.session_agent_clones.for_session(session_id) {
+        for (daemon_instance_id, codebase_session_id) in self.every_agent_clone_of(session_id)? {
             self.tear_down_agent_clone(
                 session_id,
                 &daemon_instance_id,
-                &clone.codebase_session_id,
+                &codebase_session_id,
                 session_token,
             )
             .await?;
         }
         Ok(())
+    }
+
+    /// Every clone `session_id`'s roster created — `(owning daemon, the workspace session holding
+    /// the clone there)` — from the clone store **and** the session's `.session.yaml` `agents[]`.
+    ///
+    /// The store is in memory, so after a daemon restart it knows none of the clones built before
+    /// it; the record persists each one (`codebase_session_id`), and is read for exactly that. A
+    /// record that is there but cannot be read is the error: the clones it names would leak.
+    pub fn every_agent_clone_of(&self, session_id: &str) -> Result<Vec<(String, String)>, Status> {
+        let mut clones: Vec<(String, String)> = self
+            .session_agent_clones
+            .for_session(session_id)
+            .into_iter()
+            .map(|(daemon_instance_id, clone)| (daemon_instance_id, clone.codebase_session_id))
+            .chain(self.recorded_agent_clones_of(session_id)?)
+            .collect();
+        clones.sort();
+        clones.dedup();
+        Ok(clones)
+    }
+
+    /// The clones `session_id`'s `.session.yaml` records. A session with no record on this daemon
+    /// (no directory, or no `.session.yaml` in it) records none; one that cannot be read is the
+    /// error.
+    fn recorded_agent_clones_of(&self, session_id: &str) -> Result<Vec<(String, String)>, Status> {
+        let session_dir = session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)?;
+        if !records_a_session(&session_dir)? {
+            return Ok(Vec::new());
+        }
+        let metadata = tddy_core::read_session_metadata(&session_dir).map_err(|error| {
+            Status::internal(format!(
+                "the record of session {session_id} cannot be read, so the agent clones it names \
+                 are unknown: {error}"
+            ))
+        })?;
+        Ok(metadata
+            .agents
+            .into_iter()
+            .filter_map(|agent| {
+                let codebase_session_id = agent
+                    .codebase_session_id
+                    .filter(|id| !id.trim().is_empty())?;
+                Some((agent.daemon_instance_id, codebase_session_id))
+            })
+            .collect())
     }
 
     /// Push the session's current roster to its `StreamSessionAgents` subscribers and to its room.
@@ -417,3 +497,17 @@ use tddy_daemon_kernel::daemon_hook_urls;
 #[cfg(test)]
 #[path = "svc_provision_agent_clone/clone_host_precheck_tests.rs"]
 mod clone_host_precheck_tests;
+
+/// Whether `session_dir` holds a session's record (`.session.yaml`). Only "no such file" is none: a
+/// record that cannot be looked at is the error.
+fn records_a_session(session_dir: &Path) -> Result<bool, Status> {
+    let record = session_dir.join(tddy_core::SESSION_METADATA_FILENAME);
+    match std::fs::symlink_metadata(&record) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(Status::internal(format!(
+            "{} cannot be looked at: {error}",
+            record.display()
+        ))),
+    }
+}

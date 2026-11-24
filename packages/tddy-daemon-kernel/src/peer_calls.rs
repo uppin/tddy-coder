@@ -17,7 +17,8 @@ use tddy_service::proto::project::{
 };
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::{
-    DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
+    CloseSessionEvent, CloseSessionPreview, CloseSessionRequest, DeleteSessionRequest,
+    DeleteSessionResponse, PreviewCloseSessionRequest, StartSessionEvent, StartSessionRequest,
     StartSessionResponse,
 };
 use tddy_service::proto::session_files::{
@@ -175,6 +176,43 @@ pub async fn forward_delete_session(
         "session.SessionService",
         "DeleteSession",
         request,
+    )
+    .await
+}
+
+/// Forward **PreviewCloseSession** to another daemon in the common room — what closing the
+/// `workspace` session holding a split session's checkout there would lose.
+pub async fn forward_preview_close_session(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &PreviewCloseSessionRequest,
+) -> Result<CloseSessionPreview, Status> {
+    forward_unary(
+        room,
+        peer_instance_id,
+        "session.SessionService",
+        "PreviewCloseSession",
+        request,
+    )
+    .await
+}
+
+/// Forward **CloseSession** to another daemon in the common room, yielding the peer's close events
+/// (its `started`, its steps, then its one terminal event).
+pub async fn forward_close_session(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &CloseSessionRequest,
+) -> Result<UnboundedReceiver<Result<CloseSessionEvent, Status>>, Status> {
+    room.forward_server_stream_to_peer(
+        peer_instance_id,
+        "session.SessionService",
+        "CloseSession",
+        request.encode_to_vec(),
+        |bytes| {
+            CloseSessionEvent::decode(bytes.as_slice())
+                .map_err(|e| Status::internal(format!("decode CloseSessionEvent from peer: {e}")))
+        },
     )
     .await
 }

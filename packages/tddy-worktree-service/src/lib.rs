@@ -18,7 +18,9 @@ pub mod session_target;
 pub mod target_worktree_stats;
 pub mod target_worktrees;
 pub mod worktree_files;
+pub mod worktree_loss;
 pub mod worktree_measurement;
+pub mod worktree_removed_marker;
 pub mod worktree_sync;
 pub mod worktrees;
 
@@ -28,6 +30,9 @@ pub mod stream;
 /// Shared test helpers, ungated like `tddy_daemon::test_util` is: the integration suites in
 /// `tests/` reach for them, and a `#[cfg(test)]` module is invisible from there.
 pub mod test_util;
+mod worktree_diff;
+mod worktree_sizes;
+mod worktree_stats_cache;
 
 pub use service::{NoSessionRooms, WorktreeRoomCloser, WorktreeServiceImpl};
 pub use stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};

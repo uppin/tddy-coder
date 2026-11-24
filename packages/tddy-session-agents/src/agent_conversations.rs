@@ -120,6 +120,22 @@ pub struct ClosedConversations {
     pub remote: Vec<(String, String)>,
 }
 
+/// The turn loop of a local conversation a close interrupted — held so the close can tell when the
+/// interrupted turn has stopped (docs/ft/daemon/session-liveness.md § Closing a session).
+#[derive(Clone)]
+pub struct ClosedTurnLoop {
+    session: Arc<Mutex<Box<dyn SubagentSession>>>,
+}
+
+impl ClosedTurnLoop {
+    /// Whether a turn still runs in it: a turn holds the conversation's session for its whole
+    /// length, so one still holding it has not yet stopped at the interrupt.
+    #[must_use]
+    pub fn turn_still_runs(&self) -> bool {
+        self.session.try_lock().is_err()
+    }
+}
+
 /// How a cancel of only a conversation's running turn reaches it (see
 /// [`OpenAgentConversations::turn_cancel_route`]).
 pub enum TurnCancelRoute {
@@ -293,16 +309,70 @@ impl OpenAgentConversations {
         session_id: &str,
         agent_id: &str,
     ) -> ClosedConversations {
+        self.close_every_conversation_where(|conversation| {
+            conversation.is_with(session_id, agent_id)
+        })
+        .await
+        .0
+    }
+
+    /// Every conversation open on `session_id` — `(conversation id, agent id)`, by conversation id —
+    /// whichever daemon runs its loop.
+    pub async fn conversations_of(&self, session_id: &str) -> Vec<(String, String)> {
+        let mut found: Vec<(String, String)> = self
+            .open
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, conversation)| conversation.session_id() == session_id)
+            .map(|(conversation_id, conversation)| {
+                (conversation_id.clone(), conversation.agent_id().to_string())
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// Forget every conversation open on `session_id`, with any agent, interrupting the local ones
+    /// and reporting the remote ones for their owning daemon to be told — what closing the session
+    /// does ([`Self::close_every_conversation_with`], for the whole session).
+    ///
+    /// Also answers the turn loop of each local conversation it interrupted, by conversation id, for
+    /// a caller that must know when each interrupted turn has stopped — a close, before it removes
+    /// the worktrees those turns write in.
+    pub async fn close_every_conversation_of(
+        &self,
+        session_id: &str,
+    ) -> (ClosedConversations, Vec<(String, ClosedTurnLoop)>) {
+        self.close_every_conversation_where(|conversation| conversation.session_id() == session_id)
+            .await
+    }
+
+    async fn close_every_conversation_where(
+        &self,
+        closes: impl Fn(&AgentConversation) -> bool,
+    ) -> (ClosedConversations, Vec<(String, ClosedTurnLoop)>) {
         let mut closed = ClosedConversations::default();
+        let mut loops = Vec::new();
         let mut open = self.open.lock().await;
         open.retain(|conversation_id, conversation| {
-            if !conversation.is_with(session_id, agent_id) {
+            if !closes(conversation) {
                 return true;
             }
             match conversation {
-                AgentConversation::Local { closed: stop, .. } => {
+                AgentConversation::Local {
+                    closed: stop,
+                    session,
+                    ..
+                } => {
                     stop.notify_one();
                     closed.local.push(conversation_id.clone());
+                    loops.push((
+                        conversation_id.clone(),
+                        ClosedTurnLoop {
+                            session: Arc::clone(session),
+                        },
+                    ));
                 }
                 AgentConversation::Remote {
                     daemon_instance_id, ..
@@ -312,6 +382,8 @@ impl OpenAgentConversations {
             }
             false
         });
-        closed
+        closed.local.sort();
+        closed.remote.sort();
+        (closed, loops)
     }
 }

@@ -86,7 +86,7 @@ impl std::error::Error for WorktreeSyncError {}
 /// The remote a branch is first published to.
 const PUBLISH_REMOTE: &str = "origin";
 
-fn run_git(worktree: &Path, args: &[&str]) -> Result<Output, WorktreeSyncError> {
+pub(crate) fn run_git(worktree: &Path, args: &[&str]) -> Result<Output, WorktreeSyncError> {
     Command::new("git")
         .args(args)
         .current_dir(worktree)
@@ -96,7 +96,7 @@ fn run_git(worktree: &Path, args: &[&str]) -> Result<Output, WorktreeSyncError> 
         .map_err(|e| WorktreeSyncError(format!("git {args:?} could not run: {e}")))
 }
 
-fn git_stdout(worktree: &Path, args: &[&str]) -> Result<String, WorktreeSyncError> {
+pub(crate) fn git_stdout(worktree: &Path, args: &[&str]) -> Result<String, WorktreeSyncError> {
     let out = run_git(worktree, args)?;
     if !out.status.success() {
         return Err(failed(args, &out));
@@ -168,37 +168,8 @@ fn commits(worktree: &Path, range: &str) -> Result<Vec<CommitLine>, WorktreeSync
 }
 
 fn dirty_files(worktree: &Path) -> Result<Vec<DirtyFile>, WorktreeSyncError> {
-    let status = git_stdout(
-        worktree,
-        &["status", "--porcelain", "-z", "--untracked-files=all"],
-    )?;
-    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
-    let mut files = Vec::new();
-    while let Some(entry) = entries.next() {
-        let (Some(codes), Some(path)) = (entry.get(..2), entry.get(3..)) else {
-            return Err(WorktreeSyncError(format!(
-                "unrecognised git status entry {entry:?}"
-            )));
-        };
-        let mut codes = codes.chars();
-        let (index, tree) = (codes.next().unwrap_or(' '), codes.next().unwrap_or(' '));
-        let change = match (index, tree) {
-            ('?', '?') => DirtyChange::Untracked,
-            ('R' | 'C', _) | (_, 'R' | 'C') => DirtyChange::Renamed,
-            ('D', _) | (_, 'D') => DirtyChange::Deleted,
-            (_, ' ') => DirtyChange::Staged,
-            _ => DirtyChange::Modified,
-        };
-        // A rename or copy is followed by its original path as a separate entry.
-        if matches!(index, 'R' | 'C') || matches!(tree, 'R' | 'C') {
-            entries.next();
-        }
-        files.push(DirtyFile {
-            path: path.to_string(),
-            change,
-        });
-    }
-    Ok(files)
+    let status = git_stdout(worktree, &crate::worktree_loss::PORCELAIN_STATUS_ARGS)?;
+    crate::worktree_loss::parse_porcelain_status(&status)
 }
 
 /// Fetch the remote `branch` tracks, as git records it (`branch.<branch>.remote`), rather than parsed

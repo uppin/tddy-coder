@@ -97,6 +97,11 @@ import {
   type AgentConversationScenario,
 } from "./agentConversationBackend";
 import { type SessionNotificationFeed } from "./sessionNotificationFeed";
+import {
+  aCloseSessionFake,
+  type CloseSessionControls,
+  type CloseSessionScenario,
+} from "./closeSessionBackend";
 
 // The daemon-roster fixtures and the worktree row input moved with the RPCs that serve them;
 // re-exported here so the specs that already read them off this module keep their import.
@@ -152,7 +157,8 @@ function anAgentInfo(overrides: Partial<AgentInfo>): AgentInfo {
 // ---------------------------------------------------------------------------
 
 export interface SessionServiceScenario
-  extends HostServiceScenario,
+  extends CloseSessionScenario,
+    HostServiceScenario,
     SessionFilesServiceScenario,
     TerminalSessionServiceScenario,
     WorktreeServiceScenario {
@@ -206,6 +212,7 @@ export interface SessionServiceScenario
 export interface SessionServiceBackend
   extends InMemoryRpcBackend,
     AgentConversationControls,
+    CloseSessionControls,
     HostServiceControls,
     SessionFilesServiceControls,
     TerminalSessionServiceControls,
@@ -265,6 +272,10 @@ export function aSessionServiceBackend(
   const conversationFake = scenario.agentConversations
     ? anAgentConversationFake(scenario.agentConversations)
     : null;
+  // Closing a session (`PreviewCloseSession` + `CloseSession`). Always answered — a session with no
+  // scripted close has nothing at risk and closes at once — so a drawer spec that clicks a row's ×
+  // without declaring a close still gets the daemon's ordinary answer.
+  const { handlers: closeHandlers, ...closeControls } = aCloseSessionFake(scenario);
 
   const backend = anInMemoryRpcBackend()
     .implement(HostService, hostHandlers)
@@ -403,6 +414,7 @@ export function aSessionServiceBackend(
         deletedSessionIds.push(req.sessionId);
         return {};
       },
+      ...closeHandlers,
     });
 
   return Object.assign(backend, {
@@ -414,6 +426,7 @@ export function aSessionServiceBackend(
     ...worktreeControls,
     ...terminalControls,
     ...sessionFilesControls,
+    ...closeControls,
     // A scenario that declared no roster / no conversations still answers these, with nothing —
     // a spec asserting "never attached" must not have to know whether a fake was built.
     attachedAgentIds: () => (rosterFake ? rosterFake.attachedAgentIds() : []),

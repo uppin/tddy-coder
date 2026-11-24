@@ -5,6 +5,7 @@
 //! use tddy_daemon::test_util::{test_config, test_service, TEST_TOKEN, TEST_USER};
 //! ```
 
+mod held_agents;
 mod signing;
 
 use std::ops::Deref;
@@ -13,6 +14,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
+use tddy_service::proto::session::{
+    CloseSessionPreview, CloseSessionRequest, PreviewCloseSessionRequest,
+};
 use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, DeleteSessionRequest, DeleteSessionResponse,
     EnsureProjectHomeSessionRequest, EnsureProjectHomeSessionResponse, GetWorktreeSnapshotRequest,
@@ -172,104 +176,14 @@ pub struct TestDaemon {
     inner: Arc<DaemonSessionHost>,
 }
 
-/// A main agent a [`TestDaemon`] holds for a session ([`TestDaemon::holds_a_main_agent`]).
-pub struct HeldMain {
-    /// The agent's process id: where a signal to its session lands.
-    pub pid: u32,
-    record: PathBuf,
-    _dir: tempfile::TempDir,
-}
-
-impl HeldMain {
-    /// The signal (`INT` or `TERM`) the agent received, waiting up to ten seconds for it.
-    pub async fn signal_received(&self) -> Option<String> {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        loop {
-            if let Ok(text) = std::fs::read_to_string(&self.record) {
-                return Some(text.trim().to_string());
-            }
-            if std::time::Instant::now() >= deadline {
-                return None;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    }
-}
+pub use crate::test_util::held_agents::{
+    conversation_is_open, open_a_remote_conversation, HeldMain,
+};
 
 impl TestDaemon {
     #[must_use]
     pub fn from_arc(inner: Arc<DaemonSessionHost>) -> Self {
         Self { inner }
-    }
-
-    /// Make `session_id` live as the daemon defines it: hold a main agent terminal for it. The
-    /// agent is a stub that records the first `INT` or `TERM` it receives, then exits; it is ready
-    /// (its traps installed) when this returns. A `pid` recorded in `.session.yaml` makes a
-    /// session active no longer; this does.
-    pub async fn holds_a_main_agent(&self, session_id: &str) -> HeldMain {
-        let dir = tempfile::tempdir().expect("a directory for the stub agent");
-        let record = dir.path().join("signal-received");
-        let ready = dir.path().join("ready");
-        let script = dir.path().join("agent.sh");
-        std::fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\ntrap 'echo TERM > \"{r}\"; exit 0' TERM\ntrap 'echo INT > \"{r}\"; exit 0' INT\ntouch \"{ready}\"\nwhile :; do sleep 0.05; done\n",
-                r = record.display(),
-                ready = ready.display()
-            ),
-        )
-        .expect("write the stub agent");
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
-                .expect("make the stub agent executable");
-        }
-        let pid = self
-            .inner
-            .terminal_manager()
-            .start_with_options(
-                session_id,
-                std::env::temp_dir(),
-                "test-model",
-                vec![script.to_string_lossy().to_string()],
-                "claude-cli",
-                None,
-                None,
-                Vec::new(),
-                Vec::new(),
-                None,
-            )
-            .await
-            .expect("a main agent terminal starts")
-            .pid;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while !ready.exists() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "the stub agent never installed its traps"
-            );
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        HeldMain {
-            pid,
-            record,
-            _dir: dir,
-        }
-    }
-
-    /// Whether the daemon still serves `session_id`'s main terminal.
-    pub async fn serves_a_main_for(&self, session_id: &str) -> bool {
-        self.inner
-            .terminal_manager()
-            .get(session_id)
-            .await
-            .is_some()
-    }
-
-    /// Stop everything the daemon holds for `session_id`: the session is no longer live.
-    pub async fn stops_holding(&self, session_id: &str) {
-        self.inner.terminal_manager().stop_session(session_id).await;
     }
 
     #[must_use]
@@ -348,6 +262,7 @@ impl Deref for TestDaemon {
 #[async_trait]
 impl SessionService for TestDaemon {
     type StreamStartSessionStream = crate::SessionStartEventStream;
+    type CloseSessionStream = crate::CloseSessionEventStream;
 
     async fn list_sessions(
         &self,
@@ -446,6 +361,26 @@ impl SessionService for TestDaemon {
         self.inner
             .session_lifecycle_service()
             .get_worktree_snapshot(request)
+            .await
+    }
+
+    async fn preview_close_session(
+        &self,
+        request: Request<PreviewCloseSessionRequest>,
+    ) -> Result<Response<CloseSessionPreview>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .preview_close_session(request)
+            .await
+    }
+
+    async fn close_session(
+        &self,
+        request: Request<CloseSessionRequest>,
+    ) -> Result<Response<Self::CloseSessionStream>, Status> {
+        self.inner
+            .session_lifecycle_service()
+            .close_session(request)
             .await
     }
 }

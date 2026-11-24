@@ -145,3 +145,14 @@ pub(crate) fn sync_state_to_proto(state: SyncState) -> WorktreeSyncState {
         unavailable_reason: String::new(),
     }
 }
+
+/// The session's worktree is back: a close's record of removing it no longer holds, so the session
+/// lists as holding one again.
+pub(crate) fn forget_a_recorded_removal(session_dir: &std::path::Path) -> Result<(), Status> {
+    crate::worktree_removed_marker::clear_worktree_removed(session_dir).map_err(|e| {
+        Status::internal(format!(
+            "the worktree was restored, but the record of its removal in {} could not be cleared: {e}",
+            session_dir.display()
+        ))
+    })
+}

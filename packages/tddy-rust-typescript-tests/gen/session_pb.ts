@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file session.proto.
  */
 export const file_session: GenFile = /*@__PURE__*/
-  fileDesc("Cg1zZXNzaW9uLnByb3RvEgdzZXNzaW9uIs0BChNBZ2VudENsb25lUGxhY2VtZW50EhIKCnNlc3Npb25faWQYASABKAkSJwofZmFjaWxpdGF0aW5nX2RhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdmYWNpbGl0YXRpbmdfZGFlbW9uX3VybBgDIAEoCRIdChVmaXJzdF9hZG1pc3Npb25fdG9rZW4YBCABKAkSGwoTZmlyc3RfYWRtaXNzaW9uX3VybBgFIAEoCRIcChRmaXJzdF9hZG1pc3Npb25fcm9vbRgGIAEoCSKSAQohQXR0YWNobWVudE1hdGVyaWFsaXphdGlvblByb2dyZXNzEhAKCGJhc2VuYW1lGAEgASgJEhgKEGF0dGFjaG1lbnRfaW5kZXgYAiABKA0SGAoQYXR0YWNobWVudF9jb3VudBgDIAEoDRISCgpieXRlc19kb25lGAQgASgEEhMKC2J5dGVzX3RvdGFsGAUgASgEIpoCCgpTdGFydFBoYXNlEiYKBHN0ZXAYASABKA4yGC5zZXNzaW9uLlN0YXJ0UGhhc2UuU3RlcBIuCghib3VuZGFyeRgCIAEoDjIcLnNlc3Npb24uU3RhcnRQaGFzZS5Cb3VuZGFyeSJoCgRTdGVwEhQKEFNURVBfVU5TUEVDSUZJRUQQABIRCg1TVEVQX1dPUktUUkVFEAESFwoTU1RFUF9TRU1BTlRJQ19JTkRFWBACEg4KClNURVBfQUdFTlQQAxIOCgpTVEVQX0NMT05FEAQiSgoIQm91bmRhcnkSGAoUQk9VTkRBUllfVU5TUEVDSUZJRUQQABISCg5CT1VOREFSWV9CRUdJThABEhAKDEJPVU5EQVJZX0VORBACImQKDkJyYW5jaENvbmZsaWN0Eg4KBmJyYW5jaBgBIAEoCRIjCgVvd25lchgCIAEoCzIULnR5cGVzLkJyYW5jaFNlc3Npb24SHQoVc3VnZ2VzdGVkX2JyYW5jaF9uYW1lGAMgASgJIkIKFUNvbm5lY3RTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiZAoWQ29ubmVjdFNlc3Npb25SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYAyABKAkiQQoURGVsZXRlU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIiMKFURlbGV0ZVNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCCJXChRSZW5hbWVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJIi0KFVJlbmFtZVNlc3Npb25SZXNwb25zZRIUCgxkaXNwbGF5X25hbWUYASABKAkiYwoaR2V0V29ya3RyZWVTbmFwc2hvdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSLKAQobR2V0V29ya3RyZWVTbmFwc2hvdFJlc3BvbnNlEhMKC2hlYWRfY29tbWl0GAEgASgJEg4KBmJyYW5jaBgCIAEoCRIVCg1jaGFuZ2VkX3BhdGhzGAMgAygJEhUKDWNoYW5nZWRfZmlsZXMYBCABKA0SEwoLbGluZXNfYWRkZWQYBSABKAMSFQoNbGluZXNfcmVtb3ZlZBgGIAEoAxIXCg91bnRyYWNrZWRfZmlsZXMYByABKA0SEwoLYXR0YWNobWVudHMYCCADKAkilQEKD0hvc3REb2N1bWVudFJlZhIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSJwoFc2NvcGUYAiABKA4yGC50eXBlcy5Ib3N0RG9jdW1lbnRTY29wZRISCgpzZXNzaW9uX2lkGAMgASgJEhIKCnByb2plY3RfaWQYBCABKAkSFQoNcmVsYXRpdmVfcGF0aBgFIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiPwoUTGlzdFNlc3Npb25zUmVzcG9uc2USJwoIc2Vzc2lvbnMYASADKAsyFS5zZXNzaW9uLlNlc3Npb25FbnRyeSJBChRSZXN1bWVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkipAEKFVJlc3VtZVNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCRIrCg1yZXN0b3JlZF90YWJzGAUgAygLMhQuc2Vzc2lvbi5SZXN0b3JlZFRhYiJgCgtSZXN0b3JlZFRhYhITCgt0ZXJtaW5hbF9pZBgBIAEoCRIsCgdvdXRjb21lGAIgASgOMhsuc2Vzc2lvbi5SZXN0b3JlZFRhYk91dGNvbWUSDgoGcmVhc29uGAMgASgJIpIBChFTZXNzaW9uQXR0YWNobWVudBIQCghiYXNlbmFtZRgBIAEoCRIuCgZzdGFnZWQYAiABKAsyHC5zZXNzaW9uLlN0YWdlZEF0dGFjaG1lbnRSZWZIABIxCg1ob3N0X2RvY3VtZW50GAMgASgLMhguc2Vzc2lvbi5Ib3N0RG9jdW1lbnRSZWZIAEIICgZzb3VyY2UivgEKEVNlc3Npb25Db250ZXh0RG9jEgsKA2tleRgBIAEoCRIQCghiYXNlbmFtZRgCIAEoCRIMCgRwYXRoGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEg4KBmV4aXN0cxgFIAEoCBIsCgRraW5kGAYgASgOMh4uc2Vzc2lvbi5TZXNzaW9uQ29udGV4dERvY0tpbmQSEgoKc2l6ZV9ieXRlcxgHIAEoBBIVCg1yZWxhdGl2ZV9wYXRoGAggASgJIuYICgxTZXNzaW9uRW50cnkSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjcmVhdGVkX2F0GAIgASgJEg4KBnN0YXR1cxgDIAEoCRIRCglyZXBvX3BhdGgYBCABKAkSCwoDcGlkGAUgASgNEhEKCWlzX2FjdGl2ZRgGIAEoCBISCgpwcm9qZWN0X2lkGAcgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgIIAEoCRIVCg13b3JrZmxvd19nb2FsGAkgASgJEhYKDndvcmtmbG93X3N0YXRlGAogASgJEhcKD2VsYXBzZWRfZGlzcGxheRgLIAEoCRINCgVhZ2VudBgMIAEoCRINCgVtb2RlbBgNIAEoCRIbChNwZW5kaW5nX2VsaWNpdGF0aW9uGA4gASgIEhcKD2FjdGl2aXR5X3N0YXR1cxgPIAEoCRIMCgR0b29sGBAgASgJEhQKDHNlc3Npb25fdHlwZRgRIAEoCRISCgp1cGRhdGVkX2F0GBIgASgJEhQKDGxpdmVraXRfcm9vbRgTIAEoCRIbChNwcmV2aW91c19zZXNzaW9uX2lkGBQgASgJEh8KF29yY2hlc3RyYXRvcl9zZXNzaW9uX2lkGBUgASgJEg4KBnJlY2lwZRgWIAEoCRIXCg93b3JrX3F1ZXVlX2pzb24YFyABKAkSEAoIYnl0ZXNfaW4YGCABKAQSEQoJYnl0ZXNfb3V0GBkgASgEEh0KFWxhc3RfZGF0YV9yZWNlaXZlZF9hdBgaIAEoCRIwCgxjb250ZXh0X2RvY3MYGyADKAsyGi5zZXNzaW9uLlNlc3Npb25Db250ZXh0RG9jEg4KBmJyYW5jaBgcIAEoCRIjChtjb2RlYmFzZV9kYWVtb25faW5zdGFuY2VfaWQYHSABKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgeIAEoCRIvCgxhZ2VudF9zdGF0dXMYHyABKA4yGS50eXBlcy5TZXNzaW9uQWdlbnRTdGF0dXMSMgoNbGFzdF9hY3Rpdml0eRggIAEoCzIbLnR5cGVzLlNlc3Npb25BZ2VudEFjdGl2aXR5EhcKD3NzaF9jb25maWdfaG9zdBghIAEoCRIYChBtYW5hZ2VkX2NvZGViYXNlGCIgASgIEhQKDHNlc3Npb25fcm9sZRgjIAEoCRIYChByZWFkc19ob3N0X3BhdGhzGCQgASgIEjYKEm9yY2hlc3RyYXRpb25fbWFyaxglIAEoCzIaLnNlc3Npb24uT3JjaGVzdHJhdGlvbk1hcmsSFQoNd29ya19xdWV1ZV9pZBgmIAEoCRIUCgxkaXNwbGF5X25hbWUYJyABKAkSJgoGdGFyZ2V0GCggASgLMhYuc2Vzc2lvbi5TZXNzaW9uVGFyZ2V0Eg8KB3NhbmRib3gYKSABKAgSEQoJcHJfbnVtYmVyGCogASgEEhAKCHByX3N0YXRlGCsgASgJEhcKD293bnNfd29ya19xdWV1ZRgsIAEoCCJhCg1TZXNzaW9uVGFyZ2V0EiEKA3NzaBgBIAEoCzISLnNlc3Npb24uU3NoVGFyZ2V0SAASJQoFY29kZXIYAiABKAsyFC5zZXNzaW9uLkNvZGVyVGFyZ2V0SABCBgoEa2luZCIgCglTc2hUYXJnZXQSEwoLY29uZmlnX2hvc3QYASABKAkiUgoLQ29kZXJUYXJnZXQSEgoKYWNjb3VudF9pZBgBIAEoCRINCgVvd25lchgCIAEoCRIRCgl3b3Jrc3BhY2UYAyABKAkSDQoFYWdlbnQYBCABKAkiXgoRT3JjaGVzdHJhdGlvbk1hcmsSDAoEbWFyaxgBIAEoCRIMCgRub3RlGAIgASgJEhkKEXNldF9ieV9zZXNzaW9uX2lkGAMgASgJEhIKCmF0X3VuaXhfbXMYBCABKAQilQEKH0Vuc3VyZVByb2plY3RIb21lU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIrCgVzdGFydBgEIAEoCzIcLnNlc3Npb24uU3RhcnRTZXNzaW9uUmVxdWVzdCJbCiBFbnN1cmVQcm9qZWN0SG9tZVNlc3Npb25SZXNwb25zZRImCgdzZXNzaW9uGAEgASgLMhUuc2Vzc2lvbi5TZXNzaW9uRW50cnkSDwoHb3V0Y29tZRgCIAEoCSJoChRTaWduYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGc2lnbmFsGAMgASgFEhUKDWNvbnRyb2xfdG9rZW4YBCABKAkiNAoVU2lnbmFsU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiSwoTU3BsaXRBZ2VudFBsYWNlbWVudBISCgpzZXNzaW9uX2lkGAEgASgJEiAKGGFnZW50X2RhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSJYChNTdGFnZWRBdHRhY2htZW50UmVmEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRISCgpzdGFnaW5nX2lkGAIgASgJEhEKCWZpbGVfbmFtZRgDIAEoCSK1AwoRU3RhcnRTZXNzaW9uRXZlbnQSSQoTYXR0YWNobWVudF9wcm9ncmVzcxgBIAEoCzIqLnNlc3Npb24uQXR0YWNobWVudE1hdGVyaWFsaXphdGlvblByb2dyZXNzSAASLwoGcmVzdWx0GAIgASgLMh0uc2Vzc2lvbi5TdGFydFNlc3Npb25SZXNwb25zZUgAEiQKBXBoYXNlGAMgASgLMhMuc2Vzc2lvbi5TdGFydFBoYXNlSAASLQoKa2VlcF9hbGl2ZRgEIAEoCzIXLnNlc3Npb24uU3RhcnRLZWVwQWxpdmVIABIwCg5jbG9uZV9wcm9ncmVzcxgFIAEoCzIWLnNlc3Npb24uQ2xvbmVQcm9ncmVzc0gAEiwKB3N0YXJ0ZWQYBiABKAsyGS5zZXNzaW9uLlN0YXJ0VGFza1N0YXJ0ZWRIABIvCgtyZW1vdGVfY2FsbBgHIAEoCzIYLnNlc3Npb24uU3RhcnRSZW1vdGVDYWxsSAASNQoOd29ya3RyZWVfcmVhZHkYCCABKAsyGy5zZXNzaW9uLlN0YXJ0V29ya3RyZWVSZWFkeUgAQgcKBWV2ZW50Ij8KEFN0YXJ0VGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiiAIKD1N0YXJ0UmVtb3RlQ2FsbBIMCgRob3N0GAEgASgJEg8KB2NvbW1hbmQYAiABKAkSEwoLZHVyYXRpb25fbXMYAyABKAQSMQoHb3V0Y29tZRgEIAEoDjIgLnNlc3Npb24uU3RhcnRSZW1vdGVDYWxsLk91dGNvbWUSEQoJZXhpdF9jb2RlGAUgASgFEhMKC3N0ZGVycl90YWlsGAYgASgJImYKB091dGNvbWUSFwoTT1VUQ09NRV9VTlNQRUNJRklFRBAAEhIKDk9VVENPTUVfRVhJVEVEEAESFQoRT1VUQ09NRV9USU1FRF9PVVQQAhIXChNPVVRDT01FX1VOUkVBQ0hBQkxFEAMiYAoSU3RhcnRXb3JrdHJlZVJlYWR5Eg4KBmJyYW5jaBgBIAEoCRIQCgh3b3JrdHJlZRgCIAEoCRITCgtiYXNlX2NvbW1pdBgDIAEoCRITCgtiYXNlX2JlaGluZBgEIAEoDSKcAQoNQ2xvbmVQcm9ncmVzcxINCgVzdGFnZRgBIAEoCRIPCgdwZXJjZW50GAIgASgNEhQKDG9iamVjdHNfZG9uZRgDIAEoBBIVCg1vYmplY3RzX3RvdGFsGAQgASgEEhYKDmJ5dGVzX3JlY2VpdmVkGAUgASgEEhgKEGJ5dGVzX3Blcl9zZWNvbmQYBiABKAQSDAoEbGluZRgHIAEoCSIiCg5TdGFydEtlZXBBbGl2ZRIQCghhY3Rpdml0eRgBIAEoCSLACgoTU3RhcnRTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhEKCXRvb2xfcGF0aBgCIAEoCRISCgpwcm9qZWN0X2lkGAMgASgJEg0KBWFnZW50GAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCRIOCgZyZWNpcGUYBiABKAkSFAoMc2Vzc2lvbl90eXBlGAcgASgJEg0KBW1vZGVsGAggASgJEh4KFmJyYW5jaF93b3JrdHJlZV9pbnRlbnQYCSABKAkSFwoPbmV3X2JyYW5jaF9uYW1lGAogASgJEiUKHXNlbGVjdGVkX2ludGVncmF0aW9uX2Jhc2VfcmVmGAsgASgJEiIKGnNlbGVjdGVkX2JyYW5jaF90b193b3JrX29uGAwgASgJEhYKDmluaXRpYWxfcHJvbXB0GA0gASgJEhcKD3Blcm1pc3Npb25fbW9kZRgOIAEoCRIZChF3b3JrX3F1ZXVlX3BhcmVudBgPIAEoCRIPCgdzYW5kYm94GBAgASgIEhgKEG1hbmFnZWRfY29kZWJhc2UYESABKAgSGgoSc3BlY2lhbGl6ZWRfYWdlbnRzGBIgAygJEhsKE2Nsb25lX3BsYWNlZF9hZ2VudHMYLCADKAkSEQoJcmVwb19wYXRoGBggASgJEhMKC2NsYXVkZV9hcmdzGBkgAygJEiQKHGRhbmdlcm91c2x5X3NraXBfcGVybWlzc2lvbnMYGiABKAgSFgoOc2VtYW50aWNfaW5kZXgYGyABKAgSHAoUY3JlYXRlX3JlbW90ZV9icmFuY2gYHCABKAgSLwoLYXR0YWNobWVudHMYHSADKAsyGi5zZXNzaW9uLlNlc3Npb25BdHRhY2htZW50EhoKEm9uX2JyYW5jaF9jb25mbGljdBgeIAEoCRIjChtjb2RlYmFzZV9kYWVtb25faW5zdGFuY2VfaWQYICABKAkSHAoUcmVxdWVzdGVkX3Nlc3Npb25faWQYISABKAkSMQoLYWdlbnRfY2xvbmUYIiABKAsyHC5zZXNzaW9uLkFnZW50Q2xvbmVQbGFjZW1lbnQSMQoLc3BsaXRfYWdlbnQYIyABKAsyHC5zZXNzaW9uLlNwbGl0QWdlbnRQbGFjZW1lbnQSLAokd29ya19xdWV1ZV9wYXJlbnRfZGFlbW9uX2luc3RhbmNlX2lkGCQgASgJEhQKDHdvcmtfaXRlbV9pZBglIAEoCRIXCg9zc2hfY29uZmlnX2hvc3QYJiABKAkSGgoSc2FuZGJveGVkX2NvZGViYXNlGCcgASgIEiwKDWdpdGh1Yl9zb3VyY2UYKCABKA4yFS5zZXNzaW9uLkdpdGh1YlNvdXJjZRIbChNwcm92aWRlcl9hY2NvdW50X2lkGCkgASgJEhkKEXByb3ZpZGVyX2J1aWx0X2luGCogASgIEhQKDHNlc3Npb25fcm9sZRgrIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgtIAEoCRInCh9vcmNoZXN0cmF0b3JfZGFlbW9uX2luc3RhbmNlX2lkGC4gASgJEhMKC3J1bl9pbl90bXV4GC8gASgIEg4KBmVmZm9ydBgwIAEoCRIUCgxkaXNwbGF5X25hbWUYMSABKAkSJgoGdGFyZ2V0GDIgASgLMhYuc2Vzc2lvbi5TZXNzaW9uVGFyZ2V0EhcKD3dpdGhfd29ya19xdWV1ZRgzIAEoCEoECB8QIEoECBMQFEoECBQQFUoECBUQFkoECBYQF0oECBcQGCKoAQoUU3RhcnRTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkSMAoPYnJhbmNoX2NvbmZsaWN0GAUgASgLMhcuc2Vzc2lvbi5CcmFuY2hDb25mbGljdCqfAQoSUmVzdG9yZWRUYWJPdXRjb21lEiQKIFJFU1RPUkVEX1RBQl9PVVRDT01FX1VOU1BFQ0lGSUVEEAASIQodUkVTVE9SRURfVEFCX09VVENPTUVfUkVTVE9SRUQQARIeChpSRVNUT1JFRF9UQUJfT1VUQ09NRV9GUkVTSBACEiAKHFJFU1RPUkVEX1RBQl9PVVRDT01FX0RST1BQRUQQAypnChVTZXNzaW9uQ29udGV4dERvY0tpbmQSJQohU0VTU0lPTl9DT05URVhUX0RPQ19LSU5EX01BTklGRVNUEAASJwojU0VTU0lPTl9DT05URVhUX0RPQ19LSU5EX0FUVEFDSE1FTlQQASpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAipiCgxHaXRodWJTb3VyY2USHQoZR0lUSFVCX1NPVVJDRV9VTlNQRUNJRklFRBAAEhcKE0dJVEhVQl9TT1VSQ0VfVkFVTFQQARIaChZHSVRIVUJfU09VUkNFX0xPQ0FMX0dIEAIy4gYKDlNlc3Npb25TZXJ2aWNlEksKDExpc3RTZXNzaW9ucxIcLnNlc3Npb24uTGlzdFNlc3Npb25zUmVxdWVzdBodLnNlc3Npb24uTGlzdFNlc3Npb25zUmVzcG9uc2USSwoMU3RhcnRTZXNzaW9uEhwuc2Vzc2lvbi5TdGFydFNlc3Npb25SZXF1ZXN0Gh0uc2Vzc2lvbi5TdGFydFNlc3Npb25SZXNwb25zZRJQChJTdHJlYW1TdGFydFNlc3Npb24SHC5zZXNzaW9uLlN0YXJ0U2Vzc2lvblJlcXVlc3QaGi5zZXNzaW9uLlN0YXJ0U2Vzc2lvbkV2ZW50MAESUQoOQ29ubmVjdFNlc3Npb24SHi5zZXNzaW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBofLnNlc3Npb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJOCg1SZXN1bWVTZXNzaW9uEh0uc2Vzc2lvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBoeLnNlc3Npb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlEm8KGEVuc3VyZVByb2plY3RIb21lU2Vzc2lvbhIoLnNlc3Npb24uRW5zdXJlUHJvamVjdEhvbWVTZXNzaW9uUmVxdWVzdBopLnNlc3Npb24uRW5zdXJlUHJvamVjdEhvbWVTZXNzaW9uUmVzcG9uc2USTgoNU2lnbmFsU2Vzc2lvbhIdLnNlc3Npb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaHi5zZXNzaW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJOCg1EZWxldGVTZXNzaW9uEh0uc2Vzc2lvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBoeLnNlc3Npb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEk4KDVJlbmFtZVNlc3Npb24SHS5zZXNzaW9uLlJlbmFtZVNlc3Npb25SZXF1ZXN0Gh4uc2Vzc2lvbi5SZW5hbWVTZXNzaW9uUmVzcG9uc2USYAoTR2V0V29ya3RyZWVTbmFwc2hvdBIjLnNlc3Npb24uR2V0V29ya3RyZWVTbmFwc2hvdFJlcXVlc3QaJC5zZXNzaW9uLkdldFdvcmt0cmVlU25hcHNob3RSZXNwb25zZWIGcHJvdG8z", [file_types]);
+  fileDesc("Cg1zZXNzaW9uLnByb3RvEgdzZXNzaW9uIs0BChNBZ2VudENsb25lUGxhY2VtZW50EhIKCnNlc3Npb25faWQYASABKAkSJwofZmFjaWxpdGF0aW5nX2RhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdmYWNpbGl0YXRpbmdfZGFlbW9uX3VybBgDIAEoCRIdChVmaXJzdF9hZG1pc3Npb25fdG9rZW4YBCABKAkSGwoTZmlyc3RfYWRtaXNzaW9uX3VybBgFIAEoCRIcChRmaXJzdF9hZG1pc3Npb25fcm9vbRgGIAEoCSKSAQohQXR0YWNobWVudE1hdGVyaWFsaXphdGlvblByb2dyZXNzEhAKCGJhc2VuYW1lGAEgASgJEhgKEGF0dGFjaG1lbnRfaW5kZXgYAiABKA0SGAoQYXR0YWNobWVudF9jb3VudBgDIAEoDRISCgpieXRlc19kb25lGAQgASgEEhMKC2J5dGVzX3RvdGFsGAUgASgEIpoCCgpTdGFydFBoYXNlEiYKBHN0ZXAYASABKA4yGC5zZXNzaW9uLlN0YXJ0UGhhc2UuU3RlcBIuCghib3VuZGFyeRgCIAEoDjIcLnNlc3Npb24uU3RhcnRQaGFzZS5Cb3VuZGFyeSJoCgRTdGVwEhQKEFNURVBfVU5TUEVDSUZJRUQQABIRCg1TVEVQX1dPUktUUkVFEAESFwoTU1RFUF9TRU1BTlRJQ19JTkRFWBACEg4KClNURVBfQUdFTlQQAxIOCgpTVEVQX0NMT05FEAQiSgoIQm91bmRhcnkSGAoUQk9VTkRBUllfVU5TUEVDSUZJRUQQABISCg5CT1VOREFSWV9CRUdJThABEhAKDEJPVU5EQVJZX0VORBACImQKDkJyYW5jaENvbmZsaWN0Eg4KBmJyYW5jaBgBIAEoCRIjCgVvd25lchgCIAEoCzIULnR5cGVzLkJyYW5jaFNlc3Npb24SHQoVc3VnZ2VzdGVkX2JyYW5jaF9uYW1lGAMgASgJIkIKFUNvbm5lY3RTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiZAoWQ29ubmVjdFNlc3Npb25SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYAyABKAkiQQoURGVsZXRlU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIiMKFURlbGV0ZVNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCCJXChRSZW5hbWVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMZGlzcGxheV9uYW1lGAMgASgJIi0KFVJlbmFtZVNlc3Npb25SZXNwb25zZRIUCgxkaXNwbGF5X25hbWUYASABKAkiYwoaR2V0V29ya3RyZWVTbmFwc2hvdFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSLKAQobR2V0V29ya3RyZWVTbmFwc2hvdFJlc3BvbnNlEhMKC2hlYWRfY29tbWl0GAEgASgJEg4KBmJyYW5jaBgCIAEoCRIVCg1jaGFuZ2VkX3BhdGhzGAMgAygJEhUKDWNoYW5nZWRfZmlsZXMYBCABKA0SEwoLbGluZXNfYWRkZWQYBSABKAMSFQoNbGluZXNfcmVtb3ZlZBgGIAEoAxIXCg91bnRyYWNrZWRfZmlsZXMYByABKA0SEwoLYXR0YWNobWVudHMYCCADKAkilQEKD0hvc3REb2N1bWVudFJlZhIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSJwoFc2NvcGUYAiABKA4yGC50eXBlcy5Ib3N0RG9jdW1lbnRTY29wZRISCgpzZXNzaW9uX2lkGAMgASgJEhIKCnByb2plY3RfaWQYBCABKAkSFQoNcmVsYXRpdmVfcGF0aBgFIAEoCSIsChNMaXN0U2Vzc2lvbnNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiPwoUTGlzdFNlc3Npb25zUmVzcG9uc2USJwoIc2Vzc2lvbnMYASADKAsyFS5zZXNzaW9uLlNlc3Npb25FbnRyeSJBChRSZXN1bWVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkipAEKFVJlc3VtZVNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCRIrCg1yZXN0b3JlZF90YWJzGAUgAygLMhQuc2Vzc2lvbi5SZXN0b3JlZFRhYiJgCgtSZXN0b3JlZFRhYhITCgt0ZXJtaW5hbF9pZBgBIAEoCRIsCgdvdXRjb21lGAIgASgOMhsuc2Vzc2lvbi5SZXN0b3JlZFRhYk91dGNvbWUSDgoGcmVhc29uGAMgASgJIpIBChFTZXNzaW9uQXR0YWNobWVudBIQCghiYXNlbmFtZRgBIAEoCRIuCgZzdGFnZWQYAiABKAsyHC5zZXNzaW9uLlN0YWdlZEF0dGFjaG1lbnRSZWZIABIxCg1ob3N0X2RvY3VtZW50GAMgASgLMhguc2Vzc2lvbi5Ib3N0RG9jdW1lbnRSZWZIAEIICgZzb3VyY2UivgEKEVNlc3Npb25Db250ZXh0RG9jEgsKA2tleRgBIAEoCRIQCghiYXNlbmFtZRgCIAEoCRIMCgRwYXRoGAMgASgJEhMKC2Rlc2NyaXB0aW9uGAQgASgJEg4KBmV4aXN0cxgFIAEoCBIsCgRraW5kGAYgASgOMh4uc2Vzc2lvbi5TZXNzaW9uQ29udGV4dERvY0tpbmQSEgoKc2l6ZV9ieXRlcxgHIAEoBBIVCg1yZWxhdGl2ZV9wYXRoGAggASgJIv4ICgxTZXNzaW9uRW50cnkSEgoKc2Vzc2lvbl9pZBgBIAEoCRISCgpjcmVhdGVkX2F0GAIgASgJEg4KBnN0YXR1cxgDIAEoCRIRCglyZXBvX3BhdGgYBCABKAkSCwoDcGlkGAUgASgNEhEKCWlzX2FjdGl2ZRgGIAEoCBISCgpwcm9qZWN0X2lkGAcgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgIIAEoCRIVCg13b3JrZmxvd19nb2FsGAkgASgJEhYKDndvcmtmbG93X3N0YXRlGAogASgJEhcKD2VsYXBzZWRfZGlzcGxheRgLIAEoCRINCgVhZ2VudBgMIAEoCRINCgVtb2RlbBgNIAEoCRIbChNwZW5kaW5nX2VsaWNpdGF0aW9uGA4gASgIEhcKD2FjdGl2aXR5X3N0YXR1cxgPIAEoCRIMCgR0b29sGBAgASgJEhQKDHNlc3Npb25fdHlwZRgRIAEoCRISCgp1cGRhdGVkX2F0GBIgASgJEhQKDGxpdmVraXRfcm9vbRgTIAEoCRIbChNwcmV2aW91c19zZXNzaW9uX2lkGBQgASgJEh8KF29yY2hlc3RyYXRvcl9zZXNzaW9uX2lkGBUgASgJEg4KBnJlY2lwZRgWIAEoCRIXCg93b3JrX3F1ZXVlX2pzb24YFyABKAkSEAoIYnl0ZXNfaW4YGCABKAQSEQoJYnl0ZXNfb3V0GBkgASgEEh0KFWxhc3RfZGF0YV9yZWNlaXZlZF9hdBgaIAEoCRIwCgxjb250ZXh0X2RvY3MYGyADKAsyGi5zZXNzaW9uLlNlc3Npb25Db250ZXh0RG9jEg4KBmJyYW5jaBgcIAEoCRIjChtjb2RlYmFzZV9kYWVtb25faW5zdGFuY2VfaWQYHSABKAkSGwoTY29kZWJhc2Vfc2Vzc2lvbl9pZBgeIAEoCRIvCgxhZ2VudF9zdGF0dXMYHyABKA4yGS50eXBlcy5TZXNzaW9uQWdlbnRTdGF0dXMSMgoNbGFzdF9hY3Rpdml0eRggIAEoCzIbLnR5cGVzLlNlc3Npb25BZ2VudEFjdGl2aXR5EhcKD3NzaF9jb25maWdfaG9zdBghIAEoCRIYChBtYW5hZ2VkX2NvZGViYXNlGCIgASgIEhQKDHNlc3Npb25fcm9sZRgjIAEoCRIYChByZWFkc19ob3N0X3BhdGhzGCQgASgIEjYKEm9yY2hlc3RyYXRpb25fbWFyaxglIAEoCzIaLnNlc3Npb24uT3JjaGVzdHJhdGlvbk1hcmsSFQoNd29ya19xdWV1ZV9pZBgmIAEoCRIUCgxkaXNwbGF5X25hbWUYJyABKAkSJgoGdGFyZ2V0GCggASgLMhYuc2Vzc2lvbi5TZXNzaW9uVGFyZ2V0Eg8KB3NhbmRib3gYKSABKAgSEQoJcHJfbnVtYmVyGCogASgEEhAKCHByX3N0YXRlGCsgASgJEhcKD293bnNfd29ya19xdWV1ZRgsIAEoCBIWCg5ob2xkc193b3JrdHJlZRgtIAEoCCJhCg1TZXNzaW9uVGFyZ2V0EiEKA3NzaBgBIAEoCzISLnNlc3Npb24uU3NoVGFyZ2V0SAASJQoFY29kZXIYAiABKAsyFC5zZXNzaW9uLkNvZGVyVGFyZ2V0SABCBgoEa2luZCIgCglTc2hUYXJnZXQSEwoLY29uZmlnX2hvc3QYASABKAkiUgoLQ29kZXJUYXJnZXQSEgoKYWNjb3VudF9pZBgBIAEoCRINCgVvd25lchgCIAEoCRIRCgl3b3Jrc3BhY2UYAyABKAkSDQoFYWdlbnQYBCABKAkiXgoRT3JjaGVzdHJhdGlvbk1hcmsSDAoEbWFyaxgBIAEoCRIMCgRub3RlGAIgASgJEhkKEXNldF9ieV9zZXNzaW9uX2lkGAMgASgJEhIKCmF0X3VuaXhfbXMYBCABKAQilQEKH0Vuc3VyZVByb2plY3RIb21lU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCRIrCgVzdGFydBgEIAEoCzIcLnNlc3Npb24uU3RhcnRTZXNzaW9uUmVxdWVzdCJbCiBFbnN1cmVQcm9qZWN0SG9tZVNlc3Npb25SZXNwb25zZRImCgdzZXNzaW9uGAEgASgLMhUuc2Vzc2lvbi5TZXNzaW9uRW50cnkSDwoHb3V0Y29tZRgCIAEoCSJoChRTaWduYWxTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDgoGc2lnbmFsGAMgASgFEhUKDWNvbnRyb2xfdG9rZW4YBCABKAkiNAoVU2lnbmFsU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIEg8KB21lc3NhZ2UYAiABKAkiSwoTU3BsaXRBZ2VudFBsYWNlbWVudBISCgpzZXNzaW9uX2lkGAEgASgJEiAKGGFnZW50X2RhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSJYChNTdGFnZWRBdHRhY2htZW50UmVmEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRISCgpzdGFnaW5nX2lkGAIgASgJEhEKCWZpbGVfbmFtZRgDIAEoCSK1AwoRU3RhcnRTZXNzaW9uRXZlbnQSSQoTYXR0YWNobWVudF9wcm9ncmVzcxgBIAEoCzIqLnNlc3Npb24uQXR0YWNobWVudE1hdGVyaWFsaXphdGlvblByb2dyZXNzSAASLwoGcmVzdWx0GAIgASgLMh0uc2Vzc2lvbi5TdGFydFNlc3Npb25SZXNwb25zZUgAEiQKBXBoYXNlGAMgASgLMhMuc2Vzc2lvbi5TdGFydFBoYXNlSAASLQoKa2VlcF9hbGl2ZRgEIAEoCzIXLnNlc3Npb24uU3RhcnRLZWVwQWxpdmVIABIwCg5jbG9uZV9wcm9ncmVzcxgFIAEoCzIWLnNlc3Npb24uQ2xvbmVQcm9ncmVzc0gAEiwKB3N0YXJ0ZWQYBiABKAsyGS5zZXNzaW9uLlN0YXJ0VGFza1N0YXJ0ZWRIABIvCgtyZW1vdGVfY2FsbBgHIAEoCzIYLnNlc3Npb24uU3RhcnRSZW1vdGVDYWxsSAASNQoOd29ya3RyZWVfcmVhZHkYCCABKAsyGy5zZXNzaW9uLlN0YXJ0V29ya3RyZWVSZWFkeUgAQgcKBWV2ZW50Ij8KEFN0YXJ0VGFza1N0YXJ0ZWQSDwoHdGFza19pZBgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiiAIKD1N0YXJ0UmVtb3RlQ2FsbBIMCgRob3N0GAEgASgJEg8KB2NvbW1hbmQYAiABKAkSEwoLZHVyYXRpb25fbXMYAyABKAQSMQoHb3V0Y29tZRgEIAEoDjIgLnNlc3Npb24uU3RhcnRSZW1vdGVDYWxsLk91dGNvbWUSEQoJZXhpdF9jb2RlGAUgASgFEhMKC3N0ZGVycl90YWlsGAYgASgJImYKB091dGNvbWUSFwoTT1VUQ09NRV9VTlNQRUNJRklFRBAAEhIKDk9VVENPTUVfRVhJVEVEEAESFQoRT1VUQ09NRV9USU1FRF9PVVQQAhIXChNPVVRDT01FX1VOUkVBQ0hBQkxFEAMiYAoSU3RhcnRXb3JrdHJlZVJlYWR5Eg4KBmJyYW5jaBgBIAEoCRIQCgh3b3JrdHJlZRgCIAEoCRITCgtiYXNlX2NvbW1pdBgDIAEoCRITCgtiYXNlX2JlaGluZBgEIAEoDSKcAQoNQ2xvbmVQcm9ncmVzcxINCgVzdGFnZRgBIAEoCRIPCgdwZXJjZW50GAIgASgNEhQKDG9iamVjdHNfZG9uZRgDIAEoBBIVCg1vYmplY3RzX3RvdGFsGAQgASgEEhYKDmJ5dGVzX3JlY2VpdmVkGAUgASgEEhgKEGJ5dGVzX3Blcl9zZWNvbmQYBiABKAQSDAoEbGluZRgHIAEoCSIiCg5TdGFydEtlZXBBbGl2ZRIQCghhY3Rpdml0eRgBIAEoCSLACgoTU3RhcnRTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhEKCXRvb2xfcGF0aBgCIAEoCRISCgpwcm9qZWN0X2lkGAMgASgJEg0KBWFnZW50GAQgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgFIAEoCRIOCgZyZWNpcGUYBiABKAkSFAoMc2Vzc2lvbl90eXBlGAcgASgJEg0KBW1vZGVsGAggASgJEh4KFmJyYW5jaF93b3JrdHJlZV9pbnRlbnQYCSABKAkSFwoPbmV3X2JyYW5jaF9uYW1lGAogASgJEiUKHXNlbGVjdGVkX2ludGVncmF0aW9uX2Jhc2VfcmVmGAsgASgJEiIKGnNlbGVjdGVkX2JyYW5jaF90b193b3JrX29uGAwgASgJEhYKDmluaXRpYWxfcHJvbXB0GA0gASgJEhcKD3Blcm1pc3Npb25fbW9kZRgOIAEoCRIZChF3b3JrX3F1ZXVlX3BhcmVudBgPIAEoCRIPCgdzYW5kYm94GBAgASgIEhgKEG1hbmFnZWRfY29kZWJhc2UYESABKAgSGgoSc3BlY2lhbGl6ZWRfYWdlbnRzGBIgAygJEhsKE2Nsb25lX3BsYWNlZF9hZ2VudHMYLCADKAkSEQoJcmVwb19wYXRoGBggASgJEhMKC2NsYXVkZV9hcmdzGBkgAygJEiQKHGRhbmdlcm91c2x5X3NraXBfcGVybWlzc2lvbnMYGiABKAgSFgoOc2VtYW50aWNfaW5kZXgYGyABKAgSHAoUY3JlYXRlX3JlbW90ZV9icmFuY2gYHCABKAgSLwoLYXR0YWNobWVudHMYHSADKAsyGi5zZXNzaW9uLlNlc3Npb25BdHRhY2htZW50EhoKEm9uX2JyYW5jaF9jb25mbGljdBgeIAEoCRIjChtjb2RlYmFzZV9kYWVtb25faW5zdGFuY2VfaWQYICABKAkSHAoUcmVxdWVzdGVkX3Nlc3Npb25faWQYISABKAkSMQoLYWdlbnRfY2xvbmUYIiABKAsyHC5zZXNzaW9uLkFnZW50Q2xvbmVQbGFjZW1lbnQSMQoLc3BsaXRfYWdlbnQYIyABKAsyHC5zZXNzaW9uLlNwbGl0QWdlbnRQbGFjZW1lbnQSLAokd29ya19xdWV1ZV9wYXJlbnRfZGFlbW9uX2luc3RhbmNlX2lkGCQgASgJEhQKDHdvcmtfaXRlbV9pZBglIAEoCRIXCg9zc2hfY29uZmlnX2hvc3QYJiABKAkSGgoSc2FuZGJveGVkX2NvZGViYXNlGCcgASgIEiwKDWdpdGh1Yl9zb3VyY2UYKCABKA4yFS5zZXNzaW9uLkdpdGh1YlNvdXJjZRIbChNwcm92aWRlcl9hY2NvdW50X2lkGCkgASgJEhkKEXByb3ZpZGVyX2J1aWx0X2luGCogASgIEhQKDHNlc3Npb25fcm9sZRgrIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgtIAEoCRInCh9vcmNoZXN0cmF0b3JfZGFlbW9uX2luc3RhbmNlX2lkGC4gASgJEhMKC3J1bl9pbl90bXV4GC8gASgIEg4KBmVmZm9ydBgwIAEoCRIUCgxkaXNwbGF5X25hbWUYMSABKAkSJgoGdGFyZ2V0GDIgASgLMhYuc2Vzc2lvbi5TZXNzaW9uVGFyZ2V0EhcKD3dpdGhfd29ya19xdWV1ZRgzIAEoCEoECB8QIEoECBMQFEoECBQQFUoECBUQFkoECBYQF0oECBcQGCKoAQoUU3RhcnRTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkSMAoPYnJhbmNoX2NvbmZsaWN0GAUgASgLMhcuc2Vzc2lvbi5CcmFuY2hDb25mbGljdCJHChpQcmV2aWV3Q2xvc2VTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkicgoTQ2xvc2VTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJY29uZmlybWVkGAMgASgIEh0KFWNvbmZpcm1lZF9maW5nZXJwcmludBgEIAEoCSI1ChVDbG9zZVNlc3Npb25EaXJ0eUZpbGUSDAoEcGF0aBgBIAEoCRIOCgZjaGFuZ2UYAiABKAkiMgoSQ2xvc2VTZXNzaW9uQ29tbWl0EgsKA3NoYRgBIAEoCRIPCgdzdWJqZWN0GAIgASgJIq4CChRDbG9zZVNlc3Npb25Xb3JrdHJlZRIMCgRwYXRoGAEgASgJEgwKBGhvc3QYAiABKAkSMQoFb3duZXIYAyABKA4yIi5zZXNzaW9uLkNsb3NlU2Vzc2lvbldvcmt0cmVlT3duZXISEAoIb3duZXJfaWQYBCABKAkSDgoGYnJhbmNoGAUgASgJEjMKC2RpcnR5X2ZpbGVzGAYgAygLMh4uc2Vzc2lvbi5DbG9zZVNlc3Npb25EaXJ0eUZpbGUSNQoQdW5wdXNoZWRfY29tbWl0cxgHIAMoCzIbLnNlc3Npb24uQ2xvc2VTZXNzaW9uQ29tbWl0Eh0KFXVucHVzaGVkX2NvbW1pdF9jb3VudBgIIAEoDRIaChJ1bmF2YWlsYWJsZV9yZWFzb24YCSABKAkiMAoPQ2xvc2VTZXNzaW9uVGFiEg4KBnRhYl9pZBgBIAEoCRINCgVsYWJlbBgCIAEoCSKgAQoTQ2xvc2VTZXNzaW9uUHJldmlldxIwCgl3b3JrdHJlZXMYASADKAsyHS5zZXNzaW9uLkNsb3NlU2Vzc2lvbldvcmt0cmVlEiYKBHRhYnMYAiADKAsyGC5zZXNzaW9uLkNsb3NlU2Vzc2lvblRhYhITCgtmaW5nZXJwcmludBgDIAEoCRIaChJuZWVkc19jb25maXJtYXRpb24YBCABKAgiQgoTQ2xvc2VTZXNzaW9uU3RhcnRlZBIPCgd0YXNrX2lkGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSKeAQoQQ2xvc2VTZXNzaW9uU3RlcBIrCgRraW5kGAEgASgOMh0uc2Vzc2lvbi5DbG9zZVNlc3Npb25TdGVwS2luZBIPCgdzdWJqZWN0GAIgASgJEi0KBXN0YXRlGAMgASgOMh4uc2Vzc2lvbi5DbG9zZVNlc3Npb25TdGVwU3RhdGUSDwoHbWVzc2FnZRgEIAEoCRIMCgRob3N0GAUgASgJIlIKE0Nsb3NlU2Vzc2lvbk91dGNvbWUSCgoCb2sYASABKAgSLwoMZmFpbGVkX3N0ZXBzGAIgAygLMhkuc2Vzc2lvbi5DbG9zZVNlc3Npb25TdGVwIuUBChFDbG9zZVNlc3Npb25FdmVudBIvCgdzdGFydGVkGAEgASgLMhwuc2Vzc2lvbi5DbG9zZVNlc3Npb25TdGFydGVkSAASKQoEc3RlcBgCIAEoCzIZLnNlc3Npb24uQ2xvc2VTZXNzaW9uU3RlcEgAEjoKEm5lZWRzX2NvbmZpcm1hdGlvbhgDIAEoCzIcLnNlc3Npb24uQ2xvc2VTZXNzaW9uUHJldmlld0gAEi8KB291dGNvbWUYBCABKAsyHC5zZXNzaW9uLkNsb3NlU2Vzc2lvbk91dGNvbWVIAEIHCgVldmVudCqfAQoSUmVzdG9yZWRUYWJPdXRjb21lEiQKIFJFU1RPUkVEX1RBQl9PVVRDT01FX1VOU1BFQ0lGSUVEEAASIQodUkVTVE9SRURfVEFCX09VVENPTUVfUkVTVE9SRUQQARIeChpSRVNUT1JFRF9UQUJfT1VUQ09NRV9GUkVTSBACEiAKHFJFU1RPUkVEX1RBQl9PVVRDT01FX0RST1BQRUQQAypnChVTZXNzaW9uQ29udGV4dERvY0tpbmQSJQohU0VTU0lPTl9DT05URVhUX0RPQ19LSU5EX01BTklGRVNUEAASJwojU0VTU0lPTl9DT05URVhUX0RPQ19LSU5EX0FUVEFDSE1FTlQQASpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAipiCgxHaXRodWJTb3VyY2USHQoZR0lUSFVCX1NPVVJDRV9VTlNQRUNJRklFRBAAEhcKE0dJVEhVQl9TT1VSQ0VfVkFVTFQQARIaChZHSVRIVUJfU09VUkNFX0xPQ0FMX0dIEAIqzQEKGUNsb3NlU2Vzc2lvbldvcmt0cmVlT3duZXISLAooQ0xPU0VfU0VTU0lPTl9XT1JLVFJFRV9PV05FUl9VTlNQRUNJRklFRBAAEigKJENMT1NFX1NFU1NJT05fV09SS1RSRUVfT1dORVJfU0VTU0lPThABEi0KKUNMT1NFX1NFU1NJT05fV09SS1RSRUVfT1dORVJfQ09OVkVSU0FUSU9OEAISKQolQ0xPU0VfU0VTU0lPTl9XT1JLVFJFRV9PV05FUl9DT0RFQkFTRRADKtEBChRDbG9zZVNlc3Npb25TdGVwS2luZBInCiNDTE9TRV9TRVNTSU9OX1NURVBfS0lORF9VTlNQRUNJRklFRBAAEiEKHUNMT1NFX1NFU1NJT05fU1RFUF9LSU5EX0NIRUNLEAESJQohQ0xPU0VfU0VTU0lPTl9TVEVQX0tJTkRfVEVSTUlOQVRFEAISIgoeQ0xPU0VfU0VTU0lPTl9TVEVQX0tJTkRfUkVNT1ZFEAMSIgoeQ0xPU0VfU0VTU0lPTl9TVEVQX0tJTkRfUkVDT1JEEAQq1QEKFUNsb3NlU2Vzc2lvblN0ZXBTdGF0ZRIoCiRDTE9TRV9TRVNTSU9OX1NURVBfU1RBVEVfVU5TUEVDSUZJRUQQABIkCiBDTE9TRV9TRVNTSU9OX1NURVBfU1RBVEVfUlVOTklORxABEiEKHUNMT1NFX1NFU1NJT05fU1RFUF9TVEFURV9ET05FEAISIwofQ0xPU0VfU0VTU0lPTl9TVEVQX1NUQVRFX0ZBSUxFRBADEiQKIENMT1NFX1NFU1NJT05fU1RFUF9TVEFURV9TS0lQUEVEEAQyiAgKDlNlc3Npb25TZXJ2aWNlEksKDExpc3RTZXNzaW9ucxIcLnNlc3Npb24uTGlzdFNlc3Npb25zUmVxdWVzdBodLnNlc3Npb24uTGlzdFNlc3Npb25zUmVzcG9uc2USSwoMU3RhcnRTZXNzaW9uEhwuc2Vzc2lvbi5TdGFydFNlc3Npb25SZXF1ZXN0Gh0uc2Vzc2lvbi5TdGFydFNlc3Npb25SZXNwb25zZRJQChJTdHJlYW1TdGFydFNlc3Npb24SHC5zZXNzaW9uLlN0YXJ0U2Vzc2lvblJlcXVlc3QaGi5zZXNzaW9uLlN0YXJ0U2Vzc2lvbkV2ZW50MAESUQoOQ29ubmVjdFNlc3Npb24SHi5zZXNzaW9uLkNvbm5lY3RTZXNzaW9uUmVxdWVzdBofLnNlc3Npb24uQ29ubmVjdFNlc3Npb25SZXNwb25zZRJOCg1SZXN1bWVTZXNzaW9uEh0uc2Vzc2lvbi5SZXN1bWVTZXNzaW9uUmVxdWVzdBoeLnNlc3Npb24uUmVzdW1lU2Vzc2lvblJlc3BvbnNlEm8KGEVuc3VyZVByb2plY3RIb21lU2Vzc2lvbhIoLnNlc3Npb24uRW5zdXJlUHJvamVjdEhvbWVTZXNzaW9uUmVxdWVzdBopLnNlc3Npb24uRW5zdXJlUHJvamVjdEhvbWVTZXNzaW9uUmVzcG9uc2USTgoNU2lnbmFsU2Vzc2lvbhIdLnNlc3Npb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaHi5zZXNzaW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJOCg1EZWxldGVTZXNzaW9uEh0uc2Vzc2lvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBoeLnNlc3Npb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEk4KDVJlbmFtZVNlc3Npb24SHS5zZXNzaW9uLlJlbmFtZVNlc3Npb25SZXF1ZXN0Gh4uc2Vzc2lvbi5SZW5hbWVTZXNzaW9uUmVzcG9uc2USYAoTR2V0V29ya3RyZWVTbmFwc2hvdBIjLnNlc3Npb24uR2V0V29ya3RyZWVTbmFwc2hvdFJlcXVlc3QaJC5zZXNzaW9uLkdldFdvcmt0cmVlU25hcHNob3RSZXNwb25zZRJYChNQcmV2aWV3Q2xvc2VTZXNzaW9uEiMuc2Vzc2lvbi5QcmV2aWV3Q2xvc2VTZXNzaW9uUmVxdWVzdBocLnNlc3Npb24uQ2xvc2VTZXNzaW9uUHJldmlldxJKCgxDbG9zZVNlc3Npb24SHC5zZXNzaW9uLkNsb3NlU2Vzc2lvblJlcXVlc3QaGi5zZXNzaW9uLkNsb3NlU2Vzc2lvbkV2ZW50MAFiBnByb3RvMw", [file_types]);
 
 /**
  * @generated from message session.AgentClonePlacement
@@ -1128,6 +1128,15 @@ export type SessionEntry = Message<"session.SessionEntry"> & {
    * @generated from field: bool owns_work_queue = 44;
    */
   ownsWorkQueue: boolean;
+
+  /**
+   * Whether the session still holds a worktree a close would remove: its type owns one, it records
+   * one, no close removed it (the session directory's `worktree-removed` marker), and — when it is on this
+   * host — the path exists. The drawer offers an inactive row's trash bin exactly when it does.
+   *
+   * @generated from field: bool holds_worktree = 45;
+   */
+  holdsWorktree: boolean;
 };
 
 /**
@@ -2290,6 +2299,387 @@ export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@_
   messageDesc(file_session, 38);
 
 /**
+ * @generated from message session.PreviewCloseSessionRequest
+ */
+export type PreviewCloseSessionRequest = Message<"session.PreviewCloseSessionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message session.PreviewCloseSessionRequest.
+ * Use `create(PreviewCloseSessionRequestSchema)` to create a new message.
+ */
+export const PreviewCloseSessionRequestSchema: GenMessage<PreviewCloseSessionRequest> = /*@__PURE__*/
+  messageDesc(file_session, 39);
+
+/**
+ * @generated from message session.CloseSessionRequest
+ */
+export type CloseSessionRequest = Message<"session.CloseSessionRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * The operator saw the preview's losses and accepted them.
+   *
+   * @generated from field: bool confirmed = 3;
+   */
+  confirmed: boolean;
+
+  /**
+   * `CloseSessionPreview.fingerprint` of the preview the operator accepted. A close whose losses no
+   * longer match it asks again instead of acting.
+   *
+   * @generated from field: string confirmed_fingerprint = 4;
+   */
+  confirmedFingerprint: string;
+};
+
+/**
+ * Describes the message session.CloseSessionRequest.
+ * Use `create(CloseSessionRequestSchema)` to create a new message.
+ */
+export const CloseSessionRequestSchema: GenMessage<CloseSessionRequest> = /*@__PURE__*/
+  messageDesc(file_session, 40);
+
+/**
+ * @generated from message session.CloseSessionDirtyFile
+ */
+export type CloseSessionDirtyFile = Message<"session.CloseSessionDirtyFile"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * `modified` / `staged` / `untracked` / `deleted` / `renamed`.
+   *
+   * @generated from field: string change = 2;
+   */
+  change: string;
+};
+
+/**
+ * Describes the message session.CloseSessionDirtyFile.
+ * Use `create(CloseSessionDirtyFileSchema)` to create a new message.
+ */
+export const CloseSessionDirtyFileSchema: GenMessage<CloseSessionDirtyFile> = /*@__PURE__*/
+  messageDesc(file_session, 41);
+
+/**
+ * @generated from message session.CloseSessionCommit
+ */
+export type CloseSessionCommit = Message<"session.CloseSessionCommit"> & {
+  /**
+   * @generated from field: string sha = 1;
+   */
+  sha: string;
+
+  /**
+   * @generated from field: string subject = 2;
+   */
+  subject: string;
+};
+
+/**
+ * Describes the message session.CloseSessionCommit.
+ * Use `create(CloseSessionCommitSchema)` to create a new message.
+ */
+export const CloseSessionCommitSchema: GenMessage<CloseSessionCommit> = /*@__PURE__*/
+  messageDesc(file_session, 42);
+
+/**
+ * One worktree a close would remove, and what removing it would lose.
+ *
+ * @generated from message session.CloseSessionWorktree
+ */
+export type CloseSessionWorktree = Message<"session.CloseSessionWorktree"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * Where it is: empty for this daemon's host; otherwise the target (ssh host, Coder workspace) or
+   * the codebase daemon it is on, as the operator knows it.
+   *
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * @generated from field: session.CloseSessionWorktreeOwner owner = 3;
+   */
+  owner: CloseSessionWorktreeOwner;
+
+  /**
+   * The conversation or workspace session the worktree belongs to; empty for SESSION.
+   *
+   * @generated from field: string owner_id = 4;
+   */
+  ownerId: string;
+
+  /**
+   * @generated from field: string branch = 5;
+   */
+  branch: string;
+
+  /**
+   * Uncommitted files: staged, unstaged, deleted, renamed, and untracked files that are not ignored.
+   *
+   * @generated from field: repeated session.CloseSessionDirtyFile dirty_files = 6;
+   */
+  dirtyFiles: CloseSessionDirtyFile[];
+
+  /**
+   * Commits on the worktree's HEAD that no remote-tracking ref and not the session's recorded base
+   * hold — at most 20, newest first.
+   *
+   * @generated from field: repeated session.CloseSessionCommit unpushed_commits = 7;
+   */
+  unpushedCommits: CloseSessionCommit[];
+
+  /**
+   * How many such commits there are in all (may exceed the listed ones).
+   *
+   * @generated from field: uint32 unpushed_commit_count = 8;
+   */
+  unpushedCommitCount: number;
+
+  /**
+   * Why the worktree could not be read (target unreachable, vault locked, codebase daemon offline);
+   * empty when it was. A close never proceeds past an unreadable worktree.
+   *
+   * @generated from field: string unavailable_reason = 9;
+   */
+  unavailableReason: string;
+};
+
+/**
+ * Describes the message session.CloseSessionWorktree.
+ * Use `create(CloseSessionWorktreeSchema)` to create a new message.
+ */
+export const CloseSessionWorktreeSchema: GenMessage<CloseSessionWorktree> = /*@__PURE__*/
+  messageDesc(file_session, 43);
+
+/**
+ * One agent tab a close would terminate.
+ *
+ * @generated from message session.CloseSessionTab
+ */
+export type CloseSessionTab = Message<"session.CloseSessionTab"> & {
+  /**
+   * `main`, a terminal id, or `conversation:<id>`.
+   *
+   * @generated from field: string tab_id = 1;
+   */
+  tabId: string;
+
+  /**
+   * How the operator knows it (agent kind, tmux session, conversation's agent).
+   *
+   * @generated from field: string label = 2;
+   */
+  label: string;
+};
+
+/**
+ * Describes the message session.CloseSessionTab.
+ * Use `create(CloseSessionTabSchema)` to create a new message.
+ */
+export const CloseSessionTabSchema: GenMessage<CloseSessionTab> = /*@__PURE__*/
+  messageDesc(file_session, 44);
+
+/**
+ * @generated from message session.CloseSessionPreview
+ */
+export type CloseSessionPreview = Message<"session.CloseSessionPreview"> & {
+  /**
+   * @generated from field: repeated session.CloseSessionWorktree worktrees = 1;
+   */
+  worktrees: CloseSessionWorktree[];
+
+  /**
+   * @generated from field: repeated session.CloseSessionTab tabs = 2;
+   */
+  tabs: CloseSessionTab[];
+
+  /**
+   * A digest of every worktree's owner, path and losses (or unavailable reason). CloseSession
+   * compares it with the one the operator confirmed.
+   *
+   * @generated from field: string fingerprint = 3;
+   */
+  fingerprint: string;
+
+  /**
+   * True when any worktree would lose something or could not be read: the operator is asked.
+   *
+   * @generated from field: bool needs_confirmation = 4;
+   */
+  needsConfirmation: boolean;
+};
+
+/**
+ * Describes the message session.CloseSessionPreview.
+ * Use `create(CloseSessionPreviewSchema)` to create a new message.
+ */
+export const CloseSessionPreviewSchema: GenMessage<CloseSessionPreview> = /*@__PURE__*/
+  messageDesc(file_session, 45);
+
+/**
+ * @generated from message session.CloseSessionStarted
+ */
+export type CloseSessionStarted = Message<"session.CloseSessionStarted"> & {
+  /**
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+};
+
+/**
+ * Describes the message session.CloseSessionStarted.
+ * Use `create(CloseSessionStartedSchema)` to create a new message.
+ */
+export const CloseSessionStartedSchema: GenMessage<CloseSessionStarted> = /*@__PURE__*/
+  messageDesc(file_session, 46);
+
+/**
+ * @generated from message session.CloseSessionStep
+ */
+export type CloseSessionStep = Message<"session.CloseSessionStep"> & {
+  /**
+   * @generated from field: session.CloseSessionStepKind kind = 1;
+   */
+  kind: CloseSessionStepKind;
+
+  /**
+   * What the step acts on: a tab id, a worktree path, the session.
+   *
+   * @generated from field: string subject = 2;
+   */
+  subject: string;
+
+  /**
+   * @generated from field: session.CloseSessionStepState state = 3;
+   */
+  state: CloseSessionStepState;
+
+  /**
+   * Why it failed or was skipped; a short note otherwise.
+   *
+   * @generated from field: string message = 4;
+   */
+  message: string;
+
+  /**
+   * Where it ran: empty for this daemon's host, else the target or peer daemon.
+   *
+   * @generated from field: string host = 5;
+   */
+  host: string;
+};
+
+/**
+ * Describes the message session.CloseSessionStep.
+ * Use `create(CloseSessionStepSchema)` to create a new message.
+ */
+export const CloseSessionStepSchema: GenMessage<CloseSessionStep> = /*@__PURE__*/
+  messageDesc(file_session, 47);
+
+/**
+ * @generated from message session.CloseSessionOutcome
+ */
+export type CloseSessionOutcome = Message<"session.CloseSessionOutcome"> & {
+  /**
+   * True when every tab ended and every worktree was removed.
+   *
+   * @generated from field: bool ok = 1;
+   */
+  ok: boolean;
+
+  /**
+   * Every step that failed or was skipped, in order.
+   *
+   * @generated from field: repeated session.CloseSessionStep failed_steps = 2;
+   */
+  failedSteps: CloseSessionStep[];
+};
+
+/**
+ * Describes the message session.CloseSessionOutcome.
+ * Use `create(CloseSessionOutcomeSchema)` to create a new message.
+ */
+export const CloseSessionOutcomeSchema: GenMessage<CloseSessionOutcome> = /*@__PURE__*/
+  messageDesc(file_session, 48);
+
+/**
+ * @generated from message session.CloseSessionEvent
+ */
+export type CloseSessionEvent = Message<"session.CloseSessionEvent"> & {
+  /**
+   * @generated from oneof session.CloseSessionEvent.event
+   */
+  event: {
+    /**
+     * @generated from field: session.CloseSessionStarted started = 1;
+     */
+    value: CloseSessionStarted;
+    case: "started";
+  } | {
+    /**
+     * @generated from field: session.CloseSessionStep step = 2;
+     */
+    value: CloseSessionStep;
+    case: "step";
+  } | {
+    /**
+     * Terminal: the close found something unconfirmed (or unreadable) at risk and did nothing
+     * further. Carries the fresh preview to show the operator.
+     *
+     * @generated from field: session.CloseSessionPreview needs_confirmation = 3;
+     */
+    value: CloseSessionPreview;
+    case: "needsConfirmation";
+  } | {
+    /**
+     * Terminal: the close ran to its end.
+     *
+     * @generated from field: session.CloseSessionOutcome outcome = 4;
+     */
+    value: CloseSessionOutcome;
+    case: "outcome";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message session.CloseSessionEvent.
+ * Use `create(CloseSessionEventSchema)` to create a new message.
+ */
+export const CloseSessionEventSchema: GenMessage<CloseSessionEvent> = /*@__PURE__*/
+  messageDesc(file_session, 49);
+
+/**
  * @generated from enum session.RestoredTabOutcome
  */
 export enum RestoredTabOutcome {
@@ -2417,6 +2807,119 @@ export const GithubSourceSchema: GenEnum<GithubSource> = /*@__PURE__*/
   enumDesc(file_session, 3);
 
 /**
+ * Whose a worktree a close would remove is.
+ *
+ * @generated from enum session.CloseSessionWorktreeOwner
+ */
+export enum CloseSessionWorktreeOwner {
+  /**
+   * @generated from enum value: CLOSE_SESSION_WORKTREE_OWNER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The session's own worktree, on this host or on its target.
+   *
+   * @generated from enum value: CLOSE_SESSION_WORKTREE_OWNER_SESSION = 1;
+   */
+  SESSION = 1,
+
+  /**
+   * A clone-placed subagent conversation's worktree (`owner_id` = the conversation).
+   *
+   * @generated from enum value: CLOSE_SESSION_WORKTREE_OWNER_CONVERSATION = 2;
+   */
+  CONVERSATION = 2,
+
+  /**
+   * A split session's checkout on its codebase daemon (`owner_id` = the paired workspace session).
+   *
+   * @generated from enum value: CLOSE_SESSION_WORKTREE_OWNER_CODEBASE = 3;
+   */
+  CODEBASE = 3,
+}
+
+/**
+ * Describes the enum session.CloseSessionWorktreeOwner.
+ */
+export const CloseSessionWorktreeOwnerSchema: GenEnum<CloseSessionWorktreeOwner> = /*@__PURE__*/
+  enumDesc(file_session, 4);
+
+/**
+ * @generated from enum session.CloseSessionStepKind
+ */
+export enum CloseSessionStepKind {
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_KIND_CHECK = 1;
+   */
+  CHECK = 1,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_KIND_TERMINATE = 2;
+   */
+  TERMINATE = 2,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_KIND_REMOVE = 3;
+   */
+  REMOVE = 3,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_KIND_RECORD = 4;
+   */
+  RECORD = 4,
+}
+
+/**
+ * Describes the enum session.CloseSessionStepKind.
+ */
+export const CloseSessionStepKindSchema: GenEnum<CloseSessionStepKind> = /*@__PURE__*/
+  enumDesc(file_session, 5);
+
+/**
+ * @generated from enum session.CloseSessionStepState
+ */
+export enum CloseSessionStepState {
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_STATE_RUNNING = 1;
+   */
+  RUNNING = 1,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_STATE_DONE = 2;
+   */
+  DONE = 2,
+
+  /**
+   * @generated from enum value: CLOSE_SESSION_STEP_STATE_FAILED = 3;
+   */
+  FAILED = 3,
+
+  /**
+   * Not attempted, because an earlier step failed (a tab survived, so no worktree is removed).
+   *
+   * @generated from enum value: CLOSE_SESSION_STEP_STATE_SKIPPED = 4;
+   */
+  SKIPPED = 4,
+}
+
+/**
+ * Describes the enum session.CloseSessionStepState.
+ */
+export const CloseSessionStepStateSchema: GenEnum<CloseSessionStepState> = /*@__PURE__*/
+  enumDesc(file_session, 6);
+
+/**
  * @generated from service session.SessionService
  */
 export const SessionService: GenService<{
@@ -2531,6 +3034,31 @@ export const SessionService: GenService<{
     methodKind: "unary";
     input: typeof GetWorktreeSnapshotRequestSchema;
     output: typeof GetWorktreeSnapshotResponseSchema;
+  },
+  /**
+   * What closing a session would lose: per worktree it owns, its uncommitted files and its commits
+   * no remote holds, and the tabs a close would terminate (docs/ft/daemon/session-liveness.md
+   * § Closing a session). Read-only and advisory: CloseSession checks again. Answered by the daemon
+   * holding the session, as DeleteSession is.
+   *
+   * @generated from rpc session.SessionService.PreviewCloseSession
+   */
+  previewCloseSession: {
+    methodKind: "unary";
+    input: typeof PreviewCloseSessionRequestSchema;
+    output: typeof CloseSessionPreviewSchema;
+  },
+  /**
+   * Close a session as one task: terminate every agent tab of it, then remove every worktree it
+   * owns, keeping its record and branch. The first event names the task; exactly one terminal
+   * event follows — `needs_confirmation` (nothing more was done) or `outcome`.
+   *
+   * @generated from rpc session.SessionService.CloseSession
+   */
+  closeSession: {
+    methodKind: "server_streaming";
+    input: typeof CloseSessionRequestSchema;
+    output: typeof CloseSessionEventSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_session, 0);

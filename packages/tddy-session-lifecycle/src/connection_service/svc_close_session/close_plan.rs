@@ -1,0 +1,532 @@
+//! What a close would remove and what that would lose — the preview, and the plan the close task
+//! acts on (docs/ft/daemon/session-liveness.md § Closing a session).
+//!
+//! Every worktree the session owns, in the order a close removes them: its clone-placed
+//! conversations' worktrees (they sit inside its own), its own worktree — on this host or on its
+//! target — and a split session's checkout on its codebase daemon. Each is read for what removing
+//! it would lose, or carries why it could not be read.
+
+use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
+use tddy_rpc::{Request, Status};
+use tddy_service::proto::session::{
+    CloseSessionPreview, CloseSessionTab, CloseSessionWorktree, CloseSessionWorktreeOwner,
+    PreviewCloseSessionRequest,
+};
+use tddy_session_activity::session_deletion::{
+    is_daemon_managed_worktree, worktree_removal_applies_to,
+};
+use tddy_subagent_worktree::ConversationWorktree;
+use tddy_worktree_service::target_worktrees::target_path_is_present;
+use tddy_worktree_service::worktree_loss::read_target_worktree_loss;
+use tddy_worktree_service::worktrees::path_is_present;
+
+use super::super::DaemonSessionHost;
+use super::CloseContext;
+use crate::connection_service::svc_close_session::conversation_worktrees::conversation_worktrees_in;
+use crate::connection_service::svc_close_session::worktree_reads::read_local_worktree;
+use crate::connection_service::svc_close_session::worktree_reads::recorded_base;
+use crate::connection_service::svc_close_session::worktree_reads::recorded_branch;
+use crate::connection_service::svc_close_session::worktree_reads::target_branch;
+use crate::connection_service::svc_close_session::worktree_reads::unavailable;
+use crate::connection_service::svc_close_session::worktree_reads::with_loss;
+
+/// One worktree a close removes: what the operator is shown, and how it is removed.
+pub(super) struct PlannedWorktree {
+    pub view: CloseSessionWorktree,
+    pub removal: Removal,
+}
+
+/// How a planned worktree is removed.
+pub(super) enum Removal {
+    /// The session's own worktree on this host, forced out of its project's clone. `present`: the
+    /// plan found it on disk — one planned gone that is there again at removal is refused, since
+    /// what it holds was never shown.
+    Local { path: PathBuf, present: bool },
+    /// The session's own worktree on its target; `present` as for [`Removal::Local`].
+    Target { worktree: String, present: bool },
+    /// A clone-placed conversation's worktree, with its branch and base ref.
+    Conversation(ConversationWorktree),
+    /// A conversation's worktree whose base ref is gone: the worktree alone, out of the session's
+    /// repository.
+    ConversationWithoutBase {
+        session_worktree: PathBuf,
+        root: PathBuf,
+    },
+    /// The checkout a split session's codebase daemon holds: closed there, as the paired workspace
+    /// session, confirming the preview that daemon gave.
+    Codebase {
+        daemon_instance_id: String,
+        session_id: String,
+        fingerprint: String,
+        here: bool,
+    },
+    /// Removed by another worktree's step: one forwarded close removes everything the codebase
+    /// daemon listed.
+    WithAnother,
+}
+
+/// What a close of one session would remove and end.
+pub(super) struct ClosePlan {
+    /// In removal order.
+    pub worktrees: Vec<PlannedWorktree>,
+    pub tabs: Vec<CloseSessionTab>,
+    /// Why the session's tab roster could not be read: then not every tab can be ended, and the
+    /// close fails its check.
+    pub unreadable_tabs: Option<String>,
+    pub fingerprint: String,
+}
+
+impl ClosePlan {
+    /// Whether any worktree could not be read.
+    pub fn has_an_unreadable_worktree(&self) -> bool {
+        self.worktrees
+            .iter()
+            .any(|worktree| !worktree.view.unavailable_reason.is_empty())
+    }
+
+    /// Whether removing any worktree would lose something.
+    pub fn loses_something(&self) -> bool {
+        self.worktrees.iter().any(|worktree| loses(&worktree.view))
+    }
+
+    pub fn preview(&self) -> CloseSessionPreview {
+        CloseSessionPreview {
+            worktrees: self
+                .worktrees
+                .iter()
+                .map(|worktree| worktree.view.clone())
+                .collect(),
+            tabs: self.tabs.clone(),
+            fingerprint: self.fingerprint.clone(),
+            needs_confirmation: self.has_an_unreadable_worktree() || self.loses_something(),
+        }
+    }
+}
+
+fn loses(worktree: &CloseSessionWorktree) -> bool {
+    !worktree.dirty_files.is_empty() || worktree.unpushed_commit_count > 0
+}
+
+impl DaemonSessionHost {
+    /// Read everything a close of the session in `ctx` would remove, and what removing it would
+    /// lose.
+    pub(super) async fn plan_close(&self, ctx: &CloseContext) -> ClosePlan {
+        let metadata = &ctx.metadata;
+        let mut worktrees = Vec::new();
+        if let Some(own) = self.own_worktree_of(ctx).await {
+            // Conversation worktrees are cut in a worktree on this host only: a conversation of a
+            // remote agent works in that agent's clone, which the clone teardown removes.
+            if let Removal::Local {
+                path,
+                present: true,
+            } = &own.removal
+            {
+                worktrees.extend(conversation_worktrees_in(path, &ctx.session_id).await);
+            }
+            worktrees.push(own);
+        }
+        if let Some((daemon_instance_id, codebase_session_id)) =
+            tddy_session_agents::peer_session_answer::split_pairing(metadata)
+        {
+            worktrees.extend(
+                self.codebase_worktrees(ctx, daemon_instance_id, codebase_session_id)
+                    .await,
+            );
+        }
+        let fingerprint = fingerprint_of(worktrees.iter().map(|worktree| &worktree.view));
+        let (tabs, unreadable_tabs) = self.tabs_a_close_ends(ctx).await;
+        ClosePlan {
+            tabs,
+            unreadable_tabs,
+            worktrees,
+            fingerprint,
+        }
+    }
+
+    /// The session's own worktree, when its type owns one and it records one: on its target, or
+    /// on this host under a project's `.worktrees`. A worktree already gone is listed losing nothing
+    /// — its removal clears what git still registers of it.
+    async fn own_worktree_of(&self, ctx: &CloseContext) -> Option<PlannedWorktree> {
+        let metadata = &ctx.metadata;
+        let session_type = metadata.session_type.as_deref().unwrap_or_default();
+        if !worktree_removal_applies_to(Some(self.coding_agents.agents()), session_type) {
+            return None;
+        }
+        let recorded = metadata.repo_path.clone()?;
+        let base = recorded_base(&ctx.session_dir);
+        if let Some(target) = &metadata.target {
+            let host = host_of_target(target);
+            let (view, present) = self
+                .read_target_worktree(ctx, &recorded, base.as_deref())
+                .await;
+            return Some(PlannedWorktree {
+                view: CloseSessionWorktree { host, ..view },
+                removal: Removal::Target {
+                    worktree: recorded,
+                    present,
+                },
+            });
+        }
+        let path = PathBuf::from(&recorded);
+        if !is_daemon_managed_worktree(&path) {
+            return None;
+        }
+        // Only "no such file" is gone: a worktree that cannot be looked at is never read as one
+        // that holds nothing.
+        let (view, present) = match path_is_present(&path) {
+            Ok(true) => (read_local_worktree(&path, base.as_deref()).await, true),
+            Ok(false) => (
+                CloseSessionWorktree {
+                    branch: recorded_branch(&ctx.session_dir),
+                    ..CloseSessionWorktree::default()
+                },
+                false,
+            ),
+            Err(error) => (
+                unavailable(CloseSessionWorktree::default(), error.to_string()),
+                false,
+            ),
+        };
+        Some(PlannedWorktree {
+            view: CloseSessionWorktree {
+                path: recorded,
+                owner: CloseSessionWorktreeOwner::Session as i32,
+                ..view
+            },
+            removal: Removal::Local { path, present },
+        })
+    }
+
+    /// The session's worktree on its target, read through the shell its owner reaches it with, and
+    /// whether it is there. One whose presence cannot be told
+    /// ([`target_path_is_present`]) could not be read.
+    async fn read_target_worktree(
+        &self,
+        ctx: &CloseContext,
+        worktree: &str,
+        base: Option<&str>,
+    ) -> (CloseSessionWorktree, bool) {
+        let view = CloseSessionWorktree {
+            path: worktree.to_string(),
+            owner: CloseSessionWorktreeOwner::Session as i32,
+            ..CloseSessionWorktree::default()
+        };
+        let shell = match self.target_shell_of(ctx) {
+            Ok(shell) => shell,
+            Err(reason) => return (unavailable(view, reason), false),
+        };
+        match target_path_is_present(shell.as_ref(), worktree).await {
+            Err(refusal) => (unavailable(view, refusal.message().to_string()), false),
+            Ok(false) => (
+                CloseSessionWorktree {
+                    branch: recorded_branch(&ctx.session_dir),
+                    ..view
+                },
+                false,
+            ),
+            Ok(true) => match read_target_worktree_loss(shell.as_ref(), worktree, base).await {
+                Ok(loss) => (
+                    CloseSessionWorktree {
+                        branch: target_branch(shell.as_ref(), worktree).await,
+                        ..with_loss(view, loss)
+                    },
+                    true,
+                ),
+                Err(refusal) => (unavailable(view, refusal.message().to_string()), true),
+            },
+        }
+    }
+
+    /// The shell the session's target is reached through, as its caller.
+    pub(super) fn target_shell_of(
+        &self,
+        ctx: &CloseContext,
+    ) -> Result<std::sync::Arc<dyn tddy_remote_shell::RemoteShell>, String> {
+        let subject = ctx
+            .subject
+            .as_deref()
+            .ok_or_else(|| "no caller to reach the session's target as".to_string())?;
+        self.launch_sessions()
+            .tab_target_shell()
+            .target_of(&ctx.session_dir, subject)
+            .map(|target| target.shell)
+            .map_err(|refusal| refusal.message().to_string())
+    }
+
+    /// The worktrees of a split session's checkout on its codebase daemon, as that daemon previews
+    /// closing the paired workspace session — asked directly when the checkout is on this daemon
+    /// (a jailed codebase), forwarded otherwise. A daemon that no longer has the session holds no
+    /// checkout for it; one that cannot be reached is a worktree that could not be read.
+    async fn codebase_worktrees(
+        &self,
+        ctx: &CloseContext,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+    ) -> Vec<PlannedWorktree> {
+        let here = daemon_instance_id
+            == tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config);
+        let previewed = self
+            .preview_the_codebase(ctx, daemon_instance_id, codebase_session_id, here)
+            .await;
+        let unreadable = |reason: String| {
+            vec![PlannedWorktree {
+                view: CloseSessionWorktree {
+                    host: daemon_instance_id.to_string(),
+                    owner: CloseSessionWorktreeOwner::Codebase as i32,
+                    owner_id: codebase_session_id.to_string(),
+                    unavailable_reason: reason,
+                    ..CloseSessionWorktree::default()
+                },
+                removal: Removal::Codebase {
+                    daemon_instance_id: daemon_instance_id.to_string(),
+                    session_id: codebase_session_id.to_string(),
+                    fingerprint: String::new(),
+                    here,
+                },
+            }]
+        };
+        let preview = match previewed {
+            Ok(preview) => preview,
+            Err(refusal)
+                if tddy_session_agents::peer_session_answer::peer_does_not_hold_the_session(
+                    &refusal,
+                ) =>
+            {
+                log::info!(
+                    "CloseSession: daemon {daemon_instance_id} no longer has workspace session \
+                     {codebase_session_id} ({}); session {} has no checkout there to remove",
+                    refusal.message(),
+                    ctx.session_id
+                );
+                return Vec::new();
+            }
+            Err(refusal) => return unreadable(refusal.message().to_string()),
+        };
+        // One forwarded close removes everything the codebase daemon listed; its removal rides on
+        // the first worktree, and the rest are shown alone.
+        planned_codebase_worktrees(daemon_instance_id, codebase_session_id, here, preview)
+    }
+
+    /// What closing workspace session `codebase_session_id` would lose, as its daemon previews it:
+    /// asked here when `here`, forwarded otherwise.
+    async fn preview_the_codebase(
+        &self,
+        ctx: &CloseContext,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+        here: bool,
+    ) -> Result<CloseSessionPreview, Status> {
+        let request = PreviewCloseSessionRequest {
+            session_token: ctx.session_token.clone(),
+            session_id: codebase_session_id.to_string(),
+        };
+        if here {
+            Box::pin(self.preview_close_session_at_host(Request::direct(request)))
+                .await
+                .map(|response| response.into_inner())
+        } else {
+            self.forward_preview_close(daemon_instance_id, &request)
+                .await
+        }
+    }
+
+    /// Forward `PreviewCloseSession` to `daemon_instance_id`, refusing — distinctly from "that
+    /// daemon has no such session" — when this daemon is not in the common room right now.
+    async fn forward_preview_close(
+        &self,
+        daemon_instance_id: &str,
+        request: &PreviewCloseSessionRequest,
+    ) -> Result<CloseSessionPreview, Status> {
+        let slot = self
+            .peer_routing
+            .common_room_slot("PreviewCloseSession")
+            .map_err(not_a_missing_session)?;
+        if !slot.is_connected().await {
+            return Err(Status::unavailable(format!(
+                "cannot reach the common room to read the checkout on daemon \
+                 {daemon_instance_id}; retry once the daemons can see each other"
+            )));
+        }
+        tddy_daemon_kernel::peer_calls::forward_preview_close_session(
+            slot,
+            daemon_instance_id,
+            request,
+        )
+        .await
+    }
+}
+
+/// The worktrees of the codebase daemon's `preview`, planned as the codebase half: the first carries
+/// the one forwarded close that removes them all, confirming `preview`'s fingerprint.
+fn planned_codebase_worktrees(
+    daemon_instance_id: &str,
+    codebase_session_id: &str,
+    here: bool,
+    preview: CloseSessionPreview,
+) -> Vec<PlannedWorktree> {
+    let fingerprint = preview.fingerprint;
+    preview
+        .worktrees
+        .into_iter()
+        .enumerate()
+        .map(|(index, worktree)| PlannedWorktree {
+            view: CloseSessionWorktree {
+                host: if here {
+                    worktree.host.clone()
+                } else {
+                    daemon_instance_id.to_string()
+                },
+                owner: CloseSessionWorktreeOwner::Codebase as i32,
+                owner_id: codebase_session_id.to_string(),
+                ..worktree
+            },
+            removal: if index == 0 {
+                Removal::Codebase {
+                    daemon_instance_id: daemon_instance_id.to_string(),
+                    session_id: codebase_session_id.to_string(),
+                    fingerprint: fingerprint.clone(),
+                    here,
+                }
+            } else {
+                Removal::WithAnother
+            },
+        })
+        .collect()
+}
+
+/// A local peer refusal ("no common room configured") is `FAILED_PRECONDITION`, the code a peer
+/// that holds no such session answers too; it is a checkout that could not be read, so it is
+/// answered as `UNAVAILABLE`.
+fn not_a_missing_session(refusal: Status) -> Status {
+    Status::unavailable(refusal.message().to_string())
+}
+
+/// Where a target is, as the operator knows it: an ssh target's `Host` alias, a Coder workspace as
+/// `owner/workspace`.
+pub(super) fn host_of_target(target: &tddy_core::SessionTarget) -> String {
+    match target {
+        tddy_core::SessionTarget::Ssh { config_host } => config_host.clone(),
+        tddy_core::SessionTarget::Coder {
+            owner, workspace, ..
+        } => format!("{owner}/{workspace}"),
+    }
+}
+
+/// A SHA-256, hex, over every worktree's owner, owner id, path and host, and what removing it would
+/// lose — its files (path and change) and its commits no remote holds (the listed shas and the full
+/// count) — or why it could not be read. Order-independent: each worktree, and each list within it,
+/// is sorted first, so the same state always digests the same.
+pub(super) fn fingerprint_of<'a>(
+    worktrees: impl IntoIterator<Item = &'a CloseSessionWorktree>,
+) -> String {
+    let mut digests: Vec<String> = worktrees
+        .into_iter()
+        .map(|worktree| {
+            let mut files: Vec<String> = worktree
+                .dirty_files
+                .iter()
+                .map(|file| format!("{}\u{1f}{}", file.path, file.change))
+                .collect();
+            files.sort();
+            let mut commits: Vec<&str> = worktree
+                .unpushed_commits
+                .iter()
+                .map(|commit| commit.sha.as_str())
+                .collect();
+            commits.sort_unstable();
+            let losses = if worktree.unavailable_reason.is_empty() {
+                format!(
+                    "files\u{1e}{}\u{1d}commits\u{1e}{}\u{1e}{}",
+                    files.join("\u{1e}"),
+                    commits.join("\u{1e}"),
+                    worktree.unpushed_commit_count
+                )
+            } else {
+                format!("unavailable\u{1e}{}", worktree.unavailable_reason)
+            };
+            [
+                worktree.owner.to_string(),
+                worktree.owner_id.clone(),
+                worktree.path.clone(),
+                worktree.host.clone(),
+                losses,
+            ]
+            .join("\u{1c}")
+        })
+        .collect();
+    digests.sort();
+    let digest = Sha256::digest(digests.join("\n").as_bytes());
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use tddy_service::proto::session::CloseSessionDirtyFile;
+
+    use super::*;
+
+    fn a_worktree(path: &str, files: &[&str]) -> CloseSessionWorktree {
+        CloseSessionWorktree {
+            path: path.to_string(),
+            owner: CloseSessionWorktreeOwner::Session as i32,
+            dirty_files: files
+                .iter()
+                .map(|file| CloseSessionDirtyFile {
+                    path: file.to_string(),
+                    change: "untracked".to_string(),
+                })
+                .collect(),
+            ..CloseSessionWorktree::default()
+        }
+    }
+
+    #[test]
+    fn the_fingerprint_does_not_depend_on_the_order_worktrees_and_files_are_listed_in() {
+        // Given the same two worktrees, listed in two orders
+        let one = a_worktree("/repo/.worktrees/one", &["a.md", "b.md"]);
+        let two = a_worktree("/repo/.worktrees/two", &["c.md"]);
+        let one_reversed = a_worktree("/repo/.worktrees/one", &["b.md", "a.md"]);
+
+        // When
+        let first = fingerprint_of([&one, &two]);
+        let second = fingerprint_of([&two, &one_reversed]);
+
+        // Then
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn the_fingerprint_changes_when_a_file_is_added() {
+        // Given
+        let before = a_worktree("/repo/.worktrees/one", &["a.md"]);
+        let after = a_worktree("/repo/.worktrees/one", &["a.md", "b.md"]);
+
+        // When
+        let (fingerprint_before, fingerprint_after) =
+            (fingerprint_of([&before]), fingerprint_of([&after]));
+
+        // Then
+        assert_ne!(fingerprint_before, fingerprint_after);
+    }
+
+    #[test]
+    fn an_unreadable_worktree_digests_its_reason() {
+        // Given the same worktree, unreadable for two reasons
+        let refused = CloseSessionWorktree {
+            unavailable_reason: "Connection refused".to_string(),
+            ..a_worktree("/repo/.worktrees/one", &[])
+        };
+        let locked = CloseSessionWorktree {
+            unavailable_reason: "the vault is locked".to_string(),
+            ..refused.clone()
+        };
+
+        // When
+        let (first, second) = (fingerprint_of([&refused]), fingerprint_of([&locked]));
+
+        // Then
+        assert_ne!(first, second);
+    }
+}

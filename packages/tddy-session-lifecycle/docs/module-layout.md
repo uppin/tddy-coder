@@ -48,6 +48,8 @@ module, so it reads the host's private fields directly and needs `pub(super)` at
 | `local_exec_tools.rs` (child `local_exec_tool_dispatch.rs`) | where an exec tool runs on this daemon (a jail, a session's checkout, or a hosted agent clone), shared by the host and `tddy-daemon-rpc`'s exec-tool family |
 | `svc_shut_down_children.rs`, `terminal_bridge_impl.rs` | shutdown of a host's children — the CLI sessions, the workspace jails, then (last, so an agent still reporting is answered) `AgentToolSockets::stop_serving`; the host's terminal bridge |
 | `svc_demo_vm_ports.rs` | `DemoVmServiceImpl`'s wiring and `demo_vm_entry`; `DemoVmServiceImpl::new` takes the `DemoVmState` the host builds |
+| `svc_close_session.rs` (children under `svc_close_session/`) | `PreviewCloseSession` and `CloseSession`, the close task and the closes in flight — laid out in [session-service.md § Closing a session](session-service.md#closing-a-session-svc_close_session) |
+| `svc_terminal_ports/session_tabs.rs` | a session's tabs beside its main as its end sees them (`tabs_beside_main`, which refuses an unreadable roster), ending each with its session, and the survivor checks (`local_tmux_survives`) |
 
 ### Ports, and the peer-routed wrappers
 

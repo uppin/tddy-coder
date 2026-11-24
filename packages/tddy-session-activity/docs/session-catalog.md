@@ -23,6 +23,11 @@ sandboxed-codebase placement too), one whose tools run over SSH (`ssh_config_hos
 checkout. Tddy Desktop types a dropped file's real path only for a session that does; every other
 session has the file uploaded into its session directory.
 
+`session_list_enrichment` also answers `SessionEntry.holds_worktree`: true when the session's type owns
+a worktree (`session_deletion::worktree_removal_applies_to`), it records one, its directory holds no
+`worktree-removed` marker, and — for a local session — the path is a daemon-managed worktree (under
+`.worktrees`) that exists. The drawer offers a closed session's trash bin by it.
+
 `session_list_enrichment` reads a session's pending-elicitation flag through this crate's
 `pending_elicitation` module, which reads the `pending_elicitation` field of `.session.yaml` (`false` when the metadata cannot be read). It lives here rather than with Telegram
 because every daemon's session list shows it.

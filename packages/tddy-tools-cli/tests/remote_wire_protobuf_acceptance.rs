@@ -39,6 +39,7 @@ struct StartRecordingSessionService {
 #[async_trait]
 impl SessionService for StartRecordingSessionService {
     type StreamStartSessionStream = Streaming<StartSessionEvent>;
+    type CloseSessionStream = Streaming<tddy_service::proto::session::CloseSessionEvent>;
 
     async fn list_sessions(
         &self,
@@ -114,6 +115,20 @@ impl SessionService for StartRecordingSessionService {
         &self,
         _request: Request<GetWorktreeSnapshotRequest>,
     ) -> Result<Response<GetWorktreeSnapshotResponse>, Status> {
+        Err(Status::unimplemented("not served by this fixture"))
+    }
+
+    async fn preview_close_session(
+        &self,
+        _request: Request<tddy_service::proto::session::PreviewCloseSessionRequest>,
+    ) -> Result<Response<tddy_service::proto::session::CloseSessionPreview>, Status> {
+        Err(Status::unimplemented("not served by this fixture"))
+    }
+
+    async fn close_session(
+        &self,
+        _request: Request<tddy_service::proto::session::CloseSessionRequest>,
+    ) -> Result<Response<Self::CloseSessionStream>, Status> {
         Err(Status::unimplemented("not served by this fixture"))
     }
 }

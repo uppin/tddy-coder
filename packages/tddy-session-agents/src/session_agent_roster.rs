@@ -199,6 +199,35 @@ impl SessionAgentRosterStore {
         })
     }
 
+    /// Remove every agent reading the clone `daemon_instance_id` holds as workspace session
+    /// `codebase_session_id`: that clone was torn down. Whether any was; when none, nothing is
+    /// written and `rev` stays.
+    pub fn forget_clone(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+    ) -> Result<bool, Status> {
+        self.with_session(session_id, session_dir, |state, sources| {
+            let reads_it = |agent: &SessionAgentRecord| {
+                agent.daemon_instance_id == daemon_instance_id
+                    && agent.codebase_session_id.as_deref() == Some(codebase_session_id)
+            };
+            if !state.agents.iter().any(reads_it) {
+                return Ok(false);
+            }
+            let next: Vec<SessionAgentRecord> = state
+                .agents
+                .iter()
+                .filter(|agent| !reads_it(agent))
+                .cloned()
+                .collect();
+            state.commit(session_id, session_dir, next, sources)?;
+            Ok(true)
+        })
+    }
+
     /// The entry `agent_id` names, or `None` when the roster does not hold it.
     ///
     /// Reads the *persisted* record rather than the wire entry, because the callers that need it —

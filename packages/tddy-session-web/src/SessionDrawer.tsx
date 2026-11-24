@@ -67,6 +67,13 @@ interface SessionDrawerProps {
   onSelectAll?: () => void;
   /** Delete the currently selected sessions. */
   onBulkDelete?: () => void;
+  /** Session id → what its running close is doing now; each such row shows a mini spinner. */
+  closingSessions?: ReadonlyMap<string, string>;
+  /**
+   * Close a row's session — the × on an active row, the trash bin on an ended row that still holds
+   * a worktree (docs/ft/web/session-drawer.md § Closing a session). Absent, rows offer neither.
+   */
+  onCloseSession?: (session: SessionEntry) => void;
   /**
    * Failures about the list itself — it could not be loaded, a bulk delete left rows behind —
    * shown under the header, above the rows they are about. Rendered only while the list is open.
@@ -124,6 +131,8 @@ export function SessionDrawer({
   onExitSelectionMode,
   onSelectAll,
   onBulkDelete,
+  closingSessions,
+  onCloseSession,
   notices,
   projects = [],
   projectHomes = [],
@@ -224,6 +233,8 @@ export function SessionDrawer({
     sessionMetadataBySessionId,
     selectedForDelete,
     onToggleSelect,
+    closingSessions,
+    onCloseSession,
   };
   const selectedCount = selectedForDelete?.size ?? 0;
   const allSelected =

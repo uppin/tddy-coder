@@ -19,9 +19,23 @@ handle. The daemon host implements the callbacks once, in `tddy-session-lifecycl
 | `svc_resolve_listed_worktree.rs` | agent-def resolution (`resolvable_agent_defs`, `agent_def_for_spawn`, `resolve_specialized_agent_defs`), `seeded_roster_records`, `roster_session_dir`, `report_shadowed_agent_def` (6 methods) |
 | `svc_turn_end_reporter.rs` | the cancel forward to an agent's owning daemon and the local and remote roster records for an agent id (4 methods) |
 | `agent_roster.rs` | the free roster functions (`workspace_start_request`, `started_roster_rev`, `dispatch_envelope`, `refuse_unenforceable_withdrawal`, `session_enforces_a_withdrawal`, `roster_agent_ids`, `agent_tool_reads_the_clone`), the `agent_records` re-export |
-| `peer_session_answer.rs` | the free items that read or classify a peer's answer about a session: `peer_has_no_such_session` (a peer's `FailedPrecondition` or `NotFound`), `split_pairing`, `resolve_worktree_root_in_session_dir`, `resolve_worktree_root_for_session` |
+| `peer_session_answer.rs` | the free items that read or classify a peer's answer about a session: `peer_has_no_such_session` (a peer's `FailedPrecondition` or `NotFound`), `peer_does_not_hold_the_session` (only `FailedPrecondition` carrying `SESSION_NOT_HELD_HERE`, the words a daemon refuses a session it holds no directory for — what a close reads as a checkout already gone), `split_pairing`, `resolve_worktree_root_in_session_dir`, `resolve_worktree_root_for_session` |
 | `seeded_clone_guard.rs`, `seed_codebase.rs`, `roster_replacement.rs` | the guard that releases a seeded roster on drop, `SeedCodebase` (the codebase a starting session seeds its roster from), and the roster's withdrawals (`roster_replacement_pairs`, the one source of what a session's roster withdraws, used by every sandboxed spawn and relaunch) |
 | `session_dir_lookup.rs` | `session_dir_for(tddy_data_dir, session_id)` |
+
+**Which clones a session has.** `every_agent_clone_of` lists them from the in-memory clone store
+**and** the session's `.session.yaml` `agents[]` (`codebase_session_id`), so a restarted daemon still
+knows the clones built before it. A session with no directory or no `.session.yaml` records none; a
+record that cannot be read is an error, never "no clones". `tear_down_agent_clone` — shared by a
+detach, `DeleteSession` and a session close — deletes the clone's workspace session on its daemon
+("no such session" there is success), forgets it from the store, revokes the daemon's admission and
+removes every `agents[]` entry reading the clone (`SessionAgentRosterStore::forget_clone`, which writes
+nothing when no entry does), republishing the roster.
+
+**Conversations a session's close ends.** `OpenAgentConversations::close_every_conversation_of`
+interrupts every local conversation of the session, reports the remote ones for their daemon to
+cancel, and answers each interrupted local conversation's `ClosedTurnLoop` — `turn_still_runs()` while
+the interrupted turn still holds the conversation's session.
 
 The host-free pieces the methods call (`clone_readiness`, `agent_clone_lookup`, `agent_clone_worktree`,
 `conversation_cancel_forward`, `conversation_open_forward`, `departed_daemon`, `session_room_participants`,

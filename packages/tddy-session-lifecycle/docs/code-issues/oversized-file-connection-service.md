@@ -31,6 +31,7 @@
 | 2026-11-07 | ±0 | by `wc -l` (554 → 554 total lines; counter not re-run): #830 (`#agent-tools` 22/28) makes `coding_agents` non-optional; the field's doc comment is reworded at the same length. Touched, unchanged |
 | 2026-11-16 | +6 | #921 (`#remote-shell` 7/7), by `git diff --numstat` (6 added, 0 removed; the record's counter not re-run): the host's Coder credential field and its re-exports. Still over 500 by the record's counter; not split here |
 | 2026-11-16 | 433 → 431 by `restructure lines` (558 → 556 whole file) | #924 (`#remote-shell` 8/11) sweep: the re-export block this stack lengthened moved with its neighbours into a module the facade re-exports. Restored to below its before-the-stack measurement; still over 500 by the whole-file count, so this record stays open on the remainder |
+| 2026-11-24 | +4 (575 → 579 whole file, `wc -l` on `origin/master` `df43ffc6c` and HEAD) | #1032 (session close): the host's `session_closes` field with its doc comment and the `svc_close_session` module line. Grown; not split — the close's own code lives in `svc_close_session/` |
 
 ## What grew it
 

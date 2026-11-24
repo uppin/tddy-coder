@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tddy_agent_launch::restore_tabs::{agent_launch_node, new_agent_tab, NewAgentTab};
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
 use tddy_cli_sessions::tmux::{
-    agent_tab_tmux_session_name, ensure_reachable, kill_tmux_session_logged,
+    agent_tab_tmux_session_name, ensure_reachable, kill_tmux_session, kill_tmux_session_logged,
     start_agent_tmux_session, tmux_attach_argv, tmux_binary, tmux_new_session_argv,
     tmux_session_name,
 };
@@ -279,7 +279,8 @@ impl CliManagerTerminalRoster {
         recorded
     }
 
-    /// Stop `terminal_id`, and with it the tmux session its chain says wraps its agent.
+    /// Stop `terminal_id`, and with it the tmux session its chain says wraps its agent. The tab
+    /// closes either way: a tmux session that could not be ended is logged.
     async fn end(
         &self,
         session_id: &str,
@@ -287,21 +288,73 @@ impl CliManagerTerminalRoster {
         launch: &[LaunchNode],
         subject: Option<&str>,
     ) {
-        // The tmux session first: its client then ends with the agent, so no detach watcher holds
-        // the session live for an agent nobody can reach. A tab on a target keeps its tmux there.
-        if launch.first().map(|node| node.kind.as_str()) == Some(tddy_core::tab_roster::TARGET_KIND)
-        {
-            self.end_target_tmux_of(session_id, terminal_id, launch, subject)
-                .await;
-        } else if let Some(wrapper) = launch.iter().find(|node| node.kind == TMUX_KIND) {
-            if let (Some(name), Some(os_user)) = (
-                wrapper.property(tddy_core::tab_roster::SESSION_PROPERTY),
-                wrapper.property(tddy_core::tab_roster::OS_USER_PROPERTY),
-            ) {
-                kill_tmux_session_logged(os_user, name, "a tab that closed").await;
-            }
+        if let Err(error) = self.end_wrapping_tmux(session_id, launch, subject).await {
+            log::warn!("terminal {terminal_id} of session {session_id} closed, but {error}");
         }
         self.manager.stop_terminal(session_id, terminal_id).await;
+    }
+
+    /// End tab `terminal_id` of `session_id` as its session ends (a close or a delete): its jail,
+    /// the tmux session its recorded chain says wraps its agent — here, or on the target as
+    /// `subject` — and its terminal. Unlike a closed tab it stays in the roster, which the session
+    /// keeps; and a tmux session that could not be ended is the error, since the session's end must
+    /// know of a survivor.
+    ///
+    /// `tmux` is what the tab's recorded chain says wraps its agent, as the session's end read it
+    /// with the roster — never re-read here, where a roster that could not be read would end nothing.
+    pub(super) async fn end_with_its_session(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        tmux: Option<&WrappingTmux>,
+        subject: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(tabs) = &self.tab_jails {
+            tabs.jails.stop(session_id, terminal_id).await;
+        }
+        let ended = self.end_tmux(session_id, tmux.cloned(), subject).await;
+        self.manager.stop_terminal(session_id, terminal_id).await;
+        ended
+    }
+
+    /// End the tmux session `launch` records wrapping a tab's agent: on the session's target for a
+    /// chain that starts `target`, here as the recorded user otherwise. A chain with no `tmux` node
+    /// (a shell, an agent, a tmux attach) ends nothing: the tmux session a person keeps outlives a
+    /// tab attached to it. The tmux session goes first: its client then ends with the agent, so no
+    /// detach watcher holds the session live for an agent nobody can reach.
+    async fn end_wrapping_tmux(
+        &self,
+        session_id: &str,
+        launch: &[LaunchNode],
+        subject: Option<&str>,
+    ) -> Result<(), String> {
+        self.end_tmux(session_id, wrapping_tmux(launch), subject)
+            .await
+    }
+
+    /// End `tmux`, the tmux session wrapping a tab's agent: on the session's target, or here as its
+    /// user. No tmux session ends nothing.
+    async fn end_tmux(
+        &self,
+        session_id: &str,
+        tmux: Option<WrappingTmux>,
+        subject: Option<&str>,
+    ) -> Result<(), String> {
+        match tmux {
+            None => Ok(()),
+            Some(WrappingTmux::OnTarget { name }) => {
+                self.end_target_tmux_named(session_id, &name, subject).await
+            }
+            Some(WrappingTmux::Here { name, os_user }) => {
+                let (user, session) = (os_user.clone(), name.clone());
+                tokio::task::spawn_blocking(move || kill_tmux_session(&user, &session))
+                    .await
+                    .map_err(|e| {
+                        format!("the kill of its tmux session {name:?} did not finish: {e}")
+                    })?
+                    .map_err(|e| format!("its tmux session {name:?} could not be ended: {e}"))
+            }
+        }
     }
 
     /// Close `terminal_id`: end it, and remove it from the roster. `false` when the session has no
@@ -353,7 +406,7 @@ impl CliManagerTerminalRoster {
 
     /// The chain the roster records for `terminal_id`; empty when it records none (or the roster
     /// cannot be read, which is logged — closing the tab does not depend on it).
-    fn recorded_chain(&self, session_id: &str, terminal_id: &str) -> Vec<LaunchNode> {
+    pub(super) fn recorded_chain(&self, session_id: &str, terminal_id: &str) -> Vec<LaunchNode> {
         let read = self
             .session_dir(session_id)
             .map_err(|refusal| anyhow::anyhow!(refusal.message().to_string()))
@@ -405,4 +458,30 @@ fn wire_node(node: LaunchNode) -> WireLaunchNode {
         kind: node.kind,
         properties: node.properties.into_iter().collect(),
     }
+}
+
+/// The tmux session a tab's chain records wrapping its agent, and where it runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum WrappingTmux {
+    /// On this host, run as `os_user`.
+    Here { name: String, os_user: String },
+    /// On the session's target.
+    OnTarget { name: String },
+}
+
+/// The tmux session `launch` records wrapping an agent (its `tmux` node), here or — for a chain
+/// that starts `target` — on the session's target. `None` for a chain with no `tmux` node, or a
+/// node that does not name its session (and, here, its user).
+pub(super) fn wrapping_tmux(launch: &[LaunchNode]) -> Option<WrappingTmux> {
+    let wrapper = launch.iter().find(|node| node.kind == TMUX_KIND)?;
+    let name = wrapper
+        .property(tddy_core::tab_roster::SESSION_PROPERTY)?
+        .to_string();
+    if launch.first().map(|node| node.kind.as_str()) == Some(tddy_core::tab_roster::TARGET_KIND) {
+        return Some(WrappingTmux::OnTarget { name });
+    }
+    let os_user = wrapper
+        .property(tddy_core::tab_roster::OS_USER_PROPERTY)?
+        .to_string();
+    Some(WrappingTmux::Here { name, os_user })
 }
