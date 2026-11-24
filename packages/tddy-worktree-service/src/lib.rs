@@ -30,6 +30,9 @@ pub mod stream;
 /// Shared test helpers, ungated like `tddy_daemon::test_util` is: the integration suites in
 /// `tests/` reach for them, and a `#[cfg(test)]` module is invisible from there.
 pub mod test_util;
+mod worktree_diff;
+mod worktree_sizes;
+mod worktree_stats_cache;
 
 pub use service::{NoSessionRooms, WorktreeRoomCloser, WorktreeServiceImpl};
 pub use stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};

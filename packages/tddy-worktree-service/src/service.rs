@@ -28,8 +28,8 @@ use tddy_task::IdleTimeoutTracker;
 use crate::project_storage;
 use crate::pull_request_view::SessionPullRequests;
 use crate::service_helpers::{
-    blocking_within, map_clean_worktree_error, map_remove_worktree_error,
-    proto_worktree_size_status, worktree_row_from_diff,
+    blocking_within, forget_a_recorded_removal, map_clean_worktree_error,
+    map_remove_worktree_error, proto_worktree_size_status, worktree_row_from_diff,
 };
 use crate::stream::{worktree_file_frames, MpscResultStream, MpscWorktreeStatsStream};
 use crate::worktree_sync::{pull_fast_forward, push_branch, read_sync_state};
@@ -678,15 +678,4 @@ impl WorktreeService for WorktreeServiceImpl {
         self.record_rpc_activity();
         self.session_pull_request_stream(request.into_inner()).await
     }
-}
-
-/// The session's worktree is back: a close's record of removing it no longer holds, so the session
-/// lists as holding one again.
-fn forget_a_recorded_removal(session_dir: &std::path::Path) -> Result<(), Status> {
-    crate::worktree_removed_marker::clear_worktree_removed(session_dir).map_err(|e| {
-        Status::internal(format!(
-            "the worktree was restored, but the record of its removal in {} could not be cleared: {e}",
-            session_dir.display()
-        ))
-    })
 }

@@ -165,6 +165,87 @@ as done.
 | Daemon integration | `tddy-session-lifecycle/tests/delete_session.rs` (extended) | delete kills non-main tmux tab sessions; delete of a closed session, and of one whose worktree was removed outside the daemon, succeeds |
 | Cypress component | `tddy-session-web/cypress/component/SessionsDrawerClose.cy.tsx` | × only on active rows, trash only on inactive rows holding a worktree; clean → no dialog; dirty → dialog per worktree; Cancel sends nothing; Confirm sends confirmed + fingerprint; unreadable → Retry; children choice; failure notice; spinner while closing; a second row closes while the first is still running |
 
+## Restructuring
+
+`/pr-wrap` step 3.5 (500 production lines, Rust counted to the first `#[cfg(test)]`). Every move is
+engine-driven (`tddy-tools restructure`: `check --deep` clean, then `apply`, compile gate green). Hand
+edits are `use` lines only (see the last list). Behaviour is unchanged:
+`restructure verify --against HEAD` reports `every statement accounted for` (585957 → 585957), and the
+comment-line multiset of both packages is unchanged apart from one intra-doc link the engine re-spelled.
+
+### Module layout
+
+```text
+tddy-session-lifecycle/src/connection_service/svc_close_session/
+  close_plan.rs              the plan and preview: PlannedWorktree, Removal, ClosePlan, plan_close,
+                             own/target/codebase worktrees, fingerprint_of
+  worktree_reads.rs    (new) reading one worktree: recorded base/branch, local and target branch,
+                             read_local_worktree, with_loss, unavailable, change_name
+  conversation_worktrees.rs (new) every clone-placed conversation worktree under a session's own
+  close_tabs.rs              ending tabs, and now listing them: tabs_a_close_ends, MAIN_TAB,
+                             conversation_tab_id, main_label
+  close_task.rs              the task and the run's phases (check, terminate, remove, record)
+  close_task/steps.rs  (new) streaming a step: CloseRun::{step, note, send}, progress_line
+  close_task/codebase.rs (new) closing a split session's checkout: CloseRun::close_codebase,
+                             CodebaseEvents
+tddy-session-lifecycle/src/test_util/
+  held_agents.rs       (new) HeldMain and TestDaemon::{holds_a_main_agent, serves_a_main_for,
+                             stops_holding}; `test_util::HeldMain` stays public through a `pub use`
+tddy-worktree-service/src/
+  worktrees.rs               listing, path policy, remove and clean, and a named `pub use` facade
+                             for everything that left, so every `worktrees::…` path still resolves
+  worktree_sizes.rs    (new) seam B of the record: the size calculator and its sizes file
+  worktree_stats_cache.rs (new) seam A's cache half: WorktreeStatsCache and its cache file
+  worktree_diff.rs     (new) seam C: numstat, diff rows, project_worktree_snapshot
+  service_helpers.rs         + forget_a_recorded_removal (this PR's helper, beside the other
+                             error-to-Status mappers)
+```
+
+### Production lines
+
+| File | Merge base | This PR before | After |
+|---|---|---|---|
+| `svc_close_session/close_plan.rs` | — | 642 | **409** |
+| `svc_close_session/close_task.rs` | — | 606 | **449** |
+| `tddy-worktree-service/src/worktrees.rs` | 1006 | 1062 | **409** |
+| `tddy-worktree-service/src/service.rs` | 679 | 692 | **681** 🔴 still over |
+| `tddy-session-lifecycle/src/test_util.rs` | 556 | 581 | **489** |
+| `svc_close_session/close_tabs.rs` | — | 254 | 313 |
+| `svc_close_session/worktree_reads.rs` | — | — | 118 |
+| `svc_close_session/conversation_worktrees.rs` | — | — | 76 |
+| `svc_close_session/close_task/steps.rs` | — | — | 76 |
+| `svc_close_session/close_task/codebase.rs` | — | — | 99 |
+| `test_util/held_agents.rs` | — | — | 98 |
+| `worktree_sizes.rs` | — | — | 400 |
+| `worktree_stats_cache.rs` | — | — | 155 |
+| `worktree_diff.rs` | — | — | 134 |
+| `service_helpers.rs` | 147 | 147 | 158 |
+
+`service.rs` keeps the two `forget_a_recorded_removal(&session_dir)?;` calls inside the
+`impl WorktreeService` trait impl, which the engine cannot cut (record
+`packages/tddy-worktree-service/docs/code-issues/oversized-file-service.md`). Two code-issue records
+closed on the number: `oversized-file-worktrees.md` (final 409) and `oversized-file-test-util.md`
+(final 489). Both are deleted here.
+
+- [`2026-11-20-session-liveness-oversized-files-after-the-stack.md`](../todo/2026-11-20-session-liveness-oversized-files-after-the-stack.md):
+  **✅ RESOLVED HERE**. Its "What closes it" is the `test_util/held_agents.rs` split, done above
+  (556 → 489). The other files it lists carry records of their own.
+
+### Engine findings
+
+- **Refused:** the whole step-member run of `CloseRun` (`running` … `send`). `CloseRun::failed` names
+  both the method and the field `failed`, and `move_impl_members` refuses the `<CloseRun>::failed`
+  spelling. The narrower seam `step`/`note`/`send` was taken instead. See
+  [`2026-11-24-restructure-cannot-anchor-a-method-named-like-a-field.md`](../todo/2026-11-24-restructure-cannot-anchor-a-method-named-like-a-field.md).
+- **Hand `use` fixes after the moves** (the tree compiled every time):
+  - three unused `use sha2::Digest;` deleted, in `worktree_reads.rs`, `conversation_worktrees.rs` and
+    `close_tabs.rs` ([`…-tidy-leaves-unused-trait-imports.md`](../todo/2026-11-24-restructure-tidy-leaves-unused-trait-imports.md));
+  - three header `#[cfg(test)] use …` moved into their file's `mod tests`, in `close_plan.rs` and
+    `worktrees.rs` ×2. They stopped the production-line count at lines 12 and 2
+    ([`…-tidy-writes-cfg-test-imports-above-production-code.md`](../todo/2026-11-24-restructure-tidy-writes-cfg-test-imports-above-production-code.md));
+  - `service.rs`: the `use crate::service_helpers::forget_a_recorded_removal;` the move wrote below a
+    `pub use` was folded into the existing `service_helpers` group.
+
 ## Refactoring Needed
 
 ### From /red (TDD Red Phase)

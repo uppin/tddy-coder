@@ -13,6 +13,8 @@ use tddy_rpc::{Code, Status};
 use super::super::svc_terminal_ports::session_tabs::SessionTab;
 use super::super::DaemonSessionHost;
 use super::CloseContext;
+use tddy_core::SessionMetadata;
+use tddy_service::proto::session::CloseSessionTab;
 
 /// How long the tabs a close ended are given to be gone before one still there fails its step.
 pub(super) const ENDED_WITHIN: Duration = Duration::from_secs(10);
@@ -219,6 +221,43 @@ impl DaemonSessionHost {
             tokio::time::sleep(ENDED_POLL).await;
         }
     }
+
+    /// The tabs a close of `ctx`'s session ends: its main while an agent of it is live or it runs
+    /// in tmux (whose agent outlives this daemon), each tab beside it, and each open conversation.
+    pub(super) async fn tabs_a_close_ends(&self, ctx: &CloseContext) -> Vec<CloseSessionTab> {
+        let mut tabs = Vec::new();
+        let live = self
+            .launch_sessions()
+            .live_sessions()
+            .await
+            .contains(&ctx.session_id);
+        if live || ctx.metadata.tmux_session.is_some() {
+            tabs.push(CloseSessionTab {
+                tab_id: MAIN_TAB.to_string(),
+                label: main_label(&ctx.metadata),
+            });
+        }
+        tabs.extend(
+            self.tabs_beside_main(&ctx.session_id)
+                .await
+                .into_iter()
+                .map(|tab| CloseSessionTab {
+                    tab_id: tab.terminal_id,
+                    label: tab.label,
+                }),
+        );
+        tabs.extend(
+            self.agent_conversations
+                .conversations_of(&ctx.session_id)
+                .await
+                .into_iter()
+                .map(|(conversation_id, agent_id)| CloseSessionTab {
+                    tab_id: conversation_tab_id(&conversation_id),
+                    label: agent_id,
+                }),
+        );
+        tabs
+    }
 }
 
 #[async_trait]
@@ -250,5 +289,25 @@ impl SessionTabEnding for DaemonSessionHost {
             "not every tab of session {session_id} could be ended, so it was left in place: {}",
             failures.join("; ")
         )))
+    }
+}
+
+/// The main tab's id, as the terminal surface names it.
+pub(super) const MAIN_TAB: &str = tddy_cli_sessions::cli_session_manager::MAIN_TERMINAL_ID;
+
+/// A conversation's tab id: `conversation:<id>`.
+pub(super) fn conversation_tab_id(conversation_id: &str) -> String {
+    format!("conversation:{conversation_id}")
+}
+
+/// The main tab's label: the session's agent, and the tmux session it runs in.
+pub(super) fn main_label(metadata: &SessionMetadata) -> String {
+    let agent = metadata
+        .session_type
+        .clone()
+        .unwrap_or_else(|| "agent".to_string());
+    match &metadata.tmux_session {
+        Some(name) => format!("{agent} in tmux {name}"),
+        None => agent,
     }
 }

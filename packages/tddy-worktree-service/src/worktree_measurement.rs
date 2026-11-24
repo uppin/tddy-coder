@@ -3,7 +3,7 @@
 //! The one place that runs `git` against a worktree somebody is working in, several times a second:
 //! a hosted session room polls with it, and `GetWorktreeSnapshot` measures with it, so the two can
 //! never quote different totals for one checkout. The counts are parsed by
-//! [`crate::worktrees::parse_git_diff_numstat`], the same parser the Worktrees screen reads with.
+//! [`crate::worktree_diff::parse_git_diff_numstat`], the same parser the Worktrees screen reads with.
 
 use std::ffi::OsStr;
 use std::path::Path;

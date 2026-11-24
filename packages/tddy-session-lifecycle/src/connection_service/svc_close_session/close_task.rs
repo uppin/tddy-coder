@@ -6,27 +6,27 @@
 //! writes it as a line to its `progress` channel — and ends with exactly one terminal event:
 //! `needs_confirmation` (nothing more was done) or `outcome`.
 
+mod codebase;
+mod steps;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use bytes::Bytes;
-use tddy_rpc::{Request, Status};
+use tddy_rpc::Status;
 use tddy_service::proto::session::{
     close_session_event, CloseSessionEvent, CloseSessionOutcome, CloseSessionPreview,
-    CloseSessionRequest, CloseSessionStarted, CloseSessionStep, CloseSessionStepKind,
-    CloseSessionStepState,
+    CloseSessionStarted, CloseSessionStep, CloseSessionStepKind, CloseSessionStepState,
 };
-use tddy_session_agents::peer_session_answer::peer_has_no_such_session;
 use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskStatus};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 
 use super::super::DaemonSessionHost;
-use super::close_plan::{
-    conversation_tab_id, host_of_target, ClosePlan, PlannedWorktree, Removal, MAIN_TAB,
-};
+use super::close_plan::{host_of_target, ClosePlan, PlannedWorktree, Removal};
 use super::close_tabs::EndedTab;
 use super::closes_in_flight::CloseReservation;
 use super::CloseContext;
+use crate::connection_service::svc_close_session::close_tabs::conversation_tab_id;
+use crate::connection_service::svc_close_session::close_tabs::MAIN_TAB;
 
 /// The `kind` a close task is registered under.
 pub(super) const CLOSE_TASK_KIND: &str = "close_session";
@@ -328,60 +328,6 @@ impl CloseRun {
         }
     }
 
-    /// Close the workspace session holding a split session's checkout on its codebase daemon,
-    /// confirming the preview that daemon gave. A daemon that no longer has the session has no
-    /// checkout left to remove.
-    async fn close_codebase(
-        &self,
-        daemon_instance_id: &str,
-        session_id: &str,
-        fingerprint: &str,
-        here: bool,
-    ) -> Result<String, String> {
-        let request = CloseSessionRequest {
-            session_token: self.ctx.session_token.clone(),
-            session_id: session_id.to_string(),
-            confirmed: true,
-            confirmed_fingerprint: fingerprint.to_string(),
-        };
-        let events = if here {
-            Box::pin(self.host.close_session_at_host(Request::direct(request)))
-                .await
-                .map(|stream| CodebaseEvents::Here(stream.into_inner()))
-        } else {
-            self.host
-                .forward_close(daemon_instance_id, &request)
-                .await
-                .map(CodebaseEvents::Peer)
-        };
-        let ended = match events {
-            Ok(events) => events.terminal().await,
-            Err(refusal) => Err(refusal),
-        };
-        match ended {
-            Ok(close_session_event::Event::Outcome(outcome)) if outcome.ok => {
-                Ok(format!("closed on daemon {daemon_instance_id}"))
-            }
-            Ok(close_session_event::Event::Outcome(outcome)) => Err(format!(
-                "the close on daemon {daemon_instance_id} did not finish: {}",
-                outcome
-                    .failed_steps
-                    .iter()
-                    .map(|step| format!("{} — {}", step.subject, step.message))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            )),
-            Ok(_) => Err(format!(
-                "the checkout on daemon {daemon_instance_id} changed since it was checked; \
-                 close the session again"
-            )),
-            Err(refusal) if peer_has_no_such_session(&refusal) => Ok(format!(
-                "daemon {daemon_instance_id} no longer has workspace session {session_id}"
-            )),
-            Err(refusal) => Err(refusal.message().to_string()),
-        }
-    }
-
     /// Tear down every agent clone the session's roster created — from the clone store and the
     /// record — one step each. Whether all went.
     async fn tear_down_every_clone(&mut self) -> bool {
@@ -489,45 +435,6 @@ impl CloseRun {
     fn skipped(&mut self, kind: CloseSessionStepKind, subject: &str, host: &str, message: &str) {
         self.step(kind, subject, host, CloseSessionStepState::Skipped, message);
     }
-
-    /// Stream one step, write it to the progress channel, and keep it when it failed or was skipped.
-    fn step(
-        &mut self,
-        kind: CloseSessionStepKind,
-        subject: &str,
-        host: &str,
-        state: CloseSessionStepState,
-        message: &str,
-    ) {
-        let step = CloseSessionStep {
-            kind: kind as i32,
-            subject: subject.to_string(),
-            state: state as i32,
-            message: message.to_string(),
-            host: host.to_string(),
-        };
-        self.note(&progress_line(&step));
-        if matches!(
-            state,
-            CloseSessionStepState::Failed | CloseSessionStepState::Skipped
-        ) {
-            self.failed.push(step.clone());
-        }
-        self.send(close_session_event::Event::Step(step));
-    }
-
-    /// Write `line` to the task's progress channel.
-    fn note(&self, line: &str) {
-        self.progress.write(Bytes::from(format!("{line}\n")));
-    }
-
-    fn send(&self, event: close_session_event::Event) {
-        // A caller that went away does not stop the close: it runs to its end, and its task
-        // records how it went.
-        let _ = self
-            .events
-            .send(Ok(CloseSessionEvent { event: Some(event) }));
-    }
 }
 
 /// What a REMOVE step of `worktree` names: its path as recorded (the paired workspace session for
@@ -539,68 +446,4 @@ fn removal_subject(worktree: &PlannedWorktree) -> (String, String) {
         worktree.view.path.clone()
     };
     (subject, worktree.view.host.clone())
-}
-
-/// One step as a line of the task's progress output.
-fn progress_line(step: &CloseSessionStep) -> String {
-    let kind = match step.kind() {
-        CloseSessionStepKind::Check => "check",
-        CloseSessionStepKind::Terminate => "terminate",
-        CloseSessionStepKind::Remove => "remove",
-        CloseSessionStepKind::Record => "record",
-        CloseSessionStepKind::Unspecified => "step",
-    };
-    let state = match step.state() {
-        CloseSessionStepState::Running => "running",
-        CloseSessionStepState::Done => "done",
-        CloseSessionStepState::Failed => "failed",
-        CloseSessionStepState::Skipped => "skipped",
-        CloseSessionStepState::Unspecified => "unknown",
-    };
-    let host = if step.host.is_empty() {
-        String::new()
-    } else {
-        format!(" on {}", step.host)
-    };
-    let message = if step.message.is_empty() {
-        String::new()
-    } else {
-        format!(" — {}", step.message)
-    };
-    format!("{kind} {}{host}: {state}{message}", step.subject)
-}
-
-/// The events of a codebase daemon's close: this daemon's own stream, or the peer's relay.
-enum CodebaseEvents {
-    Here(crate::CloseSessionEventStream),
-    Peer(UnboundedReceiver<Result<CloseSessionEvent, Status>>),
-}
-
-impl CodebaseEvents {
-    /// Read to the close's terminal event. A stream that ends without one, or with an error, is
-    /// the error.
-    async fn terminal(self) -> Result<close_session_event::Event, Status> {
-        let mut last = None;
-        match self {
-            CodebaseEvents::Here(mut stream) => {
-                while let Some(item) = futures_util::StreamExt::next(&mut stream).await {
-                    last = item?.event;
-                }
-            }
-            CodebaseEvents::Peer(mut events) => {
-                while let Some(item) = events.recv().await {
-                    last = item?.event;
-                }
-            }
-        }
-        match last {
-            Some(
-                event @ (close_session_event::Event::Outcome(_)
-                | close_session_event::Event::NeedsConfirmation(_)),
-            ) => Ok(event),
-            _ => Err(Status::internal(
-                "the codebase daemon's close ended without saying how",
-            )),
-        }
-    }
 }

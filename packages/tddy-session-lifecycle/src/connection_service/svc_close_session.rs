@@ -23,6 +23,8 @@ mod close_plan;
 mod close_tabs;
 mod close_task;
 mod closes_in_flight;
+mod conversation_worktrees;
+mod worktree_reads;
 
 pub(crate) use closes_in_flight::SessionCloses;
 

@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-worktree-service/src/service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **831 production lines** (2026-11-21, #975; 883 at 2026-11-21, #970; 808 at 2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.66× over**
-**Thresholds breached:** length 831 > 500
+**Metrics:** **681 production lines** (2026-11-24, `feature/session-close-and-remove`; 679 at 2026-11-23, #1022; 831 at 2026-11-21, #975; 883 at 2026-11-21, #970; 808 at 2026-10-25, #752; 772 at 2026-10-18, #625; 777 at 2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.36× over**
+**Thresholds breached:** length 681 > 500
 **Restructure:** not designed
-**Status:** Open — narrowed 2026-11-23 (#1022: 897 → 679, seam W moved the inherent impl to `service/host.rs`); the remainder is the `impl WorktreeService` trait impl (seams B, C), which the engine cannot cut — no hand move consented (D2). **TODO:** re-measure after the engine can extract from trait impls (`docs/dev/todo/2026-11-14-restructure-engine-no-extract-for-guarded-ranges.md`). Earlier: partially fixed 2026-11-21 (#975: 883 → 831); engine defect: `docs/dev/todo/2026-11-21-restructure-engine-refuses-the-target-parity-splits.md`
+**Status:** Open — regressed 2026-11-24 by 2 lines (679 → 681: two calls in the trait impl, `feature/session-close-and-remove`); narrowed 2026-11-23 (#1022: 897 → 679, seam W moved the inherent impl to `service/host.rs`); the remainder is the `impl WorktreeService` trait impl (seams B, C), which the engine cannot cut — no hand move consented (D2). **TODO:** re-measure after the engine can extract from trait impls (`docs/dev/todo/2026-11-14-restructure-engine-no-extract-for-guarded-ranges.md`). Earlier: partially fixed 2026-11-21 (#975: 883 → 831); engine defect: `docs/dev/todo/2026-11-21-restructure-engine-refuses-the-target-parity-splits.md`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -24,6 +24,7 @@
 | 2026-11-22 | 897 | **regressed by #1005** (`#workqueue` 4/14): 831 → 897 (+66). This PR's four inspector RPCs had taken the file to 986; their bodies (`session_sync` and the PR stream, 115 lines) now live in the child module `service/inspector.rs`. What stays here: the four delegating trait methods and the stream's associated type, the `pull_requests` field and `attach_pull_requests`, and imports. The pre-existing seams are untouched, because they wait on the engine (status above) |
 
 | 2026-11-23 | 679 | **narrowed by the `#workqueue` sweep** (#1022): 897 → 679 (−218). Seam W — the whole inherent `impl WorktreeServiceImpl` — moved to `service/host.rs` (257 lines) with `extract_module` + `to_file`, which the engine accepted (`check --deep` clean, apply compiled). Still **over budget**: the `impl WorktreeService` trait impl (seams B and C above) stays, and the engine still cannot cut it |
+| 2026-11-24 | 681 | **regressed by 2** on `feature/session-close-and-remove` (the session close-and-remove PR): 679 → 692 (+13) at its tip, the `forget_a_recorded_removal` helper and its two calls in `RestoreSessionWorktree` (local and target paths), which clear the `worktree-removed` marker. `/pr-wrap` step 3.5 moved the helper to `service_helpers.rs` with `move_item` (`check --deep` clean, apply compiled): 692 → 681. The two `forget_a_recorded_removal(&session_dir)?;` lines stay, because they sit in the `impl WorktreeService` trait impl, which the engine still cannot cut |
 
 ## Engine refusal (2026-11-21)
 

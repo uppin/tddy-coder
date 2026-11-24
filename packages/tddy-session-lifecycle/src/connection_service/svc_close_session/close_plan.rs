@@ -6,28 +6,29 @@
 //! target — and a split session's checkout on its codebase daemon. Each is read for what removing
 //! it would lose, or carries why it could not be read.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
-use tddy_core::SessionMetadata;
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::session::{
-    CloseSessionCommit, CloseSessionDirtyFile, CloseSessionPreview, CloseSessionTab,
-    CloseSessionWorktree, CloseSessionWorktreeOwner, PreviewCloseSessionRequest,
+    CloseSessionPreview, CloseSessionTab, CloseSessionWorktree, CloseSessionWorktreeOwner,
+    PreviewCloseSessionRequest,
 };
 use tddy_session_activity::session_deletion::{
     is_daemon_managed_worktree, worktree_removal_applies_to,
 };
-use tddy_subagent_worktree::{
-    ConversationId, ConversationWorktree, ConversationWorktrees, SUBAGENT_WORKTREES_DIR,
-};
-use tddy_worktree_service::worktree_loss::{
-    read_local_worktree_loss, read_target_worktree_loss, WorktreeLoss,
-};
-use tddy_worktree_service::worktree_sync::DirtyChange;
+use tddy_subagent_worktree::ConversationWorktree;
+use tddy_worktree_service::worktree_loss::read_target_worktree_loss;
 
 use super::super::DaemonSessionHost;
 use super::CloseContext;
+use crate::connection_service::svc_close_session::conversation_worktrees::conversation_worktrees_in;
+use crate::connection_service::svc_close_session::worktree_reads::read_local_worktree;
+use crate::connection_service::svc_close_session::worktree_reads::recorded_base;
+use crate::connection_service::svc_close_session::worktree_reads::recorded_branch;
+use crate::connection_service::svc_close_session::worktree_reads::target_branch;
+use crate::connection_service::svc_close_session::worktree_reads::unavailable;
+use crate::connection_service::svc_close_session::worktree_reads::with_loss;
 
 /// One worktree a close removes: what the operator is shown, and how it is removed.
 pub(super) struct PlannedWorktree {
@@ -340,63 +341,6 @@ impl DaemonSessionHost {
         )
         .await
     }
-
-    /// The tabs a close of `ctx`'s session ends: its main while an agent of it is live or it runs
-    /// in tmux (whose agent outlives this daemon), each tab beside it, and each open conversation.
-    async fn tabs_a_close_ends(&self, ctx: &CloseContext) -> Vec<CloseSessionTab> {
-        let mut tabs = Vec::new();
-        let live = self
-            .launch_sessions()
-            .live_sessions()
-            .await
-            .contains(&ctx.session_id);
-        if live || ctx.metadata.tmux_session.is_some() {
-            tabs.push(CloseSessionTab {
-                tab_id: MAIN_TAB.to_string(),
-                label: main_label(&ctx.metadata),
-            });
-        }
-        tabs.extend(
-            self.tabs_beside_main(&ctx.session_id)
-                .await
-                .into_iter()
-                .map(|tab| CloseSessionTab {
-                    tab_id: tab.terminal_id,
-                    label: tab.label,
-                }),
-        );
-        tabs.extend(
-            self.agent_conversations
-                .conversations_of(&ctx.session_id)
-                .await
-                .into_iter()
-                .map(|(conversation_id, agent_id)| CloseSessionTab {
-                    tab_id: conversation_tab_id(&conversation_id),
-                    label: agent_id,
-                }),
-        );
-        tabs
-    }
-}
-
-/// The main tab's id, as the terminal surface names it.
-pub(super) const MAIN_TAB: &str = tddy_cli_sessions::cli_session_manager::MAIN_TERMINAL_ID;
-
-/// A conversation's tab id: `conversation:<id>`.
-pub(super) fn conversation_tab_id(conversation_id: &str) -> String {
-    format!("conversation:{conversation_id}")
-}
-
-/// The main tab's label: the session's agent, and the tmux session it runs in.
-fn main_label(metadata: &SessionMetadata) -> String {
-    let agent = metadata
-        .session_type
-        .clone()
-        .unwrap_or_else(|| "agent".to_string());
-    match &metadata.tmux_session {
-        Some(name) => format!("{agent} in tmux {name}"),
-        None => agent,
-    }
 }
 
 /// A local peer refusal ("no common room configured") is `FAILED_PRECONDITION`, which a caller
@@ -413,183 +357,6 @@ pub(super) fn host_of_target(target: &tddy_core::SessionTarget) -> String {
         tddy_core::SessionTarget::Coder {
             owner, workspace, ..
         } => format!("{owner}/{workspace}"),
-    }
-}
-
-/// The base the session's worktree was cut from, as its changeset recorded it.
-fn recorded_base(session_dir: &Path) -> Option<String> {
-    tddy_core::read_changeset(session_dir)
-        .ok()?
-        .effective_worktree_integration_base_ref
-        .filter(|base| !base.trim().is_empty())
-}
-
-/// The branch the session's changeset records — what a worktree no longer on disk was on.
-fn recorded_branch(session_dir: &Path) -> String {
-    tddy_core::read_changeset(session_dir)
-        .ok()
-        .and_then(|changeset| changeset.branch)
-        .unwrap_or_default()
-}
-
-/// A worktree on this host: what removing it would lose, and the branch it is on.
-async fn read_local_worktree(path: &Path, base: Option<&str>) -> CloseSessionWorktree {
-    let view = CloseSessionWorktree::default();
-    let (worktree, base) = (path.to_path_buf(), base.map(str::to_string));
-    let read = tokio::task::spawn_blocking(move || {
-        read_local_worktree_loss(&worktree, base.as_deref())
-            .map(|loss| (loss, local_branch(&worktree)))
-    })
-    .await;
-    match read {
-        Ok(Ok((loss, branch))) => CloseSessionWorktree {
-            branch,
-            ..with_loss(view, loss)
-        },
-        Ok(Err(error)) => unavailable(view, error.to_string()),
-        Err(error) => unavailable(view, format!("the read did not finish: {error}")),
-    }
-}
-
-/// The branch checked out in `worktree`; empty on a detached `HEAD`.
-fn local_branch(worktree: &Path) -> String {
-    std::process::Command::new("git")
-        .arg("-C")
-        .arg(worktree)
-        .args(["symbolic-ref", "--short", "-q", "HEAD"])
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-/// The branch checked out in `worktree` on a target; empty on a detached `HEAD`.
-async fn target_branch(shell: &dyn tddy_remote_shell::RemoteShell, worktree: &str) -> String {
-    let command = format!(
-        "git -C {} symbolic-ref --short -q HEAD",
-        tddy_core::shell_single_quote(worktree)
-    );
-    match shell
-        .exec(tddy_remote_shell::ExecRequest::new(command))
-        .await
-    {
-        Ok(output) if output.status == 0 => {
-            String::from_utf8_lossy(&output.stdout).trim().to_string()
-        }
-        _ => String::new(),
-    }
-}
-
-/// Every clone-placed conversation worktree under the session worktree `session_worktree`, each
-/// read for what removing it would lose (above the commit the conversation started from).
-async fn conversation_worktrees_in(
-    session_worktree: &Path,
-    session_id: &str,
-) -> Vec<PlannedWorktree> {
-    let Ok(entries) = std::fs::read_dir(session_worktree.join(SUBAGENT_WORKTREES_DIR)) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
-        .collect();
-    names.sort();
-    let worktrees = ConversationWorktrees::new(session_worktree, session_id);
-    let mut planned = Vec::new();
-    for name in names {
-        let root = session_worktree.join(SUBAGENT_WORKTREES_DIR).join(&name);
-        let without_base = || Removal::ConversationWithoutBase {
-            session_worktree: session_worktree.to_path_buf(),
-            root: root.clone(),
-        };
-        // A directory that names no conversation, or whose conversation recorded no base, is still
-        // read — removing the session's worktree would take whatever it holds along.
-        let found = match ConversationId::parse(&name) {
-            Ok(conversation) => worktrees.existing(&conversation).await,
-            Err(_) => Ok(None),
-        };
-        let (read, removal) = match found {
-            Ok(Some(found)) => (
-                CloseSessionWorktree {
-                    branch: found.branch().to_string(),
-                    ..read_local_worktree(found.root(), Some(found.base())).await
-                },
-                Removal::Conversation(found),
-            ),
-            // Not a checkout of its own: git would read the enclosing session worktree instead,
-            // which excludes this directory, so what it holds is never reported as safe to lose.
-            Ok(None) if !root.join(".git").exists() => (
-                unavailable(
-                    CloseSessionWorktree::default(),
-                    format!(
-                        "{} is not a git worktree, so what it holds cannot be read; removing the \
-                         session's worktree would delete it",
-                        root.display()
-                    ),
-                ),
-                without_base(),
-            ),
-            Ok(None) => (read_local_worktree(&root, None).await, without_base()),
-            Err(error) => (
-                unavailable(CloseSessionWorktree::default(), error.to_string()),
-                without_base(),
-            ),
-        };
-        planned.push(PlannedWorktree {
-            view: CloseSessionWorktree {
-                path: root.to_string_lossy().into_owned(),
-                owner: CloseSessionWorktreeOwner::Conversation as i32,
-                owner_id: name,
-                ..read
-            },
-            removal,
-        });
-    }
-    planned
-}
-
-/// `view` carrying what removing it would lose.
-fn with_loss(view: CloseSessionWorktree, loss: WorktreeLoss) -> CloseSessionWorktree {
-    CloseSessionWorktree {
-        dirty_files: loss
-            .dirty_files
-            .into_iter()
-            .map(|file| CloseSessionDirtyFile {
-                path: file.path,
-                change: change_name(file.change).to_string(),
-            })
-            .collect(),
-        unpushed_commits: loss
-            .unpushed
-            .into_iter()
-            .map(|commit| CloseSessionCommit {
-                sha: commit.sha,
-                subject: commit.subject,
-            })
-            .collect(),
-        unpushed_commit_count: loss.unpushed_count,
-        ..view
-    }
-}
-
-/// `view`, which could not be read, saying why.
-fn unavailable(view: CloseSessionWorktree, reason: String) -> CloseSessionWorktree {
-    CloseSessionWorktree {
-        unavailable_reason: reason,
-        ..view
-    }
-}
-
-/// A dirty file's change as the wire names it.
-fn change_name(change: DirtyChange) -> &'static str {
-    match change {
-        DirtyChange::Modified => "modified",
-        DirtyChange::Staged => "staged",
-        DirtyChange::Untracked => "untracked",
-        DirtyChange::Deleted => "deleted",
-        DirtyChange::Renamed => "renamed",
     }
 }
 
@@ -642,6 +409,8 @@ pub(super) fn fingerprint_of<'a>(
 
 #[cfg(test)]
 mod tests {
+    use tddy_service::proto::session::CloseSessionDirtyFile;
+
     use super::*;
 
     fn a_worktree(path: &str, files: &[&str]) -> CloseSessionWorktree {
