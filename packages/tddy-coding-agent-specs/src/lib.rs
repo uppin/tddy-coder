@@ -26,6 +26,10 @@ use tddy_actions::tool::{ToolError, ToolRegistry, BUILTIN_SUPPORT_TOOLS, BUILTIN
 pub use crate::spec::acp::package_runner;
 pub use crate::spec::acp::AcpCommandError;
 pub use crate::spec::acp::AcpSection;
+pub use crate::spec::activity_slot::{
+    worktree_slug, ActivitySlot, ActivitySource, EmitRule, EntryKind, HookMessageSource, LineRule,
+    SpokenRole, TranscriptEntry, TranscriptPathVars, TranscriptSource, TRANSCRIPT_PATH_VARIABLES,
+};
 pub use crate::spec::argv::CuratedModel;
 pub use crate::spec::argv::ModelsSection;
 pub use crate::spec::effort_slot::{EffortCarry, EffortSlot};

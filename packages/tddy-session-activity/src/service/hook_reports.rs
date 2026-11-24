@@ -202,7 +202,17 @@ impl ActivityServiceImpl {
 
         self.follow_conversation_rotation(&session_dir, &req)?;
         self.follow_reported_model(&session_dir, &req).await?;
-        self.record_spoken_message(&session_dir, &req)?;
+        self.record_spoken_message(&session_dir, &req, spec.activity())?;
+        // The hooks' end of a turn: the transcript's own end of the same turn closes the pairing
+        // of the two sources' tool calls ([`super::transcript_lines`]).
+        if spec.activity().followed_transcript().is_some()
+            && req.status == tddy_core::SessionActivityStatus::Done.as_wire()
+        {
+            self.ports
+                .activity
+                .tool_turns()
+                .hooks_turn_ended(&req.session_id, now);
+        }
 
         // What the session waits on is kept next to the status that says it waits: a reader that is
         // not watching live (an orchestrator's `ReadSessionActivity`) sees the agent's question.
@@ -274,6 +284,18 @@ impl ActivityServiceImpl {
             .session_type
             .clone()
             .unwrap_or_else(|| UNTYPED_HOOK_SOURCE.to_string());
+        // An agent whose transcript is followed has its two reports of one call paired
+        // ([`super::transcript_lines`]); one whose spec reads tool calls from that transcript too
+        // has a call the transcript reported first keep the transcript's id, so its rows merge.
+        let activity = self
+            .agents
+            .for_session_type(meta.session_type.as_deref().unwrap_or(""))
+            .map(|spec| spec.activity().clone())
+            .unwrap_or_default();
+        let pairs_with_transcript = activity.followed_transcript().is_some();
+        let adopts_transcript_ids = pairs_with_transcript && activity.tool_calls.reads_transcript();
+        // An agent's id for a call is a key of the log: Cursor's embed a newline.
+        let tool_use_id = super::transcript_lines::sanitized_call_id(&req.tool_use_id);
 
         let record = match req.event.as_str() {
             "PreToolUse" => {
@@ -282,13 +304,28 @@ impl ActivityServiceImpl {
                 // match by construction — across interleaved calls and across a daemon
                 // restart alike. Without one (Claude Code sends none), mint a call_id and
                 // remember it so the paired PostToolUse can reuse it.
-                let call_id = if req.tool_use_id.is_empty() {
+                let mut call_id = if tool_use_id.is_empty() {
                     let minted = uuid::Uuid::new_v4().to_string();
                     self.ports.activity.push_pending(&req.session_id, &minted);
                     minted
                 } else {
-                    req.tool_use_id.clone()
+                    tool_use_id.clone()
                 };
+                let started_unix_ms = tddy_daemon_kernel::now_unix_ms();
+                if pairs_with_transcript {
+                    let paired = self.ports.activity.tool_turns().saw(
+                        &req.session_id,
+                        tddy_daemon_kernel::tool_turns::ToolCallSource::Hooks,
+                        tddy_daemon_kernel::tool_turns::SeenToolCall {
+                            tool_name: req.tool_name.clone(),
+                            call_id: call_id.clone(),
+                            started_unix_ms,
+                        },
+                    );
+                    if let Some(transcript_call) = paired.filter(|_| adopts_transcript_ids) {
+                        call_id = transcript_call.call_id;
+                    }
+                }
                 tddy_core::agent_activity::AgentActivityRecord {
                     call_id,
                     tool_name: req.tool_name,
@@ -296,7 +333,7 @@ impl ActivityServiceImpl {
                     status: tddy_core::agent_activity::STATUS_RUNNING.to_string(),
                     result: serde_json::Value::Null,
                     error_message: String::new(),
-                    started_unix_ms: tddy_daemon_kernel::now_unix_ms(),
+                    started_unix_ms,
                     completed_unix_ms: 0,
                     source,
                     head_commit,
@@ -312,13 +349,19 @@ impl ActivityServiceImpl {
                 // The tool call finished: a named call pairs by its own id, as its pre did;
                 // otherwise pair with the most-recent pending call_id (fresh id when none is
                 // outstanding, e.g. a hook restart), and append the terminal row.
-                let call_id = if req.tool_use_id.is_empty() {
+                let call_id = if tool_use_id.is_empty() {
                     self.ports
                         .activity
                         .pop_pending(&req.session_id)
                         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+                } else if adopts_transcript_ids {
+                    self.ports
+                        .activity
+                        .tool_turns()
+                        .adopted_id(&req.session_id, &tool_use_id)
+                        .unwrap_or(tool_use_id)
                 } else {
-                    req.tool_use_id.clone()
+                    tool_use_id
                 };
                 let status = if req.is_error {
                     tddy_core::agent_activity::STATUS_ERROR

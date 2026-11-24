@@ -306,6 +306,7 @@ mod tests {
                 model_report: Vec::new(),
                 home_dirs: Vec::new(),
                 peer_name: None,
+                activity: Default::default(),
             },
         }
     }

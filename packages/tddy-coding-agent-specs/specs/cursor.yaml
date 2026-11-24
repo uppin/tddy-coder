@@ -76,6 +76,33 @@ extensions:
     # events only, so a subagent's tool call on another model never re-points the session.
     model_report:
       - { kind: hook_field, field: model, events: [sessionStart, beforeSubmitPrompt, stop] }
+    # Where a session's activity is read from (`coding_agent.activity`). Cursor's hooks report its
+    # tool calls with their ids, status and results, but nothing it says (`afterAgentResponse`
+    # would duplicate rows and stays uninstalled); its own transcript holds every prompt and every
+    # reply — the text between tool calls included — but no tool results and no tool ids. So the
+    # words come from the transcript and the tool calls from the hooks; the transcript's tool_use
+    # parts still order the text around the calls. Seen 2026-11-24 (probe 01a20f1b):
+    #   {"role":"user","message":{"content":[{"type":"text","text":"<timestamp>…</timestamp>\n<user_query>…</user_query>"}]}}
+    #   {"role":"assistant","message":{"content":[{"type":"text","text":"…"},{"type":"tool_use","name":"Read","input":{…}}]}}
+    #   {"type":"turn_ended","status":"success"}
+    # The project directory is the worktree's path with every run of other characters made one `-`.
+    activity:
+      messages: transcript
+      tool_calls: hooks
+      transcript:
+        path: "{agent_home}/.cursor/projects/{worktree_slug}/agent-transcripts/{conversation_id}/{conversation_id}.jsonl"
+        lines:
+          - where: [{ field: role, equals: user }]
+            parts: message.content
+            emit:
+              - { kind: user_message, where: [{ field: type, equals: text }], text: text, unwrap_tag: user_query }
+          - where: [{ field: role, equals: assistant }]
+            parts: message.content
+            emit:
+              - { kind: agent_message, where: [{ field: type, equals: text }], text: text }
+              - { kind: tool_use, where: [{ field: type, equals: tool_use }], name: name, input: input }
+          - where: [{ field: type, equals: turn_ended }]
+            emit: [{ kind: turn_end }]
     models:
       default: composer-2.5
       curated:

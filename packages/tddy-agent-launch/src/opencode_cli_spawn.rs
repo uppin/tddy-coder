@@ -50,7 +50,9 @@ use crate::harness_from_spec::{harness_template_params, resume_token_adapter, Ha
 use crate::opencode_cli_spawn::session_start::shell_for_session_target;
 use crate::opencode_cli_spawn::session_start::CliSessionStart;
 use crate::usage_context::{record_usage_context, UsageSubject};
-use harness_launch::{launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch};
+use harness_launch::{
+    launch, HarnessFollowers, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
+};
 use start_steps::{
     log_hooks_on_the_target, node_launcher_for, place_slot_files_and_pointer,
     report_the_started_session,
@@ -349,6 +351,10 @@ pub(crate) async fn start_cli_harness_session(
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),
             }),
+            followers: HarnessFollowers {
+                delivery: hook_delivery.clone(),
+                registry: hook_followers.clone(),
+            },
         },
         HarnessRun::start(run_in_tmux),
     )

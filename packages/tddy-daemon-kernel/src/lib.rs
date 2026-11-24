@@ -86,6 +86,7 @@ mod stream_relay;
 pub use agent_tool_socket::next_embedded_socket_path;
 pub mod local_token_tonic_adapter;
 pub mod relay_idle;
+pub mod tool_turns;
 pub mod toolchain;
 pub mod user_paths;
 pub mod users_file;
@@ -180,6 +181,12 @@ pub struct AgentActivityHub {
     >,
     /// Per-session stack of in-flight `call_id`s awaiting their terminal row.
     pending: StdMutex<HashMap<String, Vec<String>>>,
+    /// Per-session tool calls of the current turn, by the source that reported them first: how a
+    /// transcript's tool call is paired with its hook row.
+    tool_turns: tool_turns::ToolTurns,
+    /// Per-session messages recorded lately, so one said in both a hook and a transcript is
+    /// recorded once.
+    spoken: StdMutex<HashMap<String, std::collections::VecDeque<String>>>,
 }
 
 impl AgentActivityHub {
@@ -265,6 +272,32 @@ impl AgentActivityHub {
             .entry(session_id.to_string())
             .or_default()
             .push(call_id.to_string());
+    }
+
+    /// The current turn's tool calls, as each source reported them.
+    pub fn tool_turns(&self) -> &tool_turns::ToolTurns {
+        &self.tool_turns
+    }
+
+    /// How many recent messages per session [`Self::first_time_spoken`] remembers.
+    pub const SPOKEN_REMEMBERED: usize = 64;
+
+    /// Whether `message` (a role and its text, as the caller keys it) is new for the session among
+    /// the last [`Self::SPOKEN_REMEMBERED`]; remembered either way.
+    pub fn first_time_spoken(&self, session_id: &str, message: &str) -> bool {
+        let mut spoken = self
+            .spoken
+            .lock()
+            .expect("agent activity hub mutex poisoned");
+        let recent = spoken.entry(session_id.to_string()).or_default();
+        if recent.iter().any(|seen| seen == message) {
+            return false;
+        }
+        if recent.len() == Self::SPOKEN_REMEMBERED {
+            recent.pop_front();
+        }
+        recent.push_back(message.to_string());
+        true
     }
 
     /// Take the most recent in-flight `call_id` for a session, if any.

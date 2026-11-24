@@ -39,6 +39,18 @@ pub trait HookReportDelivery: Send + Sync {
         &self,
         request: tddy_service::proto::activity::ReportAgentActivityRequest,
     ) -> Result<(), String>;
+    /// Record one line of a session's agent transcript, already mapped by its spec, as the activity
+    /// service's `record_transcript_line` does — the session on this host or on a target alike. A
+    /// delivery that records no transcripts refuses it, naming why; the session host's records them.
+    async fn record_transcript_line(
+        &self,
+        line: tddy_session_activity::TranscriptLine,
+    ) -> Result<(), String> {
+        Err(format!(
+            "this hook delivery records no transcripts; a line of {}'s was not recorded",
+            line.session_id
+        ))
+    }
     /// Post a target child's report to its orchestrator as a session message (`#orchestra` 2/9),
     /// as `PostSessionMessage` from the child would. A delivery that serves no session messages
     /// refuses it, naming why; the session host's delivery serves them.

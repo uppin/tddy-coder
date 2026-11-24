@@ -56,7 +56,7 @@ pub use crate::service::ports::NoSessionDeltaStores;
 pub use crate::service::ports::OsUserResolver;
 pub use crate::service::ports::SessionDeltaStores;
 pub use crate::service::ports::SessionLabels;
-pub use service::{ActivityServiceImpl, AnswerWaitPorts};
+pub use service::{ActivityServiceImpl, AnswerWaitPorts, TranscriptLine};
 
 /// How a session's activity deltas are numbered: the wire's absent value, the first real tick, and
 /// the rule that produces the next one.
