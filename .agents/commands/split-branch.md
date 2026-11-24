@@ -15,7 +15,7 @@ neither depends on the other to build, test or merge.
 | Slice B must merge **before** slice A, and A is built on top of B | `/split-pr-to-stack` |
 | A new PR **on top of** an existing one, with nothing to carve out | `/add-to-pr-stack` |
 | A branch that just needs to follow the current one, no split at all | `/follow-up-branch` |
-| The work isn't written yet and you are planning several PRs from requirements | `/plan-pr-stack` |
+| The work isn't written yet and you are planning several PRs from requirements | `/plan-streak` (it makes dependent PRs a stack and independent ones siblings off the trunk) |
 
 **The test that decides it:** after the split, can each branch build and pass its own tests with the
 other branch absent? If yes → sibling split, this command. If the second slice would not compile

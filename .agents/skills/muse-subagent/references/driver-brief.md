@@ -153,8 +153,8 @@ a stop.
 Consent: green-yolo.md § "Consent" — apply every cleanup (Minor included), decompose files this PR
 pushed past 500 production lines, solve every code issue this PR added, take your own
 recommendation per TODO, wrap the docs, retitle, `gh pr ready`.
-<only under /yolo-pr-stack:> ONE EXCEPTION, from .agents/commands/yolo-pr-stack.md § "Stage W": do
-NOT split a file that other stack PRs also modify — record it as pr-wrap step 3.5's stack-branch
+<only under /yolo-streak, on a stacked node:> ONE EXCEPTION, from .agents/commands/yolo-streak.md
+§ "Stage W": do NOT split a file that other PRs of this node's stack also modify — record it as pr-wrap step 3.5's stack-branch
 rule says, and list it in LEFT_FOR_HUMAN. Do not ask about the top node's backlog delta; list it in
 LEFT_FOR_HUMAN.
 
@@ -180,6 +180,6 @@ reviewer is posted with its evidence, as fix-pr says, and listed in your summary
 
 For stage F the driver also counts **rounds**. A turn that ends `incomplete` because checks are
 still running is resumed with *"Re-read the PR state and continue /fix-pr."*, and that is one round.
-The cap is 5 rounds (the `/yolo-pr-stack` round cap), inside the 6-turn cap. Between rounds, wait for
+The cap is 5 rounds (the `/yolo-streak` round cap), inside the 6-turn cap. Between rounds, wait for
 the checks with `$MA exec local <WORKTREE> 'scripts/ci-status.sh --watch <PR>'` in a background Bash
 call, rather than spending a turn on waiting.

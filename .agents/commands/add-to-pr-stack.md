@@ -193,6 +193,13 @@ gh pr edit <pr> --title "<type>(<pkg>): <unchanged subject> (#<slug> <K>/<newN>)
 Plain `gh pr edit --title` is correct here. **Skip merged PRs** — their titles are already commits on
 `master`, and editing the PR page only suggests history was corrected when it was not.
 
+**When the stack is one unit of a streak** (planned by `/plan-streak` — several stacks and standalone
+PRs under one slug), the slug is the streak's and `N` counts the **whole streak**: the new node takes
+the next free streak label as its `K`, and every open PR of the streak is renumbered — in every stack
+and every standalone PR, not only this stack. Give the new node's changeset the streak's sixth
+heading, `## Placement` (this stack, its position, its base), and, when the planning session owns the
+streak's work queue, add it there with its `parents` and `needs`.
+
 ## Step 4: Report
 
 State:

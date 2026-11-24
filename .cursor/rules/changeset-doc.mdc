@@ -45,7 +45,7 @@ Changeset documents track **delta changes** (State A → State B) to development
 
 **`Complexity` is required on every changeset — stacked or standalone, whichever command planned it.**
 It is a planning output, written for whoever sizes the implementer: an orchestrator such as
-`/yolo-pr-stack`, or the developer choosing a model and effort for `/green`, `/pr-wrap` or
+`/yolo-streak`, or the developer choosing a model and effort for `/green`, `/pr-wrap` or
 `/code-restructuring` by hand, reads this one line instead of re-deriving the size of the change from
 the diff. Score it when the changeset is written and re-score it in the same commit as the red step if
 the failing tests showed the change is bigger or smaller than planned. Take the **highest** score any

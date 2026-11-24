@@ -852,7 +852,7 @@ Mark anything not green with an explicit visual indicator rather than burying it
 **Guides**: [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md),
 [`docs/dev/guides/testing.md`](../../docs/dev/guides/testing.md)
 
-> **`/plan-pr-stack` is what plans a stack in the first place**, and this command lands what it
-> produced. Note that tddy also ships a **workflow recipe** by a similar name — a separate product
+> **`/plan-streak` is what plans a stack in the first place** — as one unit of a streak, beside any
+> standalone PRs, which land on their own — and this command lands each stack it produced. Note that tddy also ships a **workflow recipe** by a similar name — a separate product
 > feature documented in the `pr-stack` skill — which
 > this command has nothing to do with.

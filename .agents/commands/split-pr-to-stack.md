@@ -18,12 +18,11 @@ those definitions.
 (`B1` mergeable first, `B2` based on `B1`). `/split-branch` produces sibling branches, typically
 both off `master`, and registers no stack.
 
-**Plan the stack, not split it**, when the work is not written yet — that is `/plan-pr-stack`. This
+**Plan the streak, not split it**, when the work is not written yet — that is `/plan-streak`. This
 command carves an **existing** PR; it does not plan from requirements. Note that `plan-pr-stack` is
-also the name of a tddy **workflow recipe**, which is a separate product feature documented in
-the `pr-stack` skill; a
-different thing from the slash command — see the `pr-stack` skill § *Two ways to plan a stack*. This
-command carves up **existing** commits/files.
+the legacy alias of a retired tddy **workflow recipe**, a separate product feature documented in
+[`docs/ft/coder/pr-stacking.md`](../../docs/ft/coder/pr-stacking.md) and unrelated to any slash
+command. This command carves up **existing** commits/files.
 
 `$ARGUMENTS` may name the PR/branch to split (`#123`, a URL, a branch) and/or describe the two
 slices. Default: current branch. **This command always produces exactly two new layers (B1, B2).**
@@ -583,4 +582,4 @@ the tail — do not split), `/follow-up-branch` (branch only on top — do not s
 `/merge`, `/pr`, `/pr-wrap`
 **Skill**: `pr-stack` (`.agents/skills/pr-stack/SKILL.md`)
 **Specs**: `docs/dev/guides/ci.md`, `docs/dev/guides/changelog-merge-hygiene.md`
-**Planning a stack from scratch**: `/plan-pr-stack`
+**Planning a streak (its stacks and standalone PRs) from scratch**: `/plan-streak`
