@@ -267,18 +267,9 @@ impl DaemonSessionHost {
     ) -> Vec<PlannedWorktree> {
         let here = daemon_instance_id
             == tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config);
-        let request = PreviewCloseSessionRequest {
-            session_token: ctx.session_token.clone(),
-            session_id: codebase_session_id.to_string(),
-        };
-        let previewed = if here {
-            Box::pin(self.preview_close_session_at_host(Request::direct(request)))
-                .await
-                .map(|response| response.into_inner())
-        } else {
-            self.forward_preview_close(daemon_instance_id, &request)
-                .await
-        };
+        let previewed = self
+            .preview_the_codebase(ctx, daemon_instance_id, codebase_session_id, here)
+            .await;
         let unreadable = |reason: String| {
             vec![PlannedWorktree {
                 view: CloseSessionWorktree {
@@ -315,34 +306,30 @@ impl DaemonSessionHost {
         };
         // One forwarded close removes everything the codebase daemon listed; its removal rides on
         // the first worktree, and the rest are shown alone.
-        let fingerprint = preview.fingerprint;
-        preview
-            .worktrees
-            .into_iter()
-            .enumerate()
-            .map(|(index, worktree)| PlannedWorktree {
-                view: CloseSessionWorktree {
-                    host: if here {
-                        worktree.host.clone()
-                    } else {
-                        daemon_instance_id.to_string()
-                    },
-                    owner: CloseSessionWorktreeOwner::Codebase as i32,
-                    owner_id: codebase_session_id.to_string(),
-                    ..worktree
-                },
-                removal: if index == 0 {
-                    Removal::Codebase {
-                        daemon_instance_id: daemon_instance_id.to_string(),
-                        session_id: codebase_session_id.to_string(),
-                        fingerprint: fingerprint.clone(),
-                        here,
-                    }
-                } else {
-                    Removal::WithAnother
-                },
-            })
-            .collect()
+        planned_codebase_worktrees(daemon_instance_id, codebase_session_id, here, preview)
+    }
+
+    /// What closing workspace session `codebase_session_id` would lose, as its daemon previews it:
+    /// asked here when `here`, forwarded otherwise.
+    async fn preview_the_codebase(
+        &self,
+        ctx: &CloseContext,
+        daemon_instance_id: &str,
+        codebase_session_id: &str,
+        here: bool,
+    ) -> Result<CloseSessionPreview, Status> {
+        let request = PreviewCloseSessionRequest {
+            session_token: ctx.session_token.clone(),
+            session_id: codebase_session_id.to_string(),
+        };
+        if here {
+            Box::pin(self.preview_close_session_at_host(Request::direct(request)))
+                .await
+                .map(|response| response.into_inner())
+        } else {
+            self.forward_preview_close(daemon_instance_id, &request)
+                .await
+        }
     }
 
     /// Forward `PreviewCloseSession` to `daemon_instance_id`, refusing — distinctly from "that
@@ -369,6 +356,44 @@ impl DaemonSessionHost {
         )
         .await
     }
+}
+
+/// The worktrees of the codebase daemon's `preview`, planned as the codebase half: the first carries
+/// the one forwarded close that removes them all, confirming `preview`'s fingerprint.
+fn planned_codebase_worktrees(
+    daemon_instance_id: &str,
+    codebase_session_id: &str,
+    here: bool,
+    preview: CloseSessionPreview,
+) -> Vec<PlannedWorktree> {
+    let fingerprint = preview.fingerprint;
+    preview
+        .worktrees
+        .into_iter()
+        .enumerate()
+        .map(|(index, worktree)| PlannedWorktree {
+            view: CloseSessionWorktree {
+                host: if here {
+                    worktree.host.clone()
+                } else {
+                    daemon_instance_id.to_string()
+                },
+                owner: CloseSessionWorktreeOwner::Codebase as i32,
+                owner_id: codebase_session_id.to_string(),
+                ..worktree
+            },
+            removal: if index == 0 {
+                Removal::Codebase {
+                    daemon_instance_id: daemon_instance_id.to_string(),
+                    session_id: codebase_session_id.to_string(),
+                    fingerprint: fingerprint.clone(),
+                    here,
+                }
+            } else {
+                Removal::WithAnother
+            },
+        })
+        .collect()
 }
 
 /// A local peer refusal ("no common room configured") is `FAILED_PRECONDITION`, the code a peer
