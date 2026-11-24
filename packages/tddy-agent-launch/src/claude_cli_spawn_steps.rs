@@ -51,11 +51,11 @@ impl ClaudeCliHooks {
 
     /// Point every hook at the hook log of a session whose agent runs on a target, its worktree
     /// there being `worktree`: each hook appends to that log instead of running
-    /// `tddy-tools session-hook`.
+    /// `tddy-tools session-hook`. The log is named by its absolute path
+    /// ([`tddy_core::remote_hook_log_in`]), so a hook finds it whatever directory the agent has
+    /// entered since it started.
     pub(super) fn point_at_the_target_log(&mut self, worktree: &Path) {
-        // FIXME(red): still the relative path the target launch has always given its hooks.
-        let _ = worktree;
-        self.remote_log = Some(tddy_core::REMOTE_HOOK_LOG.to_string());
+        self.remote_log = Some(tddy_core::remote_hook_log_in(worktree));
     }
 }
 

@@ -19,6 +19,23 @@
 /// Where a target session's hook log lives, relative to the session's worktree on the target.
 pub const REMOTE_HOOK_LOG: &str = ".tddy/hooks.log";
 
+/// The hook log of a session whose worktree on its target is `worktree`: the path every hook of
+/// the session appends to, the launch creates and the daemon follows.
+///
+/// It is the worktree's path joined with [`REMOTE_HOOK_LOG`], never [`REMOTE_HOOK_LOG`] alone: an
+/// agent runs each hook in its current directory, which follows the agent's `cd`, so a log named
+/// relative to it is looked for in whatever directory the agent last entered (seen 2026-11-24 on a
+/// Coder workspace: every hook failed with `cannot create .tddy/hooks.log: Directory nonexistent`
+/// once the agent had entered a subdirectory, and the failing `PreToolUse` hook refused every
+/// tool).
+#[must_use]
+pub fn remote_hook_log_in(worktree: &std::path::Path) -> String {
+    worktree
+        .join(REMOTE_HOOK_LOG)
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// The shell command an agent on a target runs for the hook `event`: it reads the hook's payload
 /// on its standard input and appends `<event>\t<hook_token>\t<payload>\n` to `log_path`, the
 /// payload's newlines removed.

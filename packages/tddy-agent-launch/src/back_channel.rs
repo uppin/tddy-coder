@@ -61,13 +61,13 @@ impl<'a> ChildPlacement<'a> {
         let Some(worktree) = target_worktree else {
             return Some(Self::Local);
         };
-        // FIXME(red): still the relative path the guidance has always named.
-        let _ = worktree;
+        // Absolute, as the session's own hooks name it: the child runs the line from whatever
+        // directory it has entered.
         hook_token
             .filter(|token| !token.is_empty())
             .map(|hook_token| Self::Target {
                 hook_token,
-                hook_log_path: tddy_core::REMOTE_HOOK_LOG.to_string(),
+                hook_log_path: tddy_core::remote_hook_log_in(worktree),
             })
     }
 }
