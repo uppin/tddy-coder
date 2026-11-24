@@ -1,4 +1,4 @@
-# A target session's hooks name their log by its absolute path
+# 2026-11-24 — A target session's hooks name their log by its absolute path
 
 **Type:** Fix
 **Packages:** `tddy-agent-backend`, `tddy-agent-launch`, `tddy-session-driver`
@@ -76,4 +76,9 @@ instance `git clean -fdx`, which removes the files `info/exclude` lists. Its hoo
 
 - Scoped: `./test -p tddy-agent-backend -p tddy-agent-launch -p tddy-session-driver`;
   `./dev cargo clippy -p tddy-agent-backend -p tddy-agent-launch -p tddy-session-driver -- -D warnings`.
-- Live on `remote-dev` through `tddy-session-driver`: see the PR description.
+- Live on `remote-dev` (`/bin/sh` is `dash`), 2026-11-24, through `tddy-session-driver` with the real
+  Claude Code: the agent ran `cd model-hound`, `pwd` and `cat README` as three Bash calls. The hooks
+  after the `cd` carried `cwd: <worktree>/model-hound`, all nine (SessionStart, UserPromptSubmit,
+  three PreToolUse, three PostToolUse, Stop) landed in `<worktree>/.tddy/hooks.log` and reached the
+  driver, every tool ran, and no `model-hound/.tddy` was created. The installed `Stop` hook read
+  `printf … >> '<worktree>/.tddy/hooks.log'`.

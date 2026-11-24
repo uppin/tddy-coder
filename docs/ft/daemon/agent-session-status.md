@@ -168,7 +168,8 @@ length, and `ListSessions` is a response an operator's dashboard polls.
 A session whose agent runs on a target — a machine reached through a remote shell, with no
 tddy software on it — reports the same hook word. Its hook command is a POSIX `sh` one-liner
 (`printf`, `cat`, `tr`, nothing of tddy's) that appends one line — event, hook token, payload —
-to `.tddy/hooks.log` in the worktree. The daemon follows that file through the session's remote
+to `.tddy/hooks.log` in the worktree, named by its absolute path so it is found whichever directory
+the agent has entered. The daemon follows that file through the session's remote
 shell and feeds each line into the same hook handling a local hook reaches, so a target session
 shows working, waiting and idle like a local one. Claude Code's permission prompt is answered
 there too: its hook waits for a file the daemon writes into `.tddy/answers/` through the same

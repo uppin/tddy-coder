@@ -101,14 +101,11 @@ impl LaunchSessions {
         }
         let reports_to = self.resumed_reports_to(session_dir);
         let on_target = meta.target.is_some();
+        let target_worktree = on_target.then_some(worktree);
         if spec.has(Capability::OperatorNotify) {
-            let back_channel = reports_to.as_ref().and_then(|to| {
-                to.guidance_at(
-                    spec,
-                    on_target.then_some(worktree),
-                    meta.hook_token.as_deref(),
-                )
-            });
+            let back_channel = reports_to
+                .as_ref()
+                .and_then(|to| to.guidance_at(spec, target_worktree, meta.hook_token.as_deref()));
             let notify = crate::notify_env::resumed_agent_notify_launch(
                 &self.config,
                 &tool_socket,
