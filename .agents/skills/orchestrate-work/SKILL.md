@@ -31,6 +31,10 @@ skills **or your project's equivalent**.
 | Tasks arrive while others run | A single worker doing everything serially |
 | Stack, siblings or DAG, partly done (resume) | Planning only — use the planning skills first |
 
+In this repository a planned set of PRs is a **streak**: `/plan-streak` plans it — dependent tasks
+joined into one or several linear stacks, independent ones standalone on the trunk — and
+`/yolo-streak` is this skill's streak-specific form, running its pipeline while planning continues.
+
 ## 1. The queue model
 
 A **work item** is one task:

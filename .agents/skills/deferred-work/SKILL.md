@@ -24,7 +24,7 @@ docs/dev/todo/                        ← THE RECORD: deferred work, one file pe
 | Record | Path | One file is | Written by | Read by |
 |---|---|---|---|---|
 | **Code issue** | `packages/<pkg>/docs/code-issues/` | one analyzer finding against one symbol or file | `/analyze-code-issues`, `/pr-wrap` 7.5, `/wrap-context-docs` | planning Step 2b, `/code-restructuring` |
-| **Changeset TODO** | `docs/dev/todo/` | one thing a changeset planned or discovered and **could not** finish | `/green`, `/plan-red`, `/plan-pr-stack`, `/pr-wrap` | planning Step 2b, `/pr-wrap` |
+| **Changeset TODO** | `docs/dev/todo/` | one thing a changeset planned or discovered and **could not** finish | `/green`, `/plan-red`, `/plan-streak`, `/pr-wrap` | planning Step 2b, `/pr-wrap` |
 
 **Code issues are per-package; TODOs are repo-wide.** A code issue names a file, so it belongs
 beside that file's package and travels with it — a reader of `packages/tddy-core/docs/` finds that
@@ -150,7 +150,7 @@ never assume*.
 
 ## Related
 
-**Commands**: `/plan-red`, `/plan-ft-dev`, `/plan-pr-stack`, `/add-to-pr-stack`, `/green`,
+**Commands**: `/plan-red`, `/plan-ft-dev`, `/plan-streak`, `/add-to-pr-stack`, `/green`,
 `/pr-wrap`, `/wrap-context-docs`, `/merge-pr-stack`
 **Skills**: [`analyze-code-issues`](../analyze-code-issues/SKILL.md),
 [`code-restructuring`](../code-restructuring/SKILL.md), [`pr-stack`](../pr-stack/SKILL.md),

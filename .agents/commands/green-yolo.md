@@ -297,7 +297,7 @@ gh pr view <predecessor> --json number,state,mergedAt --jq '"#\(.number) \(.stat
   human decision.
 
 **Never arm `#automerge` while the base is a parent branch** — it would merge this PR into its
-parent's PR (`plan-pr-stack` Step 10).
+parent's PR (`plan-streak` Step 11).
 
 **D2. Re-prove the PR on its new base.** GitHub does not restack for you here; repoint it with
 `/repoint` (or `/pr-stack-rebase` single mode once the base is `master`). Fetch, and confirm
@@ -377,7 +377,8 @@ they reached GitHub, so the report is where the developer reviews them.
 
 **Commands**: `/green` (phase A), `/validate-changes` (phase A), `/pr-wrap` (phase B), `/fix-pr`
 (phase C), `/squash-pr` and `/merge-pr-stack` (next: landing), `/repoint` (phase D),
-`/pr-stack-rebase`, `/yolo-pr-stack` (the whole-stack version that reuses this consent table)
+`/pr-stack-rebase`, `/yolo-streak` (the whole-streak version — stacks plus standalone PRs — that
+reuses this consent table)
 **Skills**: `tdd`, `code-restructuring`, `analyze-code-issues`, `deferred-work`, `pr-stack`,
 `muse-subagent` (`#muse`), `behaviour-modifiers`
 (all under `.agents/skills/`)

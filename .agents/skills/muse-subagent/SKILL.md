@@ -1,7 +1,7 @@
 ---
 name: muse-subagent
 description: >-
-  `#muse` — offload a command's implementation stages to Muse Code run headless (`muse exec --json`, one session continued across turns by `--session-id`), with a Claude Code Sonnet · low subagent as its driver: it starts turns, follows and judges the JSONL stream, and resumes the same Muse session until the stage is really done. Built for `/yolo-pr-stack` (every node's `[G]`/`[W]`/`[F]`), and applies equally to `/green-yolo`'s phases and to `/green`, `/code-restructuring`, `/pr-wrap`, `/fix-pr` run on their own. Planning stays with the session's own model. Runs on this machine only. Use ONLY when the user asks for it — the `#muse` tag, or words like "let Muse do it" / "offload to Muse Code". Never choose it on your own.
+  `#muse` — offload a command's implementation stages to Muse Code run headless (`muse exec --json`, one session continued across turns by `--session-id`), with a Claude Code Sonnet · low subagent as its driver: it starts turns, follows and judges the JSONL stream, and resumes the same Muse session until the stage is really done. Built for `/yolo-streak` (every node's `[G]`/`[W]`/`[F]`), and applies equally to `/green-yolo`'s phases and to `/green`, `/code-restructuring`, `/pr-wrap`, `/fix-pr` run on their own. Planning stays with the session's own model. Runs on this machine only. Use ONLY when the user asks for it — the `#muse` tag, or words like "let Muse do it" / "offload to Muse Code". Never choose it on your own.
 ---
 
 # Muse subagent — `muse exec` does the stage, a driver subagent watches it
@@ -32,7 +32,7 @@ session until the stage's done condition holds.
 | `/pr-wrap` (after `/validate-changes`) | W | preflight; reporting a stop |
 | `/fix-pr` | F (a fresh session) | preflight; reporting a stop |
 | `/green-yolo` | Phase A → G, Phase B → W, Phase C → F (W and F one session) | Phase 0 preflight, Phase D (`#automerge`), the report |
-| `/yolo-pr-stack` | every node's G, W, F | all of planning, dispatch, the ledger, the sweep plan, the TODO gate (`yolo-pr-stack.md` § *Muse mode*) |
+| `/yolo-streak` | every node's G, W, F | all of planning, dispatch, the ledger, the sweep plan, the TODO gate (`yolo-streak.md` § *Muse mode*) |
 
 Every stage runs its command's file end to end, with the answers `green-yolo.md` § *Consent* gives
 (standalone commands too: invoking a command with `#muse` is consent to that command's own
@@ -41,7 +41,7 @@ commit-and-push). Muse Code cannot ask — `--yolo` turns off `request_user_inpu
 the options, and the main agent reports it in its end-of-turn summary. The developer answers by
 re-invoking the command.
 
-Never offloaded: the interview, PRDs, changesets, red commits, `/plan-pr-stack`'s 6e review, stack
+Never offloaded: the interview, PRDs, changesets, red commits, `/plan-streak`'s 6e review, stack
 cascades (`/pr-stack-rebase` over a range), landing (`/merge-pr-stack`, `/squash-pr`, `#automerge`).
 A stage that turns out to need a planning decision stops, and the decision comes back here.
 
@@ -102,7 +102,7 @@ Keep `MUSE_MODEL` for the announcement line and the ledger. It is the model for 
 the user named another one.
 
 **Effort.** Passed as `--effort` (Muse's `--reasoning-effort`; its own default is `high`). Under
-`/yolo-pr-stack`, from the node's complexity score (§ *Muse mode* there); standalone **medium**,
+`/yolo-streak`, from the node's complexity score (§ *Muse mode* there); standalone **medium**,
 unless the user named one.
 
 ### 2. Preflight stays here
@@ -117,8 +117,8 @@ or planned in this session, or a PR whose author is them
 (`gh pr view <PR> --json author --jq .author.login` equals `gh api user --jq .login`). A PR or branch
 authored by anyone else is not offloaded — run the command without the tag, or ask.
 
-**The worktree.** Standalone, the stage runs in this session's worktree. Under `/yolo-pr-stack` each
-node gets its own worktree as usual (`yolo-pr-stack.md` § *0 — Ephemeral worktree*). **While a driver
+**The worktree.** Standalone, the stage runs in this session's worktree. Under `/yolo-streak` each
+node gets its own worktree as usual (`yolo-streak.md` § *0 — Ephemeral worktree*). **While a driver
 runs, the main agent does not edit, commit, check out or rebase in that worktree** — Muse Code owns
 it until the driver reports.
 
@@ -135,7 +135,7 @@ Announce it in one line before the Agent call:
 
 **Names.** One `<name>` per Muse session, reused only to continue it: `<command>-<branch>-<yyyymmddHHMM>`
 standalone (`green-agent-tools-n3-202611081130`); under `/green-yolo`, `G` is `gy-<branch>-G` and `W`
-and `F` share `gy-<branch>-W`; under `/yolo-pr-stack`, `yolo-<slug>-n<k>-G` and `yolo-<slug>-n<k>-W`.
+and `F` share `gy-<branch>-W`; under `/yolo-streak`, `yolo-<slug>-n<k>-G` and `yolo-<slug>-n<k>-W`.
 Branch slashes become `-` (the script accepts `[A-Za-z0-9._-]` only).
 
 ### 4. Watch, and own restarts
@@ -186,6 +186,6 @@ continue the invoked command at the step after the offloaded stage.
 
 ## Related
 
-`behaviour-modifiers` skill (the `#muse` registry row) · `/yolo-pr-stack` § *Muse mode* ·
+`behaviour-modifiers` skill (the `#muse` registry row) · `/yolo-streak` § *Muse mode* ·
 `/green-yolo` § *Consent* (the answers every stage runs on) · `pr-stack` skill (worktree and branch
 rules)

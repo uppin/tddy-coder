@@ -17,7 +17,9 @@ description: >-
   `/validate-changes` and `/pr-wrap` rebase before any code diff), milestone pushes, the
   not-on-its-base's-latest-tip trap, recurring shared-file conflicts, approval dismissal, the
   `#automerge` / `#forcemerge` comment gate, CI reading with `scripts/ci-status.sh`, and recovery.
-  Load this whenever working a stack. The `/plan-pr-stack`, `/add-to-pr-stack`,
+  Load this whenever working a stack. `/plan-streak` and `/yolo-streak` plan and run a STREAK — a
+  set of PRs where only the dependent ones are joined into stacks — and apply this skill to each
+  stack in it. The `/add-to-pr-stack`,
   `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`, `/green`, `/validate-changes`,
   `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`, `/follow-up-branch` and `/pr` commands
   are the operational entrypoints; this skill is the shared model they all follow. Triggers: stacked
@@ -38,10 +40,17 @@ allowed-tools:
 # pr-stack — the stacked-PR model
 
 Canonical mechanics for planning, tracking, and landing a **stack** of dependent PRs. The commands
-`/plan-pr-stack`, `/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`,
+`/add-to-pr-stack`, `/split-pr-to-stack`, `/pr-stack-rebase`, `/merge-pr-stack`,
 `/green`, `/validate-changes`, `/pr-wrap`, `/merge`, `/repoint`, `/squash-pr`, `/fix-pr`,
 `/follow-up-branch` and `/pr` are the operational entrypoints; they all follow the definitions
 below, so follow them exactly and keep the commands and this skill in agreement.
+
+**A stack is one unit of a streak.** `/plan-streak` and `/yolo-streak` work on a **streak**: a set of
+PRs planned together, in which only the PRs that depend on each other are joined into stacks — one
+or several, each of them linear — and every independent PR is **standalone**, based on the trunk and
+registered in no stack. This skill is the principles skill for **each** of those stacks; its PR
+boundary contract, per-PR documents and title rules apply to every node of a streak, stacked or not.
+Where this skill says "the stack", a streak means "the stack this node belongs to".
 
 > **Not to be confused with the `pr-stack` workflow recipe.** `tddy-coder` ships a *product* feature
 > — a workflow recipe, also called `pr-stack` (legacy CLI aliases: `plan-pr-stack`,
@@ -108,9 +117,12 @@ retargets existing PRs' bases. On a stack whose branches are already correct, re
 root, or a node with two predecessors.
 
 That is a **planning constraint, not just a tooling one**: decide the linear order up front and cut
-each branch off the previous one. Where work is genuinely independent, it still takes a position in
-the line — pick an order that is a valid topological sort of the real dependencies, so every PR's
-predecessors are its ancestors.
+each branch off the previous one. Pick an order that is a valid topological sort of the real
+dependencies, so every PR's predecessors are its ancestors. Work that is genuinely **independent of
+the stack** — it depends on no node of it, and no node depends on it — does not belong in it at all:
+`/plan-streak` makes it a standalone PR on the trunk. Only work that shares a dependency with the
+stack's nodes but not with its neighbours (two siblings on one root) still takes a position in the
+line; see *Why linear* below.
 
 If you inherit a branching shape, linearize before registering: pick the order, rebase each branch
 onto its new predecessor with `git rebase --onto <new-base> <old-base> <branch>` (recording each
@@ -139,9 +151,11 @@ origin/master
 - The order must be a valid **topological sort of the real dependencies**: if PR 4 consumes something
   PR 2 delivers, PR 2 must be below it. Beyond that constraint the order is yours to choose — and
   **choose it**, per *Order inside a wave*: blockers ahead of leaves inside each green wave.
-- Work that depends on nothing still occupies a position. It goes at the **back of its wave**, behind
-  everything that other waves are waiting on — unless keeping numbering and documents stable matters
-  more than throughput.
+- Work that depends on nothing **in the stack**, and that nothing in it depends on, is not a member:
+  plan it as a standalone PR (`/plan-streak` § *The streak model*). A member that is independent of
+  its neighbours — a sibling of another node on one shared root — still occupies a position. It goes
+  at the **back of its wave**, behind everything that other waves are waiting on — unless keeping
+  numbering and documents stable matters more than throughput.
 
 ### Why linear, and what to do with work that genuinely branches
 
@@ -280,7 +294,7 @@ parent, never opens a PR, and never silently defaults the base to the current br
 
 ### Splitting a layer — `/split-pr-to-stack`
 
-`/plan-pr-stack` plans a stack from requirements. `/add-to-pr-stack` and `/follow-up-branch`
+`/plan-streak` plans a set of PRs — stacks and standalone PRs — from requirements. `/add-to-pr-stack` and `/follow-up-branch`
 (branch only) add a PR on top of an existing one. `/split-branch` produces **sibling** branches,
 typically both off `master`. None of those carve an **existing** PR into stacked slices.
 
@@ -473,6 +487,10 @@ files. Never edit a sibling's documents.
 
 A bottom PR still carries all five; its `## Dependencies` says it has none. A document missing any
 of them is the duplicate-development hazard the documents exist to close.
+
+A node planned by `/plan-streak` carries a sixth, **`## Placement`** — its unit (this stack and its
+position in it, or standalone), its base, and why — because in a streak a node's stack membership is
+a planning decision, not a given.
 
 ### `## Green wave` — the stack is a line, the dependency graph is not
 
@@ -741,11 +759,13 @@ up; without the message it waits on something that is no longer missing.
 intended trade: frequent small rebases in each worktree (`/pr-stack-rebase`, bottom-up) beat one
 enormous one at the end, and it is exactly what the per-worktree rebase path exists to make cheap.
 
-### Planning commits each PR as it is planned
+### Planning commits each PR as it is cut
 
-Planning happens in **one worktree**, switching branches one at a time, and each PR's first commit is
-its own planning documents. Nothing pins a branch for longer than it takes to write them, so no layer
-is force-pushed under a worktree that is mid-`/green`.
+Planning happens in **one worktree**, switching branches one at a time. Under `/plan-streak`, pass 1
+only drafts each node's documents and records its links; pass 2 cuts each branch from its base's
+remote tip, and the PR's first commit is its own planning documents, its second its draft-PR
+contract. Nothing pins a branch for longer than it takes to write them, so no layer is force-pushed
+under a worktree that is mid-`/green`.
 
 The `## Draft PR contract` section is what tells whoever implements a PR what to publish first, so
 its successors can start against a real ref rather than waiting for the whole thing.
@@ -813,6 +833,13 @@ fourth of six and cannot merge before three others — which a base-branch name 
 Planned PRs panel shows and what move-up/move-down changes), not a claim that the stack is a line;
 the real dependency edges are the base refs, and `gh pr list --json baseRefName` is where you read them.
 
+**In a streak, the slug names the streak and `K/N` is the node's streak label.** `/plan-streak` gives
+every node of a streak — in any of its stacks, or standalone — the same `#<slug>`, with `K` the node's
+place in the streak order and `N` the streak's node count. Along one stack the `K`s still ascend, with
+gaps where the streak's other units sit, so a reviewer reads both the order inside the stack and that
+the stack belongs to a larger streak. A standalone PR carries the group too; its `K` is a label, not a
+merge-order claim.
+
 **On `master` it is not last, and that is expected.** GitHub's squash merge appends ` (#<pr>)` to the
 subject, so the commit lands as:
 
@@ -858,7 +885,7 @@ first; if the whole thing will not fit comfortably, the body is where the detail
 
 | Moment | Command / tool | Obligation |
 |---|---|---|
-| A PR is planned | `/plan-pr-stack` | Write the full format immediately. The subject states the *planned* delivery — write it as shipped. |
+| A PR is planned and opened | `/plan-streak` (pass 2) | Write the full format immediately. The subject states the *planned* delivery — write it as shipped. |
 | The PR is opened | `/pr`, `gh pr create` | Carry the node's title through verbatim. |
 | A PR is added, split, or reordered | `/add-to-pr-stack`, `/split-pr-to-stack` | **Renumber every PR in the stack** (see below), and re-register it. |
 | Before ready for review | `/pr-wrap` | **Re-read the title and correct it** to what the branch actually delivered. Scope drifts during green; the title written at planning is a guess, and this is the last moment it can be fixed. |
@@ -1173,8 +1200,8 @@ gigabytes, and half a dozen of them will exhaust a disk. Create per-node worktre
 session actually runs, and only for the nodes being worked. A node's worktree can always be
 recreated later from its branch.
 
-Under `/yolo-pr-stack`, `/fix-pr` runs in **one reusable worktree** that `git switch`es up the line
-and `rm -rf target`s between nodes. A branch checked out in another worktree cannot be switched to, so
+Under `/yolo-streak`, `/fix-pr` runs in **one reusable worktree** that `git switch`es from node to
+node in streak order and `rm -rf target`s between nodes. A branch checked out in another worktree cannot be switched to, so
 a node's per-node worktree is freed (clean and fully pushed) before the fixer needs it.
 
 ### Delete a temporary worktree as soon as its branch is pushed

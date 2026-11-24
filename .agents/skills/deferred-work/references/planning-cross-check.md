@@ -5,7 +5,7 @@ files and modules the change touches, and **before** the changeset is written. D
 during `/green` is late: by then the only choices are to work around it, silently make it worse, or
 stop.
 
-Called by `/plan-red`, `/plan-ft-dev`, `/plan-pr-stack` and `/add-to-pr-stack`, via
+Called by `/plan-red`, `/plan-ft-dev`, `/plan-streak` and `/add-to-pr-stack`, via
 [`planning-phase.md`](../../planning/references/planning-phase.md) Step 2b.
 
 ## Scan
@@ -205,12 +205,15 @@ it is measurable, a `Future enhancement` TODO if it is not. Note in `## Decision
 it was proposed and declined, so a reviewer reading a contorted seam sees a decision rather than an
 oversight.
 
-## A systemic restructure across a PR stack
+## A systemic restructure across a PR stack or streak
 
 When Step 2b finds an issue that is not one node's problem — the seam every node builds on, or a
-file more than one node edits — **`/plan-pr-stack` has one shape: its own node in this stack**,
-placed immediately before the first node that needs it. There is no "prerequisite PR off the trunk"
-option: that would be a PR the planner created that is not in the stack.
+file more than one node edits — **`/plan-streak` has one shape: its own node in the streak**, which
+every node that builds on it depends on. Under the streak's placement rules a dependency is an
+ancestor, so the restructure node sits in the same stack as those nodes, immediately before the first
+of them — and nodes that would otherwise have been standalone or in separate stacks are joined
+through it. There is no "prerequisite PR off the trunk" option for code the streak's nodes build on:
+that would be a PR the planner created that none of its dependents contain.
 
 **The restructure node does not block the planning of the nodes above it.** They are planned and
 red-tested against the structure **as it is today**. That is deliberate — planning cannot wait for
