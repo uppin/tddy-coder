@@ -133,11 +133,7 @@ impl DriverServer {
         let typed = type_into(&*self.session, typing, &EchoWait::default())
             .await
             .map_err(|e| e.to_string())?;
-        let mut answer = json!({ "sent_bytes": typed.sent_bytes });
-        if let Some(echo_seen) = typed.echo_seen {
-            answer["echo_seen"] = json!(echo_seen);
-        }
-        Ok(answer.to_string())
+        Ok(typed.answer().to_string())
     }
 
     #[tool(

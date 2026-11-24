@@ -158,6 +158,17 @@ impl Default for EchoWait {
     }
 }
 
+impl Typed {
+    /// The answer a typing tool gives: `{sent_bytes}`, plus `echo_seen` when keys followed text.
+    pub fn answer(&self) -> serde_json::Value {
+        let mut answer = serde_json::json!({ "sent_bytes": self.sent_bytes });
+        if let Some(echo_seen) = self.echo_seen {
+            answer["echo_seen"] = serde_json::json!(echo_seen);
+        }
+        answer
+    }
+}
+
 /// Why [`type_into`] stopped, and how far it got.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TypingError {

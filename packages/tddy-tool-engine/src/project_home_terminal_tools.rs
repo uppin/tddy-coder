@@ -28,7 +28,10 @@ use crate::project_home_tools::resolve_target;
 use crate::project_home_tools::{
     target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
-use crate::terminal_keys::{encode_typing, type_into, EchoWait, TypingTerminal};
+use crate::terminal_keys::{encode_typing, type_into, EchoWait};
+
+mod leased_terminal;
+use leased_terminal::LeasedTerminal;
 use crate::ToolOutcome;
 
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";
@@ -486,37 +489,7 @@ async fn send_session_keys(
         screen_id: &screen_id,
     };
     match type_into(&terminal, typing, &EchoWait::default()).await {
-        Ok(typed) => {
-            let mut answer = json!({ "sent_bytes": typed.sent_bytes });
-            if let Some(echo_seen) = typed.echo_seen {
-                answer["echo_seen"] = json!(echo_seen);
-            }
-            ToolOutcome::ok(answer.to_string())
-        }
+        Ok(typed) => ToolOutcome::ok(typed.answer().to_string()),
         Err(e) => ToolOutcome::err(format!("{SEND_SESSION_KEYS}: {e}")),
-    }
-}
-
-/// A target's terminal typed into under a home session's lease: its output read through
-/// [`ProjectHomeTerminalPort::read_terminal`], each write made through
-/// [`ProjectHomeTerminalPort::send_keys`], which checks the lease.
-struct LeasedTerminal<'a> {
-    port: &'a dyn ProjectHomeTerminalPort,
-    target: &'a SessionTarget,
-    screen_id: &'a str,
-}
-
-#[async_trait]
-impl TypingTerminal for LeasedTerminal<'_> {
-    async fn output_offset(&self) -> Result<u64, String> {
-        self.port
-            .read_terminal(self.target)
-            .await
-            .map(|grid| grid.offset)
-            .map_err(|e| format!("cannot read the terminal: {e:#}"))
-    }
-
-    async fn write(&self, bytes: Vec<u8>) -> Result<(), String> {
-        self.port.send_keys(self.target, self.screen_id, bytes).await
     }
 }
