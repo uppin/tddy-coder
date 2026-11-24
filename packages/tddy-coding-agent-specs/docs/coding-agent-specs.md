@@ -362,6 +362,67 @@ The daemon side is `tddy-session-activity`'s `follow_reported_model`
 Tests: `tests/spec_model_report.rs` (both built-ins' declarations, `events` and an empty list,
 a blank or ignored value, and the two load-time refusals).
 
+## Activity (`coding_agent.activity`)
+
+`CodingAgentSection.activity: ActivitySlot` (`spec/activity_slot.rs`, read through
+`CodingAgentSpec::activity()`) says where a session's activity is read from — what was said
+(`messages`) and the tool calls (`tool_calls`), each `hooks | transcript | both` (`hooks` when absent)
+— and how the agent's own transcript file maps to activity. Its shape is the spec's alone: one generic
+mapper (`TranscriptSource::map_line`) reads the declared rules, reusing the usage binding's
+`FieldPath` and `where` predicates (`tddy_usage::FieldEq::holds_for`).
+
+```yaml
+# cursor.yaml — words from the transcript, tool calls (with ids, status, results) from the hooks
+activity:
+  messages: transcript
+  tool_calls: hooks
+  transcript:
+    path: "{agent_home}/.cursor/projects/{worktree_slug}/agent-transcripts/{conversation_id}/{conversation_id}.jsonl"
+    lines:
+      - where: [{ field: role, equals: user }]
+        parts: message.content
+        emit:
+          - { kind: user_message, where: [{ field: type, equals: text }], text: text, unwrap_tag: user_query }
+      - where: [{ field: role, equals: assistant }]
+        parts: message.content
+        emit:
+          - { kind: agent_message, where: [{ field: type, equals: text }], text: text }
+          - { kind: tool_use, where: [{ field: type, equals: tool_use }], name: name, input: input }
+      - where: [{ field: type, equals: turn_ended }]
+        emit: [{ kind: turn_end }]
+# claude.yaml, muse.yaml — the hook events that carry what was said
+activity:
+  messages: hooks
+  tool_calls: hooks
+  hook_messages:
+    - { event: UserPromptSubmit, field: prompt, role: user }
+    - { event: Stop, field: last_assistant_message, role: agent }
+```
+
+| Field | Meaning |
+|---|---|
+| `hook_messages` | `{ event, field, role: user \| agent }`: the top-level string `field` of hook `event` is a message (`ActivitySlot::spoken_in_hook`), read when `messages` reads hooks |
+| `transcript.path` | a path template over `agent_home`, `conversation_id`, `worktree`, `worktree_slug` (`TRANSCRIPT_PATH_VARIABLES`), rendered with the **agent's machine's** values — on a target, the target's home and worktree. `worktree_slug` is the worktree path with every run of non-alphanumerics made one `-` (`worktree_slug`), Cursor's project directory naming |
+| `transcript.lines` | rules tried in order; the first whose `where` holds for a line maps it, and a line no rule maps says nothing |
+| `parts` | an array of the line whose elements are each matched against `emit`; absent to match the line itself |
+| `emit` | the entry a line or part makes, the first whose `where` holds: `kind` ∈ `user_message`, `agent_message` (need `text`), `tool_use` (needs `name`; `input`, `id` optional), `turn_end` |
+| `unwrap_tag` | keep only the trimmed inside of `<tag>…</tag>` when the text holds one |
+
+`parse_section` calls `validate_activity_slot` (messages prefixed `activity:`): a source reading a
+transcript the slot does not declare, a hook message with no event or field, a path naming another
+variable, and an emit missing the value its kind needs are refused at load; unknown fields and kinds
+are refused by serde. An agent with no `activity` section reads every tool call from its hooks and
+**nothing said** — an operator override of `claude.yaml` keeps its messages only by carrying the
+section.
+
+The daemon side: the follower in `tddy-agent-launch` (`transcript_follower`) and the recording in
+`tddy-session-activity` (`record_transcript_line`) —
+[Cursor CLI session § Activity from the transcript](../../../docs/ft/daemon/cursor-cli-session.md#activity-from-the-transcript),
+[agent-activity.md § Activity from an agent's transcript](../../tddy-session-activity/docs/agent-activity.md#activity-from-an-agents-transcript).
+
+Tests: `tests/spec_activity_acceptance.rs` (the built-ins' declarations, the real Cursor probe
+transcript mapped in order, the slug, a target-home path, three load-time refusals).
+
 ## Home directories (`coding_agent.home_dirs`)
 
 `CodingAgentSection.home_dirs: Vec<String>` (read through `CodingAgentSpec::home_dirs`) names the

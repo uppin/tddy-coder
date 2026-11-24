@@ -37,6 +37,17 @@ pub struct TranscriptLine {
     pub end_offset: u64,
 }
 
+/// The transcript frame's update for what `role` said.
+pub(super) fn spoken_chunk(
+    role: SpokenRole,
+    text: &str,
+) -> tddy_service::proto::acp::SessionUpdate {
+    match role {
+        SpokenRole::User => user_message_chunk(text.to_string()),
+        SpokenRole::Agent => agent_message_chunk(text.to_string()),
+    }
+}
+
 /// The key two reports of one message share, when both sources report messages.
 pub(super) fn spoken_key(role: SpokenRole, text: &str) -> String {
     let role = match role {
@@ -70,21 +81,16 @@ impl ActivityServiceImpl {
         let turns = self.ports.activity.tool_turns();
         for (n, entry) in line.entries.iter().enumerate() {
             match entry {
-                TranscriptEntry::UserMessage { text } => {
+                TranscriptEntry::UserMessage { text } | TranscriptEntry::AgentMessage { text } => {
+                    let role = match entry {
+                        TranscriptEntry::UserMessage { .. } => SpokenRole::User,
+                        _ => SpokenRole::Agent,
+                    };
                     self.record_transcript_message(
                         &session_dir,
                         &line.session_id,
                         &activity,
-                        (SpokenRole::User, text),
-                        now,
-                    )?;
-                }
-                TranscriptEntry::AgentMessage { text } => {
-                    self.record_transcript_message(
-                        &session_dir,
-                        &line.session_id,
-                        &activity,
-                        (SpokenRole::Agent, text),
+                        (role, text),
                         now,
                     )?;
                 }
@@ -147,11 +153,10 @@ impl ActivityServiceImpl {
             .tool_turns()
             .earliest_unreached_hook_call(session_id)
             .map_or(now, |started| now.min(started.saturating_sub(1)));
-        let chunk = match role {
-            SpokenRole::User => user_message_chunk(text.to_string()),
-            SpokenRole::Agent => agent_message_chunk(text.to_string()),
-        };
-        let frame = session_update_frame(chunk, i64::try_from(at).unwrap_or(i64::MAX));
+        let frame = session_update_frame(
+            spoken_chunk(role, text),
+            i64::try_from(at).unwrap_or(i64::MAX),
+        );
         append_acp_frame(session_dir, &frame)
             .map_err(|e| Status::internal(format!("failed to append to the transcript: {e}")))?;
         // A live `StreamAcpReplay` tail follows the hub, not the file.

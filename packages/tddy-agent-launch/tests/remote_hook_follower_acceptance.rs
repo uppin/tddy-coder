@@ -437,3 +437,55 @@ async fn behind_a_pty_that_turns_newlines_into_crlf_the_offset_still_counts_the_
         )
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_line_longer_than_the_cap_is_skipped_and_the_next_hook_still_arrives() {
+    // Given a followed log
+    let target = a_target();
+    let tail = target.tails_the_log_from(0);
+    let follower = target.is_followed();
+    let stopped = a_hook("Stop", "end_turn");
+
+    // When something writes a line past the cap before the next hook
+    let flood = vec![b'x'; tddy_agent_launch::log_follower::MAX_LINE_BYTES + 1];
+    tail.prints(&flood).await;
+    tail.prints(format!("\n{}", stopped.line())).await;
+    let delivered = target.daemon.once_it_holds(1).await;
+
+    // Then only the hook is delivered, and the flood was never handed on as a line
+    assert_eq!(
+        (delivered, follower.dropped_lines()),
+        (vec![stopped.delivered()], 0)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hook_log_that_could_not_be_removed_is_read_on_at_the_next_start_not_replayed() {
+    // Given a session whose follower delivered a hook, on a target that refuses the log's removal
+    let target = a_target();
+    target.shell.answers_when(|request| {
+        request
+            .command
+            .starts_with("rm -f")
+            .then(|| tddy_remote_shell::ExecOutput::exited(1, "rm: Permission denied"))
+    });
+    let remembered = tempfile::tempdir().expect("a session directory");
+    let offset = FollowOffset::persisted_at(remembered.path().join("hooks.offset"));
+    let started = a_hook("SessionStart", "startup");
+    let tail = target.tails_the_log_from(0);
+    let followers = tddy_agent_launch::remote_hook_follower::RemoteHookFollowers::new();
+    followers.insert(
+        "s1",
+        target.is_followed_remembering(offset.clone()),
+        Arc::new(target.shell.clone()),
+        "/home/dev/repo/.worktrees/019d2c7e".into(),
+    );
+    tail.prints(started.line()).await;
+    target.daemon.once_it_holds(1).await;
+
+    // When the session ends and its log stays behind
+    followers.stop_and_remove_log("s1").await;
+
+    // Then the offset still counts what was delivered: a start that keeps the log reads on
+    assert_eq!(offset.load(LOG), started.line().len() as u64);
+}

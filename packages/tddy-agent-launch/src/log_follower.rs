@@ -32,8 +32,26 @@ pub(crate) fn shell_quote(arg: &str) -> String {
     format!("'{}'", arg.replace('\'', r"'\''"))
 }
 
-/// How long a follower waits before reopening a stream that ended or could not be opened.
+/// How long a follower first waits before reopening a stream that ended or could not be opened.
+/// Each reopen that delivers nothing doubles it, up to [`REOPEN_BACKOFF_MAX`]; a stream that
+/// delivered a line resets it. A follower outlives a tmux client's exit, so an unreachable target
+/// must not cost a remote command every 200 ms.
 const REOPEN_BACKOFF: Duration = Duration::from_millis(200);
+const REOPEN_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// The longest line a follower holds while waiting for its newline: a followed file is untrusted,
+/// and one that never writes a newline must not grow the daemon without bound. A longer line is
+/// skipped — counted as read, never delivered — up to its newline.
+pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+
+/// Remove `path`, a file that may already be gone; any other failure is logged under `what`.
+pub(crate) fn remove_if_present(path: &std::path::Path, what: &str) {
+    if let Err(error) = std::fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            log::warn!("removing {what} {}: {error}", path.display());
+        }
+    }
+}
 
 /// The command that streams `path` from the byte `offset` on, and everything appended after it,
 /// until `alive_while` is removed:
@@ -61,7 +79,9 @@ pub fn tail_command(path: &str, offset: u64, alive_while: &str, waits_for_file: 
 }
 
 /// How far a follower has delivered a file: kept in memory, or persisted to a file of this host so
-/// a follower that replaces it reads on from the same byte.
+/// a follower that replaces it reads on from the same byte. A persisted offset names the file it
+/// counts (`<offset>\t<path>`): a follower of another file — a session whose conversation changed —
+/// reads that one from its first byte.
 ///
 /// Clones share the offset: the one in memory, and the file.
 #[derive(Debug, Clone, Default)]
@@ -87,15 +107,31 @@ impl FollowOffset {
         }
     }
 
-    /// The byte the next follower starts at: the last delivered, persisted or not.
-    pub fn load(&self) -> u64 {
+    /// The byte the next follower of `followed` starts at: the last delivered, persisted or not.
+    pub fn load(&self, followed: &str) -> u64 {
         let Some(path) = &self.persisted else {
             return self.in_memory.load(Ordering::SeqCst);
         };
         match std::fs::read_to_string(path) {
-            Ok(text) => match text.trim().parse() {
-                Ok(offset) => offset,
-                Err(_) => {
+            Ok(text) => match text.trim_end_matches('\n').split_once('\t') {
+                Some((offset, counted)) if counted == followed => match offset.parse() {
+                    Ok(offset) => offset,
+                    Err(_) => {
+                        log::warn!(
+                            "follow offset {}: {offset:?} is not a byte offset; reading from the start",
+                            path.display()
+                        );
+                        0
+                    }
+                },
+                Some((_, counted)) => {
+                    log::info!(
+                        "follow offset {} counted {counted}, not {followed}: reading from the start",
+                        path.display()
+                    );
+                    0
+                }
+                None => {
                     log::warn!(
                         "follow offset {}: {text:?} is not a byte offset; reading from the start",
                         path.display()
@@ -114,14 +150,15 @@ impl FollowOffset {
         }
     }
 
-    /// Record that every byte before `offset` has been delivered. A persisted offset that cannot be
-    /// written is logged: the follower keeps delivering, and only its replacement is affected.
-    pub fn save(&self, offset: u64) {
+    /// Record that every byte of `followed` before `offset` has been delivered. A persisted offset
+    /// that cannot be written is logged: the follower keeps delivering, and only its replacement is
+    /// affected.
+    pub fn save(&self, offset: u64, followed: &str) {
         self.in_memory.store(offset, Ordering::SeqCst);
         let Some(path) = &self.persisted else {
             return;
         };
-        if let Err(error) = write_atomically(path, offset.to_string().as_bytes()) {
+        if let Err(error) = write_atomically(path, format!("{offset}\t{followed}").as_bytes()) {
             log::warn!("follow offset {}: {error}", path.display());
         }
     }
@@ -131,11 +168,7 @@ impl FollowOffset {
     pub fn forget(&self) {
         self.in_memory.store(0, Ordering::SeqCst);
         if let Some(path) = &self.persisted {
-            if let Err(error) = std::fs::remove_file(path) {
-                if error.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("follow offset {}: {error}", path.display());
-                }
-            }
+            remove_if_present(path, "follow offset");
         }
     }
 }
@@ -220,7 +253,8 @@ async fn follow(
     sink: Arc<dyn LineSink>,
 ) {
     let target = shell.address();
-    let mut delivered = offset.load();
+    let mut delivered = offset.load(&file.path);
+    let mut backoff = REOPEN_BACKOFF;
     log::info!(
         "following the {} {} on {target} from byte {delivered}",
         file.label,
@@ -242,9 +276,11 @@ async fn follow(
             &file.alive_while,
             file.waits_for_file,
         );
+        let reached = delivered;
         match shell.exec_streamed(&command).await {
             Ok(mut streamed) => {
-                let ended = read_stream(&mut streamed, &mut delivered, &offset, &sink).await;
+                let ended =
+                    read_stream(&mut streamed, &mut delivered, (&offset, &file.path), &sink).await;
                 log::info!(
                     "the {} {} on {target} stopped streaming at byte {delivered}: {ended}",
                     file.label,
@@ -257,7 +293,12 @@ async fn follow(
                 file.path
             ),
         }
-        tokio::time::sleep(REOPEN_BACKOFF).await;
+        backoff = if delivered > reached {
+            REOPEN_BACKOFF
+        } else {
+            (backoff * 2).min(REOPEN_BACKOFF_MAX)
+        };
+        tokio::time::sleep(backoff).await;
     }
 }
 
@@ -267,27 +308,52 @@ async fn follow(
 async fn read_stream(
     streamed: &mut tddy_remote_shell::StreamedExec,
     delivered: &mut u64,
-    offset: &FollowOffset,
+    (offset, followed): (&FollowOffset, &str),
     sink: &Arc<dyn LineSink>,
 ) -> String {
     let mut pending: Vec<u8> = Vec::new();
+    // Bytes of an over-long line already counted as read, skipped up to its newline.
+    let mut skipping = false;
     let mut chunk = [0u8; 4096];
     loop {
         match streamed.stdout.read(&mut chunk).await {
             Ok(0) => return "end of stream".to_string(),
             Err(error) => return error.to_string(),
             Ok(read) => {
+                // Only the bytes just read can hold a newline not seen yet: a long line is scanned
+                // once, not once per read.
+                let mut scan_from = pending.len();
                 pending.extend_from_slice(&chunk[..read]);
-                while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
-                    let raw: Vec<u8> = pending.drain(..=end).collect();
+                while let Some(found) = pending[scan_from..].iter().position(|byte| *byte == b'\n')
+                {
+                    let raw: Vec<u8> = pending.drain(..=scan_from + found).collect();
+                    scan_from = 0;
                     let mut line = &raw[..raw.len() - 1];
                     if line.last() == Some(&b'\r') {
                         line = &line[..line.len() - 1];
                     }
                     // The line and its `\n`: a `\r` before it is a pty's, not the file's.
                     *delivered += line.len() as u64 + 1;
-                    sink.line(line, *delivered).await;
-                    offset.save(*delivered);
+                    let too_long = line.len() > MAX_LINE_BYTES;
+                    if too_long {
+                        log::warn!(
+                            "{followed}: the line ending at byte {delivered} is longer than \
+                             {MAX_LINE_BYTES} bytes and is skipped"
+                        );
+                    }
+                    if !std::mem::take(&mut skipping) && !too_long {
+                        sink.line(line, *delivered).await;
+                    }
+                    offset.save(*delivered, followed);
+                }
+                if pending.len() > MAX_LINE_BYTES {
+                    log::warn!(
+                        "{followed}: a line past byte {delivered} is longer than {MAX_LINE_BYTES} \
+                         bytes and is skipped"
+                    );
+                    *delivered += pending.len() as u64;
+                    pending.clear();
+                    skipping = true;
                 }
             }
         }
@@ -324,13 +390,27 @@ mod tests {
         // Given
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("followers").join("transcript.offset");
-        FollowOffset::persisted_at(path.clone()).save(4711);
+        FollowOffset::persisted_at(path.clone()).save(4711, "/t/c.jsonl");
 
         // When
-        let next = FollowOffset::persisted_at(path).load();
+        let next = FollowOffset::persisted_at(path).load("/t/c.jsonl");
 
         // Then
         assert_eq!(next, 4711);
+    }
+
+    #[test]
+    fn a_persisted_offset_of_another_file_starts_the_next_follower_at_the_first_byte() {
+        // Given an offset counted in the transcript of the session's previous conversation
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("transcript.offset");
+        FollowOffset::persisted_at(path.clone()).save(4711, "/t/old-chat.jsonl");
+
+        // When the follower of the new conversation's transcript starts
+        let next = FollowOffset::persisted_at(path).load("/t/new-chat.jsonl");
+
+        // Then
+        assert_eq!(next, 0);
     }
 
     #[test]
@@ -339,14 +419,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hooks.offset");
         let offset = FollowOffset::persisted_at(path.clone());
-        offset.save(99);
+        offset.save(99, "/t/hooks.log");
 
         // When
         offset.forget();
 
         // Then
         assert_eq!(
-            (offset.load(), FollowOffset::persisted_at(path).load()),
+            (
+                offset.load("/t/hooks.log"),
+                FollowOffset::persisted_at(path).load("/t/hooks.log")
+            ),
             (0, 0)
         );
     }
@@ -356,10 +439,10 @@ mod tests {
         // Given
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("hooks.offset");
-        std::fs::write(&path, "not a number").unwrap();
+        std::fs::write(&path, "not a number\t/t/hooks.log").unwrap();
 
         // When
-        let offset = FollowOffset::persisted_at(path).load();
+        let offset = FollowOffset::persisted_at(path).load("/t/hooks.log");
 
         // Then
         assert_eq!(offset, 0);

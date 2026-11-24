@@ -206,6 +206,22 @@ impl RemoteHookFollowers {
         }
     }
 
+    /// Stop `session_id`'s registered hook-log follower at once, before its replacement starts: two
+    /// readers of one log starting from one persisted offset would deliver its hooks twice.
+    pub fn abort_hook_follower(&self, session_id: &str) {
+        if let Some(hooks) = self.with_session(session_id, |session| session.hooks.take()) {
+            hooks.follower.follower.abort();
+        }
+    }
+
+    /// Stop `session_id`'s registered transcript follower at once, before its replacement starts.
+    pub fn abort_transcript_follower(&self, session_id: &str) {
+        if let Some(transcript) = self.with_session(session_id, |session| session.transcript.take())
+        {
+            transcript.follower.abort();
+        }
+    }
+
     /// Whether `session_id` has a follower registered: its hook log's or its transcript's.
     pub fn follows(&self, session_id: &str) -> bool {
         self.entries
@@ -230,21 +246,19 @@ impl RemoteHookFollowers {
         if let Some(transcript) = entry.transcript {
             transcript.follower.stop().await;
             if let Some(lease) = transcript.lease {
-                if let Err(error) = std::fs::remove_file(&lease) {
-                    if error.kind() != std::io::ErrorKind::NotFound {
-                        log::warn!(
-                            "removing session {session_id}'s transcript lease {}: {error}",
-                            lease.display()
-                        );
-                    }
-                }
+                crate::log_follower::remove_if_present(&lease, "a transcript lease");
             }
         }
         if let Some(hooks) = entry.hooks {
-            hooks.follower.stop_and_forget().await;
-            if let Err(error) = remove_remote_hook_log(hooks.shell.as_ref(), &hooks.worktree).await
-            {
-                log::warn!("removing session {session_id}'s hook log on its target: {error}");
+            let offset = hooks.follower.offset.clone();
+            hooks.follower.stop().await;
+            // Forgotten only with the log: a log that could not be removed is kept by the next
+            // start, and is read on from where this follower stopped, not replayed from its start.
+            match remove_remote_hook_log(hooks.shell.as_ref(), &hooks.worktree).await {
+                Ok(()) => offset.forget(),
+                Err(error) => {
+                    log::warn!("removing session {session_id}'s hook log on its target: {error}");
+                }
             }
         }
     }
@@ -257,6 +271,9 @@ impl RemoteHookFollowers {
 pub fn follow_command(log_path: &str, offset: u64) -> String {
     crate::log_follower::tail_command(log_path, offset, log_path, false)
 }
+
+/// What the hook-log creation prints when the log is already there.
+const LOG_PRESENT: &str = "tddy-hook-log-present";
 
 /// Create the session's hook log in `worktree` on `shell`'s target — empty, readable and writable
 /// by its owner alone — and keep it out of the checkout's git status (`info/exclude`, as the
@@ -272,20 +289,20 @@ pub async fn create_remote_hook_log(
         "if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
          mkdir -p \"$(dirname \"$exclude\")\"; \
          for entry in '/.tddy/hooks.log' '/.tddy/answers/'; do \
-         grep -qxF \"$entry\" \"$exclude\" 2>/dev/null || echo \"$entry\" >> \"$exclude\"; done; fi",
+         grep -qxF \"$entry\" \"$exclude\" 2>/dev/null || echo \"$entry\" >> \"$exclude\"; done; fi; \
+         if [ -e {log} ]; then echo {LOG_PRESENT}; fi",
         worktree = shell_quote(&worktree.to_string_lossy()),
+        log = shell_quote(&log),
     );
-    shell
+    let output = shell
         .exec(ExecRequest::new(exclude_command))
         .await?
         .success_or_exited()?;
     // A resume finds the log its session left: it is kept, so a hook the follower has not read yet
-    // is still read, and the persisted offset still counts the same file's bytes.
-    let exists = shell
-        .exec(ExecRequest::new(format!("test -e {}", shell_quote(&log))))
-        .await
-        .is_ok_and(|output| output.status == 0);
-    if !exists {
+    // is still read, and the persisted offset still counts the same file's bytes. Asked in the same
+    // round trip — on Coder each costs seconds — and a failed one fails the start rather than being
+    // read as "no log".
+    if !String::from_utf8_lossy(&output.stdout).contains(LOG_PRESENT) {
         shell.write_file(&log, b"", FileMode::OwnerOnly).await?;
     }
     Ok(log)
@@ -380,14 +397,6 @@ impl RemoteHookFollower {
     /// reader is gone.
     pub async fn stop(self) {
         self.follower.stop().await;
-    }
-
-    /// Stop following and forget how far the log was read: the log is being removed, and one
-    /// created in its place is read from its first byte.
-    async fn stop_and_forget(self) {
-        let offset = self.offset.clone();
-        self.stop().await;
-        offset.forget();
     }
 }
 

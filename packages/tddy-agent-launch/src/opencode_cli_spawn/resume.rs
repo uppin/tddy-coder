@@ -374,10 +374,7 @@ async fn resume_cli_harness_session(
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),
             }),
-            followers: HarnessFollowers {
-                delivery: hook_delivery.clone(),
-                registry: hook_followers.clone(),
-            },
+            followers: HarnessFollowers::new(hook_delivery.clone(), hook_followers.clone()),
         },
         HarnessRun::resume(meta.tmux_session.is_some()),
     )

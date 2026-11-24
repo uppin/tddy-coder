@@ -7,10 +7,9 @@
 
 use std::path::Path;
 
-use tddy_coding_agent_specs::{ActivitySlot, SpokenRole};
+use tddy_coding_agent_specs::ActivitySlot;
 use tddy_rpc::Status;
 use tddy_service::acp_replay::{append_acp_frame, session_update_frame};
-use tddy_service::convert_acp::{agent_message_chunk, user_message_chunk};
 use tddy_service::proto::activity::ReportSessionStatusRequest;
 
 use crate::service::ActivityServiceImpl;
@@ -53,12 +52,8 @@ impl ActivityServiceImpl {
             return Ok(());
         }
 
-        let chunk = match role {
-            SpokenRole::User => user_message_chunk(text.to_string()),
-            SpokenRole::Agent => agent_message_chunk(text.to_string()),
-        };
         let at = i64::try_from(tddy_daemon_kernel::now_unix_ms()).unwrap_or(i64::MAX);
-        let frame = session_update_frame(chunk, at);
+        let frame = session_update_frame(super::transcript_lines::spoken_chunk(role, text), at);
         append_acp_frame(session_dir, &frame)
             .map_err(|e| Status::internal(format!("failed to append to the transcript: {e}")))?;
         // A live `StreamAcpReplay` tail follows the hub, not the file.

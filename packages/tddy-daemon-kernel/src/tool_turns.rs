@@ -17,6 +17,10 @@ pub struct SeenToolCall {
     pub started_unix_ms: u64,
 }
 
+/// How many unpaired calls, and unreached turn ends, a session keeps: a session whose other source
+/// never reports (its transcript is not followed) must not grow without bound. The oldest go first.
+pub const UNPAIRED_REMEMBERED: usize = 256;
+
 /// Which source reported a call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolCallSource {
@@ -66,6 +70,9 @@ impl ToolTurns {
                 Some(paired)
             }
             None => {
+                if turn.unpaired.len() == UNPAIRED_REMEMBERED {
+                    turn.unpaired.pop_front();
+                }
                 turn.unpaired.push_back((source, call));
                 None
             }
@@ -100,13 +107,12 @@ impl ToolTurns {
 
     /// The hooks reported the session's turn ending at `at_unix_ms`.
     pub fn hooks_turn_ended(&self, session_id: &str, at_unix_ms: u64) {
-        self.turns
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .entry(session_id.to_string())
-            .or_default()
-            .hook_turn_ends
-            .push_back(at_unix_ms);
+        let mut turns = self.turns.lock().unwrap_or_else(|p| p.into_inner());
+        let turn = turns.entry(session_id.to_string()).or_default();
+        if turn.hook_turn_ends.len() == UNPAIRED_REMEMBERED {
+            turn.hook_turn_ends.pop_front();
+        }
+        turn.hook_turn_ends.push_back(at_unix_ms);
     }
 
     /// The transcript reached the session's turn's end: nothing either source reported in that turn

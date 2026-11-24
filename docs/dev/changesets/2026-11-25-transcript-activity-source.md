@@ -1,6 +1,7 @@
-# Activity from an agent's own transcript, followed live on the host and on targets
+# 2026-11-25 — Activity from an agent's own transcript, followed live on the host and on targets
 
 **Type:** Feature + Fix
+**PR:** #1035
 **Packages:** `tddy-coding-agent-specs`, `tddy-usage`, `tddy-daemon-kernel`, `tddy-session-activity`,
 `tddy-agent-launch`, `tddy-session-lifecycle`
 
@@ -87,7 +88,14 @@ activity:
   - `FollowOffset` is persisted under `<session_dir>/followers/` (`hooks.offset`,
     `transcript.offset`), so the follower a resume, a re-attach or a restarted daemon starts reads on
     from the last delivered byte — never from the start, never from the end.
-  - Start, each break and each reopen are logged at INFO with the path and the offset.
+  - Start, each break and each reopen are logged at INFO with the path and the offset. A reopen
+    backs off 200 ms → 30 s while it delivers nothing. A line over 16 MiB is skipped; a long line is
+    scanned once (the newline search starts at the bytes just read).
+  - A persisted offset names the path it counts: another file — a new conversation — starts at 0.
+  - The hook offset is forgotten only after the log's removal succeeded (a kept log is read on, not
+    replayed). A re-attach aborts the registered follower **before** starting its replacement.
+    `terminate_session_dir` stops a tmux run's followers after killing it. A host PTY's transcript
+    follower starts before the agent, so an immediate exit stops it.
 - **Path placement.** Rendered from the session's recorded `usage-context.json` (conversation,
   worktree). On a target, `agent_home` is the target shell's `$HOME`, not the host home the usage
   context records; the worktree is the target's path.
@@ -128,7 +136,15 @@ activity:
 - **Call ids:** `ReportAgentActivity` replaces every control or whitespace character of
   `tool_use_id` with `_`, on host and target alike.
 
-### Not changed
+### Review findings left as they are
+
+From the independent review at wrap: the host `tail` runs as the daemon user (above); a truncated
+transcript under `tail -F` would restart at 0 while the offset counts on (Cursor only appends); a hook
+call the transcript never names holds the turn's later messages before it until the turn ends; the
+hooks' `Done` is not filtered by conversation (an agent tab's stop could misalign a turn — bounded by
+the 256-entry queues); `FollowOffset::save` writes a small file synchronously per line.
+
+## Not changed
 
 - `activity_seq` stays the session room's poll tick, `NO_TICK` (0) in the durable log by design;
   followers page by `log_seq` (operator decision).
@@ -143,6 +159,25 @@ activity:
 - A host-mode **system** daemon reads the user's transcript as itself, as the usage reader does.
 - A daemon restart does not re-attach target followers by itself; they resume (from the persisted
   offset) at the session's next resume or re-attach.
+
+## Resolved backlog
+
+- ✅ RESOLVED HERE: `docs/dev/todo/2026-11-24-cursor-reply-text-not-in-transcript.md` — a Cursor
+  session's prompts and replies reach its transcript, read from Cursor's own transcript file rather
+  than from `afterAgentResponse` (the entry's proposed route); the hook events that carry spoken text
+  are declared in the spec (`activity.hook_messages`), no longer matched in code. Deleted at this wrap.
+
+## Restructuring at wrap
+
+`opencode_cli_spawn/harness_launch.rs` reached 500 production lines (315 → 500) with this PR's
+follower wiring; that wiring — written by this PR — moved to `opencode_cli_spawn/harness_followers.rs`
+(195), leaving `harness_launch.rs` at 330. `opencode_cli_spawn/resume.rs`: 498 → 499 (near budget).
+
+## Code issues
+
+- `complexity-opencode-cli-spawn-start-cli-harness-session`: 371 → 372, **worse by 1** (the
+  `followers:` field); `complexity-opencode-cli-spawn-resume-resume-cli-harness-session`: 145 → 146,
+  **worse by 1** (the same field). Rows added to both records.
 
 ## Acceptance tests
 

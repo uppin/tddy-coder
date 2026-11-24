@@ -314,6 +314,34 @@ impl AgentActivityHub {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_message_both_sources_report_is_new_only_the_first_time() {
+        // Given
+        let hub = AgentActivityHub::default();
+
+        // When the hooks and then the transcript report the same reply, and another session says
+        // the same
+        let first = hub.first_time_spoken("s1", "agent\u{0}done");
+        let again = hub.first_time_spoken("s1", "agent\u{0}done");
+        let elsewhere = hub.first_time_spoken("s2", "agent\u{0}done");
+
+        // Then
+        assert_eq!((first, again, elsewhere), (true, false, true));
+    }
+
+    #[test]
+    fn the_spoken_window_forgets_its_oldest_message() {
+        // Given a session that has said as many messages as the window holds, after "hello"
+        let hub = AgentActivityHub::default();
+        hub.first_time_spoken("s", "user\u{0}hello");
+        for n in 0..AgentActivityHub::SPOKEN_REMEMBERED {
+            hub.first_time_spoken("s", &format!("agent-{n}"));
+        }
+
+        // Then "hello" is new again
+        assert!(hub.first_time_spoken("s", "user\u{0}hello"));
+    }
+
     /// That the epoch and the unit are right: a stamp taken now has to land in this century. This
     /// says nothing about overflow — see [`saturates_a_millisecond_count_too_large_for_a_u64`],
     /// which is where that decision is actually pinned.

@@ -904,11 +904,42 @@ last element of a pipeline, and zsh — a Coder workspace's login shell — runs
 current shell, so the command's `$(cat …)` read nothing and the report reached the log empty. A line
 the follower drops (wrong token, unknown event, a payload that is not JSON) is logged with why.
 
+#### Following a target's hook log
+
+The follower (`tddy_agent_launch::log_follower::FileFollower`, the same one that follows an agent's own
+transcript — [Cursor CLI session § Activity from the transcript](cursor-cli-session.md#activity-from-the-transcript))
+runs `stty -opost 2>/dev/null; tail -c +<offset + 1> -f '<log>' 2>/dev/null` through the session's
+remote shell, with a watch that ends the `tail` within a second of the log's removal.
+
+- **Offsets count delivered bytes.** `coder ssh` always runs its command in a pty, whose `onlcr` turns
+  every `\n` into `\r\n`; a follower counting stream bytes resumed past what it had delivered. The
+  command turns output processing off, a `\r\n` that still arrives counts as the file's one `\n`, and
+  the offset advances only past whole lines delivered — a torn last line is read again whole when a
+  stream is reopened. `tail`'s own complaints are discarded, since a transport that merges stderr
+  would put them on the stream.
+- **The offset is persisted** in `<session_dir>/followers/hooks.offset`, with the path it counts: the
+  follower a resume, a re-attach or a restarted daemon starts reads on from the last delivered line,
+  never from the log's start or its end. A resume keeps the log it finds (it used to recreate it
+  empty), asked in the same round trip that excludes it from git. The offset is forgotten only once
+  the log is removed — a log a target refused to remove is read on, not replayed.
+- **One reader per log.** A re-attach stops the session's registered follower before starting its own.
+- **Back-off.** A stream that ends is reopened after 200 ms, doubling up to 30 s while reopening
+  delivers nothing — a follower outlives a tmux client, and an unreachable target must not cost a
+  remote command every 200 ms.
+- **Untrusted lines.** A line over 16 MiB (`MAX_LINE_BYTES`) is skipped, its bytes still counted.
+- **tmux.** In tmux the exit the launch sees is its attached client's (a dropped `coder ssh`, a
+  detach, this daemon going away), and the agent may well keep running. That exit stops the followers
+  and removes the log only once `tmux has-session` says the agent's tmux session is gone; otherwise
+  they keep reading, and the session's stop (`tmux kill-session`) or delete ends them.
+- Start, each break and each reopen are logged at INFO with the log's path and the byte offset.
+
 ### The transcript holds what was said
 
 Only the coder presenter writes `acp-transcript.jsonl`, so a claude-cli session's own transcript would
-be its tool calls alone. The status report appends the two texts the hooks already carry: `UserPromptSubmit`'s
-`prompt` becomes a user message and `Stop`'s `last_assistant_message` an agent message, each stamped
+be its tool calls alone. The status report appends the two texts the hooks already carry, as
+`claude.yaml` names them (`coding_agent.activity.hook_messages` — no event name is matched in code):
+`UserPromptSubmit`'s `prompt` becomes a user message and `Stop`'s `last_assistant_message` an agent
+message, each stamped
 when it was reported, so `ReadSessionTranscript` and the Activities view list them in order among the
 tool calls. This holds for local and target sessions alike, since both reach the same report handling.
 
@@ -916,8 +947,10 @@ tool calls. This holds for local and target sessions alike, since both reach the
 - Only the session's own conversation is recorded — the last of its recorded conversations, else the
   session id. A Claude in an agent tab fires the session's hooks too, and its prompts and replies are
   not the session's transcript.
-- The texts are the hook payload's, not Claude's own transcript file: thoughts and intermediate text
-  stay out, and no file is read over a target's shell.
+- The texts are the hook payload's, not Claude's own transcript file: thoughts and the text between
+  tool calls stay out. An agent whose spec reads its own transcript has that file followed instead
+  ([Cursor CLI session § Activity from the transcript](cursor-cli-session.md#activity-from-the-transcript));
+  Claude's is not yet.
 - A live `StreamAcpReplay` tail delivers the two messages as they are reported: the status report
   publishes the frame it appended on the hub's frame channel, and the relay merges it with the tool
   calls by recorded timestamp (a message wins a tie), so its live position is the one a re-read gives.

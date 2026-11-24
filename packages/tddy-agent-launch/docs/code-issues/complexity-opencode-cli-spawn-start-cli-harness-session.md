@@ -6,7 +6,7 @@
 **Metrics:** **370 lines** (2026-11-19, after the route-env pin's re-placement)
 **Thresholds breached:** length 371 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — the `#coder-start` sweep undid the stack's growth (397 → 371), and the route-env pin leaves it one better (371 → 370); still over budget — unclaimed
+**Status:** Open — the `#coder-start` sweep undid the stack's growth (397 → 371), and the route-env pin leaves it one better (371 → 370); still over budget — unclaimed; regressed by 1 in #1035 (2026-11-25)
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -32,6 +32,7 @@
 | 2026-11-21 | 370 → 371 | **worse by 1** in #977 (claude hooks per session): `place_slot_files_and_pointer` takes the spec, to prepare the worktree for the session's own hooks file, and the session pointer instead of the whole wiring, so the resume shares it. Brace-matched fn line to closing brace on `origin/master` (`2af17f11c`) and HEAD; no coverage run. Not extracted: the one line is an argument |
 | 2026-11-21 | 371 → 371 | #980 (`#orchestra` 2/9): the first prompt (`SessionWiring::first_prompt`) and the `reports_to` wiring went in without growing it — the target shell is resolved with `transpose`, the peer-name args ride the wiring; brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD. Unchanged |
 | 2026-11-24 | unchanged (371 by this counter on both) | `fix/target-hooks-log-relative-path`: `log_hooks_on_the_target` takes the worktree path so a target's hooks name their log absolutely; the call is the same line. Brace-matched fn line to closing brace on `origin/master` (`d11cc75c1`) and HEAD |
+| 2026-11-25 | 371 → 372 | **worse by 1** in #1035 (transcript activity source): the launch's `followers: HarnessFollowers::new(..)` field, which hands the session's delivery and follower registry to a host launch too. Measured fn line to closing brace on `origin/master` and HEAD; no coverage run. Not extracted: a one-line field in a struct literal |
 
 ## What would close it
 

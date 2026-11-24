@@ -394,7 +394,7 @@ async fn a_follower_that_is_behind_still_places_every_message_where_cursor_wrote
 }
 
 #[tokio::test]
-async fn the_prompt_is_recorded_once_though_the_prompt_hook_carries_it_too() {
+async fn the_prompt_hook_adds_no_message_when_the_spec_reads_messages_from_the_transcript() {
     // Given a cursor-cli session, whose spec reads its messages from its transcript alone
     let host = ACursorHost::holding_a_cursor_session();
 

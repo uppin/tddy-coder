@@ -118,6 +118,44 @@ therefore records `Started` in `.session.yaml` at spawn instead of waiting for t
 
 Hooks use a fail-quiet contract (a 2-second ceiling per report, exit 0 on no-op events), matching the Claude CLI hook path.
 
+## Activity from the transcript
+
+Cursor's hooks report its tool calls (ids, status, results) and nothing it says. Its own transcript —
+`~/.cursor/projects/<worktree slug>/agent-transcripts/<chat>/<chat>.jsonl` — holds every prompt and
+every reply, the text between tool calls included, but no tool results and no tool ids. So
+`cursor.yaml` declares `coding_agent.activity: { messages: transcript, tool_calls: hooks }`, and the
+session's feed (`ReadSessionTranscript`, `ReadSessionActivity`, the web Agent Activity panel) carries
+the whole conversation in Cursor's order — `user_message`, `agent_message`, `tool_call` … — without
+anyone reading the terminal. How a line maps is declared in the same section, read by one generic
+mapper; see [Coding agent specs § Activity](../../../packages/tddy-coding-agent-specs/docs/coding-agent-specs.md#activity-coding_agentactivity).
+
+| Cursor transcript line | Becomes |
+|---|---|
+| `{"role":"user","message":{"content":[{"type":"text","text":"<timestamp>…</timestamp>\n<user_query>…</user_query>"}]}}` | a `user_message`, the inside of `<user_query>` |
+| `{"role":"assistant",…{"type":"text",…}}` | an `agent_message` per text part |
+| `{"role":"assistant",…{"type":"tool_use","name":…,"input":…}}` | nothing of its own: paired with the hook row of the same call (it places the text around the calls) |
+| `{"type":"turn_ended",…}` | the turn's end for the pairing |
+
+- **Where.** The path is rendered from the session's `usage-context.json` (chat id, worktree): the
+  project directory is the worktree path with every run of non-alphanumerics made one `-`. On a target
+  (SSH or Coder) the transcript is the target's: its home is the target shell's `$HOME`, its worktree
+  the target's path, and it is followed through the session's remote shell; on this host it is followed
+  through `/bin/sh`. Both use the hook log's follower — see
+  [Claude CLI session § Following a target's hook log](claude-cli-session.md#following-a-targets-hook-log).
+- **When.** The follower starts with the agent (start, resume, re-attach) and waits for a file that
+  does not exist yet (`tail -F`: the transcript appears with the first prompt). Its offset is persisted
+  in `<session_dir>/followers/transcript.offset` and kept across the session's end — the chat's file
+  outlives the session, and a resume appends to it — so no line is read twice or skipped. A target's
+  `tail` lives while the session's hook log exists there; a host one while
+  `<session_dir>/followers/transcript.alive` does.
+- **Order.** A follower may read a line long after it was written (it was restarted, or the target is
+  slow). What the transcript says next happened before every hook call it has not reached yet, so each
+  message is stamped no later than the earliest such call's start. The replay places a tool call at its
+  completion, so text between two calls that ran **in parallel** is placed before the later one's
+  start.
+- **Call ids.** Cursor's `tool_use_id`s embed a `\n`; every control or whitespace character of a
+  reported id is recorded as `_`.
+
 ## Launch from the `cursor` tool definition
 
 Every `cursor-cli` launch — host start, host resume, re-attach, jailed start and resume — is the one generic CLI launch every agent takes, rendering the built-in `packages/tddy-coding-agent-specs/specs/cursor.yaml` (overridable whole by `<tddyhome>/tools/cursor.yaml`) through the shared launchers: `launch_host_pty` on the host, `launch_jailed` in a jail. A host without coding agents refuses the start, resume or child with `FailedPrecondition: this host has no coding agents installed`; there is no hand-built fallback.
@@ -129,6 +167,7 @@ Every `cursor-cli` launch — host start, host resume, re-attach, jailed start a
 | MCP | `kind: placed`, `{home}/.cursor/mcp.json`, format `cursor-mcp-json`. Rendered in a jail only, into the persistent home; a **host** launch registers no MCP server, so the user's own `$HOME/.cursor/mcp.json` is never touched |
 | Instructions | `rules_file: .cursor/rules/tddy-managed-workflow.mdc` — the managed workflow's prompt, written whole on every launch |
 | Hooks | `adapter: cursor-hooks-json` (above) |
+| Activity | `activity: { messages: transcript, tool_calls: hooks }`, with the transcript's path and line rules ([above](#activity-from-the-transcript)) |
 | Tool allow / deny / permission prompt | `unsupported`: a launch that fills one is refused, never dropped. Managed-codebase enforcement reads this — see [`2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md`](../../dev/todo/2026-08-13-cursor-cli-cannot-enforce-managed-codebase-mode.md) |
 | Models | default `composer-2.5`, plus a curated list |
 | Conversation | `conversation: { kind: minted, adapter: cursor-create-chat }` — the chat minted before the first start (`mint_deadline_secs`, default 30), recorded as `cursor_chat_id` and bound as `chat_id` on every launch |
