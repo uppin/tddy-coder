@@ -5,6 +5,7 @@ use crate::session_watches::delivery::apply_delivery;
 use crate::session_watches::delivery::commit_delivery;
 use crate::session_watches::delivery::end_expired;
 use crate::session_watches::delivery::end_finished;
+use crate::session_watches::delivery::plan_delivery;
 use crate::session_watches::delivery::DeliveryScope;
 use crate::session_watches::delivery::WatchDelivery;
 use crate::session_watches::inbox_position_of;
@@ -273,29 +274,22 @@ impl SessionWatchStore {
         let guard = self.delivery_guard(owner);
         let _handing_over = guard.lock().await;
         let project = self.project_of(&owner.project_id);
-        let (delivery, planned) = {
+        let plan = {
             let state = project.lock().await;
-            let mut planned = state.clone();
             let streamed = self.streamed_watch_ids(owner, now_unix_ms);
-            let delivery = apply_delivery(
-                &mut planned,
+            plan_delivery(
+                &state,
                 owner,
                 log,
                 now_unix_ms,
                 &streamed,
                 DeliveryScope::Waking,
-            );
-            (delivery, planned)
+            )
         };
-        if delivery.is_empty() {
+        if plan.delivery.is_empty() {
             return Ok(false);
         }
-        let handed_endings: Vec<String> = delivery
-            .ended
-            .iter()
-            .map(|end| end.watch_id.clone())
-            .collect();
-        if let Err(e) = deliver(delivery).await {
+        if let Err(e) = deliver(plan.delivery).await {
             log::warn!(
                 target: "tddy_session_activity::session_watches",
                 "a delivery to {} was refused, so nothing was delivered: {e}",
@@ -304,14 +298,7 @@ impl SessionWatchStore {
             return Err(e);
         }
         let mut state = project.lock().await;
-        commit_delivery(
-            &mut state,
-            &planned,
-            owner,
-            &handed_endings,
-            log,
-            now_unix_ms,
-        );
+        commit_delivery(&mut state, owner, &plan.commit, log, now_unix_ms);
         self.persist_best_effort(&owner.project_id, &state);
         Ok(true)
     }

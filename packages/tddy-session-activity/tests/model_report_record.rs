@@ -262,6 +262,23 @@ async fn a_report_naming_no_model_leaves_the_record_alone() {
     assert_eq!(host.recorded_model().as_deref(), Some("glm-5p3-flash-high"));
 }
 
+#[tokio::test]
+async fn a_tool_call_on_another_model_does_not_repoint_a_cursor_session() {
+    // Given a Cursor session on GLM 5.3 Flash
+    let host = AnActivityHost::holding_a_cursor_session_started_on("glm-5p3-flash-high");
+
+    // When a tool call's hook names another model (a subagent's)
+    host.reported(
+        "preToolUse",
+        "ExecutingTool",
+        &[("model", "composer-2.5"), ("session_id", CURSOR_CHAT)],
+    )
+    .await;
+
+    // Then the record keeps the session's own model
+    assert_eq!(host.recorded_model().as_deref(), Some("glm-5p3-flash-high"));
+}
+
 // ── Claude Code: SessionStart, then the transcript ───────────────────────────────────────────
 
 #[tokio::test]

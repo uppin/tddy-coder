@@ -688,3 +688,81 @@ async fn what_a_wake_is_delivering_is_not_handed_to_its_owner_again_meanwhile() 
     assert_eq!(woke, Ok(true));
     assert_eq!(described_records(&collected.events), Vec::<String>::new());
 }
+
+#[tokio::test]
+async fn a_stream_call_while_a_wake_is_pasting_is_not_handed_what_the_wake_pastes() {
+    // Given a wake delivering the child's prompt to an orchestrator that has not echoed yet
+    let host = AHost::of_one_project();
+    let watch_id = host.a_waking_watch_of_the_childs_prompts().await;
+    host.asks_permission(CHILD, "req-1").await;
+    let (delivering, delivery_started) = tokio::sync::oneshot::channel::<()>();
+    let (echoed, until_echoed) = tokio::sync::oneshot::channel::<()>();
+    let orchestrator = the_orchestrator();
+    let wake =
+        host.watches
+            .deliver_wake_with(&orchestrator, &host.log, NOW + 1, |_delivery| async move {
+                delivering.send(()).ok();
+                until_echoed.await.ok();
+                Ok(())
+            });
+
+    // When a stream over the same watch calls while the wake is in flight
+    let meanwhile = async {
+        delivery_started
+            .await
+            .expect("the wake reaches its delivery");
+        let pick = StreamPick::default();
+        let call = host.picks(None, &watch_id, None, &pick, NOW + 2);
+        tokio::pin!(call);
+        let early = tokio::time::timeout(Duration::from_millis(100), &mut call).await;
+        echoed.send(()).ok();
+        match early {
+            Ok(batch) => batch,
+            Err(_) => call.await,
+        }
+    };
+    let (woke, batch) = tokio::join!(wake, meanwhile);
+
+    // Then the prompt reached the orchestrator once — by the wake
+    assert_eq!(woke, Ok(true));
+    assert_eq!(described_batch(&batch), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_watch_cancelled_while_a_wake_is_pasting_stays_cancelled() {
+    // Given a wake delivering the child's prompt to an orchestrator that has not echoed yet
+    let host = AHost::of_one_project();
+    let watch_id = host.a_waking_watch_of_the_childs_prompts().await;
+    host.asks_permission(CHILD, "req-1").await;
+    let (delivering, delivery_started) = tokio::sync::oneshot::channel::<()>();
+    let (echoed, until_echoed) = tokio::sync::oneshot::channel::<()>();
+    let orchestrator = the_orchestrator();
+    let wake =
+        host.watches
+            .deliver_wake_with(&orchestrator, &host.log, NOW + 1, |_delivery| async move {
+                delivering.send(()).ok();
+                until_echoed.await.ok();
+                Ok(())
+            });
+
+    // When the orchestrator cancels the watch while the wake is in flight
+    let meanwhile = async {
+        delivery_started
+            .await
+            .expect("the wake reaches its delivery");
+        let cancelled = host.watches.cancel(&orchestrator, &watch_id).await;
+        echoed.send(()).ok();
+        cancelled
+    };
+    let (woke, cancelled) = tokio::join!(wake, meanwhile);
+
+    // Then the wake still delivered, and committing it did not bring the watch back
+    assert_eq!((woke, cancelled), (Ok(true), Ok(())));
+    assert_eq!(
+        host.watches
+            .list(&orchestrator, &host.log, NOW + 2)
+            .await
+            .len(),
+        0
+    );
+}

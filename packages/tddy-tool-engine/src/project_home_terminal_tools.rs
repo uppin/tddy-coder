@@ -29,9 +29,9 @@ use crate::project_home_tools::{
     target_host_property, tool_def, ProjectHomePort, TARGET_DAEMON_INSTANCE_ID,
 };
 use crate::terminal_keys::{encode_typing, type_into, EchoWait};
+use crate::ToolOutcome;
 
 mod leased_terminal;
-use crate::ToolOutcome;
 use leased_terminal::LeasedTerminal;
 
 pub const READ_SESSION_TERMINAL: &str = "ReadSessionTerminal";

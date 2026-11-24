@@ -25,42 +25,45 @@ impl ActivityServiceImpl {
         session_dir: &Path,
         req: &ReportSessionStatusRequest,
     ) -> Result<(), Status> {
-        // Read after the status and any rotation were written: the record this rewrites must
-        // carry them.
         let meta = tddy_core::read_session_metadata(session_dir)
             .map_err(|e| Status::internal(format!("failed to read the session record: {e}")))?;
         let session_type = meta.session_type.as_deref().unwrap_or("");
         let Some(spec) = self.agents.for_session_type(session_type) else {
             return Ok(());
         };
-        let mut reported = None;
-        for source in spec
-            .model_report()
+        let reported = self
+            .reported_model(spec.model_report(), session_dir, &meta, req)
+            .await;
+        match reported {
+            Some(model) => record_model(session_dir, model),
+            None => Ok(()),
+        }
+    }
+
+    /// The model the first of `sources` that applies to `req`'s event yields, if any.
+    async fn reported_model(
+        &self,
+        sources: &[ModelReportSource],
+        session_dir: &Path,
+        meta: &SessionMetadata,
+        req: &ReportSessionStatusRequest,
+    ) -> Option<String> {
+        for source in sources
             .iter()
             .filter(|source| source.applies_to(&req.hook_event_name))
         {
             let value = match source {
                 ModelReportSource::HookField { field, .. } => req.hook_fields.get(field).cloned(),
                 ModelReportSource::Usage { .. } => {
-                    transcript_model(
-                        session_dir.to_path_buf(),
-                        &meta,
-                        self.ports.usage_bindings.clone(),
-                    )
-                    .await
+                    let bindings = self.ports.usage_bindings.clone();
+                    transcript_model(session_dir.to_path_buf(), meta, bindings).await
                 }
             };
             if let Some(model) = value.as_deref().and_then(|value| source.accepts(value)) {
-                reported = Some(model.to_string());
-                break;
+                return Some(model.to_string());
             }
         }
-        match reported {
-            Some(model) if meta.model.as_deref() != Some(model.as_str()) => {
-                record_model(session_dir, meta, model)
-            }
-            _ => Ok(()),
-        }
+        None
     }
 }
 
@@ -98,7 +101,14 @@ async fn transcript_model(
     }
 }
 
-fn record_model(session_dir: &Path, meta: SessionMetadata, model: String) -> Result<(), Status> {
+/// Write `model` into the session's record when it differs from the one there. The record is read
+/// again here, after any await above, so a status or rotation written meanwhile is kept.
+fn record_model(session_dir: &Path, model: String) -> Result<(), Status> {
+    let meta = tddy_core::read_session_metadata(session_dir)
+        .map_err(|e| Status::internal(format!("failed to read the session record: {e}")))?;
+    if meta.model.as_deref() == Some(model.as_str()) {
+        return Ok(());
+    }
     log::info!(
         "session {}: the agent reports model {model:?} (was {:?})",
         meta.session_id,

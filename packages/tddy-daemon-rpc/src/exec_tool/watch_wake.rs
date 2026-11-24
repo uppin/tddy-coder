@@ -177,6 +177,10 @@ struct OwnerWake {
     fire_at: Option<Instant>,
     /// When this orchestrator was last woken, for the gap.
     last_wake: Option<Instant>,
+    /// A wake of this orchestrator is pasting now; it is not fired again until that one ends.
+    in_flight: bool,
+    /// It came due while a wake was in flight: fire it again once that one ends.
+    due_after_flight: bool,
 }
 
 impl ExecToolRpcHandler {
@@ -194,31 +198,45 @@ impl ExecToolRpcHandler {
     /// project; on fire, the gap is honoured first, then an idle orchestrator is pasted its
     /// waiting delivery — committed only when the paste succeeds, so a failed or refused wake
     /// leaves everything waiting for the next cue.
-    async fn run_watch_waker(&self, cues: WakeCues, timings: WakeTimings) {
+    ///
+    /// Each wake runs as a task of its own: a paste waits for the orchestrator's echo (up to 5 s
+    /// for one that never echoes), and no orchestrator's wake waits on another's, nor holds up the
+    /// cues. An orchestrator is woken by one wake at a time.
+    async fn run_watch_waker(self: Arc<Self>, cues: WakeCues, timings: WakeTimings) {
         let WakeCues(mut cues) = cues;
         let mut owners: HashMap<WatchOwner, OwnerWake> = HashMap::new();
+        let (finished_tx, mut finished) = mpsc::unbounded_channel::<(WatchOwner, bool)>();
         loop {
             let deadline = owners.values().filter_map(|owner| owner.fire_at).min();
-            let cue = match deadline {
-                Some(at) => tokio::select! {
-                    received = cues.recv() => match received {
-                        Some(cue) => Some(cue),
-                        None => break,
-                    },
-                    () = tokio::time::sleep_until(at) => None,
-                },
-                None => match cues.recv().await {
-                    Some(cue) => Some(cue),
+            let sleep = async move {
+                match deadline {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
+            tokio::select! {
+                received = cues.recv() => match received {
+                    Some(cue) => {
+                        for owner in self.owners_concerned(&cue).await {
+                            let wake = owners.entry(owner).or_default();
+                            if wake.fire_at.is_none() {
+                                wake.fire_at = Some(Instant::now() + timings.settle);
+                            }
+                        }
+                    }
                     None => break,
                 },
-            };
-            if let Some(cue) = cue {
-                for owner in self.owners_concerned(&cue).await {
+                Some((owner, woke)) = finished.recv() => {
                     let wake = owners.entry(owner).or_default();
-                    if wake.fire_at.is_none() {
-                        wake.fire_at = Some(Instant::now() + timings.settle);
+                    wake.in_flight = false;
+                    if woke {
+                        wake.last_wake = Some(Instant::now());
+                    }
+                    if std::mem::take(&mut wake.due_after_flight) && wake.fire_at.is_none() {
+                        wake.fire_at = Some(Instant::now());
                     }
                 }
+                () = sleep => {}
             }
             let now = Instant::now();
             let due: Vec<WatchOwner> = owners
@@ -231,17 +249,23 @@ impl ExecToolRpcHandler {
                     continue;
                 };
                 wake.fire_at = None;
+                if wake.in_flight {
+                    wake.due_after_flight = true;
+                    continue;
+                }
                 if let Some(last) = wake.last_wake {
                     if now.duration_since(last) < timings.min_gap {
                         wake.fire_at = Some(last + timings.min_gap);
                         continue;
                     }
                 }
-                if self.try_wake(&owner).await {
-                    if let Some(wake) = owners.get_mut(&owner) {
-                        wake.last_wake = Some(Instant::now());
-                    }
-                }
+                wake.in_flight = true;
+                let handler = Arc::clone(&self);
+                let finished_tx = finished_tx.clone();
+                tokio::spawn(async move {
+                    let woke = handler.try_wake(&owner).await;
+                    let _ = finished_tx.send((owner, woke));
+                });
             }
         }
     }

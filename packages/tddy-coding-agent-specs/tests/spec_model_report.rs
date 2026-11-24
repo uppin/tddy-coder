@@ -56,16 +56,17 @@ fn the_refusal_message(dir: &Path) -> String {
 }
 
 #[test]
-fn cursor_reports_its_model_on_every_hook_event() {
+fn cursor_reports_its_model_on_its_main_conversations_hook_events() {
     // When
     let cursor = embedded_spec("cursor").expect("cursor is built in");
 
-    // Then every hook event's `model` field is the model the session is on
+    // Then the `model` of the session's start, each prompt and each turn's end is the model the
+    // session is on — never a tool call's, which a subagent on another model may make
     assert_eq!(
         cursor.model_report(),
         &[ModelReportSource::HookField {
             field: "model".to_string(),
-            events: Vec::new(),
+            events: strings(&["sessionStart", "beforeSubmitPrompt", "stop"]),
             ignore: Vec::new(),
         }]
     );

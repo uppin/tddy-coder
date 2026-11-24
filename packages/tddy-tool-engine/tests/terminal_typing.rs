@@ -23,7 +23,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_tool_engine::terminal_keys::{
-    encode_keys, encode_typing, type_into, EchoWait, Typed, TypingTerminal,
+    encode_keys, encode_typing, type_into, EchoWait, Typed, TypingError, TypingTerminal,
 };
 
 /// How often the fake TUI reads its input: everything written in between is one read.
@@ -68,6 +68,19 @@ impl DeferringTui {
     /// A TUI that reads but never draws (its screen does not move).
     fn silent() -> Self {
         Self::start(false)
+    }
+
+    /// An echoing TUI whose screen also never holds still: a spinner redraws it every few ms.
+    fn echoing_with_a_spinner() -> Self {
+        let tui = Self::start(true);
+        let spinner = tui.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                spinner.state.lock().unwrap().output_offset += 1;
+            }
+        });
+        tui
     }
 
     fn start(echoes: bool) -> Self {
@@ -294,4 +307,112 @@ fn a_typing_keeps_the_text_and_the_keys_apart() {
         [typing.text, typing.keys].concat(),
         encode_keys(Some("ls"), &enter(), true).unwrap()
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_keys_are_pressed_at_the_settle_cap_when_the_screen_never_holds_still() {
+    // Given an echoing TUI whose spinner keeps its screen moving
+    let tui = DeferringTui::echoing_with_a_spinner();
+    let wait = EchoWait::default();
+
+    // When the message and Enter are typed
+    let typing = encode_typing(Some(MESSAGE), &enter(), true).unwrap();
+    let started = tokio::time::Instant::now();
+    let typed = type_into(&tui, typing, &wait).await.unwrap();
+    tui.settle().await;
+
+    // Then Enter is pressed once the settle cap has passed, not after the no-echo timeout, and the
+    // message is submitted
+    assert!(
+        started.elapsed() < wait.settle_cap + READ_EVERY * 10,
+        "Enter came {:?} after the paste",
+        started.elapsed()
+    );
+    assert_eq!(typed.echo_seen, Some(true));
+    assert_eq!(tui.submitted(), vec![MESSAGE.to_string()]);
+}
+
+/// A terminal that echoes every write at once, and refuses the write numbered `refuse` (0-based).
+struct RefusingTerminal {
+    refuse: usize,
+    writes: Mutex<usize>,
+    offset: Mutex<u64>,
+}
+
+impl RefusingTerminal {
+    fn refusing_write(refuse: usize) -> Self {
+        Self {
+            refuse,
+            writes: Mutex::new(0),
+            offset: Mutex::new(0),
+        }
+    }
+}
+
+#[async_trait]
+impl TypingTerminal for RefusingTerminal {
+    async fn output_offset(&self) -> Result<u64, String> {
+        Ok(*self.offset.lock().unwrap())
+    }
+
+    async fn write(&self, bytes: Vec<u8>) -> Result<(), String> {
+        let mut writes = self.writes.lock().unwrap();
+        let this = *writes;
+        *writes += 1;
+        if this == self.refuse {
+            return Err("the session has exited".to_string());
+        }
+        *self.offset.lock().unwrap() += bytes.len() as u64;
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_text_write_sent_nothing() {
+    // Given a terminal that refuses the first write
+    let terminal = RefusingTerminal::refusing_write(0);
+
+    // When the message and Enter are typed
+    let typing = encode_typing(Some(MESSAGE), &enter(), true).unwrap();
+    let refused = type_into(&terminal, typing, &EchoWait::default())
+        .await
+        .unwrap_err();
+
+    // Then the refusal says nothing was sent
+    assert_eq!(
+        refused,
+        TypingError::NothingSent("the session has exited".to_string())
+    );
+    assert_eq!(
+        refused.to_string(),
+        "the session has exited; nothing was sent"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_keys_write_says_the_text_was_typed() {
+    // Given a terminal that takes the text but refuses the next write
+    let terminal = RefusingTerminal::refusing_write(1);
+
+    // When the message and Enter are typed
+    let typing = encode_typing(Some(MESSAGE), &enter(), true).unwrap();
+    let refused = type_into(&terminal, typing, &EchoWait::default())
+        .await
+        .unwrap_err();
+
+    // Then the refusal says the text was typed and the keys were not
+    assert_eq!(
+        refused.to_string(),
+        "the session has exited; the text was typed but the keys were not"
+    );
+}
+
+#[test]
+fn raw_text_keeps_its_line_breaks_as_enter_in_the_text_write() {
+    // When multi-line text is encoded for a terminal that takes no paste, with Enter after it
+    let typing = encode_typing(Some("one\ntwo"), &enter(), false).unwrap();
+
+    // Then the text write types each line break as Enter, and the keys are the trailing Enter alone
+    assert_eq!(typing.text, b"one\rtwo".to_vec());
+    assert_eq!(typing.keys, b"\r".to_vec());
 }

@@ -72,9 +72,10 @@ extensions:
     # Where a running session reports the model it is on now, so a model picked with `/model` in
     # the TUI is the one its resume relaunches on: every hook event carries `model` (seen
     # 2026-11-24: `glm-5p3-flash-high` after picking GLM 5.3 Flash; `auto` reports itself as
-    # `auto-smart`), and `--model` takes it as reported.
+    # `auto-smart`), and `--model` takes it as reported. Read on the main conversation's own
+    # events only, so a subagent's tool call on another model never re-points the session.
     model_report:
-      - { kind: hook_field, field: model }
+      - { kind: hook_field, field: model, events: [sessionStart, beforeSubmitPrompt, stop] }
     models:
       default: composer-2.5
       curated:

@@ -207,12 +207,17 @@ impl World {
 
     /// `(refused, text)` of the orchestrator's call to `tool`.
     async fn calls(&self, tool: &str, args: Value) -> (bool, String) {
+        self.calls_as(&self.orchestrator, tool, args).await
+    }
+
+    /// `(refused, text)` of `caller`'s call to `tool`.
+    async fn calls_as(&self, caller: &str, tool: &str, args: Value) -> (bool, String) {
         let response = self
             .a
             .daemon
             .execute_tool(Request::direct(ExecuteToolRequest {
                 session_token: TEST_TOKEN.to_string(),
-                session_id: self.orchestrator.clone(),
+                session_id: caller.to_string(),
                 tool_name: tool.to_string(),
                 args_json: args.to_string(),
                 daemon_instance_id: String::new(),
@@ -244,14 +249,21 @@ struct RecordingAgent {
 
 impl RecordingAgent {
     async fn on_the_main_terminal_of(host: &Host, session_id: &str) -> Self {
+        Self::on_the_main_terminal_echoing(host, session_id, true).await
+    }
+
+    /// A stand-in that echoes what it is typed as a TUI draws it (`echoes`), or one that never
+    /// does — a wake waits out its no-echo timeout before pressing Enter into it.
+    async fn on_the_main_terminal_echoing(host: &Host, session_id: &str, echoes: bool) -> Self {
         use std::os::unix::fs::PermissionsExt;
+        let echo = if echoes { "echo -echoctl" } else { "-echo" };
         let dir = tempfile::tempdir().unwrap();
         let record = dir.path().join("typed.bin");
         let script = dir.path().join("stand_in_agent.sh");
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nstty raw echo -echoctl\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
+                "#!/bin/sh\nstty raw {echo}\nprintf '\\033[?2004h{READY_MARKER}\\r\\n'\nexec cat >> '{}'\n",
                 record.display()
             ),
         )
@@ -472,4 +484,69 @@ async fn an_orchestrator_with_no_live_terminal_keeps_its_events() {
         json!("req-1"),
         "the prompt was lost: {events}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_orchestrator_that_never_echoes_does_not_hold_up_anothers_wake() {
+    // Given a second orchestrator of the project whose agent never echoes what it is typed — a
+    // wake to it waits out the no-echo timeout before pressing Enter — watching the sibling
+    let world = a_world().await;
+    let silent = a_workspace_in(&world.a.daemon, THIS_PROJECT).await;
+    let sibling = a_workspace_in(&world.a.daemon, THIS_PROJECT).await;
+    {
+        let dir = session_dir(&world.a, &silent);
+        let mut meta = tddy_core::read_session_metadata(&dir).unwrap();
+        meta.session_role = Some("orchestrator".to_string());
+        tddy_core::session_metadata::write_session_metadata(&dir, &meta).unwrap();
+    }
+    records_a_running_claude_session(&world.a, &silent);
+    let silent_agent = RecordingAgent::on_the_main_terminal_echoing(&world.a, &silent, false).await;
+    let created = world
+        .calls_as(
+            &silent,
+            "CreateSessionWatch",
+            json!({
+                "session_ids": [sibling],
+                "kinds": ["permission"],
+                "ttl_seconds": 3_600,
+                "wake_when_idle": true
+            }),
+        )
+        .await;
+    assert!(!created.0, "the watch was refused: {}", created.1);
+    tddy_core::update_activity_status(&session_dir(&world.a, &silent), "Done").unwrap();
+    world.the_orchestrator_reports("Done").await;
+
+    // When the sibling asks, starting the silent orchestrator's wake, and then the child asks
+    world
+        .bus
+        .publish(SessionNotification {
+            source: SessionNotificationSource::PendingQuestion,
+            text: "🔔 Session sibling wants to run Bash: ls".to_string(),
+            question: Some(QuestionNotice {
+                request_id: "req-sibling".to_string(),
+                kind: "permission".to_string(),
+                tool_name: "Bash".to_string(),
+                summary: "ls".to_string(),
+                questions: Vec::new(),
+            }),
+            ..world.a_notification_of(&sibling)
+        })
+        .await;
+    wait_for(&silent_agent.record, |typed| {
+        count_of(typed, WAKE_OPENS) >= 1
+    })
+    .await;
+    let asked = tokio::time::Instant::now();
+    world.the_child_asks_permission("req-1").await;
+
+    // Then the main orchestrator is woken and its turn submitted while the silent one's wake is
+    // still waiting for an echo
+    let typed = world.agent.after_wakes(1).await;
+    assert!(
+        asked.elapsed() < Duration::from_secs(2),
+        "the wake came {:?} after the child asked: it waited on the other orchestrator's",
+        asked.elapsed()
+    );
+    assert!(typed.contains("req-1"), "{typed:?}");
 }
