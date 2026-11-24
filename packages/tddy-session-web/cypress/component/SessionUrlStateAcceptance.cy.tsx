@@ -71,7 +71,7 @@ it("selecting a session in the drawer puts its id in the URL", () => {
   mountSessionsDrawer();
 
   // When
-  sessionsDrawerPage.drawerItem(BRAVO.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(BRAVO.sessionId);
 
   // Then
   appLocationPage.expectPath(`/sessions/${BRAVO.sessionId}`);
@@ -80,10 +80,10 @@ it("selecting a session in the drawer puts its id in the URL", () => {
 it("selecting a different session replaces the id in the URL", () => {
   // Given
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(ALPHA.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(ALPHA.sessionId);
 
   // When
-  sessionsDrawerPage.drawerItem(CHARLIE.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(CHARLIE.sessionId);
 
   // Then
   appLocationPage.expectPath(`/sessions/${CHARLIE.sessionId}`);
@@ -95,7 +95,7 @@ it("selecting a session keeps the host the URL already named", () => {
   mountSessionsDrawer();
 
   // When
-  sessionsDrawerPage.drawerItem(BRAVO.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(BRAVO.sessionId);
 
   // Then — the session moved, the host did not
   appLocationPage.expectPath(`/sessions/${BRAVO.sessionId}`);
@@ -109,9 +109,9 @@ it("selecting a session keeps the host the URL already named", () => {
 it("going back after selecting a second session re-selects the first", () => {
   // Given — the operator clicked through two sessions
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(ALPHA.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(ALPHA.sessionId);
   appLocationPage.expectPath(`/sessions/${ALPHA.sessionId}`);
-  sessionsDrawerPage.drawerItem(BRAVO.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(BRAVO.sessionId);
   appLocationPage.expectPath(`/sessions/${BRAVO.sessionId}`);
 
   // When
@@ -126,8 +126,8 @@ it("going back after selecting a second session re-selects the first", () => {
 it("going forward after going back re-selects the second session", () => {
   // Given
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(ALPHA.sessionId).click();
-  sessionsDrawerPage.drawerItem(BRAVO.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(ALPHA.sessionId);
+  sessionsDrawerPage.selectEndedSession(BRAVO.sessionId);
   appLocationPage.goBack();
   sessionsDrawerPage.expectSelected(ALPHA.sessionId);
 
@@ -146,7 +146,7 @@ it("going forward after going back re-selects the second session", () => {
 it("an inbound hash change selects the named session without a reload", () => {
   // Given — the operator is looking at one session
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(ALPHA.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(ALPHA.sessionId);
   sessionsDrawerPage.expectSelected(ALPHA.sessionId);
 
   // When — a link to another session is pasted into the open tab
@@ -198,7 +198,7 @@ it("a /sessions/new deep link opens the create-session pane on load", () => {
 it("going back from the create-session pane returns to the previously selected session", () => {
   // Given — a session was selected, then the create pane was opened
   mountSessionsDrawer();
-  sessionsDrawerPage.drawerItem(ALPHA.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(ALPHA.sessionId);
   sessionsDrawerPage.newSessionBtn().click();
   appLocationPage.expectPath("/sessions/new");
 

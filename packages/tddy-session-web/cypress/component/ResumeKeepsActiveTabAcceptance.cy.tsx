@@ -80,7 +80,7 @@ function aStoppedSessionWhoseClaudeTabIsRestored(
 
 function selectStoppedSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(STOPPED.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(STOPPED.sessionId);
 }
 
 // ---------------------------------------------------------------------------

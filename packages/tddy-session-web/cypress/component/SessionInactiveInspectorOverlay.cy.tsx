@@ -165,7 +165,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
     // When — the inspector no longer opens on its own, so ask for it
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    page.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     page.inspectorToggle().click();
 
     // Then — the drawer opens over a pane that still owns its base view: the stopped session's Agent
@@ -205,7 +205,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    page.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     page.inspectorToggle().click();
     page.inspectorDrawer().should("have.attr", "data-state", "open");
     page.inspectorExpand().click();
@@ -223,7 +223,7 @@ describe("SessionInactiveInspectorOverlay — overlay-drawer layout", () => {
 
     // When
     mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-    page.drawerItem(DISCONNECTED_SESSION.sessionId).click();
+    page.selectEndedSession(DISCONNECTED_SESSION.sessionId);
     page.inspectorToggle().click();
 
     // Then

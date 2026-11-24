@@ -65,7 +65,7 @@ describe("SessionInspectorInactiveDaemonSourced — inspector reads bytes/last-r
     );
 
     // When — the user selects the inactive row and opens the inspector
-    sessionsDrawerPage.drawerItem(INACTIVE_SESSION.sessionId as string).click();
+    sessionsDrawerPage.selectEndedSession(INACTIVE_SESSION.sessionId as string);
     sessionsDrawerPage.inspectorToggle().click();
     // The counters live on Details; a session now opens on its PR or Worktree tab.
     sessionsDrawerPage.inspectorDetailsTab().click();

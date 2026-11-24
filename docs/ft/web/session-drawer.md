@@ -262,10 +262,11 @@ stays nested inside one partition. A **mixed-activity** stack (e.g. a live child
 orchestrator) splits: each session lands in the partition matching its own dot, and a child whose
 orchestrator is not present in the same partition renders as a flat row there.
 
-**More appears whenever the remaining partition is non-empty** — also when nothing is active. A
-project whose sessions have all ended shows its [pinned main](#pinned-main-entry) (which is never
-inside the fold) and a collapsed **More**, not a bare list of ended rows. When every session is
-active there is no toggle.
+**More appears whenever the remaining partition is non-empty** — also when nothing is active. The
+[pinned main](#pinned-main-entry) is never inside the fold and never counts as one of the group's
+rows. So a project where nothing but main is live, or nothing at all, shows main and a collapsed
+**More**, not a bare list of ended rows, whether main itself is live or ended. When every session
+is active there is no toggle.
 
 ### Row order
 

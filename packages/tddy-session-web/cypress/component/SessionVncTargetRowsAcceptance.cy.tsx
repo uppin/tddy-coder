@@ -51,7 +51,7 @@ beforeEach(() => {
 
 function openVncTab(backend: ReturnType<typeof aSessionsDrawerBackend>) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorVncTab().click();
 }
 

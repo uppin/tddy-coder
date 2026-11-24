@@ -75,7 +75,7 @@ it("opens the full-screen Workflow Chat Screen instead of the terminal for a too
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TDD_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TDD_SESSION.sessionId);
 
   // Then — the chat replaces the terminal, and it is full-screen: no planned-PR list pane.
   workflowChatScreenPage.screen().should("exist");

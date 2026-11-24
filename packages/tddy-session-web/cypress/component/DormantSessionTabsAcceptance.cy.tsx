@@ -123,7 +123,7 @@ function aStoppedSessionThatResumes(): SessionServiceBackend {
 
 function selectStoppedSession(backend: SessionServiceBackend) {
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(STOPPED.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(STOPPED.sessionId);
 }
 
 /**
@@ -254,7 +254,7 @@ describe("A stopped session keeps its tab strip", () => {
 
     // When another session is selected and this one is selected again
     sessionsDrawerPage.drawerItem(ANOTHER.sessionId).click();
-    sessionsDrawerPage.drawerItem(STOPPED.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(STOPPED.sessionId);
 
     // Then the conversation was never cancelled, and it is still the tab holding the pane
     cy.wrap(null).should(() => {

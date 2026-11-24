@@ -199,7 +199,7 @@ it("opens the split Code pane for a claude-cli terminal session", () => {
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
 
   // When
   worktreeCodePanePage.toggle().click();
@@ -214,7 +214,7 @@ it("opens the split Code pane for a tool workflow chat session without unmountin
   // Given
   const backend = aWorktreeBackend([CHAT_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(CHAT_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(CHAT_SESSION.sessionId);
 
   // When
   worktreeCodePanePage.toggle().click();
@@ -232,7 +232,7 @@ it("lists the worktree root and lazily loads a directory's children when it is e
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
 
   // Then — the root level lists the directory and the root file (child not yet fetched).
@@ -255,7 +255,7 @@ it("renders a selected Markdown file as sanitized markup in the preview", () => 
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
 
   // When
@@ -269,7 +269,7 @@ it("highlights a selected Rust code file with syntax tokens", () => {
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
   worktreeCodePanePage.node("src").click();
 
@@ -286,7 +286,7 @@ it("highlights a selected YAML file with syntax tokens", () => {
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
 
   // When
@@ -302,7 +302,7 @@ it("renders a file with no recognized extension as plain monospace without highl
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
 
   // When
@@ -326,7 +326,7 @@ it("loads the worktree tree for an unscoped session by resolving its project fro
   // main repo; the daemon rejects worktree RPCs that arrive with an empty project_id.
   const backend = aProjectScopedWorktreeBackend([UNSCOPED_SESSION], [CODE_PANE_PROJECT]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(UNSCOPED_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(UNSCOPED_SESSION.sessionId);
 
   // When
   worktreeCodePanePage.toggle().click();
@@ -340,7 +340,7 @@ it("sends the resolved project id on the worktree directory RPC for an unscoped 
   // Given
   const backend = aProjectScopedWorktreeBackend([UNSCOPED_SESSION], [CODE_PANE_PROJECT]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(UNSCOPED_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(UNSCOPED_SESSION.sessionId);
 
   // When
   worktreeCodePanePage.toggle().click();
@@ -357,7 +357,7 @@ it("collapses the Code pane back to the single base view when toggled off", () =
   // Given
   const backend = aWorktreeBackend([TERMINAL_SESSION]);
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  sessionsDrawerPage.drawerItem(TERMINAL_SESSION.sessionId).click();
+  sessionsDrawerPage.selectEndedSession(TERMINAL_SESSION.sessionId);
   worktreeCodePanePage.toggle().click();
   worktreeCodePanePage.pane().should("exist");
 

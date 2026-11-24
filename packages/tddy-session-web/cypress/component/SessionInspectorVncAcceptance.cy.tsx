@@ -54,7 +54,7 @@ it("shows a VNC tab in the inspector tab strip alongside Details and Tools", () 
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorToggle().click();
   page.inspectorDrawer().should("have.attr", "data-state", "open");
 
@@ -75,7 +75,7 @@ it("renders the VNC tab panel and hides the metadata panel when the VNC tab is c
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorVncTab().click();
 
   // Then
@@ -94,7 +94,7 @@ it("shows an empty target list and an Add form when no VNC targets are configure
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorVncTab().click();
 
   // Then
@@ -118,7 +118,7 @@ it("calls AddVncTarget with correct fields when the form is submitted without a 
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorVncTab().click();
   page.vncAddLabel().type("Dev VM");
   page.vncAddHost().type("192.168.1.5");
@@ -151,7 +151,7 @@ it("shows the passphrase dialog before adding a target that has a password", () 
 
   // When
   mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
-  page.drawerItem(SESSION.sessionId).click();
+  page.selectEndedSession(SESSION.sessionId);
   page.inspectorVncTab().click();
   page.vncAddLabel().type("Secure VM");
   page.vncAddHost().type("10.0.0.1");

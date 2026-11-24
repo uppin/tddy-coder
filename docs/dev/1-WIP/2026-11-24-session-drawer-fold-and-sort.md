@@ -8,9 +8,10 @@
 
 1. **Ended sessions were listed bare when nothing in the project was live.** `SessionGroupBody`
    showed **More** only when both partitions were non-empty
-   (`isPartitioned = activeCount > 0 && remainingCount > 0`). A project whose sessions had all
-   ended, such as one with only its main and two idle orchestrators, listed every ended row
-   unfolded.
+   (`isPartitioned = activeCount > 0 && remainingCount > 0`). The pinned main is taken out of the
+   rows before they are split, so a live main does not count. A project where nothing but main
+   was live listed every ended row unfolded. That covers a live main above grey rows, and an ended
+   main with two idle orchestrators.
 2. **Active rows were not newest-first.** `groupSessionsByStack` returned `groups` (orchestrators
    with children) and `flat` (everything else), and the drawer rendered all groups before any flat
    row. A plain session started after an orchestrator therefore sat below it. Children were sorted
@@ -52,6 +53,10 @@ as good as the last hook report. The operator chose a follow-up for this:
 - `cypress/component/SessionsDrawerActiveSeparator.cy.tsx`: folding with nothing active, active
   row order, and row order under **More**.
 - `cypress/component/SessionsDrawerProjectHomeAcceptance.cy.tsx`: main pinned with **More (2)**
-  when nothing is live (the reported case).
-- Specs that click an ended row in a project with nothing live now open **More** first
-  (`sessionsDrawerPage.expandRemaining()`).
+  when nothing beside main is live, for a live main and for an ended one (both reported cases).
+- Every spec that clicks an ended row now selects it with `sessionsDrawerPage.selectEndedSession(id)`
+  (both page objects, `tddy-session-web` and `tddy-web`). It opens the row's **More** unless
+  `aria-expanded` says it is already open, then clicks the row. The **More** button now carries
+  `aria-expanded`. Before this change an ended row was bare whenever nothing was live, so about
+  25 session-web specs and 5 tddy-web specs clicked one directly. `expandRemaining()` is a toggle,
+  so it would close the fold again on a second ended row.

@@ -207,7 +207,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
 
     // Then — the main view is the greyed Agent tab; the transcript is not the pane
     dormantAgentTabPage.terminal().should("exist");
@@ -229,7 +229,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When — selection alone; no toggle click
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
 
     // Then
     page.inspectorDrawer().should("have.attr", "data-state", "closed");
@@ -244,7 +244,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
 
     // Then — reachable without opening the inspector
     sessionActivitiesPage.resumeBtn(DORMANT.sessionId).should("be.visible");
@@ -259,7 +259,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     sessionActivitiesPage.resume(DORMANT.sessionId);
 
     // Then — exactly one ResumeSession, for this session
@@ -280,7 +280,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
 
     // Then — the Activity tab owns the transcript's place, says so, and the top bar still offers Resume
     openActivityTab();
@@ -298,7 +298,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     openActivityTab();
 
     // Then — the pane is there, but says nothing it cannot support
@@ -367,7 +367,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When — select it while dormant, then let the daemon report it alive
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     dormantAgentTabPage.terminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
@@ -404,7 +404,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
 
     // When — live, dead, live again
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     dormantAgentTabPage.terminal().should("exist");
     cy.then(() => {
       sessionIsLive = true;
@@ -455,7 +455,7 @@ describe("InactiveSessionActivities — the default view for a dormant session",
     // When — resume from the top bar, then let the list catch up and report the session live. The
     // base view follows the list, not the attachment, so the terminal appears on that second step.
     mountScreen(backend);
-    page.drawerItem(DORMANT.sessionId).click();
+    page.selectEndedSession(DORMANT.sessionId);
     sessionActivitiesPage.resume(DORMANT.sessionId);
     cy.wrap(null).should(() => {
       expect(backend.callsTo(SessionService.method.resumeSession)).to.have.length(1);

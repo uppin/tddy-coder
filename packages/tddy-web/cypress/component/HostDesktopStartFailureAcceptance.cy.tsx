@@ -178,7 +178,7 @@ describe("Host desktop start failure", () => {
     cy.viewport(A_DESKTOP_WINDOW.width, A_DESKTOP_WINDOW.height);
     window.localStorage.setItem("tddy_session_token", "fake-token");
     mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), aSessionWhoseDesktopRefusesTheSignIn());
-    sessionsDrawerPage.drawerItem(A_SESSION.sessionId).click();
+    sessionsDrawerPage.selectEndedSession(A_SESSION.sessionId);
     sessionsDrawerPage.inspectorScreenSharingTab().click();
 
     // When the operator starts that desktop

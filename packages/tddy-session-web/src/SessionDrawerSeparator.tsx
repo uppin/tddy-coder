@@ -37,6 +37,7 @@ export function SessionDrawerSeparator({
       <button
         type="button"
         data-testid={testId}
+        aria-expanded={visible}
         onClick={() => setIsOpen((v) => !v)}
         className="flex w-full items-center justify-end gap-1 px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
