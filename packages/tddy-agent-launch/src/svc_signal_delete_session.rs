@@ -157,6 +157,12 @@ impl LaunchSessions {
         let session_dir = unified_session_dir_path(&sessions_base, session_id);
         self.end_tmux_run(os_user, session_id, &session_dir, session_token)
             .await?;
+        // Every other tab and every conversation goes the same way, for the same reason: a tab's
+        // tmux session, here or on the target, would keep its agent running with no session left
+        // to reclaim it.
+        self.session_tabs
+            .end_tabs_and_conversations(session_id, session_token)
+            .await?;
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
         remove_session_pointer(session_id, &sessions_base).await;
@@ -186,30 +192,31 @@ impl LaunchSessions {
             .stop_and_remove_log(session_id)
             .await;
         // A target session's worktree is on its target, where the local deletion below cannot
-        // reach: what to remove there is captured now, while its record is still on disk.
-        let target_worktree =
-            target_worktree_of(&unified_session_dir_path(&sessions_base, session_id));
+        // reach. It is removed first, while the record naming it is still on disk: a target that
+        // refuses the removal refuses the delete with the session's record intact, so a retry can
+        // still name what to remove. One already gone — removed by a close, or outside the
+        // daemon — counts as removed.
+        if let Some((target, worktree)) = target_worktree_of(&session_dir) {
+            // The shell is resolved with the caller's account, as the start resolves it, so a
+            // Coder target's worktree is removed on its workspace too.
+            let subject = (self.user_resolver)(session_token).unwrap_or_default();
+            let shell = crate::opencode_cli_spawn::session_start::shell_for_session_target(
+                &target,
+                &subject,
+                self.coder_credentials.as_ref(),
+            )?;
+            tddy_worktree_service::target_worktrees::remove_target_worktree(
+                shell.as_ref(),
+                &worktree,
+            )
+            .await?;
+        }
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,
             projects_dir_opt.as_deref(),
             Some(self.coding_agents.agents()),
         )?;
-        if let Some((target, worktree)) = &target_worktree {
-            // The shell is resolved with the caller's account, as the start resolves it, so a
-            // Coder target's worktree is removed on its workspace too.
-            let subject = (self.user_resolver)(session_token).unwrap_or_default();
-            let shell = crate::opencode_cli_spawn::session_start::shell_for_session_target(
-                target,
-                &subject,
-                self.coder_credentials.as_ref(),
-            )?;
-            tddy_worktree_service::target_worktrees::remove_target_worktree(
-                shell.as_ref(),
-                worktree,
-            )
-            .await?;
-        }
         log::info!("DeleteSession: successfully removed session {}", session_id);
         Ok(Response::new(DeleteSessionResponse { ok: true }))
     }
@@ -366,9 +373,14 @@ fn target_tmux_run_of(session_dir: &Path) -> Option<tddy_core::SessionTarget> {
     metadata.target
 }
 
-/// What a delete removes on a session's target, captured from its record before the record
-/// goes: the target and the worktree there. `None` for a session whose agent ran here.
+/// What a delete removes on a session's target, read from its record before the record goes: the
+/// target and the worktree there. `None` for a session whose agent ran here, and for one whose
+/// worktrees a close already removed (its `worktree-removed` marker): nothing is left there, and a
+/// target that can no longer be reached must not keep the record from going.
 pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::SessionTarget, String)> {
+    if tddy_worktree_service::worktree_removed_marker::worktree_removal_recorded(session_dir) {
+        return None;
+    }
     let metadata = read_session_metadata(session_dir).ok()?;
     Some((metadata.target?, metadata.repo_path?))
 }

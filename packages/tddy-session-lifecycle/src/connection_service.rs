@@ -272,6 +272,9 @@ pub struct DaemonSessionHost {
     /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host the
     /// daemon runtime did not build.
     askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,
+    /// The close running for each session (docs/ft/daemon/session-liveness.md § Closing a
+    /// session): closes of different sessions run at once, a second of one session is refused.
+    session_closes: Arc<svc_close_session::SessionCloses>,
 }
 
 pub use session_worktree_observer::SessionWorktreeObserver;

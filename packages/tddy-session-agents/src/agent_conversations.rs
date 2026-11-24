@@ -293,10 +293,45 @@ impl OpenAgentConversations {
         session_id: &str,
         agent_id: &str,
     ) -> ClosedConversations {
+        self.close_every_conversation_where(|conversation| {
+            conversation.is_with(session_id, agent_id)
+        })
+        .await
+    }
+
+    /// Every conversation open on `session_id` — `(conversation id, agent id)`, by conversation id —
+    /// whichever daemon runs its loop.
+    pub async fn conversations_of(&self, session_id: &str) -> Vec<(String, String)> {
+        let mut found: Vec<(String, String)> = self
+            .open
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, conversation)| conversation.session_id() == session_id)
+            .map(|(conversation_id, conversation)| {
+                (conversation_id.clone(), conversation.agent_id().to_string())
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// Forget every conversation open on `session_id`, with any agent, interrupting the local ones
+    /// and reporting the remote ones for their owning daemon to be told — what closing the session
+    /// does ([`Self::close_every_conversation_with`], for the whole session).
+    pub async fn close_every_conversation_of(&self, session_id: &str) -> ClosedConversations {
+        self.close_every_conversation_where(|conversation| conversation.session_id() == session_id)
+            .await
+    }
+
+    async fn close_every_conversation_where(
+        &self,
+        closes: impl Fn(&AgentConversation) -> bool,
+    ) -> ClosedConversations {
         let mut closed = ClosedConversations::default();
         let mut open = self.open.lock().await;
         open.retain(|conversation_id, conversation| {
-            if !conversation.is_with(session_id, agent_id) {
+            if !closes(conversation) {
                 return true;
             }
             match conversation {
@@ -312,6 +347,8 @@ impl OpenAgentConversations {
             }
             false
         });
+        closed.local.sort();
+        closed.remote.sort();
         closed
     }
 }

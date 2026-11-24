@@ -18,11 +18,12 @@ use tddy_service::proto::session::{
 use tddy_testing_commons::wait::eventually;
 
 use support::OBSERVE;
+use tddy_subagent_worktree::{ConversationId, ConversationWorktree, ConversationWorktrees};
 use tmux_agent_support::close_events::{failed_steps_of, CloseEvents};
 use tmux_agent_support::close_session::{a_close_request, WORKTREE_REMOVED_MARKER};
 use tmux_agent_support::{
     a_daemon_whose_agent, a_daemon_with_a_private_tmux, a_process_is_alive, AgentTemperament,
-    KilledOnDrop,
+    KilledOnDrop, TmuxAgentDaemon,
 };
 
 fn a_dirty(path: &str, change: &str) -> CloseSessionDirtyFile {
@@ -819,5 +820,121 @@ async fn a_close_of_a_session_this_daemon_does_not_hold_is_refused() {
     assert_eq!(
         refused.err().map(|status| status.code()),
         Some(Code::FailedPrecondition)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A clone-placed conversation's worktree
+// ---------------------------------------------------------------------------
+
+/// The conversation a session's subagent works in, in a worktree and branch of its own.
+const CONVERSATION: &str = "explore";
+
+/// A clone-placed conversation of `session_id`, its worktree cut inside the session's worktree as
+/// the subagent route cuts it.
+async fn a_conversation_worktree_of(
+    daemon: &TmuxAgentDaemon,
+    session_id: &str,
+) -> ConversationWorktree {
+    ConversationWorktrees::new(daemon.recorded_worktree_of(session_id), session_id)
+        .ensure(&ConversationId::parse(CONVERSATION).unwrap())
+        .await
+        .expect("the conversation's worktree is cut")
+}
+
+/// Whether the project's repository still has `reference`.
+fn project_has_ref(daemon: &TmuxAgentDaemon, reference: &str) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(daemon.project_repo())
+        .args(["rev-parse", "--verify", "--quiet", reference])
+        .output()
+        .expect("git runs")
+        .status
+        .success()
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn the_preview_lists_a_conversation_worktree_with_its_dirty_files() {
+    // Given a running session whose subagent left a file in its conversation's worktree
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let conversation = a_conversation_worktree_of(&daemon, &session_id).await;
+    std::fs::write(conversation.root().join("findings.md"), "found\n").unwrap();
+
+    // When
+    let preview = daemon.previews_closing(&session_id).await;
+
+    // Then the conversation's worktree is listed as its own, with the file, beside the session's
+    let listed: Vec<(
+        CloseSessionWorktreeOwner,
+        String,
+        String,
+        Vec<CloseSessionDirtyFile>,
+    )> = preview
+        .worktrees
+        .iter()
+        .map(|worktree| {
+            (
+                worktree.owner(),
+                worktree.owner_id.clone(),
+                worktree.path.clone(),
+                worktree.dirty_files.clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        (listed, preview.needs_confirmation),
+        (
+            vec![
+                (
+                    CloseSessionWorktreeOwner::Conversation,
+                    CONVERSATION.to_string(),
+                    conversation.root().to_string_lossy().into_owned(),
+                    vec![a_dirty("findings.md", "untracked")],
+                ),
+                (
+                    CloseSessionWorktreeOwner::Session,
+                    String::new(),
+                    daemon.recorded_worktree_of(&session_id),
+                    Vec::new(),
+                ),
+            ],
+            true
+        )
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_confirmed_close_removes_a_conversation_worktree_with_its_branch_and_base_ref() {
+    // Given a session with a dirty conversation worktree, and its preview
+    let daemon = a_daemon_with_a_private_tmux().await;
+    let (session_id, _name) = daemon.a_running_tmux_session().await;
+    let conversation = a_conversation_worktree_of(&daemon, &session_id).await;
+    std::fs::write(conversation.root().join("findings.md"), "found\n").unwrap();
+    let base_ref = format!("refs/tddy/subagent-base/{session_id}/{CONVERSATION}");
+    let preview = daemon.previews_closing(&session_id).await;
+
+    // When the close confirms it
+    let events = daemon
+        .closes_confirming(&session_id, &preview.fingerprint)
+        .await;
+
+    // Then the conversation's worktree, its branch and its base ref are gone
+    assert_eq!(
+        (
+            events.outcome().ok,
+            events.done_steps().contains(&(
+                CloseSessionStepKind::Remove,
+                conversation.root().to_string_lossy().into_owned()
+            )),
+            conversation.root().exists(),
+            daemon.project_has_branch(conversation.branch()),
+            project_has_ref(&daemon, &base_ref),
+        ),
+        (true, true, false, false, false),
+        "{events:?}"
     );
 }

@@ -262,6 +262,7 @@ impl DaemonSessionHost {
             tab_jails: Arc::clone(&self.tab_jails),
             tab_jail_spawn: self.tab_jail_spawn.clone(),
             tab_target_shell: self.tab_target_shell.clone(),
+            session_tabs: Arc::new(self.clone()),
         }
     }
 }

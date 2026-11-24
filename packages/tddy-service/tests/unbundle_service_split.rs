@@ -599,10 +599,11 @@ const WORK_QUEUE_METHODS: [&str; 28] = [
 /// `SetProjectAccounts` (`#keyring` 5/9) is the first to do so, `EnsureProjectHomeSession`
 /// (`#project-home` 4/7) the second, `SetProjectOrchestratorDefaults` (`#orchestrators` 11/11) the
 /// third, `UpdateProject`, `DeleteProject` and `RestoreProject` (project update and soft delete)
-/// the fourth to sixth, and `RenameSession` (session display names) the seventh.
+/// the fourth to sixth, `RenameSession` (session display names) the seventh, and
+/// `PreviewCloseSession` and `CloseSession` (closing a session) the eighth and ninth.
 /// `SetProjectHomeAgent` (`#project-home` 1/7) joined and was removed again when main came to be
 /// set up with the New-session form.
-const RESIDUAL_METHODS: [&str; 24] = [
+const RESIDUAL_METHODS: [&str; 26] = [
     "ListSessions",
     "StartSession",
     "StreamStartSession",
@@ -613,6 +614,8 @@ const RESIDUAL_METHODS: [&str; 24] = [
     "DeleteSession",
     "RenameSession",
     "GetWorktreeSnapshot",
+    "PreviewCloseSession",
+    "CloseSession",
     "ListProjects",
     "CreateProject",
     "AddProjectToHost",

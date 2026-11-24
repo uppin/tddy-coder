@@ -132,6 +132,7 @@ impl DaemonSessionHost {
             terminal_exposure: Arc::new(tddy_daemon_extensions::NoTerminalExposure),
             split_rooms: Arc::new(tddy_daemon_extensions::NoSplitRooms),
             askpass: None,
+            session_closes: Arc::new(super::svc_close_session::SessionCloses::default()),
         }
     }
 

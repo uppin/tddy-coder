@@ -52,6 +52,8 @@ pub async fn a_daemon_with_a_private_tmux() -> TmuxAgentDaemon {
 }
 
 /// How the stub `claude` behaves when its tmux session is killed (tmux sends SIGHUP to the pane).
+// Each temperament says what the stub does with its pane; the shared suffix is the point.
+#[allow(clippy::enum_variant_names)]
 pub enum AgentTemperament {
     /// Reads its pane until it closes.
     HoldsItsPane,

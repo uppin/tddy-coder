@@ -74,6 +74,11 @@ tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
+# A close reads, and removes, a target session's worktree through its target's shell.
+tddy-remote-shell = { path = "../tddy-remote-shell" }
+# The fingerprint of a close preview (`svc_close_session`): the digest `tddy-host-service` and
+# `tddy-github` already take from the same crate.
+sha2 = "0.10"
 
 # The moved host and worktree services. A runtime dependency, not a dev one: `runtime.rs` builds
 # and registers both, and `session_reader` implements the worktree crate's session-listing port.

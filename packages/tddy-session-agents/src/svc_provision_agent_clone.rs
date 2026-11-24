@@ -249,8 +249,8 @@ impl AgentRoster {
     /// recorded clone while this daemon has no common room configured or joined — read-only, so
     /// `DeleteSession` can refuse before it tears anything down (`#agent-tools 30/32`).
     pub async fn refuse_an_unreachable_clone_host(&self, session_id: &str) -> Result<(), Status> {
-        let clones = self.session_agent_clones.for_session(session_id);
-        let Some((daemon_instance_id, clone)) = clones.into_iter().next() else {
+        let clones = self.every_agent_clone_of(session_id);
+        let Some((daemon_instance_id, codebase_session)) = clones.into_iter().next() else {
             return Ok(());
         };
         let reachable = match self.peer_routing.common_room_slot("DeleteSession") {
@@ -260,7 +260,6 @@ impl AgentRoster {
         if reachable {
             return Ok(());
         }
-        let codebase_session = &clone.codebase_session_id;
         Err(Status::failed_precondition(format!(
             "cannot reach the common room to delete session {session_id}'s clone \
              {codebase_session} on daemon {daemon_instance_id}, so its checkout is still \
@@ -279,16 +278,56 @@ impl AgentRoster {
         session_id: &str,
         session_token: &str,
     ) -> Result<(), Status> {
-        for (daemon_instance_id, clone) in self.session_agent_clones.for_session(session_id) {
+        for (daemon_instance_id, codebase_session_id) in self.every_agent_clone_of(session_id) {
             self.tear_down_agent_clone(
                 session_id,
                 &daemon_instance_id,
-                &clone.codebase_session_id,
+                &codebase_session_id,
                 session_token,
             )
             .await?;
         }
         Ok(())
+    }
+
+    /// Every clone `session_id`'s roster created — `(owning daemon, the workspace session holding
+    /// the clone there)` — from the clone store **and** the session's `.session.yaml` `agents[]`.
+    ///
+    /// The store is in memory, so after a daemon restart it knows none of the clones built before
+    /// it; the record persists each one (`codebase_session_id`), and is read for exactly that.
+    pub fn every_agent_clone_of(&self, session_id: &str) -> Vec<(String, String)> {
+        let mut clones: Vec<(String, String)> = self
+            .session_agent_clones
+            .for_session(session_id)
+            .into_iter()
+            .map(|(daemon_instance_id, clone)| (daemon_instance_id, clone.codebase_session_id))
+            .chain(self.recorded_agent_clones_of(session_id))
+            .collect();
+        clones.sort();
+        clones.dedup();
+        clones
+    }
+
+    /// The clones `session_id`'s `.session.yaml` records. A session this daemon holds no readable
+    /// record of records none.
+    fn recorded_agent_clones_of(&self, session_id: &str) -> Vec<(String, String)> {
+        let Ok(session_dir) = session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
+        else {
+            return Vec::new();
+        };
+        let Ok(metadata) = tddy_core::read_session_metadata(&session_dir) else {
+            return Vec::new();
+        };
+        metadata
+            .agents
+            .into_iter()
+            .filter_map(|agent| {
+                let codebase_session_id = agent
+                    .codebase_session_id
+                    .filter(|id| !id.trim().is_empty())?;
+                Some((agent.daemon_instance_id, codebase_session_id))
+            })
+            .collect()
     }
 
     /// Push the session's current roster to its `StreamSessionAgents` subscribers and to its room.

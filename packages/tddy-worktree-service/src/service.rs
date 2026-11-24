@@ -311,6 +311,7 @@ impl WorktreeService for WorktreeServiceImpl {
             let shell = self.shell_of_target(&req.session_token, &session).await?;
             let worktree_path =
                 crate::target_worktrees::restore_target_worktree(shell.as_ref(), &session).await?;
+            forget_a_recorded_removal(&session_dir)?;
             self.worktree_stats_cache.invalidate_project(project_id);
             return Ok(Response::new(RestoreSessionWorktreeResponse {
                 ok: true,
@@ -345,6 +346,7 @@ impl WorktreeService for WorktreeServiceImpl {
 
         match restored {
             Ok(path) => {
+                forget_a_recorded_removal(&session_dir)?;
                 self.worktree_stats_cache.invalidate_project(project_id);
                 Ok(Response::new(RestoreSessionWorktreeResponse {
                     ok: true,
@@ -676,4 +678,15 @@ impl WorktreeService for WorktreeServiceImpl {
         self.record_rpc_activity();
         self.session_pull_request_stream(request.into_inner()).await
     }
+}
+
+/// The session's worktree is back: a close's record of removing it no longer holds, so the session
+/// lists as holding one again.
+fn forget_a_recorded_removal(session_dir: &std::path::Path) -> Result<(), Status> {
+    crate::worktree_removed_marker::clear_worktree_removed(session_dir).map_err(|e| {
+        Status::internal(format!(
+            "the worktree was restored, but the record of its removal in {} could not be cleared: {e}",
+            session_dir.display()
+        ))
+    })
 }

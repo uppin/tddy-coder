@@ -20,6 +20,7 @@ pub mod target_worktrees;
 pub mod worktree_files;
 pub mod worktree_loss;
 pub mod worktree_measurement;
+pub mod worktree_removed_marker;
 pub mod worktree_sync;
 pub mod worktrees;
 

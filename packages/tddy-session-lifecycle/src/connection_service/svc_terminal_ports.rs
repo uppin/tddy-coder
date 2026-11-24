@@ -25,6 +25,7 @@ use crate::terminal_session_adapter::DaemonTerminalSessionStore;
 mod jailed_tabs;
 mod recorded_tabs;
 mod recorded_worktree;
+pub(crate) mod session_tabs;
 mod target_agent_tabs;
 mod target_tabs;
 mod target_tmux_tabs;
@@ -141,28 +142,13 @@ impl DaemonSessionHost {
     /// maps to, where the terminals and the control lease live, and what this host frames at.
     fn terminal_session_ports(&self) -> TerminalSessionPorts {
         let config = self.config.clone();
-        let tmux: Arc<dyn TmuxHost> = Arc::new(tmux_host::SessionTmux {
-            tddy_data_dir: self.tddy_data_dir.clone(),
-            target_shell: self.launch_sessions().tab_target_shell(),
-        });
+        let tmux = self.session_tmux();
         TerminalSessionPorts {
             github_users: self.user_resolver.clone(),
             os_users: Arc::new(move |github_user: &str| config.os_user_for_github(github_user)),
             terminals: Arc::new(self.terminal_sessions()),
             control: self.terminal_control(),
-            roster: Arc::new(
-                CliManagerTerminalRoster::new(
-                    Arc::clone(&self.cli_manager),
-                    self.launch_coding_agents(),
-                    self.tddy_data_dir.clone(),
-                    Arc::clone(&tmux),
-                )
-                .with_tab_jails(
-                    Arc::clone(&self.tab_jails),
-                    self.launch_sessions().tab_jail_spawn(),
-                )
-                .with_tab_target_shell(self.launch_sessions().tab_target_shell()),
-            ),
+            roster: Arc::new(self.terminal_roster(Arc::clone(&tmux))),
             recorded_history: Arc::new(
                 crate::session_dir_recorded_history::SessionDirRecordedHistory::new(
                     self.tddy_data_dir.clone(),
@@ -177,6 +163,31 @@ impl DaemonSessionHost {
             tmux,
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
         }
+    }
+}
+
+impl DaemonSessionHost {
+    /// The host's tmux, as the terminal surface asks it.
+    fn session_tmux(&self) -> Arc<dyn TmuxHost> {
+        Arc::new(tmux_host::SessionTmux {
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            target_shell: self.launch_sessions().tab_target_shell(),
+        })
+    }
+
+    /// The roster every tab of this host's sessions is started, closed and ended through.
+    fn terminal_roster(&self, tmux: Arc<dyn TmuxHost>) -> CliManagerTerminalRoster {
+        CliManagerTerminalRoster::new(
+            Arc::clone(&self.cli_manager),
+            self.launch_coding_agents(),
+            self.tddy_data_dir.clone(),
+            tmux,
+        )
+        .with_tab_jails(
+            Arc::clone(&self.tab_jails),
+            self.launch_sessions().tab_jail_spawn(),
+        )
+        .with_tab_target_shell(self.launch_sessions().tab_target_shell())
     }
 }
 

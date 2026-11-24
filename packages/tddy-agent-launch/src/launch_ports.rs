@@ -186,6 +186,29 @@ pub struct LaunchSessions {
     /// ([`crate::tab_target_shell`], `#session-liveness` 6/8); `None` on every host but one a test
     /// gave a double.
     pub tab_target_shell: Option<Arc<dyn crate::tab_target_shell::TabTargetShell>>,
+    /// What ends a session's tabs beside its main, and the conversations open on it, when the
+    /// session is deleted (docs/ft/daemon/session-liveness.md § Closing a session).
+    pub session_tabs: Arc<dyn SessionTabEnding>,
+}
+
+/// Ends every tab of a session other than its main — each tab of its roster and each live
+/// terminal, the tmux sessions their chains record here or on the session's target, jailed tabs —
+/// and every subagent conversation open on it, here or on the daemon that runs it.
+///
+/// The terminal roster and the conversation table live in wiring above this topic, so a delete
+/// reaches them through this port (implemented once, on the host). A close ends the same tabs
+/// through the same code, one step each.
+#[async_trait::async_trait]
+pub trait SessionTabEnding: Send + Sync {
+    /// End them for session `session_id`, a target reached — and a conversation on another daemon
+    /// cancelled — with `session_token`'s account. Every tab and conversation is attempted; the
+    /// error names each one that could not be ended. A session with no directory on this daemon
+    /// has nothing to end.
+    async fn end_tabs_and_conversations(
+        &self,
+        session_id: &str,
+        session_token: &str,
+    ) -> Result<(), Status>;
 }
 
 impl LaunchSessions {

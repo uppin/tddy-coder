@@ -49,6 +49,19 @@ pub enum RemoveWorktreeError {
     Io(String),
 }
 
+impl std::fmt::Display for RemoveWorktreeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::GitFailed { message } => f.write_str(message),
+            Self::NotListed => f.write_str("the path is not one of the repository's worktrees"),
+            Self::CannotRemovePrimary => {
+                f.write_str("the repository's main worktree is never removed")
+            }
+            Self::Io(message) => write!(f, "git could not run: {message}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CleanWorktreeError {
     GitFailed { message: String },
@@ -949,6 +962,49 @@ pub fn remove_worktree_under_repo(
     }
     info!("remove_worktree_under_repo: removed {:?}", worktree_path);
     Ok(())
+}
+
+/// Remove `worktree` from `repo_root`'s repository whatever it holds — `git worktree remove
+/// --force`, then `git worktree prune` — for a caller that has already established that nothing in
+/// it would be lost (a confirmed close). A worktree already gone counts as removed: one removed
+/// before leaves nothing to do, and one whose directory was deleted outside git leaves only its
+/// registration, which the prune clears. `git worktree remove` runs only while the directory is
+/// there, since git refuses a path it does not list.
+pub fn force_remove_worktree_under_repo(
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<(), RemoveWorktreeError> {
+    info!(
+        "force_remove_worktree_under_repo: repo_root={:?} worktree_path={:?}",
+        repo_root, worktree_path
+    );
+    if worktree_path.exists() {
+        let wt_str = worktree_path.to_str().ok_or_else(|| {
+            RemoveWorktreeError::Io("worktree path is not valid UTF-8".to_string())
+        })?;
+        run_worktree_command(repo_root, &["worktree", "remove", "--force", wt_str])?;
+    }
+    run_worktree_command(repo_root, &["worktree", "prune"])
+}
+
+/// `git <args>` in `repo_root`, its stderr the error's message when it fails.
+fn run_worktree_command(repo_root: &Path, args: &[&str]) -> Result<(), RemoveWorktreeError> {
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(args)
+        .output()
+        .map_err(|e| RemoveWorktreeError::Io(e.to_string()))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    Err(RemoveWorktreeError::GitFailed {
+        message: format!(
+            "git {} failed ({:?}): {}",
+            args.join(" "),
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim_end()
+        ),
+    })
 }
 
 /// Clear a secondary worktree in place with `git clean -fdx` (drops untracked + ignored files,

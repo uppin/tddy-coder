@@ -155,18 +155,25 @@ pub(crate) async fn run_on_target(
 /// Remove a target session's worktree on its target, through `shell`: the worktree, the pointer
 /// inside it, and the clone's registration of it (`git worktree remove`, then `prune`), so the
 /// clone does not keep a dangling entry.
+///
+/// A worktree already gone counts as removed: one removed before leaves nothing to do, and one
+/// whose directory was deleted outside git leaves only its registration, which the prune clears.
+/// `git worktree remove` runs only while the directory is there, since git refuses a path it does
+/// not list.
 pub async fn remove_target_worktree(shell: &dyn RemoteShell, worktree: &str) -> Result<(), Status> {
     let root = checkout_root_of(worktree)?;
-    for command in [
-        format!(
-            "git -C {} worktree remove --force {}",
-            quoted(&root),
-            quoted(worktree)
-        ),
-        format!("git -C {} worktree prune", quoted(&root)),
-    ] {
-        run_on_target(shell, command).await?;
+    if succeeds_on_target(shell, format!("test -e {}", quoted(worktree))).await? {
+        run_on_target(
+            shell,
+            format!(
+                "git -C {} worktree remove --force {}",
+                quoted(&root),
+                quoted(worktree)
+            ),
+        )
+        .await?;
     }
+    run_on_target(shell, format!("git -C {} worktree prune", quoted(&root))).await?;
     Ok(())
 }
 

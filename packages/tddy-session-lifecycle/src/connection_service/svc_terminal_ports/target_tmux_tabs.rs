@@ -14,12 +14,12 @@
 
 use tddy_agent_launch::remote_agent_launch::{
     end_target_tmux_session_named, launch_agent_tab_on_target, launch_tmux_tab_on_target,
-    list_target_tmux_sessions, tab_launch_status, TargetTab,
+    list_target_tmux_sessions, tab_launch_status, target_tmux_session_lives, TargetTab,
 };
 use tddy_agent_launch::restore_tabs::{agent_launch_node, new_target_agent_tab, NewTargetAgentTab};
 use tddy_agent_launch::tab_target_shell::TabTarget;
 use tddy_cli_sessions::tmux::{agent_tab_tmux_session_name, tmux_session_name};
-use tddy_core::tab_roster::{LaunchNode, TabEntry, SESSION_PROPERTY, TMUX_KIND};
+use tddy_core::tab_roster::{LaunchNode, TabEntry};
 use tddy_rpc::Status;
 use tddy_terminal_rpc::service::{TerminalKind, TerminalLaunch};
 
@@ -173,30 +173,20 @@ impl CliManagerTerminalRoster {
         Ok(())
     }
 
-    /// End the tmux session a closing target tab's chain says wraps its agent, on the target, as
-    /// `subject`. A chain with no `tmux` node (a shell, an agent, a tmux attach) ends nothing there:
-    /// the tmux session a person keeps outlives a tab attached to it. A close with no subject, or a
-    /// target that cannot be resolved or reached, is logged — the tab closes either way.
-    pub(super) async fn end_target_tmux_of(
+    /// End the tmux session `name` wrapping a target tab's agent, on `session_id`'s target, as
+    /// `subject`. A tab ended with no caller cannot reach the target, and says so; so does a target
+    /// that cannot be resolved or reached, or a tmux there that refuses the kill.
+    pub(super) async fn end_target_tmux_named(
         &self,
         session_id: &str,
-        terminal_id: &str,
-        launch: &[LaunchNode],
+        name: &str,
         subject: Option<&str>,
-    ) {
-        let Some(name) = launch
-            .iter()
-            .find(|node| node.kind == TMUX_KIND)
-            .and_then(|node| node.property(SESSION_PROPERTY))
-        else {
-            return;
-        };
+    ) -> Result<(), String> {
         let Some(subject) = subject else {
-            log::warn!(
-                "terminal {terminal_id} of session {session_id} closed without a caller: its tmux \
-                 session {name:?} on the target is left running"
-            );
-            return;
+            return Err(format!(
+                "its tmux session {name:?} on the target is left running: no caller to reach the \
+                 target as"
+            ));
         };
         let ended = match self.target_for(session_id, subject) {
             Ok(target) => end_target_tmux_session_named(target.shell.as_ref(), name)
@@ -204,11 +194,25 @@ impl CliManagerTerminalRoster {
                 .map_err(|error| error.to_string()),
             Err(refusal) => Err(refusal.message().to_string()),
         };
-        if let Err(error) = ended {
-            log::warn!(
-                "terminal {terminal_id} of session {session_id} closed, but its tmux session \
-                 {name:?} on the target could not be ended: {error}"
-            );
-        }
+        ended.map_err(|error| {
+            format!("its tmux session {name:?} on the target could not be ended: {error}")
+        })
+    }
+
+    /// Whether the tmux session `name` still lives on `session_id`'s target, asked as `subject`.
+    pub(super) async fn target_tmux_lives(
+        &self,
+        session_id: &str,
+        name: &str,
+        subject: Option<&str>,
+    ) -> Result<bool, String> {
+        let subject =
+            subject.ok_or_else(|| "no caller to reach the session's target as".to_string())?;
+        let target = self
+            .target_for(session_id, subject)
+            .map_err(|refusal| refusal.message().to_string())?;
+        target_tmux_session_lives(target.shell.as_ref(), name)
+            .await
+            .map_err(|error| error.to_string())
     }
 }
