@@ -325,13 +325,68 @@ pub fn force_remove_worktree_under_repo(
         "force_remove_worktree_under_repo: repo_root={:?} worktree_path={:?}",
         repo_root, worktree_path
     );
-    if worktree_path.exists() {
-        let wt_str = worktree_path.to_str().ok_or_else(|| {
-            RemoveWorktreeError::Io("worktree path is not valid UTF-8".to_string())
-        })?;
+    let wt_str = worktree_path
+        .to_str()
+        .ok_or_else(|| RemoveWorktreeError::Io("worktree path is not valid UTF-8".to_string()))?;
+    if path_is_present(worktree_path)? {
         run_worktree_command(repo_root, &["worktree", "remove", "--force", wt_str])?;
     }
-    run_worktree_command(repo_root, &["worktree", "prune"])
+    run_worktree_command(repo_root, &["worktree", "prune"])?;
+    worktree_is_gone_from(repo_root, worktree_path)
+}
+
+/// Whether `path` is on disk. Only "no such file" is absence: a path that cannot be looked at (a
+/// parent that cannot be searched) is the error, never read as gone.
+pub fn path_is_present(path: &Path) -> Result<bool, RemoveWorktreeError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(RemoveWorktreeError::Io(format!(
+            "{} cannot be looked at: {error}",
+            path.display()
+        ))),
+    }
+}
+
+/// The post-condition of a removal: `worktree_path` is neither on disk nor among `repo_root`'s
+/// worktrees.
+fn worktree_is_gone_from(
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<(), RemoveWorktreeError> {
+    if path_is_present(worktree_path)? {
+        return Err(RemoveWorktreeError::Io(format!(
+            "{} is still there after its removal",
+            worktree_path.display()
+        )));
+    }
+    let out = Command::new("git")
+        .current_dir(repo_root)
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .map_err(|e| RemoveWorktreeError::Io(e.to_string()))?;
+    if !out.status.success() {
+        return Err(RemoveWorktreeError::GitFailed {
+            message: format!(
+                "git worktree list failed ({:?}): {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim_end()
+            ),
+        });
+    }
+    let still_listed = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .any(|listed| paths_equal(Path::new(listed), worktree_path));
+    if still_listed {
+        return Err(RemoveWorktreeError::GitFailed {
+            message: format!(
+                "the repository still lists {} among its worktrees after its removal",
+                worktree_path.display()
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// `git <args>` in `repo_root`, its stderr the error's message when it fails.
@@ -486,5 +541,97 @@ mod tests {
         match err {
             WorktreePathError::OutsideRepoRoot { .. } => {}
         }
+    }
+
+    /// `git -C <dir> <args>`, which must succeed.
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "t@t.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "t@t.com")
+            .output()
+            .expect("git runs");
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    fn set_mode(directory: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(directory, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[test]
+    fn a_forced_removal_of_a_worktree_that_cannot_be_looked_at_is_refused_and_keeps_it() {
+        // Given a repository whose worktree sits in a directory that cannot be searched
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let worktree = repo.join(".worktrees").join("wt1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt1",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        set_mode(&repo.join(".worktrees"), 0o000);
+
+        // When
+        let removed = force_remove_worktree_under_repo(&repo, &worktree);
+        set_mode(&repo.join(".worktrees"), 0o755);
+
+        // Then
+        assert_eq!(
+            (
+                removed.map_err(|error| error.to_string().contains("cannot be looked at")),
+                worktree.is_dir(),
+            ),
+            (Err(true), true)
+        );
+    }
+
+    #[test]
+    fn a_forced_removal_leaves_the_worktree_neither_on_disk_nor_listed() {
+        // Given a repository with a dirty worktree
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q", "-b", "main"]);
+        git(&repo, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        let worktree = repo.join(".worktrees").join("wt1");
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "wt1",
+                worktree.to_str().unwrap(),
+            ],
+        );
+        fs::write(worktree.join("notes.md"), "dirty\n").unwrap();
+
+        // When
+        let removed = force_remove_worktree_under_repo(&repo, &worktree);
+
+        // Then
+        assert_eq!(
+            (
+                removed.map_err(|error| error.to_string()),
+                worktree.exists(),
+                worktree_path_is_listed(&repo, &worktree),
+            ),
+            (Ok(()), false, false)
+        );
     }
 }

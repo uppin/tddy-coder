@@ -259,3 +259,54 @@ async fn removing_a_target_worktree_whose_directory_vanished_prunes_its_registra
         (Ok(()), false)
     );
 }
+
+#[tokio::test]
+async fn removing_a_target_worktree_whose_directory_cannot_be_looked_at_is_refused_and_keeps_it() {
+    // Given a target session whose worktree's parent directory on the target cannot be searched
+    let daemon = a_daemon_with_a_target_session(reachable);
+    let worktrees = daemon
+        .remote_worktree()
+        .parent()
+        .expect("the worktree sits in its clone's .worktrees")
+        .to_path_buf();
+    let locked = Unsearchable::made_of(worktrees);
+
+    // When
+    let removed = daemon.removes_the_target_worktree().await;
+    drop(locked);
+
+    // Then it is refused, and the worktree and its registration are kept: the probe could not tell
+    // the worktree was gone
+    assert_eq!(
+        (
+            removed
+                .err()
+                .map(|s| s.message().contains("cannot be told")),
+            daemon.remote_worktree().is_dir(),
+            daemon.target_clone_lists_the_worktree(),
+        ),
+        (Some(true), true, true)
+    );
+}
+
+/// Takes every permission off a directory until it is dropped, when they are given back.
+struct Unsearchable(std::path::PathBuf);
+
+impl Unsearchable {
+    fn made_of(directory: std::path::PathBuf) -> Self {
+        set_mode(&directory, 0o000);
+        Self(directory)
+    }
+}
+
+impl Drop for Unsearchable {
+    fn drop(&mut self) {
+        set_mode(&self.0, 0o755);
+    }
+}
+
+fn set_mode(directory: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(mode))
+        .unwrap_or_else(|e| panic!("chmod {mode:o} {}: {e}", directory.display()));
+}
