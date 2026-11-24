@@ -1,7 +1,7 @@
 # 2026-11-24 — A session's stop time is not recorded
 
 **Category:** Future enhancement
-**Source:** `fix/session-drawer-fold-and-sort` (changeset `docs/dev/1-WIP/2026-11-24-session-drawer-fold-and-sort.md`)
+**Source:** `fix/session-drawer-fold-and-sort` ([changeset](../../../packages/tddy-session-web/docs/changesets/2026-11-24-session-drawer-fold-and-sort.md))
 
 The sessions drawer lists the sessions under **More** most recently touched first, by the later of
 `SessionEntry.last_activity.at_unix_ms` and `SessionEntry.updated_at`
