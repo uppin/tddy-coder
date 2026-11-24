@@ -34,6 +34,7 @@ import {
   type ServiceImpl,
   type MethodImpl,
   type Interceptor,
+  type HandlerContext,
 } from "@connectrpc/connect";
 import type {
   DescService,
@@ -72,6 +73,12 @@ export interface ServerStreamFallback<
    * ends with its answer. Default `false`.
    */
   readonly holdOpen?: boolean;
+  /**
+   * The unary request the stream's request stands for, when the two differ in shape (a watch naming
+   * its queue as `queue` where the unary read names it `stack`). The unary handler receives — and
+   * `callsTo(unary)` records — what this returns. Default: the stream's request as it is.
+   */
+  readonly toRequest?: (request: MessageShape<S["input"]>) => MessageShape<U["input"]>;
 }
 
 const serverStreamFallbacks: ServerStreamFallback[] = [];
@@ -213,13 +220,14 @@ export class InMemoryRpcBackend {
           router.rpc(fallback.stream, async function* (req: unknown, ctx: unknown) {
             // The unary handler is called directly, so the call is recorded here as the unary
             // interceptor would have; a thrown ConnectError becomes the stream's error.
+            const unaryRequest = fallback.toRequest ? fallback.toRequest(req as never) : req;
             const key = requestKey(fallback.unary.parent.typeName, fallback.unary.name);
             const bucket = recording.get(key) ?? [];
-            bucket.push(req);
+            bucket.push(unaryRequest);
             recording.set(key, bucket);
-            const answer = await (unaryImpl as (r: unknown, c: unknown) => unknown)(req, ctx);
+            const answer = await (unaryImpl as (r: unknown, c: unknown) => unknown)(unaryRequest, ctx);
             yield fallback.toEvent(answer as never);
-            if (fallback.holdOpen) await untilAborted((ctx as { signal: AbortSignal }).signal);
+            if (fallback.holdOpen) await untilAborted((ctx as HandlerContext).signal);
           } as unknown as MethodImpl<DescMethod>);
         }
       },
@@ -305,7 +313,7 @@ function requestKey(serviceTypeName: string, methodName: string): string {
 }
 
 /** Resolves once `signal` aborts — immediately when it already has. */
-function untilAborted(signal: AbortSignal): Promise<void> {
+function untilAborted(signal: HandlerContext["signal"]): Promise<void> {
   if (signal.aborted) return Promise.resolve();
   return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
 }

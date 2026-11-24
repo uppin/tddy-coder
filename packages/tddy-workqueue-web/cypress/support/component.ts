@@ -3,7 +3,7 @@ import { mount } from "cypress/react";
 import type { ReactElement, ReactNode } from "react";
 import { create } from "@bufbuild/protobuf";
 import { registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import { WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
+import { GetWorkQueueRequestSchema, WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
 import { revisionOf } from "../../src/queueRevision";
 import { type MountWithClientsOverrides, withClients } from "tddy-client-web/testkit";
 import { StartPassphraseProvider } from "tddy-session-create-web";
@@ -48,4 +48,5 @@ registerServerStreamFallback({
       summary: answer.summary,
     }),
   holdOpen: true,
+  toRequest: (watch) => create(GetWorkQueueRequestSchema, { sessionToken: watch.sessionToken, stack: watch.queue }),
 });

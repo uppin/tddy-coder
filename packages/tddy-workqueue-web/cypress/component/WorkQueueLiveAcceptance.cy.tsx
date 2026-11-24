@@ -61,12 +61,14 @@ it("an item added outside the view appears in it without leaving the view", () =
   // Given — the view open on a queue holding n1
   const feed = theViewWatching();
   feed.onSubscribe((subscription) => subscription.send(2, queueAt(2, [N1])));
+  prStackScreenPage.workItemRow("n1").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1"]);
 
   // When — an orchestrator's tool adds n2
   cy.then(() => feed.subscriptions[0].send(3, queueAt(3, [N1, N2])));
 
   // Then — it shows, from the one watch the view opened on the queue's address
+  prStackScreenPage.workItemRow("n2").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);
   cy.wrap(feed).should((f) => {
     expect(f.subscriptions, "one watch").to.have.length(1);
@@ -82,9 +84,11 @@ it("an older snapshot arriving after the view's own edit does not undo it", () =
   );
   const feed = theViewWatching(viewHost);
   feed.onSubscribe((subscription) => subscription.send(2, queueAt(2, [N1, N2])));
+  prStackScreenPage.workItemRow("n2").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);
   prStackScreenPage.openAddPlannedPrForm();
   prStackScreenPage.fillAndSubmitAddPlannedPrForm({ title: "Add logout" });
+  prStackScreenPage.workItemRow("n3").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2", "n3"]);
 
   // When — a snapshot from before the edit arrives late
@@ -111,6 +115,7 @@ it("a dropped watch keeps the queue shown, says it is reconnecting, and the next
   feed.onSubscribe((subscription, index) => {
     if (index === 0) subscription.send(2, queueAt(2, [N1]));
   });
+  prStackScreenPage.workItemRow("n1").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1"]);
 
   // When — the watch drops
@@ -125,6 +130,7 @@ it("a dropped watch keeps the queue shown, says it is reconnecting, and the next
   cy.then(() => feed.subscriptions[1].send(3, queueAt(3, [N1, N2])));
 
   // Then — the resync brings it up to date and the notice goes
+  prStackScreenPage.workItemRow("n2").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1", "n2"]);
   workQueueViewPage.liveNotice().should("not.exist");
 });
@@ -135,6 +141,7 @@ it("a removed queue ends the watch for good and says why", () => {
   feed.onSubscribe((subscription, index) => {
     if (index === 0) subscription.send(2, queueAt(2, [N1]));
   });
+  prStackScreenPage.workItemRow("n1").should("exist");
   prStackScreenPage.workItemRowNodeIds().should("deep.equal", ["n1"]);
 
   // When — the queue's session is deleted

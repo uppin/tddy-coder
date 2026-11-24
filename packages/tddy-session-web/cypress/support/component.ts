@@ -3,7 +3,7 @@ import { createElement, type ReactElement } from "react";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, registerServerStreamFallback, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { SessionService, StartSessionEventSchema } from "tddy-client-web/gen/session_pb";
-import { WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
+import { GetWorkQueueRequestSchema, WorkQueueService, WorkQueueSnapshotSchema } from "tddy-client-web/gen/work_queue_pb";
 import { revisionOf } from "tddy-workqueue-web";
 import { MediaPortProvider, PresencePortProvider, RoomRpcPortProvider } from "tddy-client-web";
 import {
@@ -106,4 +106,5 @@ registerServerStreamFallback({
       summary: answer.summary,
     }),
   holdOpen: true,
+  toRequest: (watch) => create(GetWorkQueueRequestSchema, { sessionToken: watch.sessionToken, stack: watch.queue }),
 });
