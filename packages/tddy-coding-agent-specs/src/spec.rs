@@ -4,6 +4,7 @@ pub(crate) mod acp;
 pub(crate) mod argv;
 pub(crate) mod effort_slot;
 pub(crate) mod headless_section;
+pub(crate) mod model_report_slot;
 pub(crate) mod pass_env;
 pub(crate) mod route_slot;
 pub(crate) mod slot_shapes;
@@ -25,6 +26,7 @@ use crate::slots::hooks;
 use crate::spec::acp::AcpSection;
 use crate::spec::effort_slot::{validate_effort_slot, EffortSlot};
 use crate::spec::headless_section::HeadlessSection;
+use crate::spec::model_report_slot::{validate_model_report, ModelReportSource};
 use crate::spec::slot_shapes::InstructionsSlot;
 use crate::spec::turn_input_slot::{validate_turn_input_slot, TurnInputSlot};
 
@@ -188,6 +190,9 @@ fn parse_section(
             .map_err(|e| format!("turn_input: {e}"))
             .map_err(invalid)?;
     }
+    validate_model_report(&agent.model_report, agent.usage.is_some())
+        .map_err(|e| format!("model_report: {e}"))
+        .map_err(invalid)?;
     validate_home_dirs(&agent.home_dirs)
         .map_err(|e| format!("home_dirs: {e}"))
         .map_err(invalid)?;
@@ -323,6 +328,11 @@ pub struct CodingAgentSection {
     /// [`CodingAgentSpec::turn_input`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_input: Option<TurnInputSlot>,
+    /// Where a running session of this agent reports the model it is on now, so its record (and
+    /// so its resume) follows a model picked inside the agent. Empty for an agent that reports
+    /// none. Read through [`CodingAgentSpec::model_report`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_report: Vec<ModelReportSource>,
     /// The directories under the agent's home that hold its settings and chat files
     /// (`#orchestra` 1/9), each relative to that home: an orchestrator's read reach includes them
     /// under the OS user's home and under the agent's persistent tddy home. Read through
@@ -411,6 +421,12 @@ impl CodingAgentSpec {
     /// for an agent that takes no message.
     pub fn turn_input(&self) -> Option<&TurnInputSlot> {
         self.agent.turn_input.as_ref()
+    }
+
+    /// `coding_agent.model_report`: where a running session reports its current model, tried in
+    /// order; empty for an agent that reports none.
+    pub fn model_report(&self) -> &[ModelReportSource] {
+        &self.agent.model_report
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.

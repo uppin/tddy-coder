@@ -83,3 +83,91 @@ fn text_bytes(text: &str, bracketed_paste: bool) -> Vec<u8> {
         text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
     }
 }
+
+// ── typing into a live terminal: the text, its echo, then the keys ───────────────────────────────
+
+/// What typing a request writes, as the two writes it is typed in: the text (a paste when the
+/// terminal takes one), then the keys. Either may be empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Typing {
+    pub text: Vec<u8>,
+    pub keys: Vec<u8>,
+}
+
+impl Typing {
+    /// The number of bytes both writes carry.
+    pub fn len(&self) -> usize {
+        self.text.len() + self.keys.len()
+    }
+
+    /// Whether the request types nothing.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// [`encode_keys`], kept as the two writes [`type_into`] types it in.
+pub fn encode_typing(
+    text: Option<&str>,
+    keys: &[String],
+    bracketed_paste: bool,
+) -> Result<Typing, String> {
+    let _ = (text, keys, bracketed_paste);
+    todo!("encode_typing")
+}
+
+/// The terminal [`type_into`] types into: where its output stands, and a writer to its input.
+#[async_trait::async_trait]
+pub trait TypingTerminal: Send + Sync {
+    /// The terminal's output sequence point (`TextGrid::offset`): it moves whenever the
+    /// application writes to its screen.
+    async fn output_offset(&self) -> Result<u64, String>;
+    /// Write `bytes` to the terminal's input as one write.
+    async fn write(&self, bytes: Vec<u8>) -> Result<(), String>;
+}
+
+/// How long [`type_into`] waits for the application to echo the text before it presses the keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EchoWait {
+    /// Give up waiting for any echo after this long, and press the keys anyway.
+    pub no_echo_timeout: std::time::Duration,
+    /// Once the echo starts, the output must stay this long without moving to count as settled.
+    pub quiet: std::time::Duration,
+    /// Press the keys this long after the echo started even if the output never settles (a TUI
+    /// animating a spinner).
+    pub settle_cap: std::time::Duration,
+    /// How often the output offset is read.
+    pub poll: std::time::Duration,
+}
+
+impl Default for EchoWait {
+    fn default() -> Self {
+        Self {
+            no_echo_timeout: std::time::Duration::from_secs(5),
+            quiet: std::time::Duration::from_millis(30),
+            settle_cap: std::time::Duration::from_millis(500),
+            poll: std::time::Duration::from_millis(10),
+        }
+    }
+}
+
+/// What [`type_into`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Typed {
+    /// The bytes written, text and keys together.
+    pub sent_bytes: usize,
+    /// Whether the application echoed the text before the keys were pressed: `None` when nothing
+    /// was waited on (no text, or no keys after it).
+    pub echo_seen: Option<bool>,
+}
+
+/// Type `typing` into `terminal`: the text as one write, then — once the application has echoed
+/// it — the keys as a write of their own.
+pub async fn type_into(
+    terminal: &dyn TypingTerminal,
+    typing: Typing,
+    wait: &EchoWait,
+) -> Result<Typed, String> {
+    let _ = (terminal, typing, wait);
+    todo!("type_into")
+}

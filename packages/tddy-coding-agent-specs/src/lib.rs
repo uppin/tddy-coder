@@ -43,6 +43,7 @@ pub use crate::spec::slot_shapes::McpFormat;
 pub use crate::spec::slot_shapes::McpSlot;
 pub use crate::spec::slot_shapes::ToolSlot;
 pub use crate::spec::slot_shapes::Unsupported;
+pub use crate::spec::model_report_slot::ModelReportSource;
 pub use crate::spec::turn_input_slot::TurnInputSlot;
 pub use crate::spec::variant::AgentVariant;
 pub use crate::spec::variant::VariantError;

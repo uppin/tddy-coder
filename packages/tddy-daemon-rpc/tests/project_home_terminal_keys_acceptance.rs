@@ -386,8 +386,13 @@ async fn after_a_claim_send_session_keys_writes_the_encoded_bytes_and_the_screen
         )
         .await;
 
-    // Then exactly the encoded bytes reached the child's PTY ...
-    sent.assert_answered();
+    // Then it is answered with what was written, Enter having been pressed once the child echoed
+    // the text ...
+    assert_eq!(
+        sent.assert_answered(),
+        serde_json::json!({ "sent_bytes": "echo hello\r".len(), "echo_seen": true })
+    );
+    // ... exactly the encoded bytes reached the child's PTY ...
     assert_eq!(
         tui.typed_after_waiting_for(b"echo hello\r").await,
         b"echo hello\r".to_vec(),
