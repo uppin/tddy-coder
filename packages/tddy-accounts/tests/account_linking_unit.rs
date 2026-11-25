@@ -12,7 +12,8 @@ use std::collections::BTreeMap;
 
 use pretty_assertions::assert_eq;
 use tddy_accounts::{
-    record_for_link, removal_allowed, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
+    record_for_link, removal_allowed, stamped_record, LinkedIdentity, RemovalRefusal, META_SUBJECT,
+    META_SUBJECT_ID,
 };
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 
@@ -247,4 +248,65 @@ fn an_account_sharing_an_id_with_the_session_s_at_another_provider_can_be_forgot
     );
 
     assert_eq!(allowed, Ok(()));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Stamping a derived identity onto a record that predates it
+
+/// A record linked before the provider identifiers existed: no `subject_id`, no `subject`.
+fn a_record_without_identifiers() -> CredentialRecord {
+    CredentialRecord {
+        provider: github(),
+        account: AccountId::new("account-ada"),
+        label: "Ada's work account".to_string(),
+        secret: SecretString::new("the-token-from-the-first-link"),
+        metadata: BTreeMap::new(),
+        updated_at: WHEN_THE_FIRST_LINK_COMPLETED,
+        version: FIRST_VERSION,
+    }
+}
+
+#[test]
+fn stamping_writes_both_identifiers_and_preserves_everything_else() {
+    let unstamped = a_record_without_identifiers();
+
+    let stamped = stamped_record(&unstamped, &ada(), WHEN_THE_LINK_COMPLETED);
+
+    assert_eq!(
+        stamped.metadata.get(META_SUBJECT_ID),
+        Some(&"1024".to_string())
+    );
+    assert_eq!(stamped.metadata.get(META_SUBJECT), Some(&"ada".to_string()));
+    assert_eq!(stamped.account, unstamped.account);
+    assert_eq!(stamped.label, unstamped.label);
+    assert_eq!(stamped.secret.expose(), unstamped.secret.expose());
+}
+
+#[test]
+fn stamping_reads_as_newer_than_the_record_it_replaces() {
+    let unstamped = a_record_without_identifiers();
+
+    let stamped = stamped_record(&unstamped, &ada(), WHEN_THE_LINK_COMPLETED);
+
+    // The sync engine orders by version: a silent write that kept the old one would lose to a
+    // peer's copy of the record it just replaced.
+    assert_eq!(stamped.version, unstamped.version.saturating_add(1));
+    assert_eq!(stamped.updated_at, WHEN_THE_LINK_COMPLETED);
+}
+
+#[test]
+fn stamping_overwrites_stale_identifiers() {
+    let stale = a_held_account(&ada(), "account-ada", "Ada's work account");
+
+    let restamped = stamped_record(&stale, &ada_renamed(), WHEN_THE_LINK_COMPLETED);
+
+    assert_eq!(
+        restamped.metadata.get(META_SUBJECT_ID),
+        Some(&"1024".to_string())
+    );
+    assert_eq!(
+        restamped.metadata.get(META_SUBJECT),
+        Some(&"ada-lovelace".to_string())
+    );
+    assert_eq!(restamped.account, stale.account);
 }

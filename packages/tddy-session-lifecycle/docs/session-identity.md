@@ -24,6 +24,11 @@ halves derive from that outcome:
 latter logged) yield neither half. A project that does not resolve yields no pairs but **still binds a
 handler**, which refuses each request with the resolver's own message.
 
+A record the vault holds that carries no provider identifiers does not end the resolution: the
+missing half is derived — `GET /user` with the account's token — and stamped back into the vault
+record, so the start still binds pairs and a handler for the account, and the next start resolves
+directly. Only a derivation that fails refuses, as `DerivationFailed`.
+
 ### Pinned at the session's start
 
 If the start resolved an account, the handler holds that account's **id**. Every later `github-token`
@@ -43,8 +48,9 @@ token is returned per call and kept nowhere.
 
 ### A refused resolution does not stop the session
 
-When resolution fails for any reason (`NotAssigned`, `UnknownOnThisHost`, `Ambiguous`, `Unusable`, a
-locked / uninitialized / unavailable vault, no such session, no vaults configured) the session still
+When resolution fails for any reason (`NotAssigned`, `UnknownOnThisHost`, `Ambiguous`,
+`DerivationFailed`, a locked / uninitialized / unavailable vault, no such session, no vaults
+configured) the session still
 starts, with no `GIT_*` variables, and the refusal is logged at `warn`
 (`tddy_daemon::connection_service`). This is the one place the identity half is not strictly
 enforced: the agent's commits use the checkout's inherited `user.name` / `user.email`. It is not a

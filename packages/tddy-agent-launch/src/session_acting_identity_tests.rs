@@ -6,7 +6,9 @@
 use super::session_acting_identity::*;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tddy_accounts::{AccountsError, IdentityError, META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB};
+use tddy_accounts::{
+    AccountsError, IdentityError, LinkedIdentity, META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB,
+};
 use tddy_credentials::{
     AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, SessionVaults,
     FIRST_VERSION,
@@ -867,6 +869,196 @@ fn a_daemon_side_operation_on_a_local_gh_session_reads_the_token_from_gh() {
 
     // Then it is gh's
     assert_eq!(token, Ok("gho_ada_from_the_hosts_gh".to_string()));
+}
+
+// ── A missing identity is derived from the token, then persisted ────────────────────
+
+/// Ada's account as a row linked before the provider identifiers existed: a token and a label,
+/// no `subject_id`, no `subject`.
+fn a_github_account_without_identifiers(account: &str) -> CredentialRecord {
+    CredentialRecord {
+        provider: github(),
+        account: AccountId::new(account),
+        label: "Ada's work account".to_string(),
+        secret: SecretString::new("ghp_ada_token"),
+        metadata: BTreeMap::new(),
+        updated_at: 1_700_000_000,
+        version: FIRST_VERSION,
+    }
+}
+
+/// GitHub standing in for itself: asked with Ada's token, it answers Ada, user 101. A value, not
+/// the network — the derivation takes its probe as one.
+fn a_github_answering_ada() -> AccountIdentityProbe {
+    Arc::new(|token: &str| {
+        assert_eq!(token, "ghp_ada_token");
+        Ok(LinkedIdentity {
+            subject_id: "101".to_string(),
+            login: "ada".to_string(),
+        })
+    })
+}
+
+/// GitHub refusing every question, as it would a revoked token.
+fn a_github_answering_nothing() -> AccountIdentityProbe {
+    Arc::new(|_: &str| {
+        Err(
+            "GitHub API GET https://api.github.com/user returned HTTP 401: Bad credentials"
+                .to_string(),
+        )
+    })
+}
+
+#[test]
+fn a_commit_through_an_account_without_identifiers_derives_and_persists_them() {
+    // Given Ada's unlocked vault holding her account with no provider identifiers
+    let (_dir, vaults) =
+        vaults_where_ada_unlocked(vec![a_github_account_without_identifiers("acct-ada")]);
+    let access = access_with(Some(Arc::clone(&vaults)), ADAS_SESSION)
+        .with_user_probe(a_github_answering_ada());
+
+    // When her session's start resolves a project assigned to it
+    let identity = access.session_identity("s1", Some(&assigned("acct-ada")));
+
+    // Then the commits are hers, derived from the token — not refused
+    assert_eq!(
+        pair(&identity.git_environment, "GIT_AUTHOR_NAME"),
+        Some("ada")
+    );
+    assert_eq!(
+        pair(&identity.git_environment, "GIT_AUTHOR_EMAIL"),
+        Some("101+ada@users.noreply.github.com")
+    );
+    // And the vault's record now carries the identifiers, so the next start resolves directly
+    let restamped = vaults
+        .get(ADA)
+        .expect("Ada's vault is open")
+        .get(&github(), &AccountId::new("acct-ada"))
+        .expect("the vault reads")
+        .expect("the record is still held");
+    assert_eq!(
+        restamped.metadata.get(META_SUBJECT_ID),
+        Some(&"101".to_string())
+    );
+    assert_eq!(
+        restamped.metadata.get(META_SUBJECT),
+        Some(&"ada".to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_derived_start_binds_a_handler_for_the_derived_account() {
+    // Given Ada's unlocked vault holding her account with no provider identifiers
+    let (_dir, vaults) =
+        vaults_where_ada_unlocked(vec![a_github_account_without_identifiers("acct-ada")]);
+    let access = access_with(Some(vaults), ADAS_SESSION).with_user_probe(a_github_answering_ada());
+
+    // When her session's start resolves a project assigned to it
+    let identity = access.session_identity("s1", Some(&assigned("acct-ada")));
+
+    // Then the tools' token is hers: the start pinned her account, not a refusal
+    let token = identity
+        .github_credential
+        .expect("a handler is bound")
+        .github_token()
+        .await;
+    assert_eq!(token, Ok("ghp_ada_token".to_string()));
+}
+
+#[test]
+fn a_commit_when_derivation_fails_is_refused_with_the_reason() {
+    // Given Ada's unlocked vault holding her account with no provider identifiers, and a GitHub
+    // that will not say who its token belongs to
+    let (_dir, access) =
+        a_daemon_where_ada_unlocked(vec![a_github_account_without_identifiers("acct-ada")]);
+    let access = access.with_user_probe(a_github_answering_nothing());
+
+    // When the commit path resolves a project assigned to it
+    let refusal = access
+        .acting_identity(&assigned("acct-ada"))
+        .expect_err("there is no identity to commit under");
+
+    // Then the refusal names the account, the missing key, GitHub's reason, and the remedy
+    assert_eq!(
+        refusal,
+        SessionIdentityRefusal::Identity(IdentityError::DerivationFailed {
+            provider: github(),
+            account: AccountId::new("acct-ada"),
+            missing: META_SUBJECT_ID,
+            reason: "GitHub API GET https://api.github.com/user returned HTTP 401: Bad credentials"
+                .to_string(),
+        })
+    );
+    let message = refusal.to_string();
+    assert!(message.contains("acct-ada"), "got: {message}");
+    assert!(message.contains("401"), "got: {message}");
+    assert!(message.contains("link the account again"), "got: {message}");
+    // And the session still starts, under the checkout's identity, its tools refused alike
+    let identity = access.session_identity("s1", Some(&assigned("acct-ada")));
+    assert!(identity.git_environment.is_empty());
+}
+
+#[tokio::test]
+async fn a_derivation_failure_binds_a_handler_that_refuses_with_the_reason() {
+    // Given Ada's unlocked vault holding her account with no provider identifiers, and a GitHub
+    // that will not say who its token belongs to
+    let (_dir, access) =
+        a_daemon_where_ada_unlocked(vec![a_github_account_without_identifiers("acct-ada")]);
+    let access = access.with_user_probe(a_github_answering_nothing());
+
+    // When her session's start resolves a project assigned to it
+    let identity = access.session_identity("s1", Some(&assigned("acct-ada")));
+
+    // Then the tools' request is refused with the derivation's reason
+    let token = identity
+        .github_credential
+        .expect("a handler is bound")
+        .github_token()
+        .await;
+    let refusal = token.expect_err("the start was refused");
+    assert!(refusal.contains("acct-ada"), "got: {refusal}");
+    assert!(refusal.contains("401"), "got: {refusal}");
+}
+
+// ── Reads never touch the identity ─────────────────────────────────────────────
+
+#[test]
+fn a_daemon_side_operation_reads_the_token_of_an_account_without_identifiers() {
+    // Given Ada's unlocked vault holding her account with no provider identifiers
+    let (_dir, vaults) =
+        vaults_where_ada_unlocked(vec![a_github_account_without_identifiers("acct-ada")]);
+
+    // When a daemon-side operation resolves the project's token (over the production probe,
+    // which this path must never call — there is no network in this test)
+    let token = project_github_token(
+        Some(vaults),
+        Arc::new(ada_is_ada),
+        ADAS_SESSION,
+        &assigned("acct-ada"),
+    );
+
+    // Then it is hers
+    assert_eq!(token, Ok("ghp_ada_token".to_string()));
+}
+
+#[test]
+fn a_token_only_resolution_never_asks_who_the_token_belongs_to() {
+    // Given Ada's unlocked vault holding her account with no provider identifiers, and a probe
+    // that fails the test if it is ever asked
+    let (_dir, access) =
+        a_daemon_where_ada_unlocked(vec![a_github_account_without_identifiers("acct-ada")]);
+    let access = access.with_user_probe(Arc::new(|_: &str| -> Result<LinkedIdentity, String> {
+        panic!("a read must never derive an identity")
+    }));
+
+    // When a read resolves the project's token
+    let token = access
+        .acting_token(&assigned("acct-ada"))
+        .expect("ada is assigned");
+
+    // Then it is hers, and the probe was never asked
+    assert_eq!(token.account, AccountId::new("acct-ada"));
+    assert_eq!(token.token, "ghp_ada_token");
 }
 
 #[test]

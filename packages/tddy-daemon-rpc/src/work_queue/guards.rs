@@ -13,7 +13,7 @@ use tddy_rpc::Status;
 /// Only a node that owns a branch has a pull request to re-target; a plan-only repoint rewrites the
 /// plan and nothing else, so it is never refused for want of an account — and never asks the vault
 /// for one. The refusal comes **before** the plan is rewritten, so a refused repoint changes
-/// nothing. `resolve` is the project's account (`tddy_accounts::acting_identity`); there is no
+/// nothing. `resolve` is the project's account (`tddy_accounts::acting_token`); there is no
 /// other source, the process environment included.
 pub(crate) fn token_for_repoint(
     node_owns_branch: bool,

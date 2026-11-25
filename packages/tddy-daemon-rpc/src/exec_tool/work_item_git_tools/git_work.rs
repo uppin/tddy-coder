@@ -95,11 +95,13 @@ pub(super) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-pub(super) fn project_token(
+/// The token of the project's GitHub account: the host's `gh` login for a Local gh project,
+/// else `resolve` — the vault resolution the caller closes over.
+fn project_token_resolving(
     project: &ProjectData,
-    identity: &SessionAccountAccess,
     github_cli: &GithubCli,
     os_user: &str,
+    resolve: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
     if project.local_gh {
         tddy_agent_launch::session_acting_identity::local_gh_github_token(
@@ -108,11 +110,41 @@ pub(super) fn project_token(
             &project.git_url,
         )
     } else {
+        resolve()
+    }
+}
+
+/// The project's account token for GitHub API calls — token-only, so a record that predates the
+/// provider identifiers still answers.
+pub(super) fn project_token(
+    project: &ProjectData,
+    identity: &SessionAccountAccess,
+    github_cli: &GithubCli,
+    os_user: &str,
+) -> Result<String, String> {
+    project_token_resolving(project, github_cli, os_user, || {
+        identity
+            .acting_token(&project.accounts)
+            .map(|acting| acting.token)
+            .map_err(|refusal| refusal.to_string())
+    })
+}
+
+/// The project's account token for pushing — the paired resolution, so the pusher is an account
+/// with a commit identity, derived and persisted on first use when the record predates the
+/// identifiers.
+pub(super) fn project_push_token(
+    project: &ProjectData,
+    identity: &SessionAccountAccess,
+    github_cli: &GithubCli,
+    os_user: &str,
+) -> Result<String, String> {
+    project_token_resolving(project, github_cli, os_user, || {
         identity
             .acting_identity(&project.accounts)
             .map(|acting| acting.token)
             .map_err(|refusal| refusal.to_string())
-    }
+    })
 }
 
 impl GitEnv {
@@ -367,7 +399,8 @@ impl GitEnv {
             .unwrap_or_else(|_| base_ref.to_string());
         tddy_work_queue::git_ops::rebase_onto(&repo_root, base_ref, &old_base, branch)
             .map_err(|e| format!("rebase of {branch} onto {base_branch} failed: {e}"))?;
-        let token = project_token(&project, &self.identity, &self.github_cli, &self.os_user).ok();
+        let token =
+            project_push_token(&project, &self.identity, &self.github_cli, &self.os_user).ok();
         let identity = PushIdentity {
             env: Vec::new(),
             remote_name: Some(remote.clone()),

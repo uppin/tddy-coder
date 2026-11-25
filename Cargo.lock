@@ -12259,6 +12259,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-discovery",
+ "tddy-github",
  "tddy-host-service",
  "tddy-projects",
  "tddy-pty",

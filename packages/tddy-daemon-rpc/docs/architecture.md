@@ -193,10 +193,11 @@ tool-path and agent-definition free functions the handlers call are defined in
 
 `RepointWorkItem` resolves the project's account itself, not through a login-keyed credential: the
 orchestrator's project is read from its `.session.yaml`, its `accounts` from the project row, and
-`project_github_token(vaults, user_resolver, caller's token, accounts)` runs one `acting_identity` over
-the caller's own vault
-([resolution](../../tddy-accounts/docs/github-identity-resolution.md)). Only a node that **owns a
-branch** needs GitHub (it has a PR to re-target); a plan-only repoint reaches no GitHub call, so it is
+`project_github_token(vaults, user_resolver, caller's token, accounts)` runs one token-only
+resolution over the caller's own vault
+([resolution](../../tddy-accounts/docs/github-identity-resolution.md)): a repoint files a PR change
+and authors nothing, so it never needs — and never derives — a commit identity. Only a node that
+**owns a branch** needs GitHub (it has a PR to re-target); a plan-only repoint reaches no GitHub call, so it is
 never refused and never opens the vault (`guards::token_for_repoint`). A refusal is
 `FAILED_PRECONDITION` carrying the resolver's words, returned **before** the plan is rewritten, so a
 refused repoint changes nothing.

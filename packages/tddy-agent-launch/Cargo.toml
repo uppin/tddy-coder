@@ -22,6 +22,9 @@ tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
+# `user_api::fetch_authenticated_user`: what a missing commit identity is derived from.
+# Workspace-internal; nothing in its tree names this crate, so the edge is acyclic.
+tddy-github = { path = "../tddy-github" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-work-queue = { path = "../tddy-work-queue" }
 tddy-projects = { path = "../tddy-projects" }
