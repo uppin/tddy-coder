@@ -351,10 +351,10 @@ graph LR
 ## Milestones
 
 ### M1 — `TmuxLocation` port, host adapter, host paths ported (behaviour-preserving but D6)
-- [ ] `tmux_location.rs`: trait, `TmuxClient`, `TmuxUnreachable`, `HostTmux`, `FakeTmuxLocation`
-- [ ] `TmuxRun` carries a location; `DetachWatch`, `classify_ended_main`, `reattach_terminal`,
+- [x] `tmux_location.rs`: trait, `TmuxClient`, `TmuxUnreachable`, `HostTmux`, `FakeTmuxLocation`
+- [x] `TmuxRun` carries a location; `DetachWatch`, `classify_ended_main`, `reattach_terminal`,
       `attach_terminal_to_tmux` ported; host start/startup/lazy call sites pass `HostTmux`
-- [ ] watcher backoff + grace (D4) implemented in `DetachWatch`
+- [x] watcher backoff + grace (D4) implemented in `DetachWatch`
 
 ## Testing Strategy
 
