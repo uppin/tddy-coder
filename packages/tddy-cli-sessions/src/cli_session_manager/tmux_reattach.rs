@@ -158,6 +158,11 @@ impl DetachWatch {
         loop {
             tokio::time::sleep(backoff.delay()).await;
             if self.terminal_is_registered(&session_id).await {
+                self.watchers
+                    .write()
+                    .await
+                    .held
+                    .remove(&(session_id.clone(), self.terminal_id.clone()));
                 return;
             }
             match location.session_lives(&session).await {
@@ -178,6 +183,11 @@ impl DetachWatch {
                         "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
                     );
                     self.detached_agent_ended(&session_id, &os_user).await;
+                    self.watchers
+                        .write()
+                        .await
+                        .held
+                        .remove(&(session_id.clone(), self.terminal_id.clone()));
                     return;
                 }
                 Err(error) => {
@@ -541,6 +551,15 @@ mod tests {
         assert_eq!(end.session_id, "session-1");
         assert_eq!(end.os_user.as_deref(), Some("user"));
         assert_eq!(end.exit_code, None);
+
+        // And the watcher no longer holds the session live
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!manager
+            .detached_watchers
+            .read()
+            .await
+            .watched_sessions()
+            .contains(&"session-1".to_string()));
     }
 
     #[tokio::test]
