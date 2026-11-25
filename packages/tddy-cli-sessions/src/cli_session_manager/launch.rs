@@ -104,6 +104,7 @@ impl CliSessionManager {
             os_user,
             on_exit,
             None,
+            None,
         )
         .await
     }
@@ -136,6 +137,7 @@ impl CliSessionManager {
             client.env,
             tddy_pty::PtyEnvBase::Cleared,
             client.exit_code_in_output,
+            None,
             None,
             None,
             None,

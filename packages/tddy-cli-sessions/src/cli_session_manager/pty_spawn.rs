@@ -118,6 +118,7 @@ impl CliSessionManager {
             os_user,
             on_exit,
             tmux_session,
+            None,
         )
         .await
     }
@@ -140,6 +141,7 @@ impl CliSessionManager {
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
         tmux_session: Option<&str>,
+        tmux_location: Option<crate::tmux_location::SharedTmuxLocation>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let mut spec = build_pty_spawn_spec(
@@ -199,6 +201,7 @@ impl CliSessionManager {
             (session_id, terminal_id, kind),
             os_user,
             tmux_session,
+            tmux_location,
             handle,
             on_exit,
         )
@@ -209,6 +212,7 @@ impl CliSessionManager {
         (session_id, terminal_id, kind): (&str, &str, &str),
         os_user: Option<&str>,
         tmux_session: Option<&str>,
+        tmux_location: Option<crate::tmux_location::SharedTmuxLocation>,
         handle: super::PtyHandle,
         on_exit: Option<PendingExit>,
     ) -> anyhow::Result<Arc<super::PtyHandle>> {
@@ -220,7 +224,11 @@ impl CliSessionManager {
             on_exit,
             // A tmux attach of the user's own session is a client of nothing the session keeps; a
             // main, or a tab wrapping an agent in tmux, is a client of its agent.
-            TmuxRun::new(tmux_session.filter(|_| kind != TMUX_KIND), os_user),
+            TmuxRun::with_location(
+                tmux_session.filter(|_| kind != TMUX_KIND),
+                os_user,
+                tmux_location,
+            ),
         );
 
         finish_spawned_terminal(session_id, terminal_id, kind, handle)

@@ -4,3 +4,7 @@ pub mod process_start;
 pub mod session_toolcall;
 pub mod tab_roster_store;
 pub mod tmux;
+pub mod tmux_location;
+
+#[cfg(test)]
+mod tmux_location_tests;
