@@ -15,7 +15,7 @@ use tddy_agent_launch::back_channel::{
     ChildPlacement, RemoteMessage,
 };
 use tddy_agent_launch::remote_hook_follower::{
-    ActivityHookSink, HookLine, HookReportDelivery, HookSink,
+    ActivityHookSink, HookDeliveryError, HookLine, HookReportDelivery, HookSink,
 };
 use tddy_coding_agent_specs::{embedded_spec, CodingAgentSpec};
 use tddy_service::proto::activity::{
@@ -56,25 +56,28 @@ impl HookReportDelivery for AnOrchestratorsDaemon {
     async fn report_session_status(
         &self,
         _request: ReportSessionStatusRequest,
-    ) -> Result<ReportSessionStatusResponse, String> {
+    ) -> Result<ReportSessionStatusResponse, HookDeliveryError> {
         Ok(ReportSessionStatusResponse::default())
     }
 
     async fn await_question_answer(
         &self,
         _request: AwaitQuestionAnswerRequest,
-    ) -> Result<AwaitQuestionAnswerResponse, String> {
+    ) -> Result<AwaitQuestionAnswerResponse, HookDeliveryError> {
         Ok(AwaitQuestionAnswerResponse::default())
     }
 
     async fn report_agent_activity(
         &self,
         _request: ReportAgentActivityRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), HookDeliveryError> {
         Ok(())
     }
 
-    async fn post_message_to_orchestrator(&self, message: RemoteMessage) -> Result<(), String> {
+    async fn post_message_to_orchestrator(
+        &self,
+        message: RemoteMessage,
+    ) -> Result<(), HookDeliveryError> {
         self.posted.lock().unwrap().push(message);
         Ok(())
     }

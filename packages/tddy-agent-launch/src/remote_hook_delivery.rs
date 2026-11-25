@@ -16,9 +16,68 @@ use tddy_remote_shell::RemoteShell;
 
 use crate::remote_hook_follower::{HookLine, HookSink};
 
+/// Why a followed report was refused: the activity service's `Status`, carried across the
+/// in-process delivery so the follower can tell a report its session is not registered for yet
+/// (held and retried, n1) from any other refusal (consumed). Defined here, not as `tddy_rpc::Status`
+/// itself, so implementors outside this crate (the session driver, the tests) need no new
+/// dependency to name it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookDeliveryError {
+    code: tddy_rpc::Code,
+    message: String,
+}
+
+impl HookDeliveryError {
+    /// The refusal of `status`, as the activity service answered it.
+    pub fn from_status(status: tddy_rpc::Status) -> Self {
+        Self {
+            code: status.code(),
+            message: status.message().to_string(),
+        }
+    }
+
+    /// A refusal for a reason the activity service never gives (a delivery that serves no
+    /// transcripts, no session messages): `FAILED_PRECONDITION`, never retried.
+    pub fn failed_precondition(message: impl Into<String>) -> Self {
+        Self {
+            code: tddy_rpc::Code::FailedPrecondition,
+            message: message.into(),
+        }
+    }
+
+    /// The refusal of a report its session is not registered for yet, as `hook_session` answers
+    /// it: `NOT_FOUND` with [`tddy_session_activity::SESSION_NOT_REGISTERED_YET`]. For the tests
+    /// that hold a line until registration.
+    pub fn session_not_registered_yet() -> Self {
+        Self {
+            code: tddy_rpc::Code::NotFound,
+            message: tddy_session_activity::SESSION_NOT_REGISTERED_YET.to_string(),
+        }
+    }
+
+    /// The RPC code of the refusal.
+    pub fn code(&self) -> tddy_rpc::Code {
+        self.code
+    }
+
+    /// The refusal's message, as the activity service worded it.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for HookDeliveryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for HookDeliveryError {}
+
 /// The daemon end of a delivered hook: the two hook reports a local `tddy-tools session-hook`
-/// makes, served in-process. Implemented on the session host, which owns the activity service;
-/// a report the handling refuses is the delivery's error, never retried by the follower.
+/// makes, served in-process. Implemented on the session host, which owns the activity service.
+/// A report the handling refuses is the delivery's error: the follower holds and retries one the
+/// session is not registered for yet (n1), and consumes every other refusal.
 #[async_trait]
 pub trait HookReportDelivery: Send + Sync {
     /// Serve one `ReportSessionStatus` request, as the activity service's RPC does, and return its
@@ -26,30 +85,30 @@ pub trait HookReportDelivery: Send + Sync {
     async fn report_session_status(
         &self,
         request: tddy_service::proto::activity::ReportSessionStatusRequest,
-    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String>;
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, HookDeliveryError>;
     /// Hold for the orchestrator's answer to a recorded request, as the activity service's
     /// `AwaitQuestionAnswer` does for a local hook: the same presence check, the same recorded
     /// wait, the same outcomes.
     async fn await_question_answer(
         &self,
         request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
-    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String>;
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, HookDeliveryError>;
     /// Serve one `ReportAgentActivity` request, as the activity service's RPC does.
     async fn report_agent_activity(
         &self,
         request: tddy_service::proto::activity::ReportAgentActivityRequest,
-    ) -> Result<(), String>;
+    ) -> Result<(), HookDeliveryError>;
     /// Record one line of a session's agent transcript, already mapped by its spec, as the activity
     /// service's `record_transcript_line` does — the session on this host or on a target alike. A
     /// delivery that records no transcripts refuses it, naming why; the session host's records them.
     async fn record_transcript_line(
         &self,
         line: tddy_session_activity::TranscriptLine,
-    ) -> Result<(), String> {
-        Err(format!(
+    ) -> Result<(), HookDeliveryError> {
+        Err(HookDeliveryError::failed_precondition(format!(
             "this hook delivery records no transcripts; a line of {}'s was not recorded",
             line.session_id
-        ))
+        )))
     }
     /// Post a target child's report to its orchestrator as a session message (`#orchestra` 2/9),
     /// as `PostSessionMessage` from the child would. A delivery that serves no session messages
@@ -57,18 +116,33 @@ pub trait HookReportDelivery: Send + Sync {
     async fn post_message_to_orchestrator(
         &self,
         message: crate::back_channel::RemoteMessage,
-    ) -> Result<(), String> {
-        Err(format!(
+    ) -> Result<(), HookDeliveryError> {
+        Err(HookDeliveryError::failed_precondition(format!(
             "this hook delivery posts no session messages; {}'s report was not delivered",
             message.session_id
-        ))
+        )))
     }
 }
 
+/// Whether `error` refuses a report only because its session is not registered yet: the start
+/// writes `.session.yaml` after the launch, and the session's followers start inside it. A refused
+/// line with this error is held and retried until the session exists, never treated as consumed.
+pub(crate) fn session_not_registered_yet(error: &HookDeliveryError) -> bool {
+    error.code() == tddy_rpc::Code::NotFound
+        && error.message() == tddy_session_activity::SESSION_NOT_REGISTERED_YET
+}
+
+/// How long a sink first waits before retrying a report its session is not registered for
+/// yet; each retry doubles it, up to [`REGISTRATION_RETRY_MAX`]. The start writes
+/// `.session.yaml` seconds after the follower starts, so the first hooks wait rather than drop.
+const REGISTRATION_RETRY: std::time::Duration = std::time::Duration::from_millis(100);
+const REGISTRATION_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// The production [`HookSink`]: each followed hook is mapped to the daemon's hook reports by
 /// the one payload-to-request mapping (`tddy_session_activity::hook_request`, which the local
-/// `tddy-tools session-hook` also reports with) and served through `delivery`. A refused report
-/// is logged and the next hook still arrives: a hook must never block on the daemon's answer.
+/// `tddy-tools session-hook` also reports with) and served through `delivery`. A report refused
+/// only because its session is not registered yet is held and retried until the session exists
+/// (n1); any other refusal is logged and the next hook still arrives.
 pub struct ActivityHookSink {
     delivery: Arc<dyn HookReportDelivery>,
     session_id: String,
@@ -165,13 +239,17 @@ impl HookSink for ActivityHookSink {
             })
             .flatten()
         {
-            let request_id = match self.delivery.report_session_status(request).await {
+            let request_id = match self
+                .report_status_holding_for_registration(&line.event, request)
+                .await
+            {
                 Ok(response) => Some(response.request_id),
                 Err(error) => {
                     log::warn!(
-                        "remote hook {} for session {} refused: {error}",
+                        "remote hook {} for session {} refused: {}",
                         line.event,
-                        self.session_id
+                        self.session_id,
+                        error.message()
                     );
                     None
                 }
@@ -185,13 +263,97 @@ impl HookSink for ActivityHookSink {
             &self.hook_token,
             &self.os_user,
         ) {
-            if let Err(error) = self.delivery.report_agent_activity(request).await {
+            if let Err(error) = self
+                .report_activity_holding_for_registration(&line.event, request)
+                .await
+            {
                 log::warn!(
-                    "remote agent activity {} for session {} refused: {error}",
+                    "remote agent activity {} for session {} refused: {}",
                     line.event,
-                    self.session_id
+                    self.session_id,
+                    error.message()
                 );
             }
+        }
+    }
+}
+
+impl ActivityHookSink {
+    /// Serve one status report, holding and retrying while its session is not registered yet.
+    async fn report_status_holding_for_registration(
+        &self,
+        event: &str,
+        request: tddy_service::proto::activity::ReportSessionStatusRequest,
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, HookDeliveryError> {
+        let mut wait = REGISTRATION_RETRY;
+        let mut held = false;
+        loop {
+            match self.delivery.report_session_status(request.clone()).await {
+                Err(status) if session_not_registered_yet(&status) => {
+                    if !held {
+                        held = true;
+                        log::info!(
+                            "remote hook {event} for session {} waits for registration",
+                            self.session_id
+                        );
+                    }
+                    tokio::time::sleep(wait).await;
+                    wait = (wait * 2).min(REGISTRATION_RETRY_MAX);
+                }
+                outcome => return outcome,
+            }
+        }
+    }
+
+    /// Serve one activity report, holding and retrying while its session is not registered yet.
+    async fn report_activity_holding_for_registration(
+        &self,
+        event: &str,
+        request: tddy_service::proto::activity::ReportAgentActivityRequest,
+    ) -> Result<(), HookDeliveryError> {
+        let mut wait = REGISTRATION_RETRY;
+        let mut held = false;
+        loop {
+            match self.delivery.report_agent_activity(request.clone()).await {
+                Err(status) if session_not_registered_yet(&status) => {
+                    if !held {
+                        held = true;
+                        log::info!(
+                            "remote agent activity {event} for session {} waits for registration",
+                            self.session_id
+                        );
+                    }
+                    tokio::time::sleep(wait).await;
+                    wait = (wait * 2).min(REGISTRATION_RETRY_MAX);
+                }
+                outcome => return outcome,
+            }
+        }
+    }
+}
+
+/// Hold `record_transcript_line`'s delivery while its session is not registered yet, for the
+/// transcript follower: the same wait the hook sink holds its reports with.
+pub(crate) async fn record_transcript_holding_for_registration(
+    delivery: &Arc<dyn HookReportDelivery>,
+    line: tddy_session_activity::TranscriptLine,
+) -> Result<(), HookDeliveryError> {
+    let mut wait = REGISTRATION_RETRY;
+    let mut held = false;
+    loop {
+        match delivery.record_transcript_line(line.clone()).await {
+            Err(status) if session_not_registered_yet(&status) => {
+                if !held {
+                    held = true;
+                    log::info!(
+                        "agent transcript line of session {} waits for registration",
+                        line.session_id
+                    );
+                }
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(REGISTRATION_RETRY_MAX);
+            }
+            outcome => return outcome,
         }
     }
 }

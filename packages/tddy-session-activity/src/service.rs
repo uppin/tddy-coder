@@ -53,6 +53,12 @@ pub use crate::service::ports::{
     SessionDeltaStores, SessionLabels,
 };
 
+/// The `NOT_FOUND` message a hook report carries when its session's `.session.yaml` is not on
+/// disk yet: the start writes it after the launch, and the session's followers start inside the
+/// launch (n1). A follower holding a refused line retries on exactly this, so a refused line is
+/// never treated as consumed.
+pub const SESSION_NOT_REGISTERED_YET: &str = "session not found";
+
 /// The `activity.ActivityService` implementation.
 pub struct ActivityServiceImpl {
     ports: ActivityPorts,
@@ -168,7 +174,7 @@ impl ActivityServiceImpl {
         session_dir: &std::path::Path,
     ) -> Result<tddy_core::SessionMetadata, Status> {
         tddy_core::read_session_metadata(session_dir)
-            .map_err(|_| Status::not_found("session not found"))
+            .map_err(|_| Status::not_found(SESSION_NOT_REGISTERED_YET))
     }
 
     /// Raise one notification for `session_id`, owned by `os_user`, when there is one to raise.

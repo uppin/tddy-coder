@@ -106,6 +106,16 @@ impl ToolTurns {
     }
 
     /// The hooks reported the session's turn ending at `at_unix_ms`.
+    ///
+    /// Unpaired transcript calls are dropped with it: the turn's hooks all fired already (a `Done`
+    /// ends the turn), so anything the transcript reported that no hook paired with belongs to an
+    /// earlier turn whose hooks never arrived (n1's lost first turn) or to a re-read line (n2) —
+    /// and left in place it would pair with the *next* turn's hooks of the same tool, consuming
+    /// them before the next turn's transcript arrives and leaving its opening text with no
+    /// unreached hook to be stamped before (n3). Cursor's file carries almost no `turn_ended`
+    /// lines (one in 142), so the transcript's own end of the turn cannot be relied on to clear
+    /// them. The hooks' own unpaired calls stay: a follower that is behind pairs them when the
+    /// transcript gets here.
     pub fn hooks_turn_ended(&self, session_id: &str, at_unix_ms: u64) {
         let mut turns = self.turns.lock().unwrap_or_else(|p| p.into_inner());
         let turn = turns.entry(session_id.to_string()).or_default();
@@ -113,6 +123,8 @@ impl ToolTurns {
             turn.hook_turn_ends.pop_front();
         }
         turn.hook_turn_ends.push_back(at_unix_ms);
+        turn.unpaired
+            .retain(|(source, _)| *source == ToolCallSource::Hooks);
     }
 
     /// The transcript reached the session's turn's end: nothing either source reported in that turn

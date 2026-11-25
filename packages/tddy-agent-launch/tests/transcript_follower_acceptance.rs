@@ -4,8 +4,8 @@
 //!
 //! - **Path.** On a target the transcript is the target's: its path is rendered with the target
 //!   shell's `$HOME` and the target's worktree, never this host's.
-//! - **Pty.** `coder ssh` (and an ssh that allocates one) runs the follower's `tail` in a pty; the
-//!   offset still counts the file's bytes, so a reopened stream starts where delivery stopped.
+//! - **Rewrite.** Cursor rewrites its transcript atomically on every new prompt; polling reads
+//!   only the new suffix, so a new prompt, a reattach and a resume each append only new lines.
 //! - **tmux.** An agent in tmux outlives its follower — a dropped connection, a re-attach, a
 //!   restarted daemon. A follower started again with the session's persisted offset reads on from
 //!   the last line delivered while the agent kept writing: nothing lost, nothing twice.
@@ -19,13 +19,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
-use tddy_agent_launch::log_follower::{tail_command, FileFollower, FollowOffset};
-use tddy_agent_launch::remote_hook_follower::HookReportDelivery;
+use tddy_agent_launch::log_follower::FileFollower;
+use tddy_agent_launch::remote_hook_follower::{HookDeliveryError, HookReportDelivery};
 use tddy_agent_launch::transcript_follower::{
     follow_transcript, home_on, transcript_offset, transcript_path, TranscriptOwner,
 };
 use tddy_coding_agent_specs::{TranscriptEntry, TranscriptSource};
-use tddy_remote_shell::{ExecOutput, InMemoryShell, LocalShell, ShellCall};
+use tddy_remote_shell::{ExecOutput, InMemoryShell, LocalShell};
 use tddy_service::proto::activity::{
     AwaitQuestionAnswerRequest, AwaitQuestionAnswerResponse, ReportAgentActivityRequest,
     ReportSessionStatusRequest, ReportSessionStatusResponse,
@@ -37,8 +37,6 @@ const SESSION_ID: &str = "01a20f05-97d8-7221-85bc-d879ececfb62";
 const CHAT_ID: &str = "6a42ca72-f90d-4d19-9b8e-618ece0956b5";
 const TARGET_WORKTREE: &str =
     "/home/coder/.tddy/repos/qape-hq/.worktrees/01a20f05-97d8-7221-85bc-d879ececfb62";
-const TARGET_HOOK_LOG: &str =
-    "/home/coder/.tddy/repos/qape-hq/.worktrees/01a20f05-97d8-7221-85bc-d879ececfb62/.tddy/hooks.log";
 /// Where Cursor on the target writes the session's transcript.
 const TARGET_TRANSCRIPT: &str = "/home/coder/.cursor/projects/\
     home-coder-tddy-repos-qape-hq-worktrees-01a20f05-97d8-7221-85bc-d879ececfb62/\
@@ -87,22 +85,31 @@ impl HookReportDelivery for TheDaemonsActivity {
     async fn report_session_status(
         &self,
         _: ReportSessionStatusRequest,
-    ) -> Result<ReportSessionStatusResponse, String> {
-        Err("no hook is delivered here".to_string())
+    ) -> Result<ReportSessionStatusResponse, HookDeliveryError> {
+        Err(HookDeliveryError::failed_precondition(
+            "no hook is delivered here",
+        ))
     }
 
     async fn await_question_answer(
         &self,
         _: AwaitQuestionAnswerRequest,
-    ) -> Result<AwaitQuestionAnswerResponse, String> {
-        Err("no hook is delivered here".to_string())
+    ) -> Result<AwaitQuestionAnswerResponse, HookDeliveryError> {
+        Err(HookDeliveryError::failed_precondition(
+            "no hook is delivered here",
+        ))
     }
 
-    async fn report_agent_activity(&self, _: ReportAgentActivityRequest) -> Result<(), String> {
-        Err("no hook is delivered here".to_string())
+    async fn report_agent_activity(
+        &self,
+        _: ReportAgentActivityRequest,
+    ) -> Result<(), HookDeliveryError> {
+        Err(HookDeliveryError::failed_precondition(
+            "no hook is delivered here",
+        ))
     }
 
-    async fn record_transcript_line(&self, line: TranscriptLine) -> Result<(), String> {
+    async fn record_transcript_line(&self, line: TranscriptLine) -> Result<(), HookDeliveryError> {
         self.lines.lock().unwrap().push(line);
         Ok(())
     }
@@ -179,61 +186,6 @@ async fn on_a_target_the_transcript_is_found_under_the_targets_home_not_this_hos
     assert_eq!(path, Ok(TARGET_TRANSCRIPT.to_string()));
 }
 
-#[tokio::test(start_paused = true)]
-async fn behind_a_coder_pty_the_transcripts_lines_arrive_and_a_reopened_tail_starts_at_the_files_byte(
-) {
-    // Given a Coder target whose pty turns every `\n` into `\r\n`
-    let target = a_coder_target();
-    let lines = the_probe_lines();
-    let first_two = lines[0].len() + lines[1].len();
-    let tail = target.streams(tail_command(TARGET_TRANSCRIPT, 0, TARGET_HOOK_LOG, true));
-    let resumed = target.streams(tail_command(
-        TARGET_TRANSCRIPT,
-        first_two as u64,
-        TARGET_HOOK_LOG,
-        true,
-    ));
-    let daemon = Arc::new(TheDaemonsActivity::default());
-    let _follower = follow_transcript(
-        Arc::new(target.clone()),
-        (TARGET_TRANSCRIPT, TARGET_HOOK_LOG),
-        cursor_transcript(),
-        owner(),
-        daemon.clone(),
-        FollowOffset::in_memory(),
-    );
-
-    // When two lines arrive, the connection drops, and the rest arrive on the reopened tail
-    tail.prints(lines[..2].concat().replace('\n', "\r\n")).await;
-    daemon.once_it_holds(2).await;
-    tail.ends_with(255).await;
-    resumed
-        .prints(lines[2..].concat().replace('\n', "\r\n"))
-        .await;
-    let delivered = daemon.once_it_holds(lines.len()).await;
-
-    // Then every line is delivered once, as the spec maps it, and the reopened tail started at the
-    // file's byte, not the stream's
-    let streamed: Vec<String> = target
-        .calls()
-        .into_iter()
-        .filter_map(|call| match call {
-            ShellCall::ExecStreamed(command) => Some(command),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        (delivered, streamed),
-        (
-            mapped(&lines),
-            vec![
-                tail_command(TARGET_TRANSCRIPT, 0, TARGET_HOOK_LOG, true),
-                tail_command(TARGET_TRANSCRIPT, first_two as u64, TARGET_HOOK_LOG, true),
-            ]
-        )
-    );
-}
-
 /// The machine an agent runs on, as a real directory read through a real `/bin/sh`: its
 /// transcript, the file keeping the follower's `tail` alive, and the session's directory.
 struct AMachine {
@@ -272,6 +224,15 @@ impl AMachine {
             .open(self.transcript())
             .expect("the transcript");
         file.write_all(lines.concat().as_bytes()).unwrap();
+    }
+
+    /// The agent rewrites its transcript atomically with `lines` (a temp file renamed over it),
+    /// as Cursor does on every new prompt: the old prefix stable, new lines appended.
+    fn agent_rewrites(&self, lines: &[String]) {
+        std::fs::create_dir_all(self.transcript().parent().unwrap()).unwrap();
+        let tmp = self.transcript().with_extension("jsonl.tmp");
+        std::fs::write(&tmp, lines.concat()).expect("the temp transcript");
+        std::fs::rename(&tmp, self.transcript()).expect("the atomic replace");
     }
 
     /// A follower of the transcript through this machine's shell, from the session's persisted
@@ -340,6 +301,59 @@ async fn an_agent_in_tmux_keeps_writing_while_its_follower_restarts_and_nothing_
             Some(*end)
         })
         .collect();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Two polls past delivery: a replay would have arrived by now.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
     assert_eq!((delivered, daemon.end_offsets()), (mapped(&lines), ends));
+}
+
+#[tokio::test]
+async fn a_new_prompt_a_reattach_and_a_resume_each_append_only_new_lines() {
+    // Given an agent whose first two lines its follower delivered (n2: every new prompt re-read
+    // Cursor's JSONL from byte 0, replaying turn 1 three times and turn 2 twice)
+    let machine = AMachine::new();
+    let daemon = Arc::new(TheDaemonsActivity::default());
+    let lines = the_probe_lines();
+    let first = machine.followed_into(&daemon);
+    machine.agent_writes(&lines[..2]);
+    daemon.once_it_holds(2).await;
+
+    // When a new prompt makes Cursor rewrite its transcript atomically with two more lines —
+    // the old prefix stable, as the probe's file holds it
+    machine.agent_rewrites(&lines[..4]);
+    let delivered = daemon.once_it_holds(4).await;
+
+    // Then only the new lines arrive, each once: no replay of the first two
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        (delivered, daemon.end_offsets().len()),
+        (mapped(&lines[..4]), 4),
+        "a new prompt replays old lines"
+    );
+
+    // When the follower is reattached (same offset, new reader) with no new lines, nothing arrives
+    first.stop().await;
+    let reattached = machine.followed_into(&daemon);
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        daemon.end_offsets().len(),
+        4,
+        "a reattach replays old lines"
+    );
+
+    // When a resume appends one more line and restarts the follower, only it arrives
+    // (the probe file has four lines; a fifth stands in for the next turn's prompt).
+    reattached.stop().await;
+    let extra = "{\"role\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"prompt five\"}]}}\n"
+        .to_string();
+    let mut five = lines[..4].to_vec();
+    five.push(extra);
+    machine.agent_rewrites(&five);
+    let _resumed = machine.followed_into(&daemon);
+    let delivered = daemon.once_it_holds(5).await;
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(
+        (delivered.len(), daemon.end_offsets().len()),
+        (5, 5),
+        "a resume replays old lines"
+    );
 }

@@ -581,7 +581,10 @@ impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for AnOrchestra
     async fn report_session_status(
         &self,
         request: tddy_service::proto::activity::ReportSessionStatusRequest,
-    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
+    ) -> Result<
+        tddy_service::proto::activity::ReportSessionStatusResponse,
+        tddy_agent_launch::remote_hook_follower::HookDeliveryError,
+    > {
         let asks = !request.tool_name.is_empty();
         Ok(tddy_service::proto::activity::ReportSessionStatusResponse {
             ok: true,
@@ -596,14 +599,17 @@ impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for AnOrchestra
     async fn report_agent_activity(
         &self,
         _request: tddy_service::proto::activity::ReportAgentActivityRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), tddy_agent_launch::remote_hook_follower::HookDeliveryError> {
         Ok(())
     }
 
     async fn await_question_answer(
         &self,
         request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
-    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+    ) -> Result<
+        tddy_service::proto::activity::AwaitQuestionAnswerResponse,
+        tddy_agent_launch::remote_hook_follower::HookDeliveryError,
+    > {
         self.asked.lock().unwrap().push(request);
         tokio::time::sleep(self.takes).await;
         Ok(self.answer.clone())

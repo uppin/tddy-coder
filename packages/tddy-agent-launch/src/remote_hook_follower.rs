@@ -122,7 +122,7 @@ pub trait HookSink: Send + Sync {
     async fn deliver(&self, line: HookLine);
 }
 
-pub use crate::remote_hook_delivery::{ActivityHookSink, HookReportDelivery};
+pub use crate::remote_hook_delivery::{ActivityHookSink, HookDeliveryError, HookReportDelivery};
 
 /// The followers of this daemon's sessions, by session id: a target session's hook-log follower,
 /// with the shell and worktree its log lives on, and any session's agent-transcript follower — so a
@@ -627,7 +627,8 @@ mod tests {
         async fn report_session_status(
             &self,
             request: tddy_service::proto::activity::ReportSessionStatusRequest,
-        ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
+        ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, HookDeliveryError>
+        {
             self.statuses
                 .lock()
                 .unwrap()
@@ -638,7 +639,7 @@ mod tests {
         async fn report_agent_activity(
             &self,
             request: tddy_service::proto::activity::ReportAgentActivityRequest,
-        ) -> Result<(), String> {
+        ) -> Result<(), HookDeliveryError> {
             self.activities
                 .lock()
                 .unwrap()
@@ -649,7 +650,8 @@ mod tests {
         async fn await_question_answer(
             &self,
             _request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
-        ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+        ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, HookDeliveryError>
+        {
             Ok(Default::default())
         }
     }
