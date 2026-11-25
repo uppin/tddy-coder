@@ -109,6 +109,11 @@ impl BuildContext {
             .rpc_handlers
             .attach_host_service(Arc::clone(&served.host_service_impl));
         start_watch_waker(&shared, &hosted);
+        // The relay runs for the daemon's life, beside the log it reads (n5); its handle is not kept.
+        drop(hosted.rpc_handlers.start_notification_relay(
+            self.identity.keys.tddy_data_dir.clone(),
+            tddy_daemon_rpc::exec_tool::notification_relay::RelayTimings::default(),
+        ));
         // The trunk watch runs for the daemon's life; its handle is not kept.
         drop(hosted.connection_arc.spawn_trunk_watch());
         // Armed schedules outlive a restart: their queues are watched again (`#workqueue` 14/14).

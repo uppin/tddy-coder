@@ -44,6 +44,10 @@ pub struct PostMessageRequest {
     pub text: String,
     /// The message this one replies to: one the caller received.
     pub reply_to: Option<String>,
+    /// The host the recipient runs on, as `ListProjectSessions` names it; `None` to have it found —
+    /// on this host, as the caller's orchestrator's host, as the host of the message replied to, or
+    /// by asking the connected hosts (n5).
+    pub daemon_instance_id: Option<String>,
 }
 
 /// What `ReadSessionMessages` asks for, once its arguments are read.
@@ -145,7 +149,7 @@ pub fn session_message_tool_defs() -> Vec<ToolDef> {
     vec![
         tool_def(
             POST_SESSION_MESSAGE,
-            "Send another session of this project a message it reads when it next looks: nothing is typed into its terminal. You may message your orchestrator (the session that started you), the project's main session, and the sender of a message you received (pass reply_to); an orchestrator may message any session it can see. Same host, project and OS user only. Answers message_id, to_session_id and sent_at_unix_ms. To make a session act now, an orchestrator uses SendSessionMessage instead.",
+            "Send another session of this project a message it reads when it next looks: nothing is typed into its terminal. You may message your orchestrator (the session that started you), the project's main session, and the sender of a message you received (pass reply_to); an orchestrator may message any session it can see. Same project and OS user, on this host or another connected host: a recipient on another host is found by itself (your orchestrator, the sender you reply to, or by asking the hosts), or named with daemon_instance_id. A message to another host is queued if its link is down and delivered once it is back. Answers message_id, to_session_id and sent_at_unix_ms. To make a session act now, an orchestrator uses SendSessionMessage instead.",
             json!({
                 "type": "object",
                 "properties": {
@@ -161,6 +165,10 @@ pub fn session_message_tool_defs() -> Vec<ToolDef> {
                     "reply_to": {
                         "type": "string",
                         "description": "The message_id of a message you received that this one answers."
+                    },
+                    "daemon_instance_id": {
+                        "type": "string",
+                        "description": "The host the recipient runs on, as ListProjectSessions reports it; omit to have it found."
                     }
                 },
                 "required": ["to_session_id", "text"],
@@ -169,7 +177,7 @@ pub fn session_message_tool_defs() -> Vec<ToolDef> {
         ),
         tool_def(
             READ_SESSION_MESSAGES,
-            "Read the messages other sessions sent you that you have not read yet, oldest first, each once: their message_id, from_session_id, from, reply_to and text. What is answered counts as read. Under Claude Code, run `tddy-tools monitor --kinds message --ttl 86400` under the Monitor tool to have them streamed instead, as they arrive.",
+            "Read the messages other sessions sent you that you have not read yet, oldest first, each once: their message_id, from_session_id, from_daemon_instance_id (the sender's host), from, reply_to and text. What is answered counts as read. Under Claude Code, run `tddy-tools monitor --kinds message --ttl 86400` under the Monitor tool to have them streamed instead, as they arrive.",
             json!({
                 "type": "object",
                 "properties": {
@@ -244,10 +252,17 @@ fn post_request(args: &Value) -> Result<PostMessageRequest, String> {
         Some(Value::String(reply_to)) if !reply_to.is_empty() => Some(reply_to.clone()),
         Some(other) => return Err(format!("reply_to must name a message, not {other}")),
     };
+    let daemon_instance_id = match args.get("daemon_instance_id") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(host)) if host.trim().is_empty() => None,
+        Some(Value::String(host)) => Some(host.trim().to_string()),
+        Some(other) => return Err(format!("daemon_instance_id must name a host, not {other}")),
+    };
     Ok(PostMessageRequest {
         to_session_id,
         text,
         reply_to,
+        daemon_instance_id,
     })
 }
 

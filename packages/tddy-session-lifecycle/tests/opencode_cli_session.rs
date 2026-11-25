@@ -425,6 +425,7 @@ async fn an_opencode_session_is_listed_with_its_agent_and_model() {
         .service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions")
@@ -667,6 +668,7 @@ async fn a_muse_session_is_listed_with_its_agent_and_model() {
         .service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions")

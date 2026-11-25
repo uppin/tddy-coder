@@ -12,6 +12,12 @@ pub struct ListedSession {
     /// this id reaches the session on that host (`#start-parity` 1/9).
     #[serde(default)]
     pub daemon_instance_id: String,
+    /// The name the listing host's eligible-daemon roster gives `daemon_instance_id` — the host
+    /// label the dashboard shows. Resolved by the host that answers the listing, also for another
+    /// host's rows: never what that host says about itself. `null` for a host the roster does not
+    /// list.
+    #[serde(default)]
+    pub host_label: Option<String>,
     /// The name the session was given (`RenameSession`, or `StartSession`'s `display_name`), or
     /// `null` for an unnamed session. Defaulted so a peer that lists no names still answers.
     #[serde(default)]

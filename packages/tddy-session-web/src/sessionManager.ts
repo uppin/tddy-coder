@@ -3,8 +3,10 @@
  * change events, so the screen component doesn't scatter that logic across effects.
  *
  * It merges two sources into one sorted, de-duplicated list:
- * - the **selected host's** sessions, pulled via an injected `fetcher` (RPC), refreshed on demand and
- *   whenever the window-bound `sessionsRefreshBridge` fires (`requestSessionsRefresh()` from anywhere);
+ * - the sessions the **selected host** lists, pulled via an injected `fetcher` (RPC), refreshed on
+ *   demand and whenever the window-bound `sessionsRefreshBridge` fires (`requestSessionsRefresh()`
+ *   from anywhere). The selected host is asked with `includePeers`, so it answers for every
+ *   connected host — each row naming its host in `daemonInstanceId`, inactive sessions included;
  * - the **live cross-host** sessions, observed as LiveKit coder participants in the common room.
  *
  * It is a plain observable store (subscribe/notify, snapshot cached for `useSyncExternalStore`) with
@@ -21,7 +23,10 @@ import { subscribeSessionsRefresh } from "./lib/sessionsRefreshBridge";
 import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { useHostLabel } from "tddy-client-web";
 
-/** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
+/**
+ * Pulls the sessions the selected host lists — its own and, with `includePeers`, every connected
+ * host's (typically `client.listSessions(...)`).
+ */
 export type SessionFetcher = () => Promise<SessionEntry[]>;
 
 /**
@@ -193,7 +198,12 @@ export function useSessionManager(
   useEffect(() => {
     manager.setFetcher(
       client
-        ? () => client.listSessions({ sessionToken }).then((resp) => resp.sessions as SessionEntry[])
+        ? () =>
+            // The selected host fans out to the hosts it is connected to, so an inactive session on
+            // another host is listed too; the browser itself asks only the selected host.
+            client
+              .listSessions({ sessionToken, includePeers: true })
+              .then((resp) => resp.sessions as SessionEntry[])
         : null,
       unavailableReason,
     );

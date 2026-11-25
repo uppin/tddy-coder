@@ -4,7 +4,10 @@
 //! The tools ([`tddy_tool_engine::project_home_watch_tools`]) keep this host's session watches,
 //! `tddy_session_activity::session_watches`, for the caller's project and OS user. Before a watch is
 //! created the caller's agent must be one a turn can be sent to, and every session it names must be
-//! one it can see.
+//! one it can see — on this host, or on another connected host (n5). A named session on another
+//! host is followed there: that host is asked to relay the session's records here until the watch
+//! expires (`tddy_session_activity::notification_relay`), and a renewal asks again. The sessions the
+//! caller started on other hosts need no follow: their hosts relay them to it already.
 
 use std::time::Duration;
 
@@ -23,6 +26,7 @@ use tddy_worktree_service::session_target::{HomeCaller, SessionTarget};
 
 use super::project_home::turn::terminal_submit_key;
 use super::project_home::DaemonProjectHome;
+use super::project_home_remote::PeerSessionLists;
 
 impl DaemonProjectHome {
     /// The watches this host keeps, or a refusal when none is installed.
@@ -89,6 +93,75 @@ impl DaemonProjectHome {
     }
 }
 
+impl DaemonProjectHome {
+    /// Whether this host holds a record of `session_id` (of any project).
+    fn holds_a_record_of(&self, session_id: &str) -> bool {
+        tddy_core::read_session_metadata(&unified_session_dir_path(&self.sessions_base, session_id))
+            .is_ok()
+    }
+
+    /// The other host holding `session_id` in the caller's project, as that host lists it; `None`
+    /// when no connected host lists it, or for a caller held elsewhere (whose own host fans out).
+    async fn host_holding(&self, session_id: &str) -> Option<String> {
+        let peers = self.peers.as_ref()?;
+        let listing = PeerSessionLists {
+            routing: peers.routing.clone(),
+            local_id: peers.local_id.clone(),
+            request: tddy_service::proto::exec_tools::ExecuteToolRequest {
+                tool_name: tddy_tool_engine::project_home_tools::LIST_PROJECT_SESSIONS.to_string(),
+                args_json: "{}".to_string(),
+                daemon_instance_id: String::new(),
+                ..peers.request.clone()
+            },
+        };
+        listing
+            .list()
+            .await
+            .sessions
+            .into_iter()
+            .find(|listed| listed.session_id == session_id)
+            .map(|listed| listed.daemon_instance_id)
+            .filter(|host| !host.is_empty())
+    }
+
+    /// Ask each host in `elsewhere` to relay its named session's records here, for `home`'s watch,
+    /// until `until_unix_ms`. The first host that refuses is named.
+    async fn follow_elsewhere(
+        &self,
+        home: &HomeCaller,
+        elsewhere: &[(String, String)],
+        until_unix_ms: u64,
+    ) -> Result<(), String> {
+        if elsewhere.is_empty() {
+            return Ok(());
+        }
+        let peers = self
+            .peers
+            .as_ref()
+            .ok_or("a watch over a session on another host is kept on the caller's own host")?;
+        let github_user = self
+            .github_user
+            .clone()
+            .ok_or("the caller's OS user maps to no GitHub login on this host")?;
+        for (session_id, host) in elsewhere {
+            let follow = tddy_session_activity::notification_relay::FollowRequest {
+                follower_daemon_instance_id: peers.local_id.clone(),
+                project_id: home.project_id.clone(),
+                session_id: session_id.clone(),
+                watcher_session_id: home.session_id.clone(),
+                until_unix_ms,
+                github_user: github_user.clone(),
+            };
+            super::notification_relay::follow_on(&peers.routing, host, &follow)
+                .await
+                .map_err(|reason| {
+                    format!("host {host} cannot relay session {session_id}'s events here: {reason}")
+                })?;
+        }
+        Ok(())
+    }
+}
+
 /// A watch as the tools answer it, with how many matched events wait when listed. Shared with the
 /// inbox watch a session that is not an orchestrator holds (`#activity-wake` 5/5).
 pub(super) fn watch_json(watch: &SessionWatch, waiting: Option<usize>) -> Value {
@@ -131,11 +204,22 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
         // work queue's moves (`#workqueue` 8/14).
         let own_trunk_watch = request.kinds == [WatchKind::TrunkCommit.as_str()]
             || request.kinds == [WatchKind::WorkQueue.as_str()];
+        let mut elsewhere: Vec<(String, String)> = Vec::new();
         for session_id in &request.session_ids {
             if own_trunk_watch && session_id == &home.session_id {
                 continue;
             }
-            self.refuse_an_unseen_session(home, session_id)?;
+            if let Err(refusal) = self.refuse_an_unseen_session(home, session_id) {
+                if session_id == &home.session_id || self.holds_a_record_of(session_id) {
+                    return Err(refusal);
+                }
+                let host = self.host_holding(session_id).await.ok_or_else(|| {
+                    format!(
+                        "session {session_id} cannot be seen on this host or on any connected host: name a session of this project ListProjectSessions lists"
+                    )
+                })?;
+                elsewhere.push((session_id.clone(), host));
+            }
         }
         let kinds = request
             .kinds
@@ -159,6 +243,17 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
                 now_unix_ms(),
             )
             .await?;
+        if let Err(refusal) = self
+            .follow_elsewhere(home, &elsewhere, watch.expires_at_unix_ms)
+            .await
+        {
+            // A watch that cannot follow a session it names is not created half-working.
+            let _ = self
+                .watches()?
+                .cancel(&self.owner_of(home), &watch.watch_id)
+                .await;
+            return Err(refusal);
+        }
         Ok(watch_json(&watch, None))
     }
 
@@ -191,6 +286,18 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
                 wake_when_idle,
                 now_unix_ms(),
             )
+            .await?;
+        // The named sessions on other hosts are followed for as long as the renewed watch lives.
+        let mut elsewhere = Vec::new();
+        for session_id in &watch.filter.session_ids {
+            if session_id == &home.session_id || self.holds_a_record_of(session_id) {
+                continue;
+            }
+            if let Some(host) = self.host_holding(session_id).await {
+                elsewhere.push((session_id.clone(), host));
+            }
+        }
+        self.follow_elsewhere(home, &elsewhere, watch.expires_at_unix_ms)
             .await?;
         Ok(watch_json(&watch, None))
     }

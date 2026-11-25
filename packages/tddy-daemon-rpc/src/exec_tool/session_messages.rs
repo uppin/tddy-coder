@@ -45,6 +45,9 @@ use tddy_worktree_service::session_target::HomeCaller;
 use super::ExecToolRpcHandler;
 
 mod inbox_watch;
+mod remote_recipient;
+
+use remote_recipient::Locating;
 
 /// A served answer, as [`execute_session_message_tool`] answers the message tools — the
 /// constructors are `tddy-tool-engine`'s, and these mirror them over its public fields.
@@ -85,6 +88,8 @@ pub(super) struct DaemonSessionMessages {
     notification_log: Option<Arc<ProjectNotificationLog>>,
     /// The store the inboxes live in, beside the watches; `None` on a host with none.
     session_watches: Option<Arc<SessionWatchStore>>,
+    /// The other connected hosts, where a recipient this host does not hold is looked for (n5).
+    peers: remote_recipient::RecipientHosts,
 }
 
 /// The watches and log this host keeps, or the refusal a tool without them is answered.
@@ -115,16 +120,22 @@ impl SessionMessagePort for DaemonSessionMessages {
             .ok_or_else(|| NO_SESSION_MESSAGES.to_string())?;
         let (watches, log) = inbox_parts(&self.session_watches, &self.notification_log)?;
 
-        // Who the caller is, from its own records: its role, and the orchestrator that started it.
+        // Who the caller is, from its own records: its role, and the orchestrator that started it —
+        // and that orchestrator's host, when it is another.
         let caller_dir = tddy_core::session_lifecycle::unified_session_dir_path(
             &self.sessions_base,
             &caller.session_id,
         );
         let caller_metadata = tddy_core::read_session_metadata(&caller_dir)
             .map_err(|e| format!("cannot read session {}'s record: {e}", caller.session_id))?;
-        let orchestrator = tddy_core::read_changeset(&caller_dir)
-            .ok()
-            .and_then(|changeset| changeset.orchestrator_session_id);
+        let changeset = tddy_core::read_changeset(&caller_dir).ok();
+        let orchestrator = changeset
+            .as_ref()
+            .and_then(|changeset| changeset.orchestrator_session_id.clone());
+        let orchestrator_host = changeset
+            .and_then(|changeset| changeset.orchestrator_daemon_instance_id)
+            .map(|host| host.trim().to_string())
+            .filter(|host| !host.is_empty() && *host != self.peers.local_id);
         let main_session = projects_path_for_user(&self.os_user, Some(&self.tddy_data_dir))
             .and_then(|projects_dir| {
                 tddy_projects::project_storage::find_project(&projects_dir, &caller.project_id).ok()
@@ -147,40 +158,54 @@ impl SessionMessagePort for DaemonSessionMessages {
         };
 
         // The addressing rule: one project, one OS user, never oneself, and one of the caller's
-        // own reaches.
+        // own reaches — wherever the recipient runs.
         if request.to_session_id == caller.session_id {
             return Err(MessageRefusal::Oneself { addressable }.to_string());
         }
-        let recipient_metadata = tddy_core::read_session_metadata(
-            &tddy_core::session_lifecycle::unified_session_dir_path(
-                &self.sessions_base,
-                &request.to_session_id,
+        let received = match &request.reply_to {
+            Some(reply_to) => Some(
+                watches
+                    .received_message(&owner_of(caller, &self.os_user), reply_to, log)
+                    .ok_or_else(|| {
+                        MessageRefusal::NotReceived {
+                            message_id: reply_to.clone(),
+                        }
+                        .to_string()
+                    })?,
             ),
-        )
-        .map_err(|_| not_addressable(&request.to_session_id))?;
-        if recipient_metadata.project_id != caller.project_id {
-            return Err(not_addressable(&request.to_session_id));
-        }
+            None => None,
+        };
+        let recipient_host = self
+            .recipient_host(
+                caller,
+                &request,
+                orchestrator.as_deref(),
+                orchestrator_host,
+                received.as_ref(),
+            )
+            .await
+            .map_err(|refusal| match refusal {
+                Locating::NotAddressable => not_addressable(&request.to_session_id),
+                Locating::Refused(reason) => reason,
+            })?;
         let reaches = |to_session_id: &str| {
             addressable.any_visible_session
                 || orchestrator.as_deref() == Some(to_session_id)
                 || main_session.as_deref() == Some(to_session_id)
         };
-        if let Some(reply_to) = &request.reply_to {
-            let received = watches
-                .received_message(&owner_of(caller, &self.os_user), reply_to, log)
-                .ok_or_else(|| {
-                    MessageRefusal::NotReceived {
-                        message_id: reply_to.clone(),
-                    }
-                    .to_string()
-                })?;
-            if received.from_session_id != request.to_session_id && !reaches(&request.to_session_id)
-            {
-                return Err(not_addressable(&request.to_session_id));
+        match &received {
+            Some(received) => {
+                if received.from_session_id != request.to_session_id
+                    && !reaches(&request.to_session_id)
+                {
+                    return Err(not_addressable(&request.to_session_id));
+                }
             }
-        } else if !reaches(&request.to_session_id) {
-            return Err(not_addressable(&request.to_session_id));
+            None => {
+                if !reaches(&request.to_session_id) {
+                    return Err(not_addressable(&request.to_session_id));
+                }
+            }
         }
 
         // The message is published on the bus: the log records it, the waker and the long polls
@@ -203,6 +228,9 @@ impl SessionMessagePort for DaemonSessionMessages {
                 message_id: message_id.clone(),
                 reply_to: request.reply_to.clone(),
                 text: request.text,
+                // A recipient on another host is relayed its message from this host's log, which
+                // keeps it until that host has taken it (n5).
+                to_daemon_instance_id: recipient_host,
             }),
             at_unix_ms: sent_at_unix_ms,
         })
@@ -237,6 +265,10 @@ impl SessionMessagePort for DaemonSessionMessages {
                     "seq": message.seq,
                     "message_id": message.message_id,
                     "from_session_id": message.from_session_id,
+                    "from_daemon_instance_id": message
+                        .from_daemon_instance_id
+                        .clone()
+                        .unwrap_or_else(|| self.peers.local_id.clone()),
                     "from": message.from,
                     "reply_to": message.reply_to,
                     "text": message.text,
@@ -273,6 +305,13 @@ impl ExecToolRpcHandler {
             bus: self.project_home_host.notification_bus.clone(),
             notification_log: self.project_home_host.notification_log.clone(),
             session_watches: self.project_home_host.session_watches.clone(),
+            peers: remote_recipient::RecipientHosts {
+                routing: self.peer_routing.clone(),
+                local_id: tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(
+                    &self.config,
+                ),
+                session_token: req.session_token.clone(),
+            },
         };
         let outcome =
             execute_session_message_tool(&port, &caller, &req.tool_name, &req.args_json).await;

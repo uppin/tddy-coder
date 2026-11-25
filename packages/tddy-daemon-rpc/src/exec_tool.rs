@@ -3,6 +3,7 @@
 mod base_freshness;
 pub mod home_terminal_leases;
 mod lsp_roots;
+pub mod notification_relay;
 mod orchestrator_reach;
 mod path_access;
 mod path_guard;
@@ -127,6 +128,12 @@ pub(crate) struct ProjectHomeHost {
     /// [`RpcHandlers::attach_stack_github`](crate::RpcHandlers::attach_stack_github); the GitHub REST
     /// API itself when nothing is attached.
     pub(crate) work_queue_github: Arc<OnceLock<Arc<dyn work_queue_tools::WorkQueueGithubClients>>>,
+    /// This host's notification relay, set by
+    /// [`ExecToolRpcHandler::start_notification_relay`]: what a peer's follow registers with (n5).
+    pub(crate) relay: OnceLock<Arc<tddy_session_activity::notification_relay::NotificationRelay>>,
+    /// Where a batch relayed here cues the waker, set by
+    /// [`ExecToolRpcHandler::start_watch_waker`]: a relayed record never rides this host's bus.
+    pub(crate) relayed_cues: OnceLock<tokio::sync::mpsc::Sender<watch_wake::WakeCue>>,
 }
 
 impl ExecToolRpcHandler {
@@ -165,6 +172,8 @@ impl ExecToolRpcHandler {
                 work_queue_github: Arc::new(OnceLock::new()),
                 pull_requests: Arc::new(host.clone()),
                 session_token_signer: host.session_token_signer(),
+                relay: OnceLock::new(),
+                relayed_cues: OnceLock::new(),
             },
         }
     }

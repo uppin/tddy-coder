@@ -339,6 +339,7 @@ impl ExecToolRpcHandler {
             owner.clone(),
             owner.session_id.clone(),
             request,
+            tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config),
         )
         .await
         {

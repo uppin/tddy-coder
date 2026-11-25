@@ -3,10 +3,12 @@
  * the selected host, and routes interaction with such a row to that session's owning daemon.
  *
  * Liveness comes from LiveKit participant presence (a session's coder joins the common room as
- * `daemon-<instance>-<sessionId>`), seeded here via `aFakeCommonRoom`. The drawer does NOT fan
- * `ListSessions` out — it queries only the selected host (for inactive/history rows) and derives
- * active cross-host rows from the room. Each host answers with its own backend
- * (`mountWithPerDaemonLiveKitRpc`) so a call landing on host B's backend proves routing to host B.
+ * `daemon-<instance>-<sessionId>`), seeded here via `aFakeCommonRoom`. The browser asks only the
+ * selected host for the list, with `includePeers`: that host answers for every host it is
+ * connected to (the fan-out is the daemon's), so its backend here stands in for that whole answer —
+ * an inactive session on another host is a row it lists naming that host. Active cross-host rows
+ * also come from the room. Each host answers with its own backend (`mountWithPerDaemonLiveKitRpc`)
+ * so a call landing on host B's backend proves routing to host B.
  */
 
 import React from "react";
@@ -57,7 +59,7 @@ const SESSION_B_ACTIVE = {
   pendingElicitation: false,
 };
 
-/** A session on host B with no live participant — must never appear while host A is selected. */
+/** A session on host B with no live participant — shown only when the selected host lists it. */
 const SESSION_C_INACTIVE = {
   sessionId: "cccccccc-0000-4000-8000-000000000003",
   createdAt: "2026-07-10T10:00:00Z",
@@ -119,7 +121,7 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
     window.localStorage.setItem("tddy_session_token", "fake-token");
   });
 
-  it("queries only the selected host for the session list — no fan-out to other daemons", () => {
+  it("asks the selected host for every connected host's sessions, and no other host", () => {
     // Given — host B has a live participant; host B's backend must never be asked for its list.
     const backendA = aSessionServiceBackend({ sessions: [SESSION_A] });
     const backendB = aSessionServiceBackend({ sessions: [SESSION_B_ACTIVE] });
@@ -127,13 +129,19 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
     // When
     mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
 
-    // Then — the live cross-host row still shows, but only host A was queried for the list.
+    // Then — the live cross-host row still shows; host A was asked to include its peers, and the
+    // browser never asked host B itself (host A fans out).
     sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).should("exist");
     cy.wrap(backendA).should((b: SessionServiceBackend) => {
-      expect(listSessionsCount(b), "host A ListSessions calls").to.be.greaterThan(0);
+      const calls = b.callsTo(SessionService.method.listSessions);
+      expect(calls.length, "host A ListSessions calls").to.be.greaterThan(0);
+      expect(
+        calls.every((call) => call.includePeers),
+        "every host A ListSessions call includes its peers",
+      ).to.equal(true);
     });
     cy.wrap(backendB).should((b: SessionServiceBackend) => {
-      expect(listSessionsCount(b), "host B ListSessions calls (no fan-out)").to.equal(0);
+      expect(listSessionsCount(b), "host B ListSessions calls (the browser does not fan out)").to.equal(0);
     });
   });
 
@@ -150,17 +158,45 @@ describe("SessionsDrawerCrossHostAcceptance — active sessions across hosts", (
     sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).should("exist");
   });
 
-  it("does not show a host-B session that has no live participant", () => {
-    // Given — host B has an inactive session and no live participant.
+  it("does not show a host-B session the selected host does not list and that has no live participant", () => {
+    // Given — host B has an inactive session host A's answer does not carry (host B unreachable from
+    // host A), and no live participant.
     const backendA = aSessionServiceBackend({ sessions: [SESSION_A] });
     const backendB = aSessionServiceBackend({ sessions: [SESSION_C_INACTIVE] });
 
     // When — nothing seeded live.
     mountCrossHost(backendA, backendB, []);
 
-    // Then — the selected-host session shows; the idle cross-host session never appears.
+    // Then — the selected-host session shows; the idle cross-host session does not.
     sessionsDrawerPage.drawerItem(SESSION_A.sessionId).should("exist");
     sessionsDrawerPage.drawerItem(SESSION_C_INACTIVE.sessionId).should("not.exist");
+  });
+
+  it("shows an inactive host-B session the selected host lists, labelled with host B", () => {
+    // Given — host A's answer, fanned out to its peers, carries host B's idle session; no participant.
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A, SESSION_C_INACTIVE] });
+    const backendB = aSessionServiceBackend({ sessions: [] });
+
+    // When — nothing seeded live.
+    mountCrossHost(backendA, backendB, []);
+
+    // Then — the idle host-B session is listed, carrying host B's badge; host A's row carries none.
+    sessionsDrawerPage.drawerItem(SESSION_C_INACTIVE.sessionId).should("exist");
+    sessionsDrawerPage.drawerItemHost(SESSION_C_INACTIVE.sessionId).should("have.text", HOST_B.label);
+    sessionsDrawerPage.expectNoOwningHostBadge(SESSION_A.sessionId);
+  });
+
+  it("lists a live host-B session once when the selected host also lists it", () => {
+    // Given — host A's answer carries host B's session, and its participant is live in the room.
+    const backendA = aSessionServiceBackend({ sessions: [SESSION_A, SESSION_B_ACTIVE] });
+    const backendB = aSessionServiceBackend({ sessions: [] });
+
+    // When
+    mountCrossHost(backendA, backendB, [SESSION_B_ACTIVE]);
+
+    // Then — one row for it, with host B's badge
+    sessionsDrawerPage.drawerItemHost(SESSION_B_ACTIVE.sessionId).should("have.text", HOST_B.label);
+    sessionsDrawerPage.drawerItem(SESSION_B_ACTIVE.sessionId).should("have.length", 1);
   });
 
   it("labels a cross-host row with its owning host, and does not label same-host rows", () => {

@@ -28,7 +28,10 @@
 
 mod evicted_messages;
 mod paging;
+mod relayed;
 mod storage;
+
+pub use relayed::{HeldRecord, RelayedAppend, RelayedBatch};
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -52,7 +55,7 @@ use crate::session_notifications::{SessionNotification, SessionNotificationSubsc
 
 use crate::project_notification_log::paging::lost_after;
 use crate::project_notification_log::paging::page_of;
-pub use storage::record_json;
+pub use storage::{record_from_json, record_json, record_json_on};
 
 /// How many records a project's log keeps; older ones are evicted and counted.
 pub const PROJECT_NOTIFICATION_CAPACITY: usize = 1_000;
@@ -100,6 +103,15 @@ pub struct ProjectNotificationRecord {
     /// names when the record is appended — or `None` for a session no orchestrator started
     /// (`#orchestrators` 4/11). What a scope's [`ProjectNotificationScope::started_by`] matches.
     pub orchestrator_session_id: Option<String>,
+    /// The host the session runs on, for a record another host relayed here (n5, cross-host
+    /// watches); `None` for one of this host's own sessions.
+    pub daemon_instance_id: Option<String>,
+    /// The record's `seq` on [`Self::daemon_instance_id`], for a relayed record.
+    pub origin_seq: Option<u64>,
+    /// Non-zero only on a **relay gap**: how many of [`Self::daemon_instance_id`]'s records were
+    /// evicted there before they could be relayed here. A gap is never an event: the watches count
+    /// it as lost, and no reader lists it.
+    pub relay_lost: u64,
 }
 
 /// Whose records a read or a wait may see.
@@ -143,6 +155,8 @@ pub struct ProjectNotificationLog {
     data_dir: PathBuf,
     sessions_base_for: SessionsBaseFor,
     projects: Mutex<HashMap<String, Arc<Project>>>,
+    /// Woken whenever a record is appended to any project: what the notification relay waits on.
+    appended: Arc<Notify>,
 }
 
 /// A record as the log holds it: the record, and the OS user whose session made it.
@@ -157,6 +171,7 @@ impl Held {
         // A message, a trunk commit or a queue move is one session's own, read through its watches — never an
         // operator notification (`#activity-wake` 5/5, `#orchestra` 5/9).
         self.os_user == scope.os_user
+            && self.record.relay_lost == 0
             && !self.record.source.is_a_sessions_own()
             && self.record.session_id != scope.exclude_session_id
             && scope.started_by.as_ref().is_none_or(|orchestrator| {
@@ -184,6 +199,9 @@ struct ProjectState {
     lines_on_disk: usize,
     /// The messages the window has evicted: what a reader's `lost` counts.
     evicted_messages: evicted_messages::EvictedMessages,
+    /// Per host that relayed records here, the highest of its `seq`s this project holds: a batch
+    /// relayed again after a lost acknowledgement appends nothing twice (n5).
+    received_through: HashMap<String, u64>,
 }
 
 impl Project {
@@ -194,6 +212,7 @@ impl Project {
             .max()
             .unwrap_or(0);
         let skip = records.len().saturating_sub(PROJECT_NOTIFICATION_CAPACITY);
+        let received_through = relayed::received_through_of(&records);
         let (window, evicted_messages) =
             evicted_messages::EvictedMessages::split_restored(records, skip);
         Self {
@@ -202,6 +221,7 @@ impl Project {
                 newest_seq,
                 lines_on_disk,
                 evicted_messages,
+                received_through,
             }),
             arrived: Notify::new(),
         }
@@ -239,6 +259,7 @@ impl ProjectNotificationLog {
             data_dir: data_dir.to_path_buf(),
             sessions_base_for,
             projects: Mutex::new(projects),
+            appended: Arc::new(Notify::new()),
         })
     }
 
@@ -379,6 +400,37 @@ impl ProjectNotificationLog {
     }
 }
 
+/// Append `held` — whose `seq` is the next one — to `state` and to the project's file at `path`,
+/// compacting the file once it has grown past twice the window. `state` is the locked project's,
+/// held across the append, so the file's lines are in `seq` order and a record is either recorded
+/// whole or not at all.
+fn append_held(path: &Path, state: &mut ProjectState, held: Held) -> anyhow::Result<()> {
+    storage::append(path, &held)?;
+    state.newest_seq = held.record.seq;
+    state.lines_on_disk += 1;
+    state.keep_in_window(held);
+    if state.lines_on_disk > 2 * PROJECT_NOTIFICATION_CAPACITY {
+        match storage::rewrite(path, state.window.iter()) {
+            Ok(()) => state.lines_on_disk = state.window.len(),
+            // The record is recorded; the file keeps growing until a rewrite succeeds.
+            Err(e) => log::warn!(
+                target: "tddy_session_activity::project_notification_log",
+                "could not compact {}: {e:#}",
+                path.display()
+            ),
+        }
+    }
+    Ok(())
+}
+
+impl ProjectNotificationLog {
+    /// Wake whoever waits on `project`'s records, and on any record.
+    fn announce(&self, project: &Project) {
+        project.arrived.notify_waiters();
+        self.appended.notify_waiters();
+    }
+}
+
 #[async_trait]
 impl SessionNotificationSubscriber for ProjectNotificationLog {
     fn name(&self) -> &'static str {
@@ -427,25 +479,14 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     message: notification.message.clone(),
                     at_unix_ms: notification.at_unix_ms,
                     orchestrator_session_id: orchestrator.clone(),
+                    daemon_instance_id: None,
+                    origin_seq: None,
+                    relay_lost: 0,
                 },
             };
-            storage::append(&path, &held)?;
-            state.newest_seq = held.record.seq;
-            state.lines_on_disk += 1;
-            state.keep_in_window(held);
-            if state.lines_on_disk > 2 * PROJECT_NOTIFICATION_CAPACITY {
-                match storage::rewrite(&path, state.window.iter()) {
-                    Ok(()) => state.lines_on_disk = state.window.len(),
-                    // The record is recorded; the file keeps growing until a rewrite succeeds.
-                    Err(e) => log::warn!(
-                        target: "tddy_session_activity::project_notification_log",
-                        "could not compact {}: {e:#}",
-                        path.display()
-                    ),
-                }
-            }
+            append_held(&path, &mut state, held)?;
         }
-        project.arrived.notify_waiters();
+        self.announce(&project);
         Ok(())
     }
 }

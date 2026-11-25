@@ -143,6 +143,7 @@ impl ExecToolRpcHandler {
         let local_id = local_instance_id_for_config(&self.config);
         let ask = ListSessionsRequest {
             session_token: req.session_token.clone(),
+            include_peers: false,
         };
         other_hosts(&self.peer_routing, &local_id)
             .map(|peer| {
@@ -309,7 +310,8 @@ pub(super) struct PeerSessionLists {
 }
 
 impl PeerSessionLists {
-    /// Every other host's sessions, asked all at once, in roster order.
+    /// Every other host's sessions, asked all at once, in roster order — each labelled with the
+    /// name this host's roster gives its host, not the one the host answered with.
     pub(super) async fn list(&self) -> ListProjectSessionsResult {
         let asking: Vec<_> = other_hosts(&self.routing, &self.local_id)
             .map(|peer| {
@@ -331,7 +333,12 @@ impl PeerSessionLists {
                 .await
                 .unwrap_or_else(|e| Err(format!("asking it failed: {e}")));
             match answer {
-                Ok(listed) => result.sessions.extend(listed.sessions),
+                Ok(listed) => result
+                    .sessions
+                    .extend(listed.sessions.into_iter().map(|mut row| {
+                        row.host_label = self.routing.host_label(&row.daemon_instance_id);
+                        row
+                    })),
                 Err(reason) => {
                     log::info!("ListProjectSessions: host {peer} did not answer: {reason}");
                     result.unreachable_hosts.push(UnreachableHost {

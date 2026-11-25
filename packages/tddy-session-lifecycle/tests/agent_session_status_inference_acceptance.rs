@@ -108,6 +108,7 @@ async fn listed_sessions(sessions_base: std::path::PathBuf) -> Vec<ProtoSessionE
     service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions RPC should succeed")

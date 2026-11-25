@@ -775,6 +775,7 @@ async fn a_recorded_session_without_a_session_type_is_not_reattached() {
 async fn is_listed_active_on(host: &DaemonSessionHost, session_id: &str) -> bool {
     host.list_sessions(Request::direct(ListSessionsRequest {
         session_token: VALID_TOKEN.to_string(),
+        include_peers: false,
     }))
     .await
     .expect("ListSessions must succeed")

@@ -6,10 +6,13 @@
  * Liveness comes for free from **LiveKit participant presence**: a session's coder process joins the
  * shared common room as `daemon-<instanceId>-<sessionId>` (or `daemon-<sessionId>` on a single
  * daemon) and the LiveKit SDK keeps that participant alive while the process lives. So the active
- * rows are derived directly from the common-room participants — no per-host `ListSessions` fan-out.
+ * rows are derived directly from the common-room participants — the browser asks no host but the
+ * selected one.
  *
- * The drawer is the union of: every session on the **selected host** (from its `ListSessions`,
- * active or not) ∪ every session with a **live participant** on any host (from the room).
+ * The drawer is the union of: every session the **selected host** lists (its `ListSessions` with
+ * `includePeers`: its own and every connected host's, active or not, each naming its host) ∪ every
+ * session with a **live participant** on any host (from the room). A session in both is one row —
+ * the listed one, which carries the full metadata.
  */
 
 import { create } from "@bufbuild/protobuf";
@@ -78,8 +81,8 @@ export function owningHostForSession(session: SessionEntry, fallbackInstanceId: 
 }
 
 /**
- * Union of the selected host's sessions and the live cross-host sessions. Selected-host entries
- * (which carry full metadata from `ListSessions`) win; a live participant not already present is
+ * Union of the listed sessions and the live cross-host sessions. Listed entries (which carry full
+ * metadata from `ListSessions`, and name their own host) win; a live participant not already present is
  * added as a synthesized row owned by its host — its owner drives interaction routing and the
  * owning-host badge, and its `session` metadata (repo/goal/agent/… published by the coder
  * participant) is hydrated onto the row so it renders a real name and inspector fields. A live

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::launch_ports::LaunchSessions;
+use crate::peer_session_listing::PeerSessionListing;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -44,6 +45,9 @@ pub fn bridge_conn_resume_response(
 }
 
 impl LaunchSessions {
+    /// The caller's sessions on this host; with `include_peers`, also every other connected
+    /// daemon's own sessions, each row naming its host, and the daemons that did not answer
+    /// ([`PeerSessionListing`]).
     pub async fn list_sessions_at_session_coordinate(
         &self,
         request: Request<ListSessionsRequest>,
@@ -63,6 +67,11 @@ impl LaunchSessions {
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = local_instance_id_for_config(&self.config);
+        // Asked only once the caller is authenticated, and before this host's own read, so the
+        // peers answer while it runs.
+        let peers = req.include_peers.then(|| {
+            PeerSessionListing::ask(&self.peer_routing, &local_daemon_id, &req.session_token)
+        });
         // Tailing a session reads its transcript once, on the listing that first sees it, so the
         // seed is paid for on this blocking thread rather than on the reactor.
         let session_agent_inference = Arc::clone(&self.session_agent_inference);
@@ -94,7 +103,17 @@ impl LaunchSessions {
             },
         )
         .await?;
-        Ok(Response::new(ListSessionsResponse { sessions: entries }))
+        let mut sessions = entries;
+        let mut unreachable_hosts = Vec::new();
+        if let Some(peers) = peers {
+            let answered = peers.answers().await;
+            sessions.extend(answered.sessions);
+            unreachable_hosts = answered.unreachable_hosts;
+        }
+        Ok(Response::new(ListSessionsResponse {
+            sessions,
+            unreachable_hosts,
+        }))
     }
 
     pub async fn start_session_at_session_coordinate(

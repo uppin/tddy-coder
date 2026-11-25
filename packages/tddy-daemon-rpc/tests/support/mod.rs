@@ -83,6 +83,8 @@ pub struct InProcessPeers {
     never_answering: RwLock<HashSet<String>>,
     /// Every unary call made, as `(peer, service, method)`, in the order it was made — answered or not.
     unary_calls: Mutex<Vec<(String, String, String)>>,
+    /// Hosts whose link is down: every call to one fails at once as unavailable, until restored.
+    cut: RwLock<HashSet<String>>,
 }
 
 impl InProcessPeers {
@@ -92,6 +94,17 @@ impl InProcessPeers {
             .write()
             .unwrap()
             .insert(instance_id.to_string());
+    }
+
+    /// `instance_id`'s link goes down: every call to it fails as unavailable until
+    /// [`Self::restore_link`].
+    pub fn cut_link(&self, instance_id: &str) {
+        self.cut.write().unwrap().insert(instance_id.to_string());
+    }
+
+    /// `instance_id`'s link is back: calls reach it again.
+    pub fn restore_link(&self, instance_id: &str) {
+        self.cut.write().unwrap().remove(instance_id);
     }
 
     /// How many times `method` of `service` was asked of `peer`.
@@ -145,6 +158,11 @@ impl PeerForwarder for InProcessPeers {
         ));
         if self.never_answering.read().unwrap().contains(peer_id) {
             std::future::pending::<()>().await;
+        }
+        if self.cut.read().unwrap().contains(peer_id) {
+            return Err(Status::unavailable(format!(
+                "the link to {peer_id} is down"
+            )));
         }
         let daemon = self.daemon(peer_id)?;
         match (service, method) {
@@ -775,6 +793,23 @@ pub fn a_host_waking_orchestrators(
     timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
 ) -> (Host, Arc<SessionNotificationBus>) {
     a_host_waking_orchestrators_with(instance_id, peers, timings, |watches| watches)
+}
+
+/// [`a_host_waking_orchestrators`], whose daemon also relays its sessions' notifications to the
+/// hosts they concern and takes the ones relayed to it (`n5`, cross-host watches): retrying a host
+/// that did not take a batch after `retry`.
+pub fn a_host_relaying(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
+    retry: std::time::Duration,
+) -> (Host, Arc<SessionNotificationBus>) {
+    let (host, bus) = a_host_waking_orchestrators(instance_id, peers, timings);
+    host.daemon.handlers().start_notification_relay(
+        host.sessions.path().join("notification-log"),
+        tddy_daemon_rpc::exec_tool::notification_relay::RelayTimings { retry },
+    );
+    (host, bus)
 }
 
 /// [`a_host_waking_orchestrators`], whose session watches are leased to a stream for `lease` after

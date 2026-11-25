@@ -37,7 +37,8 @@ pub struct WatchDelivery {
     /// The records its watches matched, oldest first, each once; at most
     /// [`MAX_EVENTS_PER_ANSWER`].
     pub events: Vec<ProjectNotificationRecord>,
-    /// Matched records the log evicted before they could be delivered.
+    /// Matched records the log evicted before they could be delivered, and records another host
+    /// evicted before it could relay them here (relay gaps, n5).
     pub lost: u64,
     /// The watches that ended since the last delivery.
     pub ended: Vec<WatchEnd>,
@@ -127,16 +128,24 @@ pub(super) fn apply_delivery(
     let inbox = inbox_position_of(state, owner);
     let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
     let mut lost = 0_u64;
+    let mut gaps: BTreeMap<u64, u64> = BTreeMap::new();
     let mut scans: Vec<(String, u64, u64)> = Vec::new();
     for watch in state.watches.iter().filter(|watch| delivers(watch)) {
         let (records, watch_lost) =
             log.records_after(&owner.project_id, &owner.os_user, watch.position);
-        lost = lost.max(watch_lost);
+        let evicted_gaps = if watch_lost > 0 {
+            log.evicted_relay_lost_after(&owner.project_id, &owner.os_user, watch.position)
+        } else {
+            0
+        };
+        lost = lost.max(watch_lost + evicted_gaps);
         for record in records.iter().filter(|r| watch_owes(watch, r, inbox)) {
             matched.entry(record.seq).or_insert_with(|| record.clone());
         }
+        gaps.extend(unreported_gaps(watch, &records));
         scans.push((watch.watch_id.clone(), watch.position, watch_lost));
     }
+    lost += gaps.values().sum::<u64>();
     let events: Vec<ProjectNotificationRecord> = matched
         .values()
         .take(MAX_EVENTS_PER_ANSWER)
@@ -156,6 +165,7 @@ pub(super) fn apply_delivery(
         }
         watch.position = position;
         watch.acked_above.retain(|seq| *seq > position);
+        note_gaps_reported(watch, &gaps);
     }
     let mut ended = Vec::new();
     state.ended.retain(|pending| {
@@ -176,6 +186,31 @@ pub(super) fn apply_delivery(
     }
 }
 
+/// The relay gaps among `records` that `watch` has not reported yet: each gap's `seq` and how many
+/// records it lost. A gap is never an event, so it never moves a position; it is marked reported
+/// in [`SessionWatch::acked_above`] instead ([`note_gaps_reported`]), and pruned from there as the
+/// position passes it.
+pub(super) fn unreported_gaps<'a>(
+    watch: &'a SessionWatch,
+    records: &'a [ProjectNotificationRecord],
+) -> impl Iterator<Item = (u64, u64)> + 'a {
+    records
+        .iter()
+        .filter(move |record| {
+            record.relay_lost > 0
+                && record.seq > watch.position
+                && !watch.acked_above.contains(&record.seq)
+        })
+        .map(|record| (record.seq, record.relay_lost))
+}
+
+/// Mark `gaps` reported on `watch`, past its position.
+pub(super) fn note_gaps_reported(watch: &mut SessionWatch, gaps: &BTreeMap<u64, u64>) {
+    for seq in gaps.keys().filter(|seq| **seq > watch.position) {
+        watch.acked_above.insert(*seq);
+    }
+}
+
 /// A delivery planned on a copy of the state: what to hand over, and what to commit once it has
 /// been.
 pub(super) struct PlannedDelivery {
@@ -185,8 +220,9 @@ pub(super) struct PlannedDelivery {
 
 /// What committing a handed-over delivery changes.
 pub(super) struct DeliveryCommit {
-    /// Each of the owner's live watches and the position the delivery advances it to.
-    positions: Vec<(String, u64)>,
+    /// Each of the owner's live watches, the position the delivery advances it to, and the
+    /// `seq`s above it the delivery handed — the relay gaps it reported among them.
+    positions: Vec<(String, u64, std::collections::BTreeSet<u64>)>,
     /// The ended watches the delivery reported.
     handed_endings: Vec<String>,
 }
@@ -207,7 +243,13 @@ pub(super) fn plan_delivery(
         .watches
         .iter()
         .filter(|watch| &watch.owner == owner)
-        .map(|watch| (watch.watch_id.clone(), watch.position))
+        .map(|watch| {
+            (
+                watch.watch_id.clone(),
+                watch.position,
+                watch.acked_above.clone(),
+            )
+        })
         .collect();
     let handed_endings = delivery
         .ended
@@ -244,13 +286,20 @@ pub(super) fn commit_delivery(
         .iter_mut()
         .filter(|watch| &watch.owner == owner)
     {
-        let Some(&(_, position)) = positions.iter().find(|(id, _)| id == &watch.watch_id) else {
+        let Some((_, position, handed_above)) =
+            positions.iter().find(|(id, _, _)| id == &watch.watch_id)
+        else {
             continue;
         };
-        if position > watch.position {
-            watch.position = position;
+        if *position > watch.position {
+            watch.position = *position;
+            let position = *position;
             watch.acked_above.retain(|seq| *seq > position);
         }
+        let position = watch.position;
+        watch
+            .acked_above
+            .extend(handed_above.iter().filter(|seq| **seq > position));
     }
     state.ended.retain(|pending| {
         !(&pending.owner == owner && handed_endings.contains(&pending.end.watch_id))

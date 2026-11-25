@@ -152,7 +152,8 @@ pub struct SessionEndNotice {
 /// (`#activity-wake` 5/5).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SessionMessage {
-    /// The recipient: a session of the sender's project, on this host, of the same OS user.
+    /// The recipient: a session of the sender's project, of the same OS user — on this host, or on
+    /// [`Self::to_daemon_instance_id`].
     pub to_session_id: String,
     /// `m-` and a UUID: what a reply names as its `reply_to`.
     pub message_id: String,
@@ -160,6 +161,9 @@ pub struct SessionMessage {
     pub reply_to: Option<String>,
     /// The message itself: non-empty, at most 8 KiB.
     pub text: String,
+    /// The host the recipient runs on, when it is not the sender's: the daemon the sender's host
+    /// relays the message to (n5, cross-host messages). `None` for a recipient on the sender's host.
+    pub to_daemon_instance_id: Option<String>,
 }
 
 /// One thing that happened in one session.

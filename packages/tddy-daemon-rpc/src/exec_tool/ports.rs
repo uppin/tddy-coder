@@ -35,6 +35,11 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         &self,
         request: Request<ExecuteToolRequest>,
     ) -> Result<Response<ExecuteToolResponse>, Status> {
+        // The relay's internal names are never tools: answered only as a peer's relay call, and
+        // refused here — on the caller's own host, before any forward — for everyone else (n5).
+        if tddy_session_activity::notification_relay::is_relay_tool(&request.get_ref().tool_name) {
+            return self.serve_relay_call(request).await.map(Response::new);
+        }
         let req = request.into_inner();
         let answered = self.answer_execute_tool(req.clone()).await?;
         // Every answer to a watching orchestrator carries what its watches matched
@@ -56,6 +61,12 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
     ) -> Result<Response<MpscResultStream<ExecuteToolChunk>>, Status> {
         self.rpc_activity.record();
         let req = request.into_inner();
+        if tddy_session_activity::notification_relay::is_relay_tool(&req.tool_name) {
+            return Err(Status::permission_denied(format!(
+                "{} is not a tool: it is answered only to another daemon over the common room",
+                req.tool_name
+            )));
+        }
         let req_conn = wire_same::<ExecuteToolRequest, ConnExecuteToolRequest>(&req)?;
 
         if let PeerRoute::Forward { peer_instance_id } = self

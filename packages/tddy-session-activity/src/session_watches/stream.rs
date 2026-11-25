@@ -310,6 +310,7 @@ impl SessionWatchStore {
         // The batch: matched records after each watch's acknowledged position, unioned by seq.
         let mut matched: BTreeMap<u64, StreamedEvent> = BTreeMap::new();
         let mut lost = 0_u64;
+        let mut gaps: BTreeMap<u64, u64> = BTreeMap::new();
         for watch_id in watch_ids {
             if !live_ids.contains(watch_id) {
                 continue;
@@ -323,7 +324,13 @@ impl SessionWatchStore {
             };
             let (records, watch_lost) =
                 log.records_after(&owner.project_id, &owner.os_user, watch.position);
-            lost = lost.max(watch_lost);
+            let evicted_gaps = if watch_lost > 0 {
+                log.evicted_relay_lost_after(&owner.project_id, &owner.os_user, watch.position)
+            } else {
+                0
+            };
+            lost = lost.max(watch_lost + evicted_gaps);
+            gaps.extend(super::delivery::unreported_gaps(watch, &records));
             let inbox = super::inbox_position_of(&state, owner);
             for record in records
                 .iter()
@@ -337,6 +344,18 @@ impl SessionWatchStore {
                     event.watch_ids.push(watch_id.clone());
                 }
             }
+        }
+        // Relay gaps are reported once, here, and marked so on every streamed watch (n5).
+        lost += gaps.values().sum::<u64>();
+        if !gaps.is_empty() {
+            for watch in state
+                .watches
+                .iter_mut()
+                .filter(|watch| &watch.owner == owner && live_ids.contains(&watch.watch_id))
+            {
+                super::delivery::note_gaps_reported(watch, &gaps);
+            }
+            self.persist_best_effort(&owner.project_id, &state);
         }
         let events: Vec<StreamedEvent> = matched
             .into_values()

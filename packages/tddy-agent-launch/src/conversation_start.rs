@@ -143,6 +143,7 @@ impl ListedSessions for StartedSessionListings {
     ) -> Option<SessionEntry> {
         let request = ListSessionsRequest {
             session_token: self.session_token.clone(),
+            include_peers: false,
         };
         let listed = match self
             .launch

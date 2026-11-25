@@ -231,6 +231,9 @@ mod trunk_commit_tests {
             message: None,
             at_unix_ms: 0,
             orchestrator_session_id: None,
+            daemon_instance_id: None,
+            origin_seq: None,
+            relay_lost: 0,
         }
     }
 

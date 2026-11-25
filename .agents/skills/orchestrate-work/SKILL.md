@@ -202,7 +202,9 @@ and at least every N minutes in between (~50 for a long [G]/[W]/[F] worker, less
 Choose a channel **you can read later**; never let a child pick its own, and never accept one you
 have no way to read.
 
-For example, in tddy: a session on your host reports with `tddy-tools send --to <your session id>`.
+For example, in tddy: a session reports with `tddy-tools send --to <your session id>` — on your
+host or on any other connected host; a child on another host finds your host from its own start
+record, so it needs no `--host`.
 
 ### 6.2 Keep listening — subscribe right after the start
 
@@ -211,7 +213,9 @@ that tells you when the child messages or ends** — one that wakes you even whi
 between turns. **Never rely on remembering to poll.** Check that the subscription exists, and
 renew it before it expires while the child lives.
 
-For example, in tddy: `CreateSessionWatch` on `message` and `ended`, with `wake_when_idle`.
+For example, in tddy: `CreateSessionWatch` on `message` and `ended`, with `wake_when_idle` —
+`started_by_me` covers the children you started on every connected host, and each event names the
+host it came from (`daemon_instance_id`).
 
 ### 6.3 Read before acting
 

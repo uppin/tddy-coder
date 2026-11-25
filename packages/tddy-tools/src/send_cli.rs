@@ -4,6 +4,7 @@
 //! ```text
 //! tddy-tools send --to <session-id> "Tests pass; pushed 3f2a1c. Want me to open the PR?"
 //! tddy-tools send --to <session-id> --reply-to <message-id> -     # the text from stdin
+//! tddy-tools send --to <session-id> --host <daemon-instance-id> "Rebase on main."  # on another host
 //! ```
 //!
 //! It calls `PostSessionMessage` through the session and transport every session tool call uses
@@ -34,6 +35,12 @@ pub struct SendArgs {
     #[arg(long = "reply-to", value_name = "MESSAGE_ID")]
     pub reply_to: Option<String>,
 
+    /// The host the recipient runs on, as `ListProjectSessions` reports it. Omit it to have the
+    /// recipient found: on this host, as your orchestrator's host, as the host of the message you
+    /// reply to, or by asking the connected hosts.
+    #[arg(long = "host", value_name = "DAEMON_INSTANCE_ID")]
+    pub daemon_instance_id: Option<String>,
+
     /// The message, at most 8 KiB; `-` reads it from stdin.
     pub text: String,
 }
@@ -58,6 +65,9 @@ async fn send(args: SendArgs) -> Result<(), String> {
     });
     if let Some(reply_to) = args.reply_to {
         call["reply_to"] = json!(reply_to);
+    }
+    if let Some(host) = args.daemon_instance_id {
+        call["daemon_instance_id"] = json!(host);
     }
     let dispatched = crate::session_tool_client::dispatch_session_tool("PostSessionMessage", call);
     let answer = tokio::time::timeout(SEND_TIMEOUT, dispatched)

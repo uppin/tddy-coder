@@ -1890,6 +1890,7 @@ async fn removes_every_clone_when_the_session_is_deleted() {
         .a
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("listing sessions must succeed")
