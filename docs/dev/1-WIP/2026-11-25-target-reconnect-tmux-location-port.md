@@ -1,4 +1,4 @@
-# Changeset: A tmux-run target session reconnects like a host tmux session
+# Changeset: the `TmuxLocation` port — one detach/re-attach lifecycle for every tmux run (`#target-reconnect` 1/3)
 
 **Created:** 2026-11-25
 **Status:** Created
@@ -7,7 +7,7 @@
 [docs/ft/daemon/session-liveness.md](../../ft/daemon/session-liveness.md) (§ The rule, § A daemon
 restart) and [docs/ft/daemon/terminal-sessions.md](../../ft/daemon/terminal-sessions.md) (lines
 213–260, the target-tmux bullets). This changeset rewrites those bullets at wrap.
-**Closes:** [docs/dev/todo/2026-11-23-target-tmux-auto-reconnect.md](../todo/2026-11-23-target-tmux-auto-reconnect.md)
+**Stack:** `#target-reconnect` 1/3. The TODO [docs/dev/todo/2026-11-23-target-tmux-auto-reconnect.md](../todo/2026-11-23-target-tmux-auto-reconnect.md) is claimed ✅ RESOLVED by node 2 (branch `feature/target-reconnect/target-exit-lazy-reattach`), not here.
 
 ## Problem
 
@@ -77,7 +77,7 @@ A target **main** records no roster entry (`record_tmux_main` is called only on 
 
 | Record | Class | Note |
 |---|---|---|
-| `docs/dev/todo/2026-11-23-target-tmux-auto-reconnect.md` | ℹ answered | closed by this changeset (deleted at wrap) |
+| `docs/dev/todo/2026-11-23-target-tmux-auto-reconnect.md` | ℹ answered | resolved by node 2, which deletes it at its wrap |
 | `docs/dev/todo/2026-11-22-coder-target-stop-reads-exit-code-1.md` | ⚠ during | a target main's client exit stops being classified by its exit code at all for tmux runs (the probe decides), so this TODO narrows to non-tmux target runs; narrow it at wrap |
 | `packages/tddy-agent-launch/docs/code-issues/oversized-file-remote-agent-launch.md` (623 lines, not claimed) | ⚠ during | the new adapter goes in a **new** module `remote_agent_launch/target_tmux_location.rs`; `remote_agent_launch.rs` must not grow |
 | `docs/dev/todo/2026-11-23-split-remote-agent-launch-after-target-tmux.md` | — | not a blocker; same rule as above |
@@ -261,13 +261,92 @@ account), not a host OS user. The local client runs as the daemon (as `launch_on
 today); the roster/metadata `os_user` is still recorded and used for the agent-tool socket and the
 `AgentEnd` announcement.
 
-## Open decisions (for the developer)
+## Operator decisions (2026-11-25)
 
-1. D4 constants: backoff cap 5 min and grace 15 min — accept, or other values?
-2. One PR or a 3-node stack (M1 port extraction / M2 target exit + lazy / M3 startup + tabs)? M1 is
-   behaviour-preserving except D6 and reviewable alone; recommended: **stack of 3**, if accepted I
-   will add per-node docs per the `pr-stack` skill.
-3. D6 (host refusal no longer drops state) — accept the host behaviour change?
+1. D4 constants accepted: backoff cap 5 min, hold grace 15 min.
+2. Three-node stack: n1 port + host (this PR), n2 target exit + lazy re-attach, n3 startup re-attach.
+3. D6 accepted.
+
+## Responsibility
+
+Node 1 of 3 (`#target-reconnect`). Owns the **`TmuxLocation` port**
+(`tddy-cli-sessions/src/tmux_location.rs`: `TmuxLocation`, `TmuxClient`, `TmuxUnreachable`), its
+**host adapter `HostTmux`**, the in-crate `FakeTmuxLocation`, and porting every **host** consumer
+onto it: `TmuxRun` carries a location; `DetachWatch`, `classify_ended_main`, `reattach_terminal` and
+`attach_terminal_to_tmux` probe and attach through it; host start / startup / lazy call sites pass
+`HostTmux`. Also owns the watcher's **unreachable policy** (D4: backoff 10 s → 5 min cap, 15 min hold
+grace, release without an agent end) and **D6** (a refused host probe keeps the session). This
+document carries the whole-stack design (State A, State B, decisions) because the port is what every
+node builds on.
+
+## Boundaries
+
+- No target code: no `TargetTmux`, no resolver, no `owner_subject`, no change to `launch_on_target`,
+  `target_tmux_session_lives` or `spawn_rendered_client_*` (node 2).
+- No change to `reattach_live_tmux_tabs`'s skipping of target chains (node 3).
+- No new RPC, proto, or `MainReattach` signature change.
+
+## Dependencies
+
+None — the bottom node, based on `master`.
+
+## Draft PR contract
+
+First push after this plan: `tmux_location.rs` with the trait, `TmuxClient`, `TmuxUnreachable` and
+`HostTmux` compiling; `TmuxRun { session, location }` and `DetachWatch::start(session_id, session,
+location)` in their new signatures; the failing M1 tests below. Node 2 compiles its `TargetTmux`
+against exactly these signatures.
+
+## Green wave
+
+**Wave:** 1 of 3
+**Greenable independently:** yes — every test drives a `FakeTmuxLocation` or the host tmux; nothing
+needs a target.
+**Concurrent with:** none
+**Blocks:** node 2 (its target client-exit acceptance test needs the ported watcher's behaviour);
+node 3 transitively.
+
+Real dependency edges: `n1 → n2 → n3`.
+
+### Acceptance dependency graph (after this node)
+
+```mermaid
+graph LR
+  DW[DetachWatch] --> TL[TmuxLocation]
+  CEM[classify_ended_main] --> TL
+  RT[reattach_terminal / attach_terminal_to_tmux] --> TL
+  HT[HostTmux] -. implements .-> TL
+  HT --> TMUX[crate::tmux: tmux_session_lives, tmux_attach_argv, kill_tmux_session]
+  SL[tddy-session-lifecycle: startup + lazy] --> HT
+  AL[tddy-agent-launch: host start] --> HT
+```
+
+Must-not edges (checklist):
+- [ ] `tddy-cli-sessions` → `tddy-remote-shell`
+- [ ] `DetachWatch` / `classify_ended_main` → `crate::tmux::*` directly (only through the port)
+- [ ] `spawn_tool_on` gains a 14th parameter
+
+### Final design graph (after node 3)
+
+```mermaid
+graph LR
+  DW[DetachWatch] --> TL[TmuxLocation]
+  HT[HostTmux] -. implements .-> TL
+  TT[TargetTmux] -. implements .-> TL
+  TT --> TTS[TabTargetShell] --> RS[RemoteShell]
+  RES[tmux_location_of] --> HT
+  RES --> TT
+  RES --> META[SessionMetadata.owner_subject]
+  LAZY[reattach_recorded_main] --> RES
+  START[reattach_live_tmux_tabs] --> RES
+  TLAUNCH[launch_on_target + target agent tab] --> TT
+```
+
+## Successor PRs
+
+- node 2: branch `feature/target-reconnect/target-exit-lazy-reattach`
+- node 3: branch `feature/target-reconnect/startup-reattach-target-chains`
+
 
 ## Milestones
 
@@ -276,19 +355,6 @@ today); the roster/metadata `os_user` is still recorded and used for the agent-t
 - [ ] `TmuxRun` carries a location; `DetachWatch`, `classify_ended_main`, `reattach_terminal`,
       `attach_terminal_to_tmux` ported; host start/startup/lazy call sites pass `HostTmux`
 - [ ] watcher backoff + grace (D4) implemented in `DetachWatch`
-
-### M2 — Target client exit and lazy re-attach
-- [ ] `owner_subject` recorded by target start (and by resume when missing and a caller is present)
-- [ ] tri-state `target_tmux_session_lives`
-- [ ] `TargetTmux` adapter + `tmux_location_of` resolver
-- [ ] target main and `[target, tmux, agent]` tab spawned with their `TmuxRun`
-- [ ] `reattach_recorded_main` resolves the location; target attach uses `attach-session`
-
-### M3 — Startup re-attach of target chains
-- [ ] `reattach_live_tmux_tabs` / `pre_roster_main` handle `[target, tmux]` and `[target, tmux, agent]`
-- [ ] unreachable/vault-locked → `left` + unreachable-state watcher
-- [ ] hook-log follower restarted on every target re-attach (verify; add if missing)
-- [ ] docs: terminal-sessions.md target bullets, session-liveness.md, claude-cli-session.md
 
 ## Testing Strategy
 
@@ -308,7 +374,7 @@ on the stand-in. Watcher timing is made deterministic with `with_detach_watch_in
 | startup re-attach of target chains | Integration/acceptance (`tddy-session-lifecycle`) | `DaemonSessionHost::reattach_live_tmux_tabs` over real session dirs |
 | host regressions | existing `claude_cli_tmux_reattach_acceptance.rs`, `session_liveness_acceptance.rs` | must stay green unchanged except D6 |
 
-### Acceptance tests
+### Acceptance tests (this node)
 
 `tddy-cli-sessions` (unit, `cli_session_manager/tmux_reattach.rs` tests / `tmux_location_tests.rs`)
 - [ ] `a_client_exit_whose_location_cannot_be_asked_keeps_the_session` — `Err` → `ClientOnly`, watcher registered, no `AgentEnd` sent
@@ -318,27 +384,6 @@ on the stand-in. Watcher timing is made deterministic with `with_detach_watch_in
 - [ ] `a_location_reporting_gone_ends_the_detached_agent` — workflow/exposure/lease dropped, `AgentEnd{exit_code: None}`
 - [ ] `the_host_location_attaches_with_tmux_attach_session_exactly` — argv `[tmux, -T, clipboard, attach-session, -t, =name]`, `run_as = Some(user)`
 - [ ] `a_refused_host_probe_no_longer_drops_the_session` (D6)
-
-`tddy-agent-launch` (unit, `remote_agent_launch/target_tmux_location_tests.rs`, in-memory `RemoteShell`)
-- [ ] `the_target_probe_reads_exit_255_as_unreachable_not_gone`
-- [ ] `the_target_probe_reads_cant_find_session_as_gone`
-- [ ] `the_target_probe_reads_a_missing_tmux_as_unreachable` (127)
-- [ ] `the_target_attach_client_attaches_and_never_creates` — remote command contains `attach-session -t '=tddy-<id>'` and not `new-session`
-- [ ] `a_session_without_an_owner_subject_resolves_no_target_location` → `ReattachSkip::NoOwnerSubject`
-- [ ] `a_locked_vault_resolves_as_unreachable_naming_the_vault`
-- [ ] `a_target_start_records_its_owner_subject` — `.session.yaml` `owner_subject == caller subject`
-
-`tddy-session-lifecycle` (acceptance, new `tests/remote_target_tmux_reconnect/`, stand-in target)
-- [ ] `a_target_session_stays_live_when_its_transport_client_drops` — kill the local client pid; `ListSessions` still active; tmux `tddy-<id>` on the stand-in untouched
-- [ ] `the_first_stream_reattaches_a_dropped_target_main_without_relaunching` — `StreamSessionTerminalIo(main)` yields the pane's existing output marker; the pane pid on the stand-in is unchanged; exactly one new client
-- [ ] `a_target_session_whose_tmux_ended_while_detached_ends` — kill `tddy-<id>` on the stand-in; within 2 intervals session inactive, `AgentEnd` with no exit code
-- [ ] `daemon_start_reattaches_a_live_target_main` — fresh `DaemonSessionHost` over the dir: `ReattachReport.reattached` contains `(id, main, tddy-<id>)`
-- [ ] `daemon_start_reattaches_a_live_target_agent_tab` — `[target, tmux, agent]` tab re-attached, `tddy-<id>-<terminal>`
-- [ ] `daemon_start_leaves_an_unreachable_target_and_watches_it` — `left` reason names unreachability; making the stand-in reachable + a stream re-attaches
-- [ ] `daemon_start_leaves_a_pre_subject_target_session_for_resume` — no `owner_subject` → `left` "records no owner subject"
-- [ ] `daemon_start_never_attaches_a_persons_tmux_on_the_target` — `[target, tmux-attach]` not in `reattached`
-- [ ] `a_reattached_target_main_restarts_its_hook_log_follower` — a hook line appended on the stand-in after re-attach is read by the daemon
-- [ ] existing: `claude_cli_tmux_reattach_acceptance.rs`, `session_liveness_acceptance.rs`, `remote_target_tmux_tabs/*` stay green
 
 ## Technical Debt
 - `tmux_session_alive` (bool, hides refusals) — remove once no caller is left.
