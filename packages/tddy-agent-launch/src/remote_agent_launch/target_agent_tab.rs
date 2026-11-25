@@ -20,7 +20,7 @@ use tddy_core::ssh_exec::shell_single_quote;
 use super::agent_probe::{probe_agent_on_target, probe_tmux_on_target};
 use super::session_files::{write_rendered_session_files, SessionFilesPlace};
 use super::target_tab::{reach_the_worktree, spawn_tab_client};
-use super::target_tmux_tab::target_tmux_tab_command;
+use super::target_tmux_tab::target_agent_tmux_tab_command;
 use super::{target_login_exec, RemoteLaunchError, TargetTab};
 use crate::spec_launch::HostPtyPlan;
 
@@ -89,13 +89,13 @@ pub async fn launch_agent_tab_on_target(
 
     let command = match &agent.tmux_session {
         // In tmux on the target (`#target-tmux` 2/2): attached when its tmux session lives, the
-        // agent started in it otherwise.
+        // agent started in it otherwise, clipboard forwarding enabled on it either way.
         Some(name) => {
             probe_tmux_on_target(tab.shell.as_ref(), tab.worktree).await?;
-            target_tmux_tab_command(
+            target_agent_tmux_tab_command(
                 tab.worktree,
                 name,
-                Some(&target_login_exec(&plan.argv, &plan.env)),
+                &target_login_exec(&plan.argv, &plan.env),
             )
         }
         None => format!(

@@ -2,9 +2,13 @@
 //! sessions a Claude CLI agent runs *in* (`#tmux-agent` 1/3).
 //!
 //! Everything runs **as the session's OS user**, so it reaches that user's own tmux server — the
-//! sessions they started in their own terminals. Nothing here changes a tmux option: a client
-//! announces that it accepts OSC 52 with `-T clipboard`, a per-client feature, so tmux copy-mode
-//! copies reach the browser without editing the user's tmux configuration.
+//! sessions they started in their own terminals. A client announces that it accepts OSC 52 with
+//! `-T clipboard`, a per-client feature, so tmux copy-mode copies reach the browser. An agent
+//! session additionally gets `allow-passthrough` on its own window, and the server's
+//! `set-clipboard` is upgraded from the default `external` to `on` — tmux offers no
+//! session-scoped knob for plain writes (a session target is accepted but sets it globally), so
+//! the upgrade is server-wide at runtime; an explicit `off` is the user's hardening and is left
+//! alone. The user's `~/.tmux.conf` is never touched.
 //!
 //! The binary is `TDDY_TMUX_BINARY` when set and non-empty, else `tmux` on the daemon's `PATH`.
 //!
@@ -256,6 +260,63 @@ pub fn agent_new_session_args(name: &str, worktree: &Path, command: &[String]) -
     args
 }
 
+/// The arguments of `tmux set-option` that let tmux-aware programs in session `name` copy to the
+/// viewer: `set-option -t =<name>: allow-passthrough on`. Such a program wraps its OSC 52 write in
+/// a tmux DCS passthrough, which tmux drops unless the window allows it — and drops it whatever
+/// `set-clipboard` holds, so this is not covered by [`set_clipboard_on_args`]. `allow-passthrough`
+/// is a window option, so the target is the session's current window (`:`), as
+/// [`remain_on_exit_args`] does; `=` stops tmux matching a prefix.
+pub fn allow_passthrough_args(name: &str) -> Vec<String> {
+    vec![
+        "set-option".to_string(),
+        "-t".to_string(),
+        format!("{}:", exact_target(name)),
+        "allow-passthrough".to_string(),
+        "on".to_string(),
+    ]
+}
+
+/// The arguments of `tmux show-options` that read the server's `set-clipboard` value:
+/// `show-options -s set-clipboard`.
+pub fn show_set_clipboard_args() -> Vec<String> {
+    vec![
+        "show-options".to_string(),
+        "-s".to_string(),
+        "set-clipboard".to_string(),
+    ]
+}
+
+/// The arguments of `tmux set-option` that forward plain OSC 52 writes from panes to clients:
+/// `set-option -s set-clipboard on`. A plain write — what a program that knows nothing of tmux
+/// prints — is swallowed under the default `external`: only tmux's own copies leave the server.
+/// Server-wide at runtime: tmux offers no session-scoped knob (verified on 3.6a: a session target
+/// is accepted but sets it globally anyway).
+pub fn set_clipboard_on_args() -> Vec<String> {
+    vec![
+        "set-option".to_string(),
+        "-s".to_string(),
+        "set-clipboard".to_string(),
+        "on".to_string(),
+    ]
+}
+
+/// The value of `set-clipboard` in what `show-options -s set-clipboard` printed
+/// (`set-clipboard <value>`), or `None` when it printed anything else.
+pub fn parse_set_clipboard(stdout: &str) -> Option<&str> {
+    stdout
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("set-clipboard "))
+        .filter(|value| !value.is_empty())
+}
+
+/// Whether the server's `set-clipboard` value swallows plain OSC 52 writes from panes: only the
+/// default `external` is upgraded to `on`. `on` needs nothing, an explicit `off` is the user's
+/// hardening and is left alone, and an unreadable value is not touched.
+pub fn set_clipboard_needs_enabling(current: Option<&str>) -> bool {
+    current == Some("external")
+}
+
 /// Start `argv` in a new detached tmux session `name` in `worktree`, as `os_user`, with `env` on the
 /// pane, and return the pane process's pid.
 ///
@@ -301,7 +362,63 @@ pub fn start_agent_tmux_session(
     if remain_on_exit {
         keep_pane_after_exit(os_user, name)?;
     }
+    // A session whose clipboard cannot be enabled still runs its agent: copies from its programs
+    // may not reach the viewer, which is logged, not fatal.
+    if let Err(error) = enable_tmux_clipboard(os_user, name) {
+        log::warn!(
+            target: "tddy_daemon::tmux",
+            "copies from programs in tmux session {name:?} of {os_user} may not reach the viewer: {error}"
+        );
+    }
     pane_pid(os_user, name)
+}
+
+/// Let programs in `os_user`'s tmux session `name` copy to the viewer's clipboard:
+/// `allow-passthrough` on the session's own window (for tmux-aware programs, which wrap their
+/// OSC 52 write in a DCS passthrough), and the server's `set-clipboard` upgraded from the default
+/// `external` to `on` (for plain writes). An explicit `off` is left alone.
+///
+/// Both are attempted even when the first fails — an old tmux without `allow-passthrough` still
+/// forwards plain writes once `set-clipboard` is on — and the first failure is the error.
+pub fn enable_tmux_clipboard(os_user: &str, name: &str) -> Result<(), TmuxError> {
+    let passthrough = run_tmux_as_user(os_user, &allow_passthrough_args(name)).and_then(|output| {
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(TmuxError::new(format!(
+                "tmux could not pass programs' clipboard writes through session {name:?}: {}",
+                stderr_of(&output)
+            )))
+        }
+    });
+    let clipboard = upgrade_set_clipboard(os_user, name);
+    passthrough.and(clipboard)
+}
+
+/// Upgrade the server's `set-clipboard` from the default `external` to `on`, so plain OSC 52
+/// writes from panes reach clients. Anything else the server holds — `on`, an explicit `off`, or
+/// an unreadable value — is left alone ([`set_clipboard_needs_enabling`]).
+fn upgrade_set_clipboard(os_user: &str, name: &str) -> Result<(), TmuxError> {
+    let output = run_tmux_as_user(os_user, &show_set_clipboard_args())?;
+    if !output.status.success() {
+        return Err(TmuxError::new(format!(
+            "tmux could not read the server clipboard for session {name:?}: {}",
+            stderr_of(&output)
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !set_clipboard_needs_enabling(parse_set_clipboard(&stdout)) {
+        return Ok(());
+    }
+    let output = run_tmux_as_user(os_user, &set_clipboard_on_args())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(TmuxError::new(format!(
+            "tmux could not forward programs' clipboard writes for session {name:?}: {}",
+            stderr_of(&output)
+        )))
+    }
 }
 
 /// Set `remain-on-exit` on session `name`, and if that fails, end the session: a start that reports
@@ -753,5 +870,80 @@ mod tests {
             args.iter().all(|a| !a.contains("sk-sentinel-secret")),
             "no environment value is on tmux's argv: {args:?}"
         );
+    }
+
+    #[test]
+    fn passing_through_is_enabled_on_exactly_the_named_session() {
+        // When
+        let args = allow_passthrough_args("tddy-1234abcd");
+
+        // Then
+        assert_eq!(
+            args,
+            vec![
+                "set-option",
+                "-t",
+                "=tddy-1234abcd:",
+                "allow-passthrough",
+                "on"
+            ]
+        );
+    }
+
+    #[test]
+    fn enabling_the_server_clipboard_sets_it_on_the_server() {
+        // When
+        let args = set_clipboard_on_args();
+
+        // Then
+        assert_eq!(args, vec!["set-option", "-s", "set-clipboard", "on"]);
+    }
+
+    #[test]
+    fn reading_the_server_clipboard_asks_the_server() {
+        // When
+        let args = show_set_clipboard_args();
+
+        // Then
+        assert_eq!(args, vec!["show-options", "-s", "set-clipboard"]);
+    }
+
+    #[test]
+    fn the_server_clipboard_value_is_read_from_what_show_printed() {
+        // When
+        let value = parse_set_clipboard("set-clipboard external\n");
+
+        // Then
+        assert_eq!(value, Some("external"));
+    }
+
+    #[test]
+    fn anything_but_a_value_line_reads_as_no_value() {
+        // When tmux answers nothing usable
+        for stdout in ["", "bogus\n", "set-clipboard\n", "set-clipboard"] {
+            // Then there is no value to act on
+            assert_eq!(parse_set_clipboard(stdout), None, "{stdout:?}");
+        }
+    }
+
+    #[test]
+    fn only_the_default_external_is_upgraded_to_on() {
+        // Given the values a server can hold
+        for (current, needs) in [("external", true), ("on", false), ("off", false)] {
+            // When asked whether the server's clipboard needs enabling
+            // Then only the default is upgraded; an explicit off is the user's hardening
+            assert_eq!(
+                set_clipboard_needs_enabling(Some(current)),
+                needs,
+                "{current}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreadable_server_clipboard_is_left_alone() {
+        // When the value could not be read
+        // Then it is not touched
+        assert!(!set_clipboard_needs_enabling(None));
     }
 }

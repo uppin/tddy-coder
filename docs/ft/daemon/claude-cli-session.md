@@ -237,6 +237,9 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
   is `0700`, the user's too), and the pane sources it, deletes it and `exec`s Claude. No value —
   the provider token included — appears on any process's argv. A start that fails removes the file
   itself. Then the main terminal runs `tmux -T clipboard attach-session -t =<name>` as that user.
+  The start enables clipboard forwarding on the session — `allow-passthrough` on its window, and
+  the server's `set-clipboard` from the default `external` to `on` (an explicit `off` stands) — so
+  the agent's OSC 52 copies reach the viewer's clipboard. `~/.tmux.conf` is never touched.
 - **pid.** The recorded `pid` is tmux's `#{pane_pid}` — the Claude process — not the client's. It is a
   record of what was started: liveness is the daemon's live set ([Session liveness](session-liveness.md)),
   and **SignalSession** signals the held main terminal's process, never the recorded pid.

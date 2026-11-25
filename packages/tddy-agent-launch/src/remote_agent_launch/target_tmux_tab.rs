@@ -5,11 +5,16 @@
 //! Every tab runs one command through the target's login shell, in the session's worktree there:
 //!
 //! ```text
-//! cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '\''<name>'\'' [<inner>]'
+//! cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux -T clipboard new-session -A -s '\''<name>'\'' [<inner>]'
 //! ```
 //!
 //! `new-session -A` attaches to `<name>` when it lives and makes it otherwise, so a start, a re-attach
-//! and a recreate are the same command.
+//! and a recreate are the same command. The client announces the clipboard feature, as a host tab's
+//! does, so the target's tmux forwards clipboard writes to it.
+//!
+//! An agent's own session ([`target_agent_tmux_tab_command`]) additionally enables that forwarding
+//! before it attaches — tmux's defaults swallow a program's OSC 52 — while a person's own session
+//! keeps the target login's tmux configuration untouched.
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-23-target-tmux.md (n2)
 
@@ -81,14 +86,82 @@ pub async fn list_target_tmux_sessions(
 
 /// The command a tmux tab runs on a target: `tmux new-session -A -s <name>` in `worktree`, through
 /// the target's login shell, running `inner` (an already-quoted shell command) as the new session's
-/// command when it is made, or the login's shell when `inner` is `None`.
+/// command when it is made, or the login's shell when `inner` is `None`. The client announces the
+/// clipboard feature (`-T clipboard`), as a host tab's does.
 pub fn target_tmux_tab_command(worktree: &Path, name: &str, inner: Option<&str>) -> String {
-    let mut tmux = format!("exec tmux new-session -A -s {}", shell_single_quote(name));
+    let mut tmux = format!(
+        "exec tmux -T clipboard new-session -A -s {}",
+        shell_single_quote(name)
+    );
     if let Some(inner) = inner {
         tmux.push(' ');
         tmux.push_str(&shell_single_quote(inner));
     }
     in_the_worktree(worktree, &tmux)
+}
+
+/// The shell fragment that enables clipboard forwarding on the target's tmux session `name` (an
+/// agent's own): `allow-passthrough` on the session's window, so tmux-aware programs' wrapped
+/// OSC 52 writes pass through, and the server's `set-clipboard` upgraded from the default
+/// `external` to `on`, so plain writes are forwarded. An explicit `off` is the target login's
+/// hardening and is left alone — the same rule [`tddy_cli_sessions::tmux`] applies on the host
+/// ([`set_clipboard_needs_enabling`](tddy_cli_sessions::tmux::set_clipboard_needs_enabling)), in
+/// the target's shell because no tddy binary runs there. The steps never abort the chain (`;`, and
+/// each silenced): an old tmux without `allow-passthrough` still forwards plain writes, and a
+/// session already gone fails the caller instead.
+fn target_tmux_clipboard_fragment(name: &str) -> String {
+    let window = shell_single_quote(&format!("={name}:"));
+    format!(
+        "tmux set-option -t {window} allow-passthrough on 2>/dev/null; \
+         if [ \"$(tmux show-options -s set-clipboard 2>/dev/null)\" = \"set-clipboard external\" ]; \
+         then tmux set-option -s set-clipboard on 2>/dev/null; fi"
+    )
+}
+
+/// The command an agent tab runs in tmux on a target: the session `name` created detached running
+/// `inner` (an already-quoted shell command), clipboard forwarding enabled on it, then the tab
+/// attached to it — in `worktree`, through the target's login shell. A session already living is
+/// not created twice: the duplicate-session complaint is silenced and the tab attaches to it, with
+/// forwarding enabled on it all the same. The client's `-T clipboard` and the enablement are what
+/// carry a program's OSC 52 copy to the viewer.
+pub fn target_agent_tmux_tab_command(worktree: &Path, name: &str, inner: &str) -> String {
+    let tmux = format!(
+        "tmux new-session -d -s {} {} 2>/dev/null; {}; exec tmux -T clipboard attach-session -t {}",
+        shell_single_quote(name),
+        shell_single_quote(inner),
+        target_tmux_clipboard_fragment(name),
+        shell_single_quote(&format!("={name}")),
+    );
+    in_the_worktree(worktree, &tmux)
+}
+
+/// Enable clipboard forwarding on the target's tmux session `name` (an agent's own), through its
+/// login shell: [`target_tmux_clipboard_fragment`]. The session must already live — the caller runs
+/// this once the agent is known to have started. A target whose tmux refuses is the shell's error.
+pub async fn enable_target_tmux_clipboard(
+    shell: &dyn RemoteShell,
+    name: &str,
+) -> Result<(), RemoteLaunchError> {
+    shell
+        .exec(ExecRequest::new(target_login_run(
+            &target_tmux_clipboard_fragment(name),
+        )))
+        .await
+        .map_err(RemoteLaunchError::Shell)?
+        .success_or_exited()
+        .map_err(RemoteLaunchError::Shell)?;
+    Ok(())
+}
+
+/// [`enable_target_tmux_clipboard`], for a caller whose agent already runs: a session that refuses
+/// still runs its agent, so a failure is logged — copies from its programs may not reach the
+/// viewer — rather than returned.
+pub async fn enable_target_tmux_clipboard_logged(shell: &dyn RemoteShell, name: &str) {
+    if let Err(error) = enable_target_tmux_clipboard(shell, name).await {
+        log::warn!(
+            "copies from programs in tmux session {name:?} on the target may not reach the viewer: {error}"
+        );
+    }
 }
 
 /// Open the tab `terminal_id` of `session_id` as a client of the tmux session `name` on the target

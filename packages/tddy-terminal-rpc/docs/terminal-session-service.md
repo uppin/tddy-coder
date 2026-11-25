@@ -360,6 +360,8 @@ is one the host runs is the roster's decision, because only the host knows its h
   starts the agent in a tmux session of its own (`agent_tab_tmux_session_name`) as `launch.os_user`
   after the same reachability check, then attaches a client tab with
   `CliSessionManager::attach_terminal_to_tmux`; the tmux session is killed when the attach fails.
+  The start enables clipboard forwarding on the session (window `allow-passthrough`, server
+  `set-clipboard` from `external` to `on`), so a program's OSC 52 copy reaches the viewer.
   Every started tab is recorded in the session's tab roster with its launch chain
   (`recorded_tabs.rs`), and `StopTerminalSession` of a wrapped tab ends its tmux session before the
   tab; a tab that cannot be recorded is stopped and the start fails.
