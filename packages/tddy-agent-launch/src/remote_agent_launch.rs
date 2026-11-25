@@ -62,6 +62,7 @@ pub use crate::remote_agent_launch::target_tab::{
     launch_tab_on_target, target_shell_tab_command, TargetTab,
 };
 pub use crate::remote_agent_launch::target_tmux_tab::{
+    enable_target_tmux_clipboard, enable_target_tmux_clipboard_logged,
     end_target_tmux_session_named, launch_tmux_tab_on_target, list_target_tmux_sessions,
     target_tmux_session_lives, target_tmux_tab_command,
 };
@@ -145,8 +146,12 @@ pub fn target_tmux_session_name(session_id: &str) -> String {
 /// asked ([`probe_tmux_on_target`]), and a session already running is attached to instead:
 ///
 /// ```text
-/// cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux new-session -A -s '\''tddy-<id>'\'' '\''<target_login_exec>'\'''
+/// cd '<worktree>' && exec "${SHELL:-/bin/sh}" -lc 'exec tmux -T clipboard new-session -A -s '\''tddy-<id>'\'' '\''<target_login_exec>'\'''
 /// ```
+///
+/// The client announces the clipboard feature (`-T clipboard`), as a host run's does; clipboard
+/// forwarding on the session itself is enabled once the agent is known to have started
+/// ([`enable_target_tmux_clipboard`]).
 ///
 /// No pid file is written: the agent is the tmux server's child, and the tmux session's name is
 /// what names it.
@@ -161,7 +166,7 @@ pub fn remote_agent_tmux_command(
         "cd {} && {}",
         shell_single_quote(&worktree.to_string_lossy()),
         target_login_run(&format!(
-            "exec tmux new-session -A -s {} {}",
+            "exec tmux -T clipboard new-session -A -s {} {}",
             shell_single_quote(&target_tmux_session_name(session_id)),
             shell_single_quote(&target_login_exec(argv, env))
         ))
@@ -374,7 +379,17 @@ pub async fn launch_on_target(
     // spawn: under load the remote shell may not have run the remote command yet when a
     // spawn-counted window elapses, and an agent that exits at once would be judged started.
     // The remote command writes the session's pid file immediately before it execs the agent.
-    judge_the_start(remote, session, handle).await
+    let in_tmux = remote.tmux;
+    let shell = Arc::clone(&remote.shell);
+    let session_id = session.session_id;
+    let launched = judge_the_start(remote, session, handle).await?;
+    if in_tmux {
+        // The agent is known to have started, so its tmux session lives; a session that refuses
+        // still runs its agent, and the failure is logged, not fatal.
+        let name = target_tmux_session_name(session_id);
+        enable_target_tmux_clipboard_logged(shell.as_ref(), &name).await;
+    }
+    Ok(launched)
 }
 
 /// The directory `session_id`'s agent pid file is written into, created through the port before
@@ -734,7 +749,7 @@ mod tests {
             (printed, worktree.join(remote_agent_pid_file("s1")).exists()),
             (
                 format!(
-                    "new-session -A -s tddy-s1\n{}\nit's up\n",
+                    "-T clipboard new-session -A -s tddy-s1\n{}\nit's up\n",
                     worktree.display()
                 ),
                 false

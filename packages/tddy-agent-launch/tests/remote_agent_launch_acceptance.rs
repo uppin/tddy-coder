@@ -1128,6 +1128,34 @@ async fn an_agent_run_in_tmux_runs_in_a_tmux_session_named_for_the_session_on_th
 }
 
 #[tokio::test]
+async fn a_tmux_run_enables_clipboard_forwarding_on_the_targets_tmux() {
+    // Given a reachable target with tmux, holding the session's worktree and the agent
+    let target = a_target_with_a_login_of_its_own();
+    let agent = an_agent_that_stays_up_on(&target);
+    let daemon = a_daemon();
+
+    // When the agent is launched in tmux
+    daemon
+        .launches_in_tmux(&agent, &target)
+        .await
+        .expect("the agent is launched in tmux on the target");
+
+    // Then the session's window passes programs' writes through, and the server forwards plain ones
+    let name = the_sessions_tmux_session();
+    let window = format!("={name}:");
+    let passthrough = target.tmux(&["show-options", "-w", "-t", &window, "allow-passthrough"]);
+    assert_eq!(
+        String::from_utf8_lossy(&passthrough.stdout),
+        "allow-passthrough on\n"
+    );
+    let clipboard = target.tmux(&["show-options", "-s", "set-clipboard"]);
+    assert_eq!(
+        String::from_utf8_lossy(&clipboard.stdout),
+        "set-clipboard on\n"
+    );
+}
+
+#[tokio::test]
 async fn an_agent_run_in_tmux_outlives_its_dropped_connection() {
     // Given an agent running in tmux on the target
     let target = a_target_with_a_login_of_its_own();
