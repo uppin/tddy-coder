@@ -103,8 +103,7 @@ impl CliSessionManager {
             exit_code_in_output,
             os_user,
             on_exit,
-            None,
-            None,
+            super::tmux_reattach::TmuxRun::with_location(None, os_user, None),
         )
         .await
     }
@@ -139,8 +138,7 @@ impl CliSessionManager {
             client.exit_code_in_output,
             None,
             None,
-            None,
-            None,
+            super::tmux_reattach::TmuxRun::with_location(None, None, None),
         )
         .await
     }

@@ -67,8 +67,11 @@ impl CliSessionManager {
             client.exit_code_in_output,
             client.run_as.as_deref(),
             None,
-            Some(tmux_session),
-            Some(location),
+            super::tmux_reattach::TmuxRun::with_location(
+                Some(tmux_session),
+                client.run_as.as_deref(),
+                Some(location),
+            ),
         )
         .await
     }

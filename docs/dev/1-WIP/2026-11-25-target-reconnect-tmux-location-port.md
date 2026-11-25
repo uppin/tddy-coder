@@ -322,9 +322,9 @@ graph LR
 ```
 
 Must-not edges (checklist):
-- [ ] `tddy-cli-sessions` → `tddy-remote-shell`
-- [ ] `DetachWatch` / `classify_ended_main` → `crate::tmux::*` directly (only through the port)
-- [ ] `spawn_tool_on` gains a 14th parameter
+- [x] `tddy-cli-sessions` → `tddy-remote-shell`
+- [x] `DetachWatch` / `classify_ended_main` → `crate::tmux::*` directly (only through the port)
+- [x] `spawn_tool_on` gains a 14th parameter — the location travels inside `TmuxRun`, which `spawn_tool_on` now takes instead of a session name
 
 ### Final design graph (after node 3)
 
@@ -377,13 +377,13 @@ on the stand-in. Watcher timing is made deterministic with `with_detach_watch_in
 ### Acceptance tests (this node)
 
 `tddy-cli-sessions` (unit, `cli_session_manager/tmux_reattach.rs` tests / `tmux_location_tests.rs`)
-- [ ] `a_client_exit_whose_location_cannot_be_asked_keeps_the_session` — `Err` → `ClientOnly`, watcher registered, no `AgentEnd` sent
-- [ ] `a_watcher_backs_off_while_its_location_is_unreachable` — paused clock: probe instants 10, 20, 40 … capped at 300 s
-- [ ] `an_unreachable_location_releases_the_hold_after_the_grace_without_ending_the_agent` — at 15 min `watched_sessions()` no longer lists it; managed workflow still registered; no `AgentEnd`
-- [ ] `a_location_that_comes_back_alive_resets_the_backoff` — next probe at 10 s
-- [ ] `a_location_reporting_gone_ends_the_detached_agent` — workflow/exposure/lease dropped, `AgentEnd{exit_code: None}`
-- [ ] `the_host_location_attaches_with_tmux_attach_session_exactly` — argv `[tmux, -T, clipboard, attach-session, -t, =name]`, `run_as = Some(user)`
-- [ ] `a_refused_host_probe_no_longer_drops_the_session` (D6)
+- [x] `a_client_exit_whose_location_cannot_be_asked_keeps_the_session` — `Err` → `ClientOnly`, watcher registered, no `AgentEnd` sent
+- [x] `a_watcher_backs_off_while_its_location_is_unreachable` — paused clock: probe instants 10, 20, 40 … capped at 300 s
+- [x] `an_unreachable_location_releases_the_hold_after_the_grace_without_ending_the_agent` — at 15 min `watched_sessions()` no longer lists it; managed workflow still registered; no `AgentEnd`
+- [x] `a_location_that_comes_back_alive_resets_the_backoff` — next probe at 10 s
+- [x] `a_location_reporting_gone_ends_the_detached_agent` — workflow/exposure/lease dropped, `AgentEnd{exit_code: None}`
+- [x] `the_host_location_attaches_with_tmux_attach_session_exactly` — argv `[tmux, -T, clipboard, attach-session, -t, =name]`, `run_as = Some(user)`
+- [x] `a_refused_host_probe_no_longer_drops_the_session` (D6)
 
 ## Technical Debt
 - `tmux_session_alive` (bool, hides refusals) — remove once no caller is left.
@@ -401,7 +401,8 @@ on the stand-in. Watcher timing is made deterministic with `with_detach_watch_in
 ## Validation Results
 | Validation | Last Run | Status |
 |------------|----------|--------|
-| /validate-changes | Not yet run | Pending |
+| Scoped tests | `./test -p tddy-cli-sessions`: 107 passed | Pass |
+| Clippy | `cargo clippy -p tddy-cli-sessions --all-targets -- -D warnings` | Pass |
 | /validate-tests | Not yet run | Pending |
 | /validate-prod-ready | Not yet run | Pending |
 | /analyze-clean-code | Not yet run | Pending |

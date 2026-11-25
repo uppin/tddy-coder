@@ -341,6 +341,21 @@ impl TmuxRun {
         }
     }
 
+    /// The tmux session the terminal is a client of, when it is one.
+    pub(crate) fn session(&self) -> Option<&str> {
+        self.session.as_deref()
+    }
+
+    /// The same run, but not a client of an agent's tmux session (a `tmux` tab on a person's own
+    /// session): nothing to classify or watch when its client ends.
+    pub(crate) fn not_a_client(self) -> Self {
+        TmuxRun {
+            session: None,
+            location: None,
+            ..self
+        }
+    }
+
     /// The OS user the terminal ran as; `None` when it ran as the daemon's own user.
     pub(crate) fn os_user(&self) -> Option<&str> {
         self.os_user.as_deref()
