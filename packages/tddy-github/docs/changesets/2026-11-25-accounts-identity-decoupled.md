@@ -1,6 +1,6 @@
 # 2026-11-25 — The account a token belongs to, over `GET /user`
 
-**Type:** Fix
+**Type:** Fix · PR [#1044](https://github.com/uppin/tddy-coder/pull/1044)
 Cross-package entry: [`docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md`](../../../../docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md)
 
 New `user_api` module: `parse_authenticated_user(body)` (pure — id and login required,

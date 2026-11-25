@@ -1,6 +1,6 @@
 # 2026-11-25 — Trunk-watch reads go token-only
 
-**Type:** Fix
+**Type:** Fix · PR [#1044](https://github.com/uppin/tddy-coder/pull/1044)
 Cross-package entry: [`docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md`](../../../../docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md)
 
 The trunk poller's account token resolves token-only: REST conditional reads

@@ -1,6 +1,6 @@
 # 2026-11-25 — Stack-tool reads go token-only; pushes stay paired
 
-**Type:** Fix
+**Type:** Fix · PR [#1044](https://github.com/uppin/tddy-coder/pull/1044)
 Cross-package entry: [`docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md`](../../../../docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md)
 
 The stack tools' GitHub client and `git_work`'s API client resolve token-only, so

@@ -1,6 +1,6 @@
 # 2026-11-25 — A token-only resolution beside the paired one
 
-**Type:** Fix
+**Type:** Fix · PR [#1044](https://github.com/uppin/tddy-coder/pull/1044)
 Cross-package entry: [`docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md`](../../../../docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md)
 
 `acting_token(assignments, provider, held)` answers `ActingToken { account, token }`

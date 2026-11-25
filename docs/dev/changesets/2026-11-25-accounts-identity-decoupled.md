@@ -1,6 +1,7 @@
 # 2026-11-25 — Reads take the token alone; a missing commit identity is derived from it
 
 **Type:** Fix
+**PR:** [#1044](https://github.com/uppin/tddy-coder/pull/1044)
 **Work item:** n9 (orchestrator queue)
 **Packages:** `tddy-accounts`, `tddy-github`, `tddy-agent-launch`, `tddy-daemon-rpc`, `tddy-session-lifecycle`
 

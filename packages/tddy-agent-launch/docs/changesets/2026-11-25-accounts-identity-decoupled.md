@@ -1,6 +1,6 @@
 # 2026-11-25 — The commit path derives a missing identity; reads take the token alone
 
-**Type:** Fix
+**Type:** Fix · PR [#1044](https://github.com/uppin/tddy-coder/pull/1044)
 Cross-package entry: [`docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md`](../../../../docs/dev/changesets/2026-11-25-accounts-identity-decoupled.md)
 
 `SessionAccountAccess::acting_identity` derives on `Unusable`: the `AccountIdentityProbe`
