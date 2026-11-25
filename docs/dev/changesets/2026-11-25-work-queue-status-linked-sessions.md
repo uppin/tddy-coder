@@ -1,6 +1,7 @@
 # Work-queue status shows linked sessions and the item's branch
 
 **Type:** Fix
+**PR:** #1038
 **Work item:** n7 (orchestrator queue of session `01a20f10-4a30-7df1-8c63-d12aec760d68`)
 **Packages:** `tddy-changeset`, `tddy-tool-engine`, `tddy-daemon-rpc`, `tddy-workqueue-web`
 
@@ -125,7 +126,7 @@ to file if accounts work there. No credential-design change made here, by instru
 
 ## Wrap
 
-Wrapped 2026-11-25 by `/pr-wrap`. Verification was scoped to the touched packages:
+Wrapped 2026-11-25 by `/pr-wrap` on PR #1038. Verification was scoped to the touched packages:
 `tddy-changeset` and `tddy-tool-engine` full suites green, `tddy-daemon-rpc`
 `stack_plan_tools_acceptance` (15), `work_item_links_rpc_acceptance` (4) and
 `project_home_session_tools_acceptance` (10) green, `cargo clippy -p` on the three with
