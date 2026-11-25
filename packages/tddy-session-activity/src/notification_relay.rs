@@ -166,6 +166,9 @@ pub const RELAY_CALL_DEADLINE: Duration = Duration::from_secs(10);
 /// still found.
 const NO_ORCHESTRATOR_ELSEWHERE_FOR: Duration = Duration::from_secs(30);
 
+/// A session's orchestrator on another host as last read, and when it was read.
+type OrchestratorLookup = (Option<Destination>, std::time::Instant);
+
 /// Where one record goes, and whose it is.
 #[derive(Debug, Clone)]
 struct Route {
@@ -209,7 +212,7 @@ pub struct NotificationRelay {
     state: Mutex<RelayState>,
     /// Per session, the other host its orchestrator runs on and the orchestrator — read once from
     /// its changeset, which a start writes before the session's agent runs.
-    orchestrators: Mutex<HashMap<(String, String), (Option<Destination>, std::time::Instant)>>,
+    orchestrators: Mutex<HashMap<(String, String), OrchestratorLookup>>,
     /// Per project, the destinations of each of its records the relay was told of as it was
     /// appended ([`ProjectNotificationLog::on_append`]), by `seq`: what a record evicted before it was
     /// relayed was owed to, so `lost` counts exactly those. An entry goes once every host it names
