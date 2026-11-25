@@ -28,6 +28,7 @@ pub(crate) struct StackToolArgs {
     pub(crate) node_id: Option<String>,
     pub(crate) item_id: Option<String>,
     pub(crate) session_id: Option<String>,
+    pub(crate) session_daemon_instance_id: Option<String>,
     pub(crate) labels: Vec<String>,
     pub(crate) key: Option<String>,
     pub(crate) text: Option<String>,
@@ -130,6 +131,7 @@ pub(crate) fn work_queue_op_of(
         WORK_ITEM_LINK_SESSION => WorkQueueOp::LinkSession {
             item_id: required(tool_name, args.item_id, "item_id")?,
             session_id: required(tool_name, args.session_id, "session_id")?,
+            daemon_instance_id: args.session_daemon_instance_id.unwrap_or_default(),
         },
         WORK_ITEM_UNLINK_SESSION => WorkQueueOp::UnlinkSession {
             item_id: required(tool_name, args.item_id, "item_id")?,

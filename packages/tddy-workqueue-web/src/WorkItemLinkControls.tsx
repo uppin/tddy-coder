@@ -4,7 +4,17 @@ import { create } from "@bufbuild/protobuf";
 import { PullRequestCheckSchema } from "tddy-client-web/gen/worktree_pb";
 import { CheckRow } from "tddy-workspace-web";
 import { useWorkItemLinks } from "./workItemLinks";
-import type { WorkItem } from "./workQueue";
+import type { LinkedSession, WorkItem } from "./workQueue";
+
+/**
+ * What a row reads for one linked session: its id, and — when the link names another daemon —
+ * the host that holds it, since a bare id says nothing about where the session runs.
+ */
+export function linkedSessionLabel(linked: LinkedSession): string {
+  return linked.daemonInstanceId
+    ? `linked: ${linked.sessionId} on ${linked.daemonInstanceId}`
+    : `linked: ${linked.sessionId}`;
+}
 
 /**
  * A row's link controls (`#workqueue` 6/14): the PR assigned to the item (assign by number, remove),
@@ -12,8 +22,10 @@ import type { WorkItem } from "./workQueue";
  * Rendered only where the view supplies [`WorkItemLinks`](./workItemLinks).
  *
  * Test ids: `work-item-assign-pr-${id}` (opens the input), `…-input-${id}`, `…-submit-${id}`,
- * `work-item-unassign-pr-${id}`, `work-item-unlink-session-${id}-${sessionId}`, `work-item-link-error-${id}`,
- * `work-item-checks-toggle-${id}` (expands the check rows, each the session PR tab's `CheckRow`).
+ * `work-item-unassign-pr-${id}`, `work-item-linked-session-${id}-${sessionId}` (one per linked
+ * session, naming its host when it is not this one), `work-item-unlink-session-${id}-${sessionId}`,
+ * `work-item-link-error-${id}`, `work-item-checks-toggle-${id}` (expands the check rows, each the
+ * session PR tab's `CheckRow`).
  */
 export function WorkItemLinkControls({ node }: { node: WorkItem }) {
   const links = useWorkItemLinks();
@@ -109,9 +121,13 @@ export function WorkItemLinkControls({ node }: { node: WorkItem }) {
         </div>
       )}
       {node.linkedSessions.map((linked) => (
-        <p key={linked.sessionId} className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="truncate font-mono" title={linked.sessionId}>
-            linked: {linked.sessionId}
+        <p
+          key={linked.sessionId}
+          data-testid={`work-item-linked-session-${id}-${linked.sessionId}`}
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+        >
+          <span className="truncate font-mono" title={linkedSessionLabel(linked)}>
+            {linkedSessionLabel(linked)}
           </span>
           <Button
             data-testid={`work-item-unlink-session-${id}-${linked.sessionId}`}

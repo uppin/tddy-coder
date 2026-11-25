@@ -221,7 +221,8 @@ A search is always scoped to the orchestrator's own repository: `repo:` and `is:
 A work item can be **assigned an existing pull request** and **linked to any number of tddy sessions**
 (on any host of the project), beside the session it was started into (`WorkItem.session_id`). The four
 link tools — `work_item_assign_pr { item_id, pull_number }`, `work_item_unassign_pr { item_id }`,
-`work_item_link_session { item_id, session_id }`, `work_item_unlink_session { item_id, session_id }` —
+`work_item_link_session { item_id, session_id, session_daemon_instance_id? }`,
+`work_item_unlink_session { item_id, session_id }` —
 are daemon exec tools in `tddy-tool-engine::work_item_link_tools`, offered to the queue's **owner** only
 (addressed sessions get none of them), and the same four operations are RPCs on
 `work_queue.WorkQueueService` (`AssignWorkItemPr`, `UnassignWorkItemPr`, `LinkWorkItemSession`,
@@ -236,6 +237,12 @@ are daemon exec tools in `tddy-tool-engine::work_item_link_tools`, offered to th
 - **A linked session is Addressed** by the item's queue (it may call `work_queue_status` and
   `work_pr_read`); writing stays the owner's.
 - **A refused edit writes nothing**: every link edit is applied to a copy under the queue's record lock.
+- **A link names its host.** `session_daemon_instance_id` records which daemon holds the session
+  (empty for the queue's own host); link answers list `{ session_id, daemon_instance_id }`.
+  `work_queue_status` lists every linked session with its host on each node, and the item's
+  effective branch — what it records, else a linked session's branch, else its assigned PR's
+  head branch — resolved for display and never written back. The queue view joins the plan's
+  links for the row's child session, branch line and status chip, and names each link's host.
 
 **Live checks on the row.** `StreamWorkQueueStatus` answers, per item, its PR's state and the count of
 its checks at the PR's head that are running, failed and succeeded, with each run (name, status,

@@ -400,19 +400,33 @@ pub fn link_work_item_to_session(
 }
 
 /// Resolve the branch a stack node stands on: the branch the node recorded itself, falling back
-/// to the branch recorded by its child session's changeset.
+/// to the branch recorded by its child session's changeset — the spawn-recorded child first,
+/// then the linked sessions (`#workqueue` 6/14) in link order.
 ///
-/// The node's own record is authoritative — the session is only a fallback route to the same
-/// answer, for a node linked before its branch was known (or an older manifest). A node with no
-/// branch and no reachable session resolves to `None`; a session directory that is gone from disk
-/// is `None` too, never an error, because a deleted session must not un-resolve stack progression.
+/// The node's own record is authoritative — a session is only a fallback route to the same
+/// answer, for a node linked before its branch was known (or an older manifest). Each link is
+/// read from its session directory under `sessions_root`, and whatever is not there — a session
+/// on another host, a branchless or deleted one — is skipped, with no host comparison: session
+/// ids are unique across the fleet, so a local directory with the id is that session. A node
+/// with no branch and no reachable session resolves to `None`, never an error, because a
+/// deleted session must not un-resolve stack progression.
 pub fn resolve_stack_node_branch(sessions_root: &Path, node: &WorkItem) -> Option<String> {
     if let Some(branch) = node.branch.clone() {
         return Some(branch);
     }
-    let session_id = node.session_id.as_deref()?;
-    let child_dir = crate::session_lifecycle::unified_session_dir_path(sessions_root, session_id);
-    read_changeset(&child_dir).ok()?.branch
+    let branch_of = |session_id: &str| {
+        let child_dir =
+            crate::session_lifecycle::unified_session_dir_path(sessions_root, session_id);
+        read_changeset(&child_dir).ok()?.branch
+    };
+    if let Some(session_id) = node.session_id.as_deref() {
+        if let Some(branch) = branch_of(session_id) {
+            return Some(branch);
+        }
+    }
+    node.linked_sessions
+        .iter()
+        .find_map(|linked| branch_of(&linked.session_id))
 }
 
 /// Read an orchestrator session's stack with every node's `branch` hydrated via

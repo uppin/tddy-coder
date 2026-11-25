@@ -13,7 +13,7 @@
 use std::path::Path;
 use tddy_changeset::changeset::{
     read_stack_with_resolved_branches, resolve_stack_node_branch, update_stack_atomic, Changeset,
-    WorkItem, WorkQueue,
+    LinkedSession, WorkItem, WorkQueue,
 };
 use tddy_changeset::session_lifecycle::unified_session_dir_path;
 use tddy_changeset::session_metadata::{
@@ -49,6 +49,20 @@ fn a_node_on_branch(node_id: &str, branch: &str) -> WorkItem {
 fn a_node_linked_to_session(node_id: &str, session_id: &str) -> WorkItem {
     WorkItem {
         session_id: Some(session_id.to_string()),
+        ..a_planned_node(node_id)
+    }
+}
+
+fn a_link(session_id: &str, daemon_instance_id: &str) -> LinkedSession {
+    LinkedSession {
+        session_id: session_id.to_string(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+    }
+}
+
+fn a_node_with_linked_sessions(node_id: &str, links: Vec<LinkedSession>) -> WorkItem {
+    WorkItem {
+        linked_sessions: links,
         ..a_planned_node(node_id)
     }
 }
@@ -258,6 +272,81 @@ fn unblocks_a_dependent_node_once_its_parent_branch_resolves_through_the_child_s
 
     // Then — the fallback-resolved branch is a legitimate base for n2
     assert_eq!(base.unwrap(), "origin/feature/x/n1");
+}
+
+#[test]
+fn resolves_the_branch_from_a_linked_session_when_the_node_recorded_none() {
+    // Given — n1 records no branch and no child session; sess-a is linked to it and owns a branch
+    let root = a_sessions_root();
+    a_child_session_on_branch(root.path(), "sess-a", "feature/x/n1");
+    let node = a_node_with_linked_sessions("n1", vec![a_link("sess-a", "")]);
+
+    // When
+    let branch = resolve_stack_node_branch(root.path(), &node);
+
+    // Then — a linked session is a fallback route to the branch, like the recorded child
+    assert_eq!(branch, Some("feature/x/n1".to_string()));
+}
+
+#[test]
+fn prefers_the_recorded_child_session_branch_over_a_linked_session_branch() {
+    // Given — the recorded child and a linked session disagree about the branch
+    let root = a_sessions_root();
+    a_child_session_on_branch(root.path(), "child-1", "feature/x/from-recorded");
+    a_child_session_on_branch(root.path(), "sess-b", "feature/x/from-linked");
+    let node = WorkItem {
+        session_id: Some("child-1".to_string()),
+        ..a_node_with_linked_sessions("n1", vec![a_link("sess-b", "")])
+    };
+
+    // When
+    let branch = resolve_stack_node_branch(root.path(), &node);
+
+    // Then — the spawn-recorded child wins; linked sessions are the later fallback
+    assert_eq!(branch, Some("feature/x/from-recorded".to_string()));
+}
+
+#[test]
+fn skips_linked_sessions_whose_branch_cannot_be_read_here_in_link_order() {
+    // Given — the first links name a session on another host (no local dir), a branchless one and
+    // a deleted one; only sess-d owns a readable branch
+    let root = a_sessions_root();
+    a_branchless_child_session(root.path(), "sess-branchless");
+    a_child_session_on_branch(root.path(), "sess-d", "feature/x/n1");
+    let node = a_node_with_linked_sessions(
+        "n1",
+        vec![
+            a_link("sess-remote", "a-remote-host"),
+            a_link("sess-branchless", ""),
+            a_link("sess-deleted", ""),
+            a_link("sess-d", ""),
+        ],
+    );
+
+    // When
+    let branch = resolve_stack_node_branch(root.path(), &node);
+
+    // Then — the first locally readable linked branch wins
+    assert_eq!(branch, Some("feature/x/n1".to_string()));
+}
+
+#[test]
+fn resolves_no_branch_when_no_linked_session_has_a_readable_branch() {
+    // Given — n1's links name only a remote session and a deleted one
+    let root = a_sessions_root();
+    let node = a_node_with_linked_sessions(
+        "n1",
+        vec![
+            a_link("sess-remote", "a-remote-host"),
+            a_link("sess-deleted", ""),
+        ],
+    );
+
+    // When
+    let branch = resolve_stack_node_branch(root.path(), &node);
+
+    // Then — unreadable links resolve to no branch rather than failing
+    assert_eq!(branch, None);
 }
 
 #[test]

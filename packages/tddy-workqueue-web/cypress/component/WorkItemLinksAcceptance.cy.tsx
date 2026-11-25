@@ -128,3 +128,41 @@ it("a PR'ed item lists each of its checks when the user expands them", () => {
   byTestId("session-pr-check-lint").should("contain.text", "failure");
   byTestId("session-pr-check-test").should("contain.text", "success");
 });
+
+it("a linked item lists every linked session with its host", () => {
+  // Given — n1 links a session of this host and one of another
+  const [item] = parseWorkQueue(aWorkQueueJson(1, [AN_ITEM])).nodes;
+  const linked = {
+    ...item,
+    linkedSessions: [
+      { sessionId: "sess-local-0000-0000-0000-000000000002", daemonInstanceId: "" },
+      { sessionId: "sess-remote-0000-0000-0000-000000000003", daemonInstanceId: "the-other-host" },
+    ],
+  };
+  const links: WorkItemLinks = {
+    sessions: [],
+    checksByItemId: {},
+    errorByItemId: {},
+    onAssignPr: () => {},
+    onUnassignPr: () => {},
+    onLinkSession: () => {},
+    onUnlinkSession: () => {},
+    onSetLabels: () => {},
+    onClearBadge: () => {},
+  };
+  cy.mount(
+    <WorkItemLinksContext.Provider value={links}>
+      <WorkItemLinkControls node={linked} />
+    </WorkItemLinksContext.Provider>,
+  );
+
+  // Then — each link names its session, and the remote one names its host
+  byTestId("work-item-linked-session-n1-sess-local-0000-0000-0000-000000000002").should(
+    "contain.text",
+    "sess-local-0000-0000-0000-000000000002",
+  );
+  byTestId("work-item-linked-session-n1-sess-remote-0000-0000-0000-000000000003").should(
+    "contain.text",
+    "the-other-host",
+  );
+});

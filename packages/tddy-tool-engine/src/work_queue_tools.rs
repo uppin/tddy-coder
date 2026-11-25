@@ -198,6 +198,8 @@ pub enum WorkQueueOp {
     LinkSession {
         item_id: String,
         session_id: String,
+        /// The daemon holding the session; empty for the queue's own host.
+        daemon_instance_id: String,
     },
     /// `work_item_unlink_session`.
     UnlinkSession {

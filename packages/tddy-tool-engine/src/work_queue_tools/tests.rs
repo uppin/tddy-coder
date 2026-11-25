@@ -58,6 +58,34 @@ fn the_annotation_tools_parse_into_their_ops() {
 }
 
 #[test]
+fn work_item_link_session_parses_its_session_and_its_optional_host() {
+    assert_eq!(
+        (
+            parsed(
+                crate::work_item_link_tools::WORK_ITEM_LINK_SESSION,
+                json!({ "item_id": "n1", "session_id": "sess-a" })
+            ),
+            parsed(
+                crate::work_item_link_tools::WORK_ITEM_LINK_SESSION,
+                json!({ "item_id": "n1", "session_id": "sess-b", "session_daemon_instance_id": "host-b" })
+            ),
+        ),
+        (
+            Ok(WorkQueueOp::LinkSession {
+                item_id: "n1".to_string(),
+                session_id: "sess-a".to_string(),
+                daemon_instance_id: String::new(),
+            }),
+            Ok(WorkQueueOp::LinkSession {
+                item_id: "n1".to_string(),
+                session_id: "sess-b".to_string(),
+                daemon_instance_id: "host-b".to_string(),
+            }),
+        )
+    );
+}
+
+#[test]
 fn a_badge_without_its_tone_is_refused_naming_the_argument() {
     let refused = parsed(
         WORK_ITEM_SET_BADGE,
