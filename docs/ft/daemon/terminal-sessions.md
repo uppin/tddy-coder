@@ -209,7 +209,9 @@ kind `claude-cli`) is a client attached to it, recorded with that `tmux_session`
 [Claude CLI session § tmux mode](claude-cli-session.md#tmux-mode-startsessionrequestrun_in_tmux--true).
 That session is an ordinary tmux session of the user, so `ListTmuxSessions` lists it and a tab can
 attach to it. Unlike a tab's, it belongs to the agent: Delete kills it. Daemon shutdown only detaches
-the main terminal's client, so the agent outlives the daemon.
+the main terminal's client, so the agent outlives the daemon. Its start enables clipboard forwarding
+on it (window `allow-passthrough`, server `set-clipboard` from `external` to `on`), so a program's
+OSC 52 copy reaches the viewer; `~/.tmux.conf` is untouched.
 
 A **target session** (`StartSessionRequest.target`, a Coder workspace or ssh host) started with
 `run_in_tmux` runs its agent in tmux **on the target** (`#target-tmux` 1/2):
@@ -217,9 +219,12 @@ A **target session** (`StartSessionRequest.target`, a Coder workspace or ssh hos
 - **Preflight.** Before any worktree is cut, start and resume ask the target's login shell for
   `tmux` (`command -v tmux`, as the agent probe does). A target without it refuses
   `FAILED_PRECONDITION` naming tmux; there is no fallback to a non-tmux run.
-- **Run.** The remote command is `cd <worktree> && $SHELL -lc 'exec tmux new-session -A -s
-  tddy-<session> <the agent's env -i login exec>'`; the main terminal is the local transport client
-  attached to it, and the session records `tmux_session: tddy-<session>`.
+- **Run.** The remote command is `cd <worktree> && $SHELL -lc 'exec tmux -T clipboard new-session
+  -A -s tddy-<session> <the agent's env -i login exec>'`; the main terminal is the local transport
+  client attached to it, and the session records `tmux_session: tddy-<session>`. Once the agent is
+  known to have started, the launch enables clipboard forwarding on the session (window
+  `allow-passthrough`, server `set-clipboard` from `external` to `on`), so a program's OSC 52 copy
+  reaches the viewer.
 - **Identity is the tmux session name.** No pid file is written (the agent is the tmux server's child,
   not tddy's): the start waits for the pane's pid (`display-message -p -t '=tddy-<session>:'
   '#{pane_pid}'`), and the session pointer's owner records that pid.
@@ -242,19 +247,24 @@ A target session's **tmux tabs run on the target** too (`#target-tmux` 2/2):
   `FAILED_PRECONDITION` naming tmux; an unreachable target `UNAVAILABLE`. The daemon host's tmux is
   never listed for a target session.
 - **`StartTerminalSession`** with `kind = "tmux"` or `"tmux-new"` and `wrappers: [target]` runs
-  `$SHELL -lc 'exec tmux new-session -A -s <name>'` in the session's worktree on the target, as a
-  local tab terminal (the transport's client). Attach first checks the target lists `<name>`
-  (`NOT_FOUND` otherwise). Recorded `[target, tmux-attach]`.
+  `$SHELL -lc 'exec tmux -T clipboard new-session -A -s <name>'` in the session's worktree on the
+  target, as a local tab terminal (the transport's client). Attach first checks the target lists
+  `<name>` (`NOT_FOUND` otherwise). Recorded `[target, tmux-attach]`. A person's own session keeps
+  the target login's tmux configuration untouched.
 - An agent kind with `wrappers: [target, tmux]` runs the agent (its bare command, found on the
-  target) inside `tmux new-session -A -s tddy-<session>-<terminal>` on the target. Recorded
-  `[target, tmux, agent]`. **`StopTerminalSession`** of that tab kills its tmux session on the target
-  (the roster's `stop_as` carries the caller, whose credentials reach the target); a tab attached to a
-  person's tmux session only detaches.
-- **`ResumeSession`** restores both chains with the same `new-session -A`: re-attached when the tmux
-  session lives (`RESTORED`), made again in the worktree — the agent resuming its conversation when
-  its harness can — when it is gone (`FRESH`, naming it). The daemon-start re-attach leaves target
-  tabs for Resume: it runs with no caller, and a target's credentials resolve only for one. Neither
-  ever consults the daemon host's tmux for a `target` chain.
+  target) inside `tmux new-session -d -s tddy-<session>-<terminal>` on the target, enables clipboard
+  forwarding on the session (window `allow-passthrough`, server `set-clipboard` from `external` to
+  `on`), then attaches the tab to it — a session already living is attached to with forwarding
+  enabled on it all the same. Recorded `[target, tmux, agent]`. **`StopTerminalSession`** of that
+  tab kills its tmux session on the target (the roster's `stop_as` carries the caller, whose
+  credentials reach the target); a tab attached to a person's tmux session only detaches.
+- **`ResumeSession`** restores both chains the same way their start runs them: a person's tab with
+  `new-session -A`, an agent tab with create-detached, enablement and attach — re-attached with
+  forwarding enabled when the tmux session lives (`RESTORED`), made again in the worktree — the
+  agent resuming its conversation when its harness can — when it is gone (`FRESH`, naming it). The
+  daemon-start re-attach leaves target tabs for Resume: it runs with no caller, and a target's
+  credentials resolve only for one. Neither ever consults the daemon host's tmux for a `target`
+  chain.
 
 When a tmux-run session has **no main terminal registered** but its tmux session is alive (its client
 exited, or the daemon restarted), the first `StreamSessionTerminalIo`, `StreamTerminalOutput`,

@@ -15,7 +15,7 @@ Product behaviour: [Web terminal](../../../docs/ft/web/web-terminal.md) § Clipb
 
 ## Tests
 
-`src/lib/osc52.test.ts` (bun): terminators, selections, every byte split, multibyte UTF-8, read, invalid base64, over-cap, unrelated OSC, two sequences in one chunk. `cypress/component/TerminalOsc52Acceptance.cy.tsx` feeds bytes into a mounted terminal with `navigator.clipboard.writeText` stubbed: agent terminal, bash tab, read writes nothing and sends no input, surrounding output still renders.
+`src/lib/osc52.test.ts` (bun): terminators, selections, every byte split, multibyte UTF-8, read, invalid base64, over-cap, unrelated OSC, two sequences in one chunk. `tddy-session-web`'s `cypress/component/TerminalOsc52Acceptance.cy.tsx` feeds bytes into a mounted terminal with `navigator.clipboard.writeText` stubbed: agent terminal, bash tab, read writes nothing and sends no input, surrounding output still renders.
 
 ## Known limits
 

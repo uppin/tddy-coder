@@ -24,7 +24,10 @@ reaches the worktree and registers the client through the two steps `target_tab.
 (`reach_the_worktree`, `spawn_tab_client`), writes any session-directory file the argv names into the worktree's
 `.tddy/` on the target (`write_rendered_session_files`, over a `SessionFilesPlace`), and runs
 `cd '<wt>' && <target_login_exec(argv, env)>` — the agent's bare command under `env -i` with exactly the tab's
-environment.
+environment. With `tmux_session` it runs `remote_agent_launch/target_tmux_tab.rs`'s
+`target_agent_tmux_tab_command` instead (create detached, clipboard forwarding enabled on the session,
+then attach as a `-T clipboard` client); the main's post-start enablement is
+`enable_target_tmux_clipboard` (`_logged`: a refusal is logged, not fatal).
 Before it spawns, the target's login shell is asked for the agent's bare command (`remote_agent_launch/agent_probe.rs`:
 `probe_agent_on_target(shell, worktree, command)`, one call, `command -v` quoted with `tddy_core::ssh_exec::shell_single_quote`;
 non-zero is `RemoteLaunchError::AgentNotOnTarget { command }`; `#tab-hardening` 1/4). Every target tab's failed launch
