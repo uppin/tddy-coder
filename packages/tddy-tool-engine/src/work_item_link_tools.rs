@@ -20,7 +20,8 @@ pub const WORK_ITEM_LINK_TOOL_NAMES: [&str; 4] = [
 ];
 
 /// Their definitions: every one takes `item_id` (and the optional queue); assign takes
-/// `pull_number`, link and unlink take `session_id`.
+/// `pull_number`, link and unlink take `session_id`, and link takes the optional
+/// `session_daemon_instance_id` naming the session's host.
 pub fn work_item_link_tool_defs() -> Vec<ToolDef> {
     let item_id = json!({ "type": "string", "description": "The work item (id as work_queue_status lists it)." });
     let session_id = json!({ "type": "string", "description": "The tddy session." });
@@ -58,7 +59,16 @@ pub fn work_item_link_tool_defs() -> Vec<ToolDef> {
         tool_def(
             WORK_ITEM_LINK_SESSION,
             "Link a tddy session to a work item. A linked session may read the queue. Linking it again changes nothing.",
-            schema(json!({ "session_id": session_id.clone() }), &["item_id", "session_id"]),
+            schema(
+                json!({
+                    "session_id": session_id.clone(),
+                    "session_daemon_instance_id": {
+                        "type": "string",
+                        "description": "The host that holds the session, as session lists report it; empty for the queue's own host."
+                    }
+                }),
+                &["item_id", "session_id"],
+            ),
         ),
         tool_def(
             WORK_ITEM_UNLINK_SESSION,

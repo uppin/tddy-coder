@@ -273,3 +273,88 @@ describe("nodeChildSessionByIdentity", () => {
     expect(child?.sessionId).toBe(BRANCH_OWNER);
   });
 });
+
+/**
+ * The linked-sessions leg — the children the plan links to the node (`#workqueue` 6/14),
+ * after the recorded child and before the branch owner. A link is an explicit plan record,
+ * so it is identity evidence: it belongs to `nodeChildSessionByIdentity`, not to the
+ * branch-ownership leg.
+ */
+describe("nodeChildSession linked sessions", () => {
+  const LINKED = "child-session-linked-to-the-node";
+
+  it("resolves the child the plan links when nothing else matches", () => {
+    // Given — the node records no child and no branch; the linked session claims no node
+    const node = aStackNode({
+      itemId: "n1",
+      linkedSessions: [{ sessionId: LINKED, daemonInstanceId: "" }],
+    });
+    const children = [aStackChildSession({ sessionId: LINKED, workItemId: "" })];
+
+    // When
+    const byIdentity = nodeChildSessionByIdentity(node, children, ORCHESTRATOR);
+    const full = nodeChildSession(node, children, ORCHESTRATOR);
+
+    // Then — both joins resolve it: a link proves this node's child exists
+    expect(byIdentity?.sessionId).toBe(LINKED);
+    expect(full?.sessionId).toBe(LINKED);
+  });
+
+  it("prefers the recorded child over a linked one", () => {
+    // Given — the plan records one child and links another
+    const node = aStackNode({
+      itemId: "n1",
+      sessionId: RECORDED,
+      linkedSessions: [{ sessionId: LINKED, daemonInstanceId: "" }],
+    });
+    const children = [
+      aStackChildSession({ sessionId: RECORDED, workItemId: "" }),
+      aStackChildSession({ sessionId: LINKED, workItemId: "" }),
+    ];
+
+    // When
+    const child = nodeChildSessionByIdentity(node, children, ORCHESTRATOR);
+
+    // Then — the spawn-recorded child is the durable first answer
+    expect(child?.sessionId).toBe(RECORDED);
+  });
+
+  it("resolves the first linked session in link order", () => {
+    // Given — two linked children, both present
+    const node = aStackNode({
+      itemId: "n1",
+      linkedSessions: [
+        { sessionId: LINKED, daemonInstanceId: "" },
+        { sessionId: BRANCH_OWNER, daemonInstanceId: "another-host" },
+      ],
+    });
+    const children = [
+      aStackChildSession({ sessionId: BRANCH_OWNER, workItemId: "" }),
+      aStackChildSession({ sessionId: LINKED, workItemId: "" }),
+    ];
+
+    // When
+    const child = nodeChildSessionByIdentity(node, children, ORCHESTRATOR);
+
+    // Then — link order decides, not fleet order
+    expect(child?.sessionId).toBe(LINKED);
+  });
+
+  it("skips a linked session no child matches", () => {
+    // Given — the first link names a session that is gone; the second is live
+    const node = aStackNode({
+      itemId: "n1",
+      linkedSessions: [
+        { sessionId: "child-session-long-gone", daemonInstanceId: "" },
+        { sessionId: LINKED, daemonInstanceId: "" },
+      ],
+    });
+    const children = [aStackChildSession({ sessionId: LINKED, workItemId: "" })];
+
+    // When
+    const child = nodeChildSessionByIdentity(node, children, ORCHESTRATOR);
+
+    // Then
+    expect(child?.sessionId).toBe(LINKED);
+  });
+});

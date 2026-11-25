@@ -162,4 +162,22 @@ describe("hydrateWorkItems", () => {
     // Then — liveness decides the "in progress" badge, never whether the branch exists
     expect(hydrated[0]?.branch).toBe(REMOTE_BRANCH);
   });
+
+  it("adopts the branch and session of a child the plan links that claims no node", () => {
+    // Given — the node links a session that publishes no participant metadata for it
+    const nodes = [
+      aStackNode({
+        itemId: "n1",
+        linkedSessions: [{ sessionId: REMOTE_CHILD, daemonInstanceId: "" }],
+      }),
+    ];
+    const children = [aChild({ workItemId: "" })];
+
+    // When
+    const hydrated = hydrateWorkItems(nodes, children, ORCHESTRATOR);
+
+    // Then — the link is what joins them, so both fields are adopted from it
+    expect(hydrated[0]?.branch).toBe(REMOTE_BRANCH);
+    expect(hydrated[0]?.sessionId).toBe(REMOTE_CHILD);
+  });
 });

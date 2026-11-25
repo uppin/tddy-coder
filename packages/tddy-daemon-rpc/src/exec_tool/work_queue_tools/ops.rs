@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use tddy_core::changeset::WorkQueue;
+use tddy_core::changeset::{resolve_stack_node_branch, WorkQueue};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_core::work_queue_store::{WorkQueueRecord, WorkQueueStore};
 use tddy_tool_engine::work_queue_tools::{PrAddress, WorkQueueOp};
@@ -211,13 +211,14 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         WorkQueueOp::LinkSession {
             item_id,
             session_id,
+            daemon_instance_id,
         } => annotation_edits::edit_links(env, &item_id, |queue| {
             item_links::link_session(
                 queue,
                 &item_id,
                 item_links::LinkedSession {
                     session_id,
-                    daemon_instance_id: String::new(),
+                    daemon_instance_id: daemon_instance_id.trim().to_string(),
                 },
             )
         }),
@@ -270,7 +271,9 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
 mod annotation_edits;
 
 /// Answer the node summaries of the stack as stored — read after the statuses were refreshed, so the
-/// answer reflects what is stored. A refresh failure is surfaced as `refresh_error`, never hidden.
+/// answer reflects what is stored. Each node lists its linked sessions with their hosts, and its
+/// `branch` is the effective one (stored, else a linked session's, else its PR's): resolved for
+/// display, never written back. A refresh failure is surfaced as `refresh_error`, never hidden.
 pub(super) fn status_answer(env: &OpEnv, refresh_error: Option<String>) -> Result<Value, String> {
     // Read after the possible persist, so the answer reflects what is stored.
     let stack = env.stack()?;
@@ -281,13 +284,21 @@ pub(super) fn status_answer(env: &OpEnv, refresh_error: Option<String>) -> Resul
         .iter()
         .map(|n| {
             let (wave, binding_needs) = waves_ops::wave_and_needs(derived.as_ref(), &n.node_id);
+            // The item's actual branch: what it records, else a linked session's, else its PR's.
+            // Resolved for display only — a fallback-derived branch is never written back.
+            let branch = resolve_stack_node_branch(&env.sessions_base, n)
+                .or_else(|| n.pr.as_ref().map(|pr| pr.head_branch.clone()));
             json!({
                 "wave": wave,
                 "binding_needs": binding_needs,
                 "node_id": n.node_id,
                 "title": n.title,
-                "branch": n.branch,
+                "branch": branch,
                 "session_id": n.session_id,
+                "linked_sessions": n.linked_sessions.iter().map(|s| json!({
+                    "session_id": s.session_id,
+                    "daemon_instance_id": s.daemon_instance_id,
+                })).collect::<Vec<_>>(),
                 "pr_status": n.pr_status.as_ref().map(|s| s.phase.clone()),
                 "internal_status": n.internal_status.as_ref().map(|s| json!({
                     "kind": s.kind,

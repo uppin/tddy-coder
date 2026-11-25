@@ -1015,3 +1015,129 @@ async fn a_session_on_another_host_bound_to_no_node_there_is_refused_the_stack_r
         refusal.error_message
     );
 }
+
+/// A worker session of the project on `host` whose changeset records `branch`.
+async fn a_worker_on_branch(host: &Host, branch: &str) -> String {
+    let session_id = a_workspace_in(&host.daemon, THIS_PROJECT).await;
+    let dir = host.session_dir(&session_id);
+    let mut changeset = read_changeset(&dir).unwrap_or_default();
+    changeset.branch = Some(branch.to_string());
+    write_changeset(&dir, &changeset).unwrap();
+    session_id
+}
+
+/// The `(session_id, daemon_instance_id)` of every linked session a status node lists.
+fn status_links(node: &Value) -> Vec<(String, String)> {
+    node["linked_sessions"]
+        .as_array()
+        .expect("a status node lists its linked sessions")
+        .iter()
+        .map(|s| {
+            (
+                s["session_id"].as_str().unwrap_or_default().to_string(),
+                s["daemon_instance_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn linking_a_local_and_a_remote_session_then_status_lists_both_with_host_and_branch() {
+    // Given — host-a holds the orchestrator's queue with one branchless item; a worker on each
+    // host owns a branch
+    let world = a_world().await;
+    let (orchestrator, _queue_id) = world
+        .a
+        .an_orchestrator_owning_a_stack_of(&["Wire it"])
+        .await;
+    let local = a_worker_on_branch(&world.a, "feature/x/n1").await;
+    let remote = a_worker_on_branch(&world.b, "feature/x/n1-remote").await;
+
+    // When the orchestrator links both — the local one naming no host, the remote one host-b —
+    // and reads the status
+    let link_answer = world
+        .a
+        .answer_to(
+            &orchestrator,
+            "work_item_link_session",
+            json!({ "item_id": "n1", "session_id": local }),
+        )
+        .await;
+    world
+        .a
+        .answer_to(
+            &orchestrator,
+            "work_item_link_session",
+            json!({ "item_id": "n1", "session_id": remote, "session_daemon_instance_id": HOST_B }),
+        )
+        .await;
+    let status = world
+        .a
+        .answer_to(&orchestrator, "work_queue_status", json!({}))
+        .await;
+
+    // Then the link answers its sessions with their hosts, and the status lists every linked
+    // session with its host and the item's actual branch — the local worker's, read from its
+    // changeset, since the item records none
+    assert_eq!(
+        status_links(&link_answer),
+        vec![(local.clone(), String::new())],
+        "the link answer: {link_answer}"
+    );
+    let node = &status["nodes"]
+        .as_array()
+        .expect("a status answer lists nodes")[0];
+    assert_eq!(
+        status_links(node),
+        vec![(local, String::new()), (remote, HOST_B.to_string())],
+        "the status: {status}"
+    );
+    assert_eq!(
+        node["branch"],
+        json!("feature/x/n1"),
+        "the status: {status}"
+    );
+}
+
+#[tokio::test]
+async fn an_item_linked_to_a_session_with_a_branch_shows_that_branch_without_recording_it() {
+    // Given — a branchless item linked to a local session that owns a branch
+    let world = a_world().await;
+    let (orchestrator, queue_id) = world
+        .a
+        .an_orchestrator_owning_a_stack_of(&["Wire it"])
+        .await;
+    let worker = a_worker_on_branch(&world.a, "feature/x/n1").await;
+    world
+        .a
+        .answer_to(
+            &orchestrator,
+            "work_item_link_session",
+            json!({ "item_id": "n1", "session_id": worker }),
+        )
+        .await;
+
+    // When the orchestrator reads the status
+    let status = world
+        .a
+        .answer_to(&orchestrator, "work_queue_status", json!({}))
+        .await;
+
+    // Then the item shows the linked session's branch — resolved for display, never persisted
+    let node = &status["nodes"]
+        .as_array()
+        .expect("a status answer lists nodes")[0];
+    assert_eq!(
+        node["branch"],
+        json!("feature/x/n1"),
+        "the status: {status}"
+    );
+    let record = world.a.stacks().read(THIS_PROJECT, &queue_id).unwrap();
+    assert_eq!(
+        record.stack.nodes[0].branch, None,
+        "a fallback-resolved branch is never written back to the item"
+    );
+}

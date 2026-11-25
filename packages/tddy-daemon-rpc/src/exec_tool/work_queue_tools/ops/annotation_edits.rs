@@ -75,7 +75,7 @@ pub(crate) fn edit_links(
         })),
         "linked_sessions": item_links::linked_sessions_of(&stack, item_id)
             .into_iter()
-            .map(|s| s.session_id)
+            .map(|s| json!({ "session_id": s.session_id, "daemon_instance_id": s.daemon_instance_id }))
             .collect::<Vec<_>>(),
     }))
 }

@@ -28,8 +28,11 @@ function childrenOfStack(
  *    host boundary — the case the branch join cannot reach at all, since a cross-host node's link was
  *    written on the child's own disk and this plan never learned it.
  * 2. **The child the plan records.** The durable record of the same fact.
+ * 3. **The children the plan links to the node** (`#workqueue` 6/14), in link order. Explicit plan
+ *    records like leg 2 — a session linked by the orchestrator rather than bound by a spawn — so
+ *    identity evidence too, and what joins a node whose child publishes no participant metadata.
  *
- * Both legs answer "this node's child exists", which is the only evidence that may override
+ * All three legs answer "this node's child exists", which is the only evidence that may override
  * `QueryBranch`'s orphan verdict (D40): a resolution reporting `session.exists = false` means "not on
  * the daemon I asked", and only a positive claim on *this* node can outrank it.
  *
@@ -61,6 +64,14 @@ export function nodeChildSessionByIdentity(
     if (byRecord.length > 0) return preferActive(byRecord);
   }
 
+  // An empty link never matches: session ids are never empty, so matching one would only ever
+  // pair a corrupt link with a corrupt row.
+  for (const linked of node.linkedSessions) {
+    if (!linked.sessionId) continue;
+    const byLink = ours.filter((child) => child.sessionId === linked.sessionId);
+    if (byLink.length > 0) return preferActive(byLink);
+  }
+
   return undefined;
 }
 
@@ -68,10 +79,10 @@ export function nodeChildSessionByIdentity(
  * Which child session is working `node`, joined over the whole fleet rather than one host's
  * `ListSessions`.
  *
- * Three legs, tried in order (D39, extending D23): the two identity legs of
+ * Four legs, tried in order (D39, extending D23): the three identity legs of
  * {@link nodeChildSessionByIdentity}, then —
  *
- * 3. **Whoever owns the branch right now.** A different question, whose answer changes after a resume
+ * 4. **Whoever owns the branch right now.** A different question, whose answer changes after a resume
  *    or a hand-off, so it stays last exactly as D23 argued.
  *
  * This is the resolver for everything the row states about the session it is *looking at*: the status
@@ -79,7 +90,8 @@ export function nodeChildSessionByIdentity(
  * worker, which is what leg 3 names correctly.
  *
  * It is **not** the resolver for the orphan verdict — see `isNodeOrphaned`, which takes the identity
- * legs only, because leg 3 proves a session exists without proving it is this node's.
+ * legs only, because the branch-ownership leg proves a session exists without proving it is this
+ * node's.
  *
  * PRD: docs/ft/coder/pr-stack-live-status.md § Cross-host planned PRs (D39).
  */
