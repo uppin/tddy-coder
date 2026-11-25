@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_session_activity::project_notification_log::{
-    record_json, ProjectNotificationLog, ProjectNotificationRecord, ProjectNotificationScope,
+    record_json_on, ProjectNotificationLog, ProjectNotificationRecord, ProjectNotificationScope,
 };
 use tddy_tool_engine::project_home_inbox_tools::{
     NotificationsPage, ProjectHomeInboxPort, NO_NOTIFICATION_LOG,
@@ -43,11 +43,12 @@ impl DaemonProjectHome {
 /// A page of the log's records, each as its JSON object.
 fn json_page(
     page: FollowPage<ProjectNotificationRecord>,
+    this_host: &str,
 ) -> Result<FollowPage<serde_json::Value>, String> {
     let items = page
         .items
         .iter()
-        .map(record_json)
+        .map(|record| record_json_on(record, this_host))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("serialize a notification record: {e}"))?;
     Ok(FollowPage {
@@ -71,7 +72,7 @@ impl ProjectHomeInboxPort for DaemonProjectHome {
             .log()?
             .read(&self.scope_of(home, started_by_me), cursor, limit)?;
         Ok(NotificationsPage {
-            page: json_page(read.page)?,
+            page: json_page(read.page, &self.daemon_instance_id)?,
             lost: (read.lost > 0).then_some(read.lost),
             timed_out: None,
         })
@@ -93,7 +94,7 @@ impl ProjectHomeInboxPort for DaemonProjectHome {
             )
             .await?;
         Ok(NotificationsPage {
-            page: json_page(wait.page)?,
+            page: json_page(wait.page, &self.daemon_instance_id)?,
             lost: (wait.lost > 0).then_some(wait.lost),
             timed_out: Some(wait.timed_out),
         })

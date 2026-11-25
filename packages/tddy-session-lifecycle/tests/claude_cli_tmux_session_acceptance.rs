@@ -103,6 +103,7 @@ async fn a_tmux_run_session_records_the_pane_pid_and_reads_active() {
         .host
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions")

@@ -31,6 +31,9 @@ tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-credentials = { path = "../tddy-credentials" }
 tddy-github = { path = "../tddy-github" }
+# A relay call to a peer daemon is minted with this daemon's `SessionTokens`, and a peer's verified
+# with them (n5). An existing workspace crate the lifecycle crate already depends on.
+tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-github-inbox = { path = "../tddy-github-inbox" }
 # The generated `code_index` client `CodeNavigationServiceImpl` forwards through.
 tddy-index-daemon = { path = "../tddy-index-daemon" }
@@ -102,10 +105,6 @@ tddy-room-testkit = { path = "../tddy-room-testkit" }
 # The session-room exec-tool suite joins a room with the SDK directly; `src/` never names it.
 livekit = "0.7"
 tddy-testing-commons = { path = "../tddy-testing-commons" }
-# The cross-daemon token and sandboxed-codebase suites give each daemon a signing identity of its
-# own (`DaemonSigningKey`, `SessionTokens`). An existing workspace crate the lifecycle crate
-# already depends on.
-tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 # The roster-stream suite serves the daemon's `/rpc` mount on a loopback port: `connect_router`
 # mounts it and `axum` serves it, as the daemon does. Both are existing workspace crates.
 tddy-connectrpc = { path = "../tddy-connectrpc" }

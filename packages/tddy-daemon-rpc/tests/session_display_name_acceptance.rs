@@ -61,6 +61,7 @@ impl Host {
         self.daemon
             .list_sessions(Request::direct(ListSessionsRequest {
                 session_token: TEST_TOKEN.to_string(),
+                include_peers: false,
             }))
             .await
             .expect("ListSessions")

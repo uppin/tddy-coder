@@ -49,6 +49,7 @@ state:
     let response = service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions RPC should succeed");
@@ -97,6 +98,7 @@ async fn list_sessions_sets_pending_elicitation_from_session_metadata() {
     let response = service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions RPC should succeed");

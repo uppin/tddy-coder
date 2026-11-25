@@ -60,6 +60,7 @@ impl ProjectHomePort for DaemonProjectHome {
             .launch
             .list_sessions_at_session_coordinate(Request::direct(ListSessionsRequest {
                 session_token: self.session_token.clone(),
+                include_peers: false,
             }))
             .await
             .map_err(|status| anyhow::anyhow!(status.message().to_string()))?
@@ -71,6 +72,10 @@ impl ProjectHomePort for DaemonProjectHome {
             .find(|s| s.session_id == home_session_id)
             .and_then(|home| agents.for_session_type(&home.session_type))
             .is_some_and(|agent| agent.peer_name().is_some());
+        let host_label = self
+            .launch
+            .peer_routing
+            .host_label(&self.daemon_instance_id);
         Ok(listed
             .sessions
             .into_iter()
@@ -94,6 +99,7 @@ impl ProjectHomePort for DaemonProjectHome {
                 is_active: s.is_active,
                 pending_elicitation: s.pending_elicitation,
                 daemon_instance_id: self.daemon_instance_id.clone(),
+                host_label: host_label.clone(),
             })
             .collect())
     }

@@ -6,9 +6,18 @@ use std::collections::VecDeque;
 
 use super::{Held, ProjectNotificationLog, ProjectState, PROJECT_NOTIFICATION_CAPACITY};
 
-/// The evicted messages of one project, oldest first, at most [`PROJECT_NOTIFICATION_CAPACITY`].
+/// The evicted messages of one project, oldest first, at most [`PROJECT_NOTIFICATION_CAPACITY`] —
+/// and the relay gaps it evicted (n5): a gap is one record standing for the many another host lost,
+/// so once evicted its count must be remembered for a watch's `lost` to stay whole.
 #[derive(Default)]
-pub(super) struct EvictedMessages(VecDeque<EvictedMessage>);
+pub(super) struct EvictedMessages(VecDeque<EvictedMessage>, VecDeque<EvictedGap>);
+
+/// A relay gap the window evicted: its `seq`, whose it was, and how many records it stood for.
+struct EvictedGap {
+    seq: u64,
+    os_user: String,
+    lost: u64,
+}
 
 /// A message record the window evicted: its `seq`, and whose inbox it was addressed to.
 struct EvictedMessage {
@@ -32,6 +41,16 @@ impl EvictedMessages {
 
     /// Note that `held` left the window, when it is a message.
     pub(super) fn note(&mut self, held: &Held) {
+        if held.record.relay_lost > 0 {
+            self.1.push_back(EvictedGap {
+                seq: held.record.seq,
+                os_user: held.os_user.clone(),
+                lost: held.record.relay_lost,
+            });
+            if self.1.len() > PROJECT_NOTIFICATION_CAPACITY {
+                self.1.pop_front();
+            }
+        }
         let Some(message) = held.record.message.as_ref() else {
             return;
         };
@@ -58,7 +77,31 @@ impl EvictedMessages {
     }
 }
 
+impl EvictedMessages {
+    /// How many more records than one the evicted relay gaps of `os_user` after `seq` stood for:
+    /// what an eviction count — one per evicted record — leaves out of them.
+    fn gap_records_beyond_one_after(&self, os_user: &str, seq: u64) -> u64 {
+        self.1
+            .iter()
+            .filter(|gap| gap.seq > seq && gap.os_user == os_user)
+            .map(|gap| gap.lost.saturating_sub(1))
+            .sum()
+    }
+}
+
 impl ProjectNotificationLog {
+    /// What the relay gaps `project_id`'s window evicted after `seq` stood for beyond the one
+    /// record each is counted as by [`Self::records_after`]'s eviction count (n5). A watch adds it
+    /// to what it reports lost — never to how far it moves, which the eviction count alone sets.
+    pub fn evicted_relay_lost_after(&self, project_id: &str, os_user: &str, seq: u64) -> u64 {
+        let project = self.project(project_id);
+        let extra = project
+            .lock()
+            .evicted_messages
+            .gap_records_beyond_one_after(os_user, seq);
+        extra
+    }
+
     /// How many messages addressed to `to_session_id` (of `os_user`, in `project_id`) after `seq`
     /// the log evicted before they could be read: `ReadSessionMessages`' `lost`. Other evicted
     /// records — activity, statuses, other sessions' messages — are not the reader's loss.

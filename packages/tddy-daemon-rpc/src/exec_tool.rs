@@ -3,6 +3,7 @@
 mod base_freshness;
 pub mod home_terminal_leases;
 mod lsp_roots;
+pub mod notification_relay;
 mod orchestrator_reach;
 mod path_access;
 mod path_guard;
@@ -72,6 +73,10 @@ pub struct ExecToolRpcHandler {
 pub(crate) struct ProjectHomeHost {
     /// What an armed schedule's watcher signs its own short-lived tokens with (`#workqueue` 14/14).
     pub(crate) session_token_signer: Option<tddy_github::SessionTokenSigner>,
+    /// The tokens this daemon signs and verifies with: a relay call to a peer is minted with them,
+    /// and a peer's relay call verified (n5). `None` on a daemon that signs nothing, which neither
+    /// relays nor takes relayed records.
+    pub(crate) session_tokens: Option<tddy_daemon_auth::SessionTokens>,
     /// The GitHub inbox and the project credentials it reads with — `work_queue_status` reads PRs
     /// through it (`#workqueue` 6/14).
     pub(crate) pull_requests:
@@ -127,6 +132,12 @@ pub(crate) struct ProjectHomeHost {
     /// [`RpcHandlers::attach_stack_github`](crate::RpcHandlers::attach_stack_github); the GitHub REST
     /// API itself when nothing is attached.
     pub(crate) work_queue_github: Arc<OnceLock<Arc<dyn work_queue_tools::WorkQueueGithubClients>>>,
+    /// This host's notification relay, set by
+    /// [`ExecToolRpcHandler::start_notification_relay`]: what a peer's follow registers with (n5).
+    pub(crate) relay: OnceLock<Arc<tddy_session_activity::notification_relay::NotificationRelay>>,
+    /// Where a batch relayed here cues the waker, set by
+    /// [`ExecToolRpcHandler::start_watch_waker`]: a relayed record never rides this host's bus.
+    pub(crate) relayed_cues: OnceLock<tokio::sync::mpsc::Sender<watch_wake::WakeCue>>,
 }
 
 impl ExecToolRpcHandler {
@@ -165,6 +176,9 @@ impl ExecToolRpcHandler {
                 work_queue_github: Arc::new(OnceLock::new()),
                 pull_requests: Arc::new(host.clone()),
                 session_token_signer: host.session_token_signer(),
+                session_tokens: host.session_tokens(),
+                relay: OnceLock::new(),
+                relayed_cues: OnceLock::new(),
             },
         }
     }

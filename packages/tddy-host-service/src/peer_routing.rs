@@ -85,6 +85,20 @@ impl PeerRouting {
             .collect()
     }
 
+    /// The name the eligible-daemon roster gives `instance_id`, the one a host badge shows; `None`
+    /// for a daemon the roster does not list.
+    ///
+    /// The label is this host's to give: a row another daemon lists is labelled from this roster,
+    /// never from what that daemon says about itself.
+    #[must_use]
+    pub fn host_label(&self, instance_id: &str) -> Option<String> {
+        self.eligible_daemon_source
+            .list_eligible_daemons()
+            .into_iter()
+            .find(|e| e.instance_id.0 == instance_id)
+            .map(|e| e.label)
+    }
+
     /// `Local` for this daemon (or no daemon named), `Forward` for an eligible peer; an unknown id
     /// is refused.
     pub fn classify_daemon_route(&self, requested_daemon: &str) -> Result<PeerRoute, Status> {

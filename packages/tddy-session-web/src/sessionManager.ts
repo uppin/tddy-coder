@@ -3,8 +3,10 @@
  * change events, so the screen component doesn't scatter that logic across effects.
  *
  * It merges two sources into one sorted, de-duplicated list:
- * - the **selected host's** sessions, pulled via an injected `fetcher` (RPC), refreshed on demand and
- *   whenever the window-bound `sessionsRefreshBridge` fires (`requestSessionsRefresh()` from anywhere);
+ * - the sessions the **selected host** lists, pulled via an injected `fetcher` (RPC), refreshed on
+ *   demand and whenever the window-bound `sessionsRefreshBridge` fires (`requestSessionsRefresh()`
+ *   from anywhere). The selected host is asked with `includePeers`, so it answers for every
+ *   connected host — each row naming its host in `daemonInstanceId`, inactive sessions included;
  * - the **live cross-host** sessions, observed as LiveKit coder participants in the common room.
  *
  * It is a plain observable store (subscribe/notify, snapshot cached for `useSyncExternalStore`) with
@@ -21,7 +23,10 @@ import { subscribeSessionsRefresh } from "./lib/sessionsRefreshBridge";
 import { hostNotConnectedText, rpcFailureText } from "tddy-client-web";
 import { useHostLabel } from "tddy-client-web";
 
-/** Pulls the selected host's sessions (typically `client.listSessions(...)`). */
+/**
+ * Pulls the sessions the selected host lists — its own and, with `includePeers`, every connected
+ * host's (typically `client.listSessions(...)`).
+ */
 export type SessionFetcher = () => Promise<SessionEntry[]>;
 
 /**
@@ -77,6 +82,10 @@ export class SessionManager {
     this.recompute();
   }
 
+  /** How many pulls {@link refresh} has started, and the newest whose answer is applied. */
+  private pullsStarted = 0;
+  private newestPullApplied = 0;
+
   setSelectedInstanceId(instanceId: string): void {
     if (instanceId === this.selectedInstanceId) return;
     this.selectedInstanceId = instanceId;
@@ -99,15 +108,19 @@ export class SessionManager {
   refresh(): Promise<void> {
     const fetcher = this.fetcher;
     if (!fetcher) return Promise.resolve();
+    // A pull can outlast the poll interval (the selected host waits on its peers), so pulls
+    // overlap; an answer older than one already applied is dropped rather than reverting the list.
+    const pull = ++this.pullsStarted;
     return fetcher()
       .then((sessions) => {
-        if (this.fetcher !== fetcher) return;
+        if (this.fetcher !== fetcher || pull < this.newestPullApplied) return;
+        this.newestPullApplied = pull;
         this.selectedHostSessions = sessions;
         this.cachedLoadError = null;
         this.recompute();
       })
       .catch((err: unknown) => {
-        if (this.fetcher !== fetcher) return;
+        if (this.fetcher !== fetcher || pull < this.newestPullApplied) return;
         this.setLoadError(rpcFailureText(err));
       });
   }
@@ -193,7 +206,12 @@ export function useSessionManager(
   useEffect(() => {
     manager.setFetcher(
       client
-        ? () => client.listSessions({ sessionToken }).then((resp) => resp.sessions as SessionEntry[])
+        ? () =>
+            // The selected host fans out to the hosts it is connected to, so an inactive session on
+            // another host is listed too; the browser itself asks only the selected host.
+            client
+              .listSessions({ sessionToken, includePeers: true })
+              .then((resp) => resp.sessions as SessionEntry[])
         : null,
       unavailableReason,
     );

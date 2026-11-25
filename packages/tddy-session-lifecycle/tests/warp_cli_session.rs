@@ -479,6 +479,7 @@ async fn a_warp_session_is_listed_with_its_agent() {
         .service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions")

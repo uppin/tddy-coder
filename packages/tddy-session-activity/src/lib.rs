@@ -22,6 +22,7 @@ pub mod answers;
 pub mod hook_decision;
 pub mod hook_request;
 pub mod lsp_roots;
+pub mod notification_relay;
 pub mod orchestrator_presence;
 pub mod path_access;
 pub mod path_grants;

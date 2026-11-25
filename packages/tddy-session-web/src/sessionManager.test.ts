@@ -125,4 +125,23 @@ describe("SessionManager", () => {
     manager.setFetcher(null, "Not connected to server-2");
     expect(manager.loadError).toBe("Not connected to server-2");
   });
+
+  it("keeps the newer list when an older, slower pull answers after it", async () => {
+    // Given two pulls in flight, the first slower than the second (the host waits on its peers)
+    const answers: Array<(sessions: SessionEntry[]) => void> = [];
+    const manager = new SessionManager();
+    manager.setSelectedInstanceId(SELECTED);
+    manager.setFetcher(() => new Promise<SessionEntry[]>((resolve) => answers.push(resolve)));
+    const second = manager.refresh();
+
+    // When the second answers first, and then the first
+    answers[1]([aSession({ sessionId: SID_ON_OTHER, daemonInstanceId: OTHER })]);
+    await second;
+    answers[0]([aSession({ sessionId: SID_ON_SELECTED, daemonInstanceId: SELECTED })]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Then the list is the newer pull's
+    expect(manager.sessions.map((s) => s.sessionId)).toEqual([SID_ON_OTHER]);
+  });
 });

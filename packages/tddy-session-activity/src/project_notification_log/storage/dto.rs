@@ -33,6 +33,21 @@ pub(super) struct RecordDto {
     /// carried what one session sent another (`#activity-wake` 5/5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     message: Option<MessageDto>,
+    /// The host the record's session runs on, for a record relayed from another host (n5); absent
+    /// for one of this host's own sessions — the emitters that answer it name this host then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    daemon_instance_id: Option<String>,
+    /// The record's `seq` on [`Self::daemon_instance_id`], for a relayed record.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    origin_seq: Option<u64>,
+    /// On a relay gap: how many of the origin host's records were evicted there before they could
+    /// be relayed. Zero, and absent, on every other record.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    relay_lost: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// A [`SessionMessage`] as JSON.
@@ -44,6 +59,9 @@ struct MessageDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reply_to: Option<String>,
     text: String,
+    /// Absent for a recipient on the sender's host.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to_daemon_instance_id: Option<String>,
 }
 
 impl From<&SessionMessage> for MessageDto {
@@ -53,6 +71,7 @@ impl From<&SessionMessage> for MessageDto {
             message_id: message.message_id.clone(),
             reply_to: message.reply_to.clone(),
             text: message.text.clone(),
+            to_daemon_instance_id: message.to_daemon_instance_id.clone(),
         }
     }
 }
@@ -64,6 +83,7 @@ impl From<MessageDto> for SessionMessage {
             message_id: dto.message_id,
             reply_to: dto.reply_to,
             text: dto.text,
+            to_daemon_instance_id: dto.to_daemon_instance_id,
         }
     }
 }
@@ -154,6 +174,9 @@ impl From<&ProjectNotificationRecord> for RecordDto {
             message: record.message.as_ref().map(MessageDto::from),
             at_unix_ms: record.at_unix_ms,
             orchestrator_session_id: record.orchestrator_session_id.clone(),
+            daemon_instance_id: record.daemon_instance_id.clone(),
+            origin_seq: record.origin_seq,
+            relay_lost: record.relay_lost,
         }
     }
 }
@@ -174,6 +197,9 @@ impl From<RecordDto> for ProjectNotificationRecord {
             message: dto.message.map(SessionMessage::from),
             at_unix_ms: dto.at_unix_ms,
             orchestrator_session_id: dto.orchestrator_session_id,
+            daemon_instance_id: dto.daemon_instance_id,
+            origin_seq: dto.origin_seq,
+            relay_lost: dto.relay_lost,
         }
     }
 }

@@ -200,6 +200,9 @@ fn a_record_of(notification: SessionNotification) -> ProjectNotificationRecord {
         activity_status: notification.activity_status,
         at_unix_ms: notification.at_unix_ms,
         orchestrator_session_id: None,
+        daemon_instance_id: None,
+        origin_seq: None,
+        relay_lost: 0,
         message: None,
     }
 }
@@ -543,4 +546,111 @@ async fn nothing_waiting_never_calls_the_delivery() {
 
     // Then nothing was delivered
     assert_eq!(outcome, Ok(false));
+}
+
+// ── relay gaps (n5, cross-host watches) ──────────────────────────────────────────────────────
+
+/// A remote host's batch: `count` turn ends of a child it holds whose orchestrator is ours, after
+/// `lost` records it evicted before relaying them.
+fn a_relayed_batch(
+    from_seq: u64,
+    count: u64,
+    lost: u64,
+) -> tddy_session_activity::project_notification_log::RelayedBatch {
+    let records: Vec<ProjectNotificationRecord> = (from_seq..from_seq + count)
+        .map(|seq| ProjectNotificationRecord {
+            seq,
+            session_id: "01900000-0000-7000-8000-AABB00000699".to_string(),
+            label: "remote child".to_string(),
+            kind: SessionNotificationKind::AttentionRequired,
+            source: SessionNotificationSource::ActivityStatus,
+            text: format!("turn {seq}"),
+            agent: None,
+            question: None,
+            ended: None,
+            activity_status: Some("Done".to_string()),
+            message: None,
+            at_unix_ms: NOW,
+            orchestrator_session_id: Some(ORCHESTRATOR.to_string()),
+            daemon_instance_id: None,
+            origin_seq: None,
+            relay_lost: 0,
+        })
+        .collect();
+    tddy_session_activity::project_notification_log::RelayedBatch {
+        origin: "host-b".to_string(),
+        project_id: PROJECT.to_string(),
+        os_user: ADA.to_string(),
+        records,
+        lost,
+        through_seq: from_seq + count - 1,
+    }
+}
+
+impl AHost {
+    async fn started_by_me_watch(&self) {
+        self.watches
+            .create(
+                &the_orchestrator(),
+                WatchFilter {
+                    session_ids: Vec::new(),
+                    started_by_me: true,
+                    kinds: vec![WatchKind::TurnFinished],
+                },
+                WatchOptions::default(),
+                AN_HOUR,
+                &self.log,
+                NOW,
+            )
+            .await
+            .expect("the watch is created");
+    }
+
+    /// Every delivery until one is empty: the events' count and the lost summed.
+    async fn drained(&self) -> (usize, u64) {
+        let (mut events, mut lost) = (0, 0);
+        loop {
+            let delivery = self.delivery_at(NOW).await;
+            if delivery.is_empty() {
+                return (events, lost);
+            }
+            events += delivery.events.len();
+            lost += delivery.lost;
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_relay_gap_is_reported_lost_once() {
+    // Given a watch over the sessions the orchestrator started
+    let host = AHost::of_one_project();
+    host.started_by_me_watch().await;
+
+    // When another host relays two records after evicting four
+    host.log.append_relayed(a_relayed_batch(10, 2, 4)).unwrap();
+
+    // Then the watch delivers the two and reports the four lost, once
+    assert_eq!(host.drained().await, (2, 4));
+}
+
+#[tokio::test]
+async fn a_relay_gap_this_hosts_window_evicted_is_still_reported() {
+    // Given a watch over the sessions the orchestrator started
+    let host = AHost::of_one_project();
+    host.started_by_me_watch().await;
+
+    // When another host relays, after evicting five, more records than this host's window keeps
+    let capacity = PROJECT_NOTIFICATION_CAPACITY as u64;
+    host.log
+        .append_relayed(a_relayed_batch(6, capacity, 5))
+        .unwrap();
+
+    // Then every record is accounted for: delivered, or counted lost — the five the other host
+    // evicted among them
+    let (events, lost) = host.drained().await;
+    assert_eq!(
+        events as u64 + lost,
+        capacity + 5,
+        "{events} delivered, {lost} lost"
+    );
 }

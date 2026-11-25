@@ -328,6 +328,7 @@ impl LaunchSessions {
     ) -> Result<SessionEntry, Status> {
         self.list_sessions_at_session_coordinate(Request::direct(ListSessionsRequest {
             session_token: session_token.to_string(),
+            include_peers: false,
         }))
         .await?
         .into_inner()

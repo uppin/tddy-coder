@@ -179,6 +179,7 @@ async fn the_listed(world: &World, session_id: &str) -> SessionEntry {
         .service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions succeeds")

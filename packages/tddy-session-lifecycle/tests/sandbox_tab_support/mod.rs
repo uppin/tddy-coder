@@ -485,6 +485,7 @@ impl SandboxedTabDaemon {
         self.host
             .list_sessions(Request::direct(ListSessionsRequest {
                 session_token: VALID_TOKEN.to_string(),
+                include_peers: false,
             }))
             .await
             .expect("ListSessions must succeed")

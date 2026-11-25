@@ -137,6 +137,22 @@ describe("mergeActiveAndFetchedSessions", () => {
     expect(merged.map((s) => s.sessionId)).toEqual([SID_A]);
   });
 
+  it("keeps an inactive session another host's listing names, on that host", () => {
+    const onOther = aSession({ sessionId: SID_B, daemonInstanceId: OTHER, isActive: false });
+    const merged = mergeActiveAndFetchedSessions([onOther], [], SELECTED);
+    expect(merged.map((s) => [s.sessionId, s.daemonInstanceId, s.isActive])).toEqual([
+      [SID_B, OTHER, false],
+    ]);
+  });
+
+  it("lists a live session of another host once, as its listed row, when it is also listed", () => {
+    const listedOnOther = aSession({ sessionId: SID_B, daemonInstanceId: OTHER, repoPath: "/x/b" });
+    const merged = mergeActiveAndFetchedSessions([listedOnOther], [aLiveParticipant()], SELECTED);
+    expect(merged.map((s) => [s.sessionId, s.daemonInstanceId, s.repoPath])).toEqual([
+      [SID_B, OTHER, "/x/b"],
+    ]);
+  });
+
   it("hydrates a synthesized cross-host row with the repo path from participant metadata", () => {
     const participant = aLiveParticipant({
       sessionMetadata: aSessionMetadata({ repoPath: "/home/alice/acme-web" }),

@@ -9,7 +9,7 @@
 use serde_json::{json, Map, Value};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
-use tddy_session_activity::project_notification_log::record_json;
+use tddy_session_activity::project_notification_log::record_json_on;
 use tddy_session_activity::session_watches::WatchOwner;
 use tddy_session_lifecycle::user_sessions_path::sessions_base_for_user;
 
@@ -49,7 +49,9 @@ impl ExecToolRpcHandler {
         if delivery.is_empty() {
             return response;
         }
-        let Some(events) = delivery_events_json(&delivery) else {
+        let this_host =
+            tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config);
+        let Some(events) = delivery_events_json(&delivery, &this_host) else {
             return response;
         };
         object.insert(WATCH_EVENTS_KEY.to_string(), events);
@@ -80,11 +82,12 @@ impl ExecToolRpcHandler {
 /// eviction, and the watches that ended. `None` when a record cannot be spelled.
 fn delivery_events_json(
     delivery: &tddy_session_activity::session_watches::WatchDelivery,
+    this_host: &str,
 ) -> Option<Value> {
     let events = delivery
         .events
         .iter()
-        .map(record_json)
+        .map(|record| record_json_on(record, this_host))
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
     let ended = delivery

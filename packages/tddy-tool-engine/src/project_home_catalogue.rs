@@ -214,7 +214,7 @@ pub(crate) fn project_home_tool_defs_with(start_schema: Value) -> Vec<ToolDef> {
     let mut defs = vec![
         tool_def(
             LIST_PROJECT_SESSIONS,
-            "List the other sessions of this project on every host, with their host, worktree, activity and status. A host that does not answer is named in unreachable_hosts.",
+            "List the other sessions of this project on every host, with their host (daemon_instance_id, and host_label as the dashboard names it), worktree, activity and status. A host that does not answer is named in unreachable_hosts.",
             json!({ "type": "object", "properties": {}, "additionalProperties": false }),
         ),
         tool_def(

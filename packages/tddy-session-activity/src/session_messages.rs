@@ -91,6 +91,9 @@ pub struct InboxMessage {
     pub message_id: String,
     /// The sender.
     pub from_session_id: String,
+    /// The host the sender runs on, for a message another host relayed here (n5); `None` for a
+    /// sender on this host.
+    pub from_daemon_instance_id: Option<String>,
     /// The sender's display label.
     pub from: String,
     /// The message this one replies to.
@@ -107,6 +110,7 @@ impl InboxMessage {
             seq: record.seq,
             message_id: message.message_id.clone(),
             from_session_id: record.session_id.clone(),
+            from_daemon_instance_id: record.daemon_instance_id.clone(),
             from: record.label.clone(),
             reply_to: message.reply_to.clone(),
             text: message.text.clone(),

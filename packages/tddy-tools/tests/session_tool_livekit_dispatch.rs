@@ -118,17 +118,14 @@ fn a_split_session_envelope() -> SessionToolEnvelope {
 
 /// Clear every variable the transport detector reads, so a test states its whole environment.
 fn clear_transport_env() {
-    for key in [
-        "TDDY_SANDBOX_TOOL_IPC",
-        "TDDY_REMOTE_SESSION_ID",
-        "TDDY_REMOTE_SESSION_TOKEN",
-        "TDDY_REMOTE_DAEMON_URL",
-        "TDDY_REMOTE_DAEMON_INSTANCE_ID",
-        "TDDY_REMOTE_LIVEKIT_URL",
-        "TDDY_REMOTE_LIVEKIT_ROOM",
-        "TDDY_REMOTE_LIVEKIT_TOKEN",
-        "TDDY_REMOTE_SERVER_IDENTITY",
-    ] {
+    // Every transport variable, by prefix rather than by list: a session the daemon launched
+    // exports its own (`TDDY_REMOTE_DAEMON_SOCKET`, `TDDY_REMOTE_DAEMON_URL`, …), and a list that
+    // misses one lets the ambient session's transport answer for the test's.
+    let inherited: Vec<String> = std::env::vars_os()
+        .filter_map(|(key, _)| key.into_string().ok())
+        .filter(|key| key.starts_with("TDDY_REMOTE_") || key == "TDDY_SANDBOX_TOOL_IPC")
+        .collect();
+    for key in inherited {
         std::env::remove_var(key);
     }
 }

@@ -335,6 +335,23 @@ The presenter observer hands each event to the daemon's operator channel and the
 `NoOperatorChannel` follows none, so on a daemon without a `telegram:` block the observer runs for the
 bus alone, and a workflow session's indicator still lights.
 
+## Relaying to other hosts
+
+`notification_relay::NotificationRelay` pushes the project-log records that concern a session held
+on another connected daemon to that daemon, where `ProjectNotificationLog::append_relayed` appends
+them (n5). Routing is decided when a record is appended (`ProjectNotificationLog::on_append`): a
+session whose changeset names an orchestrator on another host, a message whose
+`SessionMessage::to_daemon_instance_id` names one, or a session a peer's watch follows
+(`NotificationRelay::follow`). Per (project, host) a cursor persisted in
+`notification-relay.json` moves only on acknowledgement; routed records evicted before they were
+taken are counted as `lost`, and the receiver records a relay gap
+(`ProjectNotificationRecord::relay_lost`) that the watches report through `session_watches::relay_gaps`.
+Relayed records carry `daemon_instance_id` and `origin_seq`; the receiver deduplicates by origin
+`seq`. The transport and its authentication (a `relay`-principal token minted by the sending
+daemon) are the daemon's: `tddy-daemon-rpc`'s `exec_tool::notification_relay`.
+
+Feature: [project-concept.md § Watching sessions on other hosts](../../../docs/ft/daemon/project-concept.md#watching-sessions-on-other-hosts)
+
 ## Authorization
 
 The bus is **host-wide**, so the relay is the only thing between one operator and another's

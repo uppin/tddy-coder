@@ -214,6 +214,11 @@ impl ExecToolRpcHandler {
         peers: Option<PeerSessionLists>,
         caller_daemon_instance_id: String,
     ) -> Result<DaemonProjectHome, Status> {
+        let github_user = self
+            .config
+            .users
+            .mapping_for_os_user(&os_user)
+            .map(|mapping| mapping.github_user);
         Ok(DaemonProjectHome {
             launch: self.attached_launch(&req.tool_name)?,
             session_token: req.session_token.clone(),
@@ -228,6 +233,8 @@ impl ExecToolRpcHandler {
             .with_github_cli(self.project_home_host.github_cli.clone()),
             daemon_instance_id: local_instance_id_for_config(&self.config),
             github_cli: self.project_home_host.github_cli.clone(),
+            github_user,
+            relay_credentials: self.relay_credentials(),
             peers,
             worktree_sizes: Arc::clone(&self.project_home_host.worktree_sizes),
             catalog: Arc::clone(&self.project_home_host.catalog),
@@ -332,12 +339,17 @@ pub(super) struct DaemonProjectHome {
     /// Reads the signed-in person's vault for a target's GitHub identity, as a session start does.
     identity: SessionAccountAccess,
     /// This host, as the eligible-daemon roster names it; every session it lists carries it.
-    daemon_instance_id: String,
+    pub(super) daemon_instance_id: String,
     /// The `gh` a Local gh project's push token is asked of (`#orchestrators` 10/11).
     pub(super) github_cli: tddy_host_service::GithubCli,
     /// The other hosts' listings, for a caller held here; `None` for one held elsewhere, whose own
     /// host fans out.
-    peers: Option<PeerSessionLists>,
+    pub(super) peers: Option<PeerSessionLists>,
+    /// The GitHub login the caller's OS user maps to here: what a follow registered on another host
+    /// names the watch's owner by (n5).
+    pub(super) github_user: Option<String>,
+    /// What a follow registered on another host is asked with (n5).
+    pub(super) relay_credentials: super::notification_relay::RelayCredentials,
     /// The daemon's worktree size calculator, the one the Worktrees screen reads.
     worktree_sizes: Arc<WorktreeSizeCalculator>,
     /// The host's catalogue, project and host RPCs, which `DescribeSessionStartOptions` answers its

@@ -105,6 +105,7 @@ impl DaemonHttp {
                 "ListSessions",
                 ListSessionsRequest {
                     session_token: session_token.to_string(),
+                    include_peers: false,
                 },
             )
             .await?;

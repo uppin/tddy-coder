@@ -458,6 +458,7 @@ async fn session_entry_includes_daemon_instance_id() {
     let response = service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions must not return an error");

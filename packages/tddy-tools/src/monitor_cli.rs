@@ -85,6 +85,9 @@ pub enum MonitorLine {
         watch_ids: Vec<String>,
         kind: String,
         session_id: String,
+        /// The host the session runs on (n5): this host's id, or another connected host's.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        daemon_instance_id: Option<String>,
         session: String,
         summary: String,
         /// The id `AnswerSessionPermission` / `AnswerSessionQuestion` take, on a `permission` or
@@ -103,6 +106,9 @@ pub enum MonitorLine {
         watch_ids: Vec<String>,
         message_id: String,
         from_session_id: String,
+        /// The host the sender runs on (n5).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        from_daemon_instance_id: Option<String>,
         /// The sender's display label.
         from: String,
         to_session_id: String,
@@ -283,6 +289,7 @@ fn event_line(event: &Value, full: bool) -> Result<MonitorLine, String> {
         watch_ids: strings("watch_ids"),
         kind: event["kind"].as_str().unwrap_or("event").to_string(),
         session_id: event["session_id"].as_str().unwrap_or_default().to_string(),
+        daemon_instance_id: event["daemon_instance_id"].as_str().map(str::to_string),
         session: event["session"].as_str().unwrap_or_default().to_string(),
         summary: event["summary"].as_str().unwrap_or_default().to_string(),
         request_id: event["request_id"].as_str().map(str::to_string),
@@ -332,6 +339,7 @@ pub fn message_line_of(event: &Value) -> Option<MonitorLine> {
             .collect(),
         message_id: message.get("message_id")?.as_str()?.to_string(),
         from_session_id: event["session_id"].as_str().unwrap_or_default().to_string(),
+        from_daemon_instance_id: event["daemon_instance_id"].as_str().map(str::to_string),
         from: event["session"].as_str().unwrap_or_default().to_string(),
         to_session_id: message.get("to_session_id")?.as_str()?.to_string(),
         reply_to: message

@@ -387,6 +387,7 @@ async fn cursor_cli_session_enrichment_reads_from_metadata() {
     let list = service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: VALID_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions must succeed")

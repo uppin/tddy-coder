@@ -53,6 +53,7 @@ impl DaemonSessionHost {
                 message_id: format!("m-{}", uuid::Uuid::new_v4()),
                 reply_to: None,
                 text: message.text,
+                to_daemon_instance_id: None,
             }),
             at_unix_ms: tddy_daemon_kernel::now_unix_ms(),
         })

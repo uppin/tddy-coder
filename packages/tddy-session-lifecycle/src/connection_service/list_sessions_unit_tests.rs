@@ -97,6 +97,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
     let result = service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: "valid".to_string(),
+            include_peers: false,
         }))
         .await;
     assert!(result.is_ok());
@@ -129,6 +130,7 @@ async fn list_sessions_lists_the_name_a_session_was_given() {
     let sessions = make_unit_service(temp.path().to_path_buf())
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: "valid".to_string(),
+            include_peers: false,
         }))
         .await
         .unwrap()

@@ -45,6 +45,13 @@ impl DaemonSessionHost {
             .map(|tokens| tokens.signer().clone())
     }
 
+    /// The tokens this daemon signs and verifies with, or `None` on a daemon that signs nothing:
+    /// what a relay call to a peer is minted with, and a peer's is verified with (n5).
+    #[must_use]
+    pub fn session_tokens(&self) -> Option<tddy_daemon_auth::SessionTokens> {
+        self.session_tokens.clone()
+    }
+
     /// The daemon's data root — the parent of every user's sessions and projects.
     #[must_use]
     pub fn tddy_data_dir(&self) -> &Path {

@@ -67,6 +67,9 @@ impl Default for WakeTimings {
 pub struct WakeCue {
     pub session_id: String,
     pub os_user: String,
+    /// The project the cue concerns, when the cue's session is not one this host holds — a record
+    /// another host relayed here (n5). `None`: read from the session's own record.
+    pub project_id: Option<String>,
 }
 
 /// The waker's end of the trigger's channel, held until the waker starts.
@@ -106,6 +109,7 @@ impl SessionNotificationSubscriber for WakeTrigger {
         let _ = self.cues.try_send(WakeCue {
             session_id: notification.session_id.clone(),
             os_user: notification.os_user.clone(),
+            project_id: None,
         });
         Ok(())
     }
@@ -190,8 +194,12 @@ impl ExecToolRpcHandler {
         cues: WakeCues,
         timings: WakeTimings,
     ) -> JoinHandle<()> {
+        let (relayed_tx, relayed) = mpsc::channel(WAKE_CUE_CAPACITY);
+        if self.project_home_host.relayed_cues.set(relayed_tx).is_err() {
+            log::error!("the watch waker was started twice; relayed records cue the first");
+        }
         let handler = Arc::clone(self);
-        tokio::spawn(async move { handler.run_watch_waker(cues, timings).await })
+        tokio::spawn(async move { handler.run_watch_waker(cues, relayed, timings).await })
     }
 
     /// The waker task: a cue arms a settle for every orchestrator with live watches in the cue's
@@ -202,7 +210,12 @@ impl ExecToolRpcHandler {
     /// Each wake runs as a task of its own: a paste waits for the orchestrator's echo (up to 5 s
     /// for one that never echoes), and no orchestrator's wake waits on another's, nor holds up the
     /// cues. An orchestrator is woken by one wake at a time.
-    async fn run_watch_waker(self: Arc<Self>, cues: WakeCues, timings: WakeTimings) {
+    async fn run_watch_waker(
+        self: Arc<Self>,
+        cues: WakeCues,
+        mut relayed: mpsc::Receiver<WakeCue>,
+        timings: WakeTimings,
+    ) {
         let WakeCues(mut cues) = cues;
         let mut owners: HashMap<WatchOwner, OwnerWake> = HashMap::new();
         let (finished_tx, mut finished) = mpsc::unbounded_channel::<(WatchOwner, bool)>();
@@ -216,16 +229,10 @@ impl ExecToolRpcHandler {
             };
             tokio::select! {
                 received = cues.recv() => match received {
-                    Some(cue) => {
-                        for owner in self.owners_concerned(&cue).await {
-                            let wake = owners.entry(owner).or_default();
-                            if wake.fire_at.is_none() {
-                                wake.fire_at = Some(Instant::now() + timings.settle);
-                            }
-                        }
-                    }
+                    Some(cue) => self.arm_settles(&cue, &mut owners, timings).await,
                     None => break,
                 },
+                Some(cue) = relayed.recv() => self.arm_settles(&cue, &mut owners, timings).await,
                 Some((owner, woke)) = finished.recv() => {
                     let wake = owners.entry(owner).or_default();
                     wake.in_flight = false;
@@ -270,6 +277,21 @@ impl ExecToolRpcHandler {
         }
     }
 
+    /// Arm a settle for every owner `cue` concerns that has none armed.
+    async fn arm_settles(
+        &self,
+        cue: &WakeCue,
+        owners: &mut HashMap<WatchOwner, OwnerWake>,
+        timings: WakeTimings,
+    ) {
+        for owner in self.owners_concerned(cue).await {
+            let wake = owners.entry(owner).or_default();
+            if wake.fire_at.is_none() {
+                wake.fire_at = Some(Instant::now() + timings.settle);
+            }
+        }
+    }
+
     /// The owners a cue concerns: every session of the cue session's project on this host that
     /// holds a live watch — the cue's own session included, for when its own status changed.
     async fn owners_concerned(&self, cue: &WakeCue) -> Vec<WatchOwner> {
@@ -283,11 +305,17 @@ impl ExecToolRpcHandler {
         else {
             return Vec::new();
         };
-        let cue_dir = unified_session_dir_path(&sessions_base, &cue.session_id);
-        let Ok(cue_metadata) = tddy_core::read_session_metadata(&cue_dir) else {
-            return Vec::new();
+        let project_id = match &cue.project_id {
+            Some(project_id) => project_id.clone(),
+            None => {
+                let cue_dir = unified_session_dir_path(&sessions_base, &cue.session_id);
+                let Ok(cue_metadata) = tddy_core::read_session_metadata(&cue_dir) else {
+                    return Vec::new();
+                };
+                cue_metadata.project_id
+            }
         };
-        if cue_metadata.project_id.is_empty() {
+        if project_id.is_empty() {
             return Vec::new();
         }
         let live = self.project_home_host.terminals.live_sessions().await;
@@ -299,7 +327,7 @@ impl ExecToolRpcHandler {
         let now = tddy_daemon_kernel::now_unix_ms();
         let mut concerned = Vec::new();
         for session in sessions {
-            if session.project_id != cue_metadata.project_id {
+            if session.project_id != project_id {
                 continue;
             }
             let owner = WatchOwner {
@@ -439,6 +467,9 @@ mod tests {
             activity_status: None,
             at_unix_ms: 1_790_000_000_000,
             orchestrator_session_id: None,
+            daemon_instance_id: None,
+            origin_seq: None,
+            relay_lost: 0,
             message: None,
         }
     }

@@ -326,6 +326,7 @@ impl ADaemonWithATarget {
         self.service
             .list_sessions(Request::direct(ListSessionsRequest {
                 session_token: VALID_TOKEN.to_string(),
+                include_peers: false,
             }))
             .await
             .expect("the sessions are listed")

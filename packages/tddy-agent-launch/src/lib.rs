@@ -46,6 +46,7 @@ pub use opencode_cli_spawn::restore_tabs;
 pub mod log_follower;
 pub mod operator_start;
 mod orchestrator_start;
+mod peer_session_listing;
 pub mod placement;
 pub mod project_home_idle;
 pub(crate) mod project_home_launch;

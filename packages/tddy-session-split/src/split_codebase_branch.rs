@@ -39,6 +39,7 @@ impl SplitSessions {
     ) -> Result<String, Status> {
         let request = ListSessionsRequest {
             session_token: session_token.to_string(),
+            include_peers: false,
         };
         let listed = match self
             .peer_routing

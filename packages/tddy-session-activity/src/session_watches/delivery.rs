@@ -3,6 +3,7 @@ use crate::project_notification_log::ProjectNotificationRecord;
 use crate::session_watches::inbox_position_of;
 use crate::session_watches::matcher::watch_matches;
 use crate::session_watches::matcher::watch_owes;
+use crate::session_watches::relay_gaps::{evicted_gaps_lost, note_gaps_reported, unreported_gaps};
 use crate::session_watches::PendingEnd;
 use crate::session_watches::ProjectWatches;
 use crate::session_watches::SessionWatch;
@@ -37,7 +38,8 @@ pub struct WatchDelivery {
     /// The records its watches matched, oldest first, each once; at most
     /// [`MAX_EVENTS_PER_ANSWER`].
     pub events: Vec<ProjectNotificationRecord>,
-    /// Matched records the log evicted before they could be delivered.
+    /// Matched records the log evicted before they could be delivered, and records another host
+    /// evicted before it could relay them here (relay gaps, n5).
     pub lost: u64,
     /// The watches that ended since the last delivery.
     pub ended: Vec<WatchEnd>,
@@ -127,16 +129,19 @@ pub(super) fn apply_delivery(
     let inbox = inbox_position_of(state, owner);
     let mut matched: BTreeMap<u64, ProjectNotificationRecord> = BTreeMap::new();
     let mut lost = 0_u64;
+    let mut gaps: BTreeMap<u64, u64> = BTreeMap::new();
     let mut scans: Vec<(String, u64, u64)> = Vec::new();
     for watch in state.watches.iter().filter(|watch| delivers(watch)) {
         let (records, watch_lost) =
             log.records_after(&owner.project_id, &owner.os_user, watch.position);
-        lost = lost.max(watch_lost);
+        lost = lost.max(watch_lost + evicted_gaps_lost(log, watch, watch_lost));
         for record in records.iter().filter(|r| watch_owes(watch, r, inbox)) {
             matched.entry(record.seq).or_insert_with(|| record.clone());
         }
+        gaps.extend(unreported_gaps(watch, &records));
         scans.push((watch.watch_id.clone(), watch.position, watch_lost));
     }
+    lost += gaps.values().sum::<u64>();
     let events: Vec<ProjectNotificationRecord> = matched
         .values()
         .take(MAX_EVENTS_PER_ANSWER)
@@ -156,6 +161,7 @@ pub(super) fn apply_delivery(
         }
         watch.position = position;
         watch.acked_above.retain(|seq| *seq > position);
+        note_gaps_reported(watch, &gaps);
     }
     let mut ended = Vec::new();
     state.ended.retain(|pending| {
@@ -185,8 +191,9 @@ pub(super) struct PlannedDelivery {
 
 /// What committing a handed-over delivery changes.
 pub(super) struct DeliveryCommit {
-    /// Each of the owner's live watches and the position the delivery advances it to.
-    positions: Vec<(String, u64)>,
+    /// Each of the owner's live watches, the position the delivery advances it to, and the
+    /// `seq`s above it the delivery handed — the relay gaps it reported among them.
+    positions: Vec<(String, u64, std::collections::BTreeSet<u64>)>,
     /// The ended watches the delivery reported.
     handed_endings: Vec<String>,
 }
@@ -207,7 +214,13 @@ pub(super) fn plan_delivery(
         .watches
         .iter()
         .filter(|watch| &watch.owner == owner)
-        .map(|watch| (watch.watch_id.clone(), watch.position))
+        .map(|watch| {
+            (
+                watch.watch_id.clone(),
+                watch.position,
+                watch.acked_above.clone(),
+            )
+        })
         .collect();
     let handed_endings = delivery
         .ended
@@ -244,13 +257,20 @@ pub(super) fn commit_delivery(
         .iter_mut()
         .filter(|watch| &watch.owner == owner)
     {
-        let Some(&(_, position)) = positions.iter().find(|(id, _)| id == &watch.watch_id) else {
+        let Some((_, position, handed_above)) =
+            positions.iter().find(|(id, _, _)| id == &watch.watch_id)
+        else {
             continue;
         };
-        if position > watch.position {
-            watch.position = position;
+        if *position > watch.position {
+            watch.position = *position;
+            let position = *position;
             watch.acked_above.retain(|seq| *seq > position);
         }
+        let position = watch.position;
+        watch
+            .acked_above
+            .extend(handed_above.iter().filter(|seq| **seq > position));
     }
     state.ended.retain(|pending| {
         !(&pending.owner == owner && handed_endings.contains(&pending.end.watch_id))

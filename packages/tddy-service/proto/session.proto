@@ -234,10 +234,22 @@ message HostDocumentRef {
 
 message ListSessionsRequest {
   string session_token = 1;
+  // Also list the sessions of every other connected daemon (the eligible-daemon roster), each row
+  // naming its host in `daemon_instance_id`; a daemon that does not answer is named in
+  // `unreachable_hosts`. False lists this host only — what a peer is asked, so a listing never
+  // travels more than one hop.
+  bool include_peers = 2;
 }
 
 message ListSessionsResponse {
   repeated SessionEntry sessions = 1;
+  // With `include_peers`: the connected daemons that did not answer, and why.
+  repeated UnreachableSessionHost unreachable_hosts = 2;
+}
+
+message UnreachableSessionHost {
+  string daemon_instance_id = 1;
+  string reason             = 2;
 }
 
 message ResumeSessionRequest {

@@ -158,6 +158,17 @@ impl RpcHandlers {
         self.exec_tool.start_watch_waker(cues, timings)
     }
 
+    /// Start relaying this host's sessions' notifications to the connected hosts they concern, and
+    /// taking theirs (n5), keeping the relay's cursors under `state_dir`. `None` when the host keeps
+    /// no notification log, or the relay's state cannot be read (logged).
+    pub fn start_notification_relay(
+        &self,
+        state_dir: std::path::PathBuf,
+        timings: crate::exec_tool::notification_relay::RelayTimings,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        self.exec_tool.start_notification_relay(state_dir, timings)
+    }
+
     /// Re-attach the watchers of every work queue that still has armed schedules (`#workqueue`
     /// 14/14), so an arming survives a daemon restart. Runs once, at startup.
     pub fn start_armed_schedule_watchers(&self) -> tokio::task::JoinHandle<usize> {

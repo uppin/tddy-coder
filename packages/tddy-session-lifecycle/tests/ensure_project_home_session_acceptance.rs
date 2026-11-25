@@ -53,6 +53,7 @@ impl World {
             .service
             .list_sessions(Request::direct(ListSessionsRequest {
                 session_token: a_caller_token().to_string(),
+                include_peers: false,
             }))
             .await
             .expect("ListSessions")

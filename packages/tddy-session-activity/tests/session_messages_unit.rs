@@ -153,6 +153,7 @@ fn a_message(from: &str, to: &str, message_id: &str, text: &str) -> SessionNotif
             message_id: message_id.to_string(),
             reply_to: None,
             text: text.to_string(),
+            to_daemon_instance_id: None,
         }),
         ..a_notification_of(from)
     }
@@ -192,6 +193,9 @@ fn a_record_of(notification: SessionNotification) -> ProjectNotificationRecord {
         message: notification.message,
         at_unix_ms: notification.at_unix_ms,
         orchestrator_session_id: None,
+        daemon_instance_id: None,
+        origin_seq: None,
+        relay_lost: 0,
     }
 }
 
@@ -227,6 +231,7 @@ async fn a_message_round_trips_through_the_log() {
                 message_id: "m-1".to_string(),
                 reply_to: None,
                 text: "Tests pass; pushed 3f2a1c.".to_string(),
+                to_daemon_instance_id: None,
             }),
         )]
     );

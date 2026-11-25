@@ -326,6 +326,7 @@ impl LivenessDaemon {
 async fn is_listed_active_on(host: &DaemonSessionHost) -> bool {
     host.list_sessions(Request::direct(ListSessionsRequest {
         session_token: VALID_TOKEN.to_string(),
+        include_peers: false,
     }))
     .await
     .expect("ListSessions must succeed")

@@ -301,6 +301,7 @@ async fn a_project_home_session_starts_a_session_tagged_with_itself_as_orchestra
         .service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: TEST_TOKEN.to_string(),
+            include_peers: false,
         }))
         .await
         .unwrap()

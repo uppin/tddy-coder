@@ -13,7 +13,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Map, Value};
 use tddy_session_activity::project_notification_log::{
-    record_json, ProjectNotificationLog, ProjectNotificationScope,
+    record_json_on, ProjectNotificationLog, ProjectNotificationScope,
 };
 use tddy_session_activity::session_watches::stream_call::StreamPick;
 use tddy_session_activity::session_watches::{
@@ -46,6 +46,7 @@ pub(super) async fn hold_and_take(
     owner: WatchOwner,
     exclude_session_id: String,
     request: WatchStreamRequest,
+    this_host: String,
 ) -> Result<Value, String> {
     let deadline = Instant::now() + Duration::from_millis(request.timeout_ms);
     let settle = Duration::from_millis(request.settle_ms);
@@ -83,7 +84,7 @@ pub(super) async fn hold_and_take(
         let has_news = batch.lost > 0 || !batch.ended.is_empty();
         let settled = settles_at.is_some_and(|at| now >= at);
         if holds_enough || has_news || settled || now >= deadline {
-            return batch_json(batch);
+            return batch_json(batch, &this_host);
         }
         // Hold until the log records something for the caller's project, or the renewal
         // tick: re-taking the batch then renews the lease while the call is held.
@@ -120,12 +121,20 @@ impl ProjectHomeWatchStreamPort for DaemonProjectHome {
             session_id: home.session_id.clone(),
             os_user: self.os_user.clone(),
         };
-        hold_and_take(watches, log, owner, home.session_id.clone(), request).await
+        hold_and_take(
+            watches,
+            log,
+            owner,
+            home.session_id.clone(),
+            request,
+            self.daemon_instance_id.clone(),
+        )
+        .await
     }
 }
 
 /// A batch as the tool answers it: each event carries the monitor line's fields plus its record.
-fn batch_json(batch: StreamBatch) -> Result<Value, String> {
+fn batch_json(batch: StreamBatch, this_host: &str) -> Result<Value, String> {
     let mut events = Vec::with_capacity(batch.events.len());
     for event in &batch.events {
         let record = &event.record;
@@ -137,6 +146,10 @@ fn batch_json(batch: StreamBatch) -> Result<Value, String> {
             json!(WatchKind::of(record).map_or("event", WatchKind::as_str)),
         );
         object.insert("session_id".to_string(), json!(record.session_id));
+        object.insert(
+            "daemon_instance_id".to_string(),
+            json!(record.daemon_instance_id.as_deref().unwrap_or(this_host)),
+        );
         object.insert("session".to_string(), json!(record.label));
         object.insert("summary".to_string(), json!(wake_event_text(record)));
         if let Some(question) = &record.question {
@@ -144,7 +157,8 @@ fn batch_json(batch: StreamBatch) -> Result<Value, String> {
         }
         object.insert(
             "record".to_string(),
-            record_json(record).map_err(|e| format!("serialize a notification record: {e}"))?,
+            record_json_on(record, this_host)
+                .map_err(|e| format!("serialize a notification record: {e}"))?,
         );
         events.push(Value::Object(object));
     }

@@ -556,6 +556,7 @@ async fn sessions_on(service: &DaemonSessionHost) -> Vec<String> {
     service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: a_caller_token().to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions")
@@ -574,6 +575,7 @@ async fn listed_on(
     service
         .list_sessions(Request::direct(ListSessionsRequest {
             session_token: a_caller_token().to_string(),
+            include_peers: false,
         }))
         .await
         .expect("ListSessions")

@@ -28,6 +28,27 @@ pub fn record_json(
     serde_json::to_value(RecordDto::from(record))
 }
 
+/// [`record_json`], naming `this_host` as the host the record's session runs on when another host
+/// did not relay it here: every record an orchestrator is handed names its session's host (n5).
+pub fn record_json_on(
+    record: &ProjectNotificationRecord,
+    this_host: &str,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let mut json = record_json(record)?;
+    if let Some(object) = json.as_object_mut() {
+        object
+            .entry("daemon_instance_id")
+            .or_insert_with(|| serde_json::Value::String(this_host.to_string()));
+    }
+    Ok(json)
+}
+
+/// A record from the JSON [`record_json`] spells it — how a record relayed from another host
+/// arrives (n5).
+pub fn record_from_json(json: &str) -> Result<ProjectNotificationRecord, serde_json::Error> {
+    serde_json::from_str::<RecordDto>(json).map(ProjectNotificationRecord::from)
+}
+
 /// Where `project_id`'s records are kept under `data_dir`. An id that cannot name a directory is
 /// refused rather than joined onto the path.
 pub(super) fn project_file(data_dir: &Path, project_id: &str) -> anyhow::Result<PathBuf> {

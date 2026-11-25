@@ -77,6 +77,7 @@ fn a_message_between_sessions() -> SessionNotification {
             message_id: "m-1".to_string(),
             reply_to: None,
             text: "Tests pass; pushed 3f2a1c.".to_string(),
+            to_daemon_instance_id: None,
         }),
         ..a_session_end("unused", None)
     }
