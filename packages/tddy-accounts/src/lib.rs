@@ -33,10 +33,14 @@ pub use coder_account::{
     CoderDeploymentUrl, CoderProbeError, CoderUser, CODER_PROVIDER,
 };
 pub use deadline::{deadline_after, forget_expired, is_past};
-pub use identity::{acting_identity, ActingIdentity, GitIdentity, IdentityError, PROVIDER_GITHUB};
+pub use identity::{
+    acting_identity, acting_token, git_identity_of, ActingIdentity, ActingToken, GitIdentity,
+    IdentityError, PROVIDER_GITHUB,
+};
 pub use linking::{
-    record_for_link, removal_allowed, AccountLinker, LinkChallenge, LinkError, LinkProgress,
-    LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
+    record_for_link, removal_allowed, stamped_record, AccountLinker, LinkChallenge, LinkError,
+    LinkProgress, LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT,
+    META_SUBJECT_ID,
 };
 pub use provider_account::{
     account_id_for, default_account_for, defaults_of, endpoints_for, preset, presets,

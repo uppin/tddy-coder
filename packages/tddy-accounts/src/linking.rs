@@ -188,6 +188,32 @@ pub fn record_for_link(
     }
 }
 
+/// The record with `identity`'s identifiers written into its metadata — the backfill half of
+/// deriving a commit identity from the token.
+///
+/// For a record the vault already holds that predates the identifiers (or whose login has gone
+/// stale since): unlike [`record_for_link`], this mints nothing and matches nothing — the caller
+/// names the record. Account, label and secret are preserved exactly; the version is bumped and
+/// `updated_at` set to `stamped_at`, as a re-link is, so the sync engine reads the stamped record
+/// as newer than the one it replaces.
+#[must_use]
+pub fn stamped_record(
+    record: &CredentialRecord,
+    identity: &LinkedIdentity,
+    stamped_at: u64,
+) -> CredentialRecord {
+    let mut stamped = record.clone();
+    stamped
+        .metadata
+        .insert(META_SUBJECT_ID.to_string(), identity.subject_id.clone());
+    stamped
+        .metadata
+        .insert(META_SUBJECT.to_string(), identity.login.clone());
+    stamped.updated_at = stamped_at;
+    stamped.version = stamped.version.saturating_add(1);
+    stamped
+}
+
 /// Whether `RemoveAccount` may forget this account.
 ///
 /// `session_account` is what [`LinkedAccountStore::session_account`] answered for the caller.

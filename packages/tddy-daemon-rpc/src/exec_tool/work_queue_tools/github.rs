@@ -49,7 +49,7 @@ impl GithubSource {
             local_gh_github_token(&self.github_cli, &self.os_user, &project.git_url)?
         } else {
             self.identity
-                .acting_identity(&project.accounts)
+                .acting_token(&project.accounts)
                 .map(|acting| acting.token)
                 .map_err(|refusal| refusal.to_string())?
         };

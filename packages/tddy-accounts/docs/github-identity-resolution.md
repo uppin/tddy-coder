@@ -2,28 +2,36 @@
 
 ## What it answers
 
-Which GitHub account a project acts as, for the token **and** the commit identity, from one
-`acting_identity(assignments, provider, held)` call (`src/identity.rs`). `assignments` are the project
-row's `accounts`; `held` are the GitHub records the signed-in person's vault holds right now.
+Which GitHub account a project acts as — the token **and** the commit identity for commits and
+pushes, the token alone for reads and PR-API calls — from two calls in `src/identity.rs`.
+`assignments` are the project row's `accounts`; `held` are the GitHub records the signed-in
+person's vault holds right now.
 
-The crate publishes no way to obtain the token without the identity, or the identity without the
-token: both halves are fields of one `ActingIdentity { account, token, git }`. There is nothing to
-police, because two independent resolutions cannot be written.
+- `acting_identity(assignments, provider, held)` answers one `ActingIdentity { account, token,
+  git }`: both halves together, so a commit's author and its pusher cannot name different
+  accounts.
+- `acting_token(assignments, provider, held)` answers one `ActingToken { account, token }` from
+  the record alone. It never looks at the provider metadata: a PR read, a check run, a comment,
+  opening or updating a PR, assigning one to a work item — none of them authors anything, so a
+  record linked before the identifiers existed still yields its token.
 
 ## Outcomes
 
 | Resolution | Result |
 |---|---|
-| `Assigned` | `ActingIdentity { account, token, git }` |
+| `Assigned` | `ActingIdentity { account, token, git }`, or `ActingToken { account, token }` for a read |
 | `NotAssigned` | `IdentityError::NotAssigned` — the project assigns no GitHub account |
 | `UnknownOnThisHost` | `IdentityError::UnknownOnThisHost` — assigned, but this host holds no such account |
 | `Ambiguous` | `IdentityError::Ambiguous` — two accounts at one provider; never picks |
 | `Assigned`, record carries no provider identifiers | `IdentityError::Unusable` — names the absent metadata key |
+| `Assigned`, identifiers missing and GitHub would not supply them | `IdentityError::DerivationFailed` — names the account, the key, and the reason |
 
 Each refusal is a distinct message (`IdentityError: Display`) that names what the person would do
 about it. `Unusable` is the one outcome beyond the resolver's four: a record can resolve and still
 carry no provider identifiers, and refusing it is the alternative to inventing an address — a commit
-authored under an invented address is attributed to nobody.
+authored under an invented address is attributed to nobody. `DerivationFailed` is what the commit
+path answers when the provider itself could not identify the token; the pure `acting_identity`
+cannot ask, so it answers `Unusable` and the derivation happens above this crate.
 
 ## Identity derivation
 
@@ -35,6 +43,13 @@ pairs from one `ActingIdentity`; the token is never among them. It returns pairs
 them to a `Command`, because the caller that spawns the process is the only one that knows which
 process they belong on, and a list of pairs is readable without running `git`.
 
+A record with no identifiers has them derived from the token: `GET /user` with the account's own
+token answers the provider id and login, which are stamped back into the vault record
+(`stamped_record`, persisted by `SessionVaultAccountStore::stamp_account_identity`) so the next
+resolution finds them. The stamp preserves account, label and secret, and reads as newer — version
+bumped, `updated_at` set — so the sync engine keeps it over a peer's older copy. Only a derivation
+that fails refuses the commit.
+
 ## Where the resolution is taken
 
 At the session's edge, from `tddy-session-lifecycle`: `SessionAccountAccess::session_identity` returns
@@ -43,7 +58,8 @@ the commit pairs and the handler that answers the agent's tools' `github-token` 
 the agent's process environment (co-located), to the host-side relay environment (jailed), or to the
 child's environment over the spawn wire (tool sessions). The token is **asked for, per call**, over a
 socket the session's host serves — never an environment variable, never a file. Daemon-side
-operations (`RepointWorkItem`) call `project_github_token` directly.
+operations that only read or file (`RepointWorkItem`, trunk watch, the stack tools' GitHub client)
+call the token-only resolution directly and never derive.
 
 `tddy-accounts` names `tddy-credentials`, `tddy-rpc` and `tddy-service` and nothing about sessions or
 LiveKit: the crate deciding which account a project acts as does not know who asks.
@@ -90,5 +106,6 @@ change that.
 ## Tests
 
 `tests/acting_identity_unit.rs` (each outcome, each message, the derivation, the label never used),
+`tests/acting_token_unit.rs` (the token without the metadata, each refusal kept),
 `tests/project_resolved_identity_acceptance.rs` (two projects, two accounts, one daemon; token and
 identity name the same account; `GITHUB_TOKEN` rescues nothing).

@@ -7,6 +7,12 @@
 //! environment variable or a file — [`SessionGithubCredential`] hands it to the agent's tools over
 //! the session's own toolcall socket, per call. Nothing in this module reads `GITHUB_TOKEN` or
 //! `GH_TOKEN`.
+//!
+//! Two resolutions, by use: commits and pushes take the paired one, and a record that carries no
+//! provider identifiers has its missing half derived — GitHub is asked who the token belongs to —
+//! and stamped back into the vault, so only a derivation that fails refuses. Reads and PR-API
+//! calls take the token-only one ([`SessionAccountAccess::acting_token`]), which never derives
+//! and never looks at the metadata at all.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -15,12 +21,15 @@ use crate::provider_account_lookup::find_provider_account;
 use crate::session_git::{session_git_environment, session_git_environment_of};
 use tddy_accounts::local_gh::{github_hostname_of, local_gh_git_identity};
 use tddy_accounts::{
-    acting_identity, AccountStore, AccountsError, ActingIdentity, IdentityError,
-    SessionSubjectResolver, SessionVaultAccountStore, PROVIDER_GITHUB,
+    acting_identity, acting_token, git_identity_of, AccountStore, AccountsError, ActingIdentity,
+    ActingToken, IdentityError, LinkedIdentity, SessionSubjectResolver, SessionVaultAccountStore,
+    PROVIDER_GITHUB,
 };
 use tddy_core::toolcall::{local_gh_source_value, GITHUB_SOURCE_ENV};
 use tddy_core::{read_session_github_source, SessionGithubSource};
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SessionVaults};
+use tddy_github::github_rest_common::GITHUB_API_BASE;
+use tddy_github::user_api::fetch_authenticated_user;
 use tddy_host_service::GithubCli;
 use tddy_projects::project_storage::{AccountAssignment, ProjectData};
 
@@ -86,6 +95,31 @@ pub(crate) fn acting_identity_for(
     acting_identity(assignments, &ProviderId::new(PROVIDER_GITHUB), held)
 }
 
+/// The GitHub account `assignments` name, resolved token-only over `held` — the account and its
+/// token, never the metadata.
+fn acting_token_for(
+    assignments: &[(ProviderId, AccountId)],
+    held: &[CredentialRecord],
+) -> Result<ActingToken, IdentityError> {
+    acting_token(assignments, &ProviderId::new(PROVIDER_GITHUB), held)
+}
+
+/// Ask GitHub who `token` belongs to — the question a missing commit identity is derived from.
+///
+/// A value, defaulting to the real `GET /user` and overridable per access
+/// ([`SessionAccountAccess::with_user_probe`]) so tests stand a fake in for GitHub. The shape
+/// mirrors [`SessionSubjectResolver`]: what varies is where the answer comes from, not what is
+/// asked.
+pub type AccountIdentityProbe = Arc<dyn Fn(&str) -> Result<LinkedIdentity, String> + Send + Sync>;
+
+/// The production probe: `GET /user` at GitHub's own API root, asked with the account's token.
+fn default_account_identity_probe(token: &str) -> Result<LinkedIdentity, String> {
+    fetch_authenticated_user(GITHUB_API_BASE, token).map(|user| LinkedIdentity {
+        subject_id: user.id.to_string(),
+        login: user.login,
+    })
+}
+
 /// The `GIT_*` pairs of the GitHub account `assignments` name, from one `acting_identity`
 /// resolution over `held` — the pure half the unit tests drive without a vault.
 #[cfg(test)]
@@ -100,8 +134,12 @@ pub(crate) fn git_environment_for(
 }
 
 /// The token of the GitHub account `accounts` name, for an operation the daemon performs itself on
-/// behalf of the signed-in person `session_token` belongs to — one `acting_identity` resolution over
-/// that person's vault, the same one a session's commit identity and its tools' token come from.
+/// behalf of the signed-in person `session_token` belongs to — one token-only resolution over
+/// that person's vault.
+///
+/// Reads and PR-API calls authenticate as the account and author nothing, so this never looks at
+/// the record's provider metadata and never derives: a record linked before `subject_id` existed
+/// still yields its token.
 ///
 /// `Err` carries the reason there is none, in the resolver's own words. The process environment is
 /// not consulted: with no resolvable account there is no token.
@@ -112,7 +150,7 @@ pub fn project_github_token(
     accounts: &[AccountAssignment],
 ) -> Result<String, String> {
     SessionAccountAccess::new(vaults, subject_of, session_token)
-        .acting_identity(accounts)
+        .acting_token(accounts)
         .map(|acting| acting.token)
         .map_err(|refusal| refusal.to_string())
 }
@@ -130,6 +168,10 @@ pub struct SessionAccountAccess {
     /// The `gh` a Local gh project's identity is asked of; the one on a spawned child's `PATH`
     /// unless [`Self::with_github_cli`] names another.
     github_cli: GithubCli,
+    /// Who a missing commit identity is asked of; the real `GET /user` unless
+    /// [`Self::with_user_probe`] names another. Asked only when a record the vault holds carries
+    /// no provider identifiers — never for a read, never when they are present.
+    user_probe: AccountIdentityProbe,
 }
 
 impl SessionAccountAccess {
@@ -144,6 +186,7 @@ impl SessionAccountAccess {
             session_token: session_token.to_string(),
             vault_key: session_token.to_string(),
             github_cli: GithubCli::on_spawn_child_path(),
+            user_probe: Arc::new(default_account_identity_probe),
         }
     }
 
@@ -171,12 +214,86 @@ impl SessionAccountAccess {
 
     /// The account `accounts` name — one `acting_identity` resolution over what the session's vault
     /// holds right now, or the reason there is none.
+    ///
+    /// The paired resolution, for commits and pushes. When the record carries no provider
+    /// identifiers, the missing half is derived — the probe asks GitHub who the token belongs
+    /// to — and stamped back into the vault record, so the next resolution finds it. Only a
+    /// derivation that fails refuses, as [`IdentityError::DerivationFailed`]; a stamp that fails
+    /// is warned about and the derived identity still answers, because the commit is correctly
+    /// attributed either way.
     pub fn acting_identity(
         &self,
         accounts: &[AccountAssignment],
     ) -> Result<ActingIdentity, SessionIdentityRefusal> {
-        acting_identity_for(&assignments_of(accounts), &self.held_github_accounts()?)
+        let assignments = assignments_of(accounts);
+        let held = self.held_github_accounts()?;
+        match acting_identity_for(&assignments, &held) {
+            Err(IdentityError::Unusable {
+                provider,
+                account,
+                missing,
+            }) => self.derived_identity(&provider, &account, missing),
+            resolved => resolved.map_err(SessionIdentityRefusal::Identity),
+        }
+    }
+
+    /// The account `accounts` name and its token — one token-only resolution over what the
+    /// session's vault holds right now, or the reason there is none.
+    ///
+    /// For reads and PR-API calls, which authenticate as the account and author nothing: this
+    /// never looks at the record's provider metadata and never derives — a record linked before
+    /// `subject_id` existed still yields its token.
+    pub fn acting_token(
+        &self,
+        accounts: &[AccountAssignment],
+    ) -> Result<ActingToken, SessionIdentityRefusal> {
+        acting_token_for(&assignments_of(accounts), &self.held_github_accounts()?)
             .map_err(SessionIdentityRefusal::Identity)
+    }
+
+    /// The paired identity for a record the vault holds that carries no provider identifiers:
+    /// derive them from the token, stamp them back, and answer paired.
+    ///
+    /// The token half is resolved token-only over the vault as it stands — the same account the
+    /// pure resolution just chose — so the derived identity and the token cannot name different
+    /// accounts.
+    fn derived_identity(
+        &self,
+        provider: &ProviderId,
+        account: &AccountId,
+        missing: &'static str,
+    ) -> Result<ActingIdentity, SessionIdentityRefusal> {
+        let assignments = vec![(provider.clone(), account.clone())];
+        let held = self.held_github_accounts()?;
+        let token =
+            acting_token_for(&assignments, &held).map_err(SessionIdentityRefusal::Identity)?;
+        let probed = (self.user_probe)(&token.token).map_err(|reason| {
+            SessionIdentityRefusal::Identity(IdentityError::DerivationFailed {
+                provider: provider.clone(),
+                account: account.clone(),
+                missing,
+                reason,
+            })
+        })?;
+        let acting = ActingIdentity {
+            account: token.account,
+            token: token.token,
+            git: git_identity_of(&probed.subject_id, &probed.login),
+        };
+        if let Err(error) = self.vault_store()?.stamp_account_identity(
+            &self.vault_key,
+            provider,
+            &acting.account,
+            &probed,
+        ) {
+            log::warn!(
+                target: "tddy_daemon::connection_service",
+                "the GitHub identity derived for account {} was not persisted: {error:?}; the \
+                 commit proceeds under it anyway",
+                acting.account.as_str()
+            );
+        }
+        Ok(acting)
     }
 
     /// The model-provider account `id_or_label` names in the session owner's vault — read the same
@@ -216,14 +333,23 @@ impl SessionAccountAccess {
 
     /// Every record the session owner's vault holds right now.
     fn held_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
+        self.vault_store()?
+            .list(&self.vault_key)
+            .map_err(SessionIdentityRefusal::Vault)
+    }
+
+    /// The session owner's vault as the account store — the same gate the reads go through, for
+    /// the writes derivation persists.
+    fn vault_store(&self) -> Result<SessionVaultAccountStore, SessionIdentityRefusal> {
         let vaults = self
             .vaults
             .as_ref()
             .filter(|_| !self.vault_key.is_empty())
             .ok_or(SessionIdentityRefusal::NoVaultsConfigured)?;
-        SessionVaultAccountStore::new(Arc::clone(vaults), Arc::clone(&self.subject_of))
-            .list(&self.vault_key)
-            .map_err(SessionIdentityRefusal::Vault)
+        Ok(SessionVaultAccountStore::new(
+            Arc::clone(vaults),
+            Arc::clone(&self.subject_of),
+        ))
     }
 }
 
@@ -352,6 +478,13 @@ impl SessionAccountAccess {
     /// Ask `github_cli` for a Local gh project's identity (builder).
     pub fn with_github_cli(mut self, github_cli: GithubCli) -> Self {
         self.github_cli = github_cli;
+        self
+    }
+
+    /// Ask `probe` who a token belongs to when a commit identity must be derived (builder;
+    /// tests). Production asks the real `GET /user`.
+    pub fn with_user_probe(mut self, probe: AccountIdentityProbe) -> Self {
+        self.user_probe = probe;
         self
     }
 

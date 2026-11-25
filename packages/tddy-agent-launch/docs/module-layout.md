@@ -287,6 +287,11 @@ Coverage: `tddy-session-lifecycle`'s `sandboxed_claude_launch_baseline` and
   (the session's recorded `github-source.yaml`, else the row's `local_gh`) and resolves it.
 - `SessionAccountAccess::with_github_cli(GithubCli)` injects the `gh` the Local gh resolution asks;
   the default is `GithubCli::on_spawn_child_path()`.
+- `SessionAccountAccess::acting_identity` is the paired resolution for commits and pushes; a record
+  with no provider identifiers has them derived (`GET /user` with the account's token, asked through
+  the `AccountIdentityProbe` — the real fetch unless `with_user_probe` names another) and stamped
+  back into the vault, so only a failed derivation refuses. `acting_token` is the token-only
+  resolution for reads and PR-API calls; `project_github_token` is its daemon-side form.
 - A Local gh identity carries the four commit pairs of the `gh` login plus `TDDY_GITHUB_SOURCE`, and a
   `github_credential` that only refuses. When `gh` cannot answer the pairs are absent and the source
   entry is still present; when the git URL names no host, neither is.

@@ -173,8 +173,8 @@ fn project_account_token(
         )
         .ok_or_else(|| "the project's row cannot be read".to_string())?;
     SessionAccountAccess::for_subject(host.credential_vaults(), subject)
-        .acting_identity(&row.accounts)
-        .map(|identity| identity.token)
+        .acting_token(&row.accounts)
+        .map(|acting| acting.token)
         .map_err(|refusal| refusal.to_string())
 }
 

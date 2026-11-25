@@ -11,7 +11,10 @@ for a session, by the account its project is assigned
 - `create_pull_request`, `update_pull_request`, their `*_via_rest_api` forms and
   `merge_open_pr_for_branch` take `token: &str` and refuse a blank one.
 - `curl_github_{get,post,patch,put}_json_with_token` and the `…_absolute_path` forms take the API root
-  as their first argument; their only callers are `RealGithubPrApi`.
+  as their first argument; their callers are `RealGithubPrApi` and `user_api::fetch_authenticated_user`.
+- `user_api::fetch_authenticated_user(api_base, token)` asks `GET /user` for the account the token
+  belongs to — what a missing commit identity is derived from. A blank token is refused before curl
+  runs; any other failure is a plain sentence for the derivation refusal to quote.
 - The token travels in the `Authorization: Bearer` header alone, never in the URL.
 
 ## `RealGithubPrApi`

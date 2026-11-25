@@ -7,6 +7,7 @@ use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
 
+use crate::linking::LinkedIdentity;
 use crate::provider_account::{
     defaults_of, unclaimed_account_id, ProviderAccount, ProviderAccountDefaults,
     ProviderAccountStore, META_DEFAULT_FOR,
@@ -39,6 +40,34 @@ impl SessionVaultAccountStore {
             subject_of,
             new_provider_accounts: Mutex::new(()),
         }
+    }
+
+    /// Stamp the identity derived from the record's own token onto it.
+    ///
+    /// The persist half of derivation: the commit path asked the provider who this token belongs
+    /// to, and the answer is written back so the next resolution finds it. A record that is not
+    /// there is [`AccountsError::NotFound`] — stamping mints no record.
+    pub fn stamp_account_identity(
+        &self,
+        session_token: &str,
+        provider: &ProviderId,
+        account: &AccountId,
+        identity: &LinkedIdentity,
+    ) -> Result<(), AccountsError> {
+        let (subject, vault) = self.vault_for(session_token)?;
+        // TODO(keyring): the read and the write are two separately serialised vault operations,
+        // so a write to this record landing between them is overwritten with the record read
+        // here. See docs/dev/todo/2026-10-04-keyring-accounts-rename-lost-update.md.
+        let record = vault
+            .get(provider, account)
+            .map_err(|error| refusal_of(&subject, error))?
+            .ok_or_else(|| AccountsError::NotFound {
+                provider: provider.clone(),
+                account: account.clone(),
+            })?;
+        vault
+            .put(crate::stamped_record(&record, identity, now_secs()?))
+            .map_err(|error| refusal_of(&subject, error))
     }
 
     /// The subject the token's session belongs to, and its vault, open on this daemon.
@@ -672,6 +701,68 @@ mod tests {
         written.sort();
         assert_eq!(stored, written);
         assert_eq!(stored.len(), 8);
+    }
+
+    #[test]
+    fn stamping_persists_the_derived_identifiers_onto_the_vault_record() {
+        // Given Ada's vault holding a record linked before the provider identifiers existed
+        let (_dir, vault, store) =
+            ada_unlocked_her_vault_holding(vec![a_credential("ada", "Work")]);
+
+        // When the identity derived from its token is stamped onto it
+        store
+            .stamp_account_identity(
+                ADAS_SESSION,
+                &ProviderId::new("github"),
+                &AccountId::new("ada"),
+                &crate::LinkedIdentity {
+                    subject_id: "101".to_string(),
+                    login: "ada".to_string(),
+                },
+            )
+            .expect("the stamp is retained");
+
+        // Then the vault's record carries both identifiers, and its secret is untouched
+        let stamped = vault
+            .get(&ProviderId::new("github"), &AccountId::new("ada"))
+            .expect("the vault reads")
+            .expect("the record is still held");
+        assert_eq!(
+            stamped.metadata.get(crate::META_SUBJECT_ID),
+            Some(&"101".to_string())
+        );
+        assert_eq!(
+            stamped.metadata.get(crate::META_SUBJECT),
+            Some(&"ada".to_string())
+        );
+        assert_eq!(stamped.secret.expose(), "shhh-ada");
+        assert_eq!(stamped.label, "Work");
+    }
+
+    #[test]
+    fn stamping_a_record_the_vault_does_not_hold_is_refused_as_not_found() {
+        // Given Ada's vault holding nothing
+        let (_dir, _vault, store) = ada_unlocked_her_vault_holding(vec![]);
+
+        // When a derived identity is stamped onto an account it does not hold
+        let stamped = store.stamp_account_identity(
+            ADAS_SESSION,
+            &ProviderId::new("github"),
+            &AccountId::new("nobody"),
+            &crate::LinkedIdentity {
+                subject_id: "101".to_string(),
+                login: "ada".to_string(),
+            },
+        );
+
+        // Then the refusal is NotFound: stamping mints no record
+        assert_eq!(
+            stamped,
+            Err(AccountsError::NotFound {
+                provider: ProviderId::new("github"),
+                account: AccountId::new("nobody"),
+            })
+        );
     }
 
     #[test]

@@ -12,7 +12,7 @@ use tddy_worktree_service::session_git_ops::{GitOp, PushIdentity};
 use tddy_worktree_service::session_target::SessionTarget;
 
 use super::super::super::work_queue_tools::WorkQueueGithub;
-use super::{git, project_token, GitEnv};
+use super::{git, project_push_token, GitEnv};
 
 /// One queue's git and GitHub, for the engines.
 pub(crate) struct DaemonQueueWorld<'a> {
@@ -166,7 +166,7 @@ impl QueueGit for DaemonQueueWorld<'_> {
         let worktree = self.worktree_of(branch)?;
         // Pushed as the project's account or not at all — never with whatever credentials the
         // host happens to hold.
-        let token = project_token(
+        let token = project_push_token(
             &self.project,
             &self.env.identity,
             &self.env.github_cli,

@@ -141,6 +141,25 @@ fn a_refusal_to_pick_between_two_accounts_names_the_provider_it_could_not_settle
 }
 
 #[test]
+fn a_derivation_failure_names_the_account_the_missing_key_and_the_reason() {
+    // Given a record GitHub could not identify the token of
+    let refusal = IdentityError::DerivationFailed {
+        provider: github(),
+        account: AccountId::new("acct-ada"),
+        missing: META_SUBJECT_ID,
+        reason: "GitHub API GET https://api.github.com/user returned HTTP 401: Bad credentials"
+            .to_string(),
+    };
+
+    // Then the message names the account, the missing key, the reason, and the remedy
+    let message = refusal.to_string();
+    assert!(message.contains("acct-ada"), "got: {message}");
+    assert!(message.contains(META_SUBJECT_ID), "got: {message}");
+    assert!(message.contains("401"), "got: {message}");
+    assert!(message.contains("link the account again"), "got: {message}");
+}
+
+#[test]
 fn a_refusal_for_an_account_this_host_lacks_names_the_account_that_is_missing() {
     // Given an assignment this host cannot honour
     let refusal = IdentityError::UnknownOnThisHost {
