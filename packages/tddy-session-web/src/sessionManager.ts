@@ -82,6 +82,10 @@ export class SessionManager {
     this.recompute();
   }
 
+  /** How many pulls {@link refresh} has started, and the newest whose answer is applied. */
+  private pullsStarted = 0;
+  private newestPullApplied = 0;
+
   setSelectedInstanceId(instanceId: string): void {
     if (instanceId === this.selectedInstanceId) return;
     this.selectedInstanceId = instanceId;
@@ -104,15 +108,19 @@ export class SessionManager {
   refresh(): Promise<void> {
     const fetcher = this.fetcher;
     if (!fetcher) return Promise.resolve();
+    // A pull can outlast the poll interval (the selected host waits on its peers), so pulls
+    // overlap; an answer older than one already applied is dropped rather than reverting the list.
+    const pull = ++this.pullsStarted;
     return fetcher()
       .then((sessions) => {
-        if (this.fetcher !== fetcher) return;
+        if (this.fetcher !== fetcher || pull < this.newestPullApplied) return;
+        this.newestPullApplied = pull;
         this.selectedHostSessions = sessions;
         this.cachedLoadError = null;
         this.recompute();
       })
       .catch((err: unknown) => {
-        if (this.fetcher !== fetcher) return;
+        if (this.fetcher !== fetcher || pull < this.newestPullApplied) return;
         this.setLoadError(rpcFailureText(err));
       });
   }

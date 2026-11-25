@@ -120,35 +120,12 @@ impl SessionMessagePort for DaemonSessionMessages {
             .ok_or_else(|| NO_SESSION_MESSAGES.to_string())?;
         let (watches, log) = inbox_parts(&self.session_watches, &self.notification_log)?;
 
-        // Who the caller is, from its own records: its role, and the orchestrator that started it —
-        // and that orchestrator's host, when it is another.
-        let caller_dir = tddy_core::session_lifecycle::unified_session_dir_path(
-            &self.sessions_base,
-            &caller.session_id,
-        );
-        let caller_metadata = tddy_core::read_session_metadata(&caller_dir)
-            .map_err(|e| format!("cannot read session {}'s record: {e}", caller.session_id))?;
-        let changeset = tddy_core::read_changeset(&caller_dir).ok();
-        let orchestrator = changeset
-            .as_ref()
-            .and_then(|changeset| changeset.orchestrator_session_id.clone());
-        let orchestrator_host = changeset
-            .and_then(|changeset| changeset.orchestrator_daemon_instance_id)
-            .map(|host| host.trim().to_string())
-            .filter(|host| !host.is_empty() && *host != self.peers.local_id);
-        let main_session = projects_path_for_user(&self.os_user, Some(&self.tddy_data_dir))
-            .and_then(|projects_dir| {
-                tddy_projects::project_storage::find_project(&projects_dir, &caller.project_id).ok()
-            })
-            .flatten()
-            .and_then(|project| project.home_session_id)
-            .filter(|home| home != &caller.session_id);
-        let addressable = Addressable {
-            any_visible_session: session_tool_role(&caller_metadata)
-                == SessionToolRole::ProjectHome,
-            orchestrator_session_id: orchestrator.clone(),
-            main_session_id: main_session.clone(),
-        };
+        let CallerReach {
+            addressable,
+            orchestrator,
+            orchestrator_host,
+            main_session,
+        } = self.reach_of(caller)?;
         let not_addressable = |to_session_id: &str| {
             MessageRefusal::NotAddressable {
                 to_session_id: to_session_id.to_string(),
@@ -278,6 +255,53 @@ impl SessionMessagePort for DaemonSessionMessages {
             "lost": read.lost,
             "has_more": read.has_more,
         }))
+    }
+}
+
+/// Who a caller may address, from its own records: its role, the orchestrator that started it and
+/// that orchestrator's host when it is another, and the project's main session.
+struct CallerReach {
+    addressable: Addressable,
+    orchestrator: Option<String>,
+    orchestrator_host: Option<String>,
+    main_session: Option<String>,
+}
+
+impl DaemonSessionMessages {
+    /// `caller`'s reach, read from its session record, its changeset and the project registry.
+    fn reach_of(&self, caller: &HomeCaller) -> Result<CallerReach, String> {
+        let caller_dir = tddy_core::session_lifecycle::unified_session_dir_path(
+            &self.sessions_base,
+            &caller.session_id,
+        );
+        let caller_metadata = tddy_core::read_session_metadata(&caller_dir)
+            .map_err(|e| format!("cannot read session {}'s record: {e}", caller.session_id))?;
+        let changeset = tddy_core::read_changeset(&caller_dir).ok();
+        let orchestrator = changeset
+            .as_ref()
+            .and_then(|changeset| changeset.orchestrator_session_id.clone());
+        let orchestrator_host = changeset
+            .and_then(|changeset| changeset.orchestrator_daemon_instance_id)
+            .map(|host| host.trim().to_string())
+            .filter(|host| !host.is_empty() && *host != self.peers.local_id);
+        let main_session = projects_path_for_user(&self.os_user, Some(&self.tddy_data_dir))
+            .and_then(|projects_dir| {
+                tddy_projects::project_storage::find_project(&projects_dir, &caller.project_id).ok()
+            })
+            .flatten()
+            .and_then(|project| project.home_session_id)
+            .filter(|home| home != &caller.session_id);
+        Ok(CallerReach {
+            addressable: Addressable {
+                any_visible_session: session_tool_role(&caller_metadata)
+                    == SessionToolRole::ProjectHome,
+                orchestrator_session_id: orchestrator.clone(),
+                main_session_id: main_session.clone(),
+            },
+            orchestrator,
+            orchestrator_host,
+            main_session,
+        })
     }
 }
 

@@ -71,6 +71,24 @@ impl PeerSessionListing {
         Self { asking }
     }
 
+    /// This host's own `entries`, then what `peers` — when asked — answered.
+    pub(crate) async fn listed_with(
+        entries: Vec<SessionEntry>,
+        peers: Option<Self>,
+    ) -> ListSessionsResponse {
+        let mut sessions = entries;
+        let mut unreachable_hosts = Vec::new();
+        if let Some(peers) = peers {
+            let answered = peers.answers().await;
+            sessions.extend(answered.sessions);
+            unreachable_hosts = answered.unreachable_hosts;
+        }
+        ListSessionsResponse {
+            sessions,
+            unreachable_hosts,
+        }
+    }
+
     /// Every answer, in roster order, waiting at most [`PEER_LISTING_DEADLINE`] in all.
     pub(crate) async fn answers(self) -> PeerSessions {
         self.answers_within(PEER_LISTING_DEADLINE).await

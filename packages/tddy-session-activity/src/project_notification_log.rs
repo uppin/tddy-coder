@@ -157,7 +157,13 @@ pub struct ProjectNotificationLog {
     projects: Mutex<HashMap<String, Arc<Project>>>,
     /// Woken whenever a record is appended to any project: what the notification relay waits on.
     appended: Arc<Notify>,
+    /// Told of every record of this host's own sessions as it is appended, before any later record
+    /// can evict it: how the notification relay routes each one while it is still known (n5).
+    on_append: std::sync::OnceLock<AppendHook>,
 }
+
+/// What [`ProjectNotificationLog::on_append`] is told: the project, and the record with its OS user.
+pub type AppendHook = Arc<dyn Fn(&str, &relayed::HeldRecord) + Send + Sync>;
 
 /// A record as the log holds it: the record, and the OS user whose session made it.
 #[derive(Debug, Clone)]
@@ -260,6 +266,7 @@ impl ProjectNotificationLog {
             sessions_base_for,
             projects: Mutex::new(projects),
             appended: Arc::new(Notify::new()),
+            on_append: std::sync::OnceLock::new(),
         })
     }
 
@@ -484,7 +491,20 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     relay_lost: 0,
                 },
             };
+            let appended = self.on_append.get().map(|hook| {
+                (
+                    Arc::clone(hook),
+                    relayed::HeldRecord {
+                        os_user: held.os_user.clone(),
+                        record: held.record.clone(),
+                    },
+                )
+            });
             append_held(&path, &mut state, held)?;
+            // Told under the project's lock, so no later record can evict it first.
+            if let Some((hook, record)) = appended {
+                hook(&project_id, &record);
+            }
         }
         self.announce(&project);
         Ok(())

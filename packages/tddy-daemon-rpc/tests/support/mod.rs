@@ -85,6 +85,24 @@ pub struct InProcessPeers {
     unary_calls: Mutex<Vec<(String, String, String)>>,
     /// Hosts whose link is down: every call to one fails at once as unavailable, until restored.
     cut: RwLock<HashSet<String>>,
+    /// The public keys the daemons announced: the fleet's key directory, which the common-room
+    /// advertisement fills for real.
+    announced_keys: RwLock<
+        HashMap<
+            tddy_github::session_token_v2::KeyId,
+            tddy_github::session_token_v2::Ed25519VerifyingKey,
+        >,
+    >,
+}
+
+#[async_trait::async_trait]
+impl tddy_daemon_auth::KeyDirectory for InProcessPeers {
+    async fn public_key_for(
+        &self,
+        key_id: &tddy_github::session_token_v2::KeyId,
+    ) -> anyhow::Result<Option<tddy_github::session_token_v2::Ed25519VerifyingKey>> {
+        Ok(self.announced_keys.read().unwrap().get(key_id).copied())
+    }
 }
 
 impl InProcessPeers {
@@ -94,6 +112,23 @@ impl InProcessPeers {
             .write()
             .unwrap()
             .insert(instance_id.to_string());
+    }
+
+    /// A daemon's signing identity, generated under `dir` and announced to the fleet: the tokens it
+    /// signs with, verifying every announced daemon's.
+    pub fn signing_identity_in(self: &Arc<Self>, dir: &Path) -> tddy_daemon_auth::SessionTokens {
+        let key = tddy_daemon_auth::DaemonSigningKey::load_or_generate(
+            &dir.join(tddy_daemon_auth::SIGNING_KEY_FILE),
+        )
+        .expect("a daemon generates a keypair");
+        self.announced_keys
+            .write()
+            .unwrap()
+            .insert(key.key_id(), key.verifying_key());
+        tddy_daemon_auth::SessionTokens::new(
+            &key,
+            Arc::clone(self) as Arc<dyn tddy_daemon_auth::KeyDirectory>,
+        )
     }
 
     /// `instance_id`'s link goes down: every call to it fails as unavailable until
@@ -804,7 +839,14 @@ pub fn a_host_relaying(
     timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
     retry: std::time::Duration,
 ) -> (Host, Arc<SessionNotificationBus>) {
-    let (host, bus) = a_host_waking_orchestrators(instance_id, peers, timings);
+    let fleet = Arc::clone(peers);
+    let (host, bus) = a_host_waking_orchestrators_customised(
+        instance_id,
+        peers,
+        timings,
+        |watches| watches,
+        move |host, sessions| host.with_session_tokens(fleet.signing_identity_in(sessions)),
+    );
     host.daemon.handlers().start_notification_relay(
         host.sessions.path().join("notification-log"),
         tddy_daemon_rpc::exec_tool::notification_relay::RelayTimings { retry },
@@ -836,6 +878,21 @@ fn a_host_waking_orchestrators_with(
         ) -> tddy_session_activity::session_watches::SessionWatchStore
         + 'static,
 ) -> (Host, Arc<SessionNotificationBus>) {
+    a_host_waking_orchestrators_customised(instance_id, peers, timings, watches_of, |host, _| host)
+}
+
+/// [`a_host_waking_orchestrators_with`], with `customise` given the host — and its sessions
+/// directory — before its handlers are installed on it.
+fn a_host_waking_orchestrators_customised(
+    instance_id: &str,
+    peers: &Arc<InProcessPeers>,
+    timings: tddy_daemon_rpc::exec_tool::watch_wake::WakeTimings,
+    watches_of: impl FnOnce(
+            tddy_session_activity::session_watches::SessionWatchStore,
+        ) -> tddy_session_activity::session_watches::SessionWatchStore
+        + 'static,
+    customise: impl FnOnce(DaemonSessionHost, &Path) -> DaemonSessionHost + 'static,
+) -> (Host, Arc<SessionNotificationBus>) {
     let bus = Arc::new(std::sync::Mutex::new(None));
     let published_on = Arc::clone(&bus);
     let cues = Arc::new(std::sync::Mutex::new(None));
@@ -862,9 +919,12 @@ fn a_host_waking_orchestrators_with(
                 .with_subscriber(Arc::new(trigger)),
         );
         *published_on.lock().unwrap() = Some(Arc::clone(&notifications));
-        host.with_session_notification_bus(notifications)
-            .with_project_notification_log(log)
-            .with_session_watches(watches)
+        customise(
+            host.with_session_notification_bus(notifications)
+                .with_project_notification_log(log)
+                .with_session_watches(watches),
+            sessions,
+        )
     });
     let wake_cues = cues
         .lock()

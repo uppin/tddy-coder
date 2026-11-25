@@ -93,6 +93,9 @@ impl DaemonProjectHome {
     }
 }
 
+/// The longest a watch tool waits for the other hosts to say which holds a session.
+const HOST_LOOKUP_DEADLINE: Duration = Duration::from_secs(5);
+
 impl DaemonProjectHome {
     /// Whether this host holds a record of `session_id` (of any project).
     fn holds_a_record_of(&self, session_id: &str) -> bool {
@@ -114,9 +117,9 @@ impl DaemonProjectHome {
                 ..peers.request.clone()
             },
         };
-        listing
-            .list()
+        tokio::time::timeout(HOST_LOOKUP_DEADLINE, listing.list())
             .await
+            .ok()?
             .sessions
             .into_iter()
             .find(|listed| listed.session_id == session_id)
@@ -152,7 +155,8 @@ impl DaemonProjectHome {
                 until_unix_ms,
                 github_user: github_user.clone(),
             };
-            super::notification_relay::follow_on(&peers.routing, host, &follow)
+            self.relay_credentials
+                .follow_on(host, &follow)
                 .await
                 .map_err(|reason| {
                     format!("host {host} cannot relay session {session_id}'s events here: {reason}")
@@ -287,18 +291,23 @@ impl ProjectHomeWatchPort for DaemonProjectHome {
                 now_unix_ms(),
             )
             .await?;
-        // The named sessions on other hosts are followed for as long as the renewed watch lives.
+        // The named sessions on other hosts are followed for as long as the renewed watch lives; one
+        // that cannot be followed again is named, never skipped silently.
         let mut elsewhere = Vec::new();
         for session_id in &watch.filter.session_ids {
             if session_id == &home.session_id || self.holds_a_record_of(session_id) {
                 continue;
             }
-            if let Some(host) = self.host_holding(session_id).await {
-                elsewhere.push((session_id.clone(), host));
-            }
+            let host = self.host_holding(session_id).await.ok_or_else(|| {
+                format!(
+                    "watch {watch_id} was renewed, but session {session_id} is on no connected host that answered, so its events are not followed past the old expiry: renew again once its host is back"
+                )
+            })?;
+            elsewhere.push((session_id.clone(), host));
         }
         self.follow_elsewhere(home, &elsewhere, watch.expires_at_unix_ms)
-            .await?;
+            .await
+            .map_err(|refusal| format!("watch {watch_id} was renewed, but {refusal}"))?;
         Ok(watch_json(&watch, None))
     }
 

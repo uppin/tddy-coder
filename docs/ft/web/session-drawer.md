@@ -357,14 +357,20 @@ sessions it started). Components: `SessionDrawerSeparator`
 
 ## Cross-Host Active Sessions
 
-The drawer shows a session that currently has a **live LiveKit participant** regardless of the
-selected host. The list is the **union** of two sources:
+The drawer shows the sessions of **every connected host**, each labelled with its host. The list is
+the **union** of two sources:
 
-- **The selected host's sessions** — from its `ListSessions` (active *and* inactive/history rows).
+- **Every connected host's sessions** — from the selected host's `ListSessions` with
+  `include_peers`: its own rows (active *and* inactive/history), then every other eligible daemon's
+  own rows, each naming its host in `daemon_instance_id`. The selected host asks its peers at once
+  with `include_peers: false` (one hop), keeps only the rows a peer reports for itself, and waits at
+  most 3 s in all — the drawer polls every 2 s; a peer that has not answered by then is named in
+  `unreachable_hosts` for that poll (on the wire; the drawer does not show it yet). A poll that
+  answers after a newer one is dropped rather than reverting the list.
 - **Live cross-host sessions** — every session with a coder participant in the common room, across
-  all hosts.
+  all hosts. A session both listed and live is one row: the listed one, deduplicated by session id.
 
-There is **no `ListSessions` fan-out** and **no backend liveness signal**. Liveness *is* LiveKit
+There is **no backend liveness signal**. Liveness *is* LiveKit
 participant presence: a session's coder process joins the shared common room as
 `daemon-<instanceId>-<sessionId>` (or `daemon-<sessionId>` on a single daemon), and the LiveKit SDK
 keeps that participant alive while the process lives (connection-level keep-alive; a dead process ⇒

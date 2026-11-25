@@ -158,6 +158,49 @@ struct RelayState {
 /// A destination of one record: the host, and the session there it is relayed for.
 type Destination = (String, String);
 
+/// The longest one relay call may take: a host that does not answer holds up the others no longer.
+pub const RELAY_CALL_DEADLINE: Duration = Duration::from_secs(10);
+
+/// How long a session found to have no orchestrator on another host is believed so before its
+/// changeset is read again — an orchestrator link written after the session's first record is
+/// still found.
+const NO_ORCHESTRATOR_ELSEWHERE_FOR: Duration = Duration::from_secs(30);
+
+/// Where one record goes, and whose it is.
+#[derive(Debug, Clone)]
+struct Route {
+    os_user: String,
+    destinations: Vec<Destination>,
+}
+
+impl Route {
+    fn names(&self, host: &str) -> bool {
+        self.destinations.iter().any(|(h, _)| h == host)
+    }
+}
+
+/// The window one pass read: the `seq` of its oldest and newest records.
+#[derive(Debug, Clone, Copy)]
+struct Window {
+    oldest_kept: Option<u64>,
+    newest: Option<u64>,
+}
+
+/// `batch`'s records in the log's own JSON, each with the session it is relayed for.
+fn relayed_records(batch: &[&(HeldRecord, String)]) -> Result<Vec<RelayedRecord>, String> {
+    batch
+        .iter()
+        .map(|(held, anchor)| {
+            crate::project_notification_log::record_json(&held.record)
+                .map(|json| RelayedRecord {
+                    record_json: json.to_string(),
+                    anchor_session_id: anchor.clone(),
+                })
+                .map_err(|e| format!("serialize a record: {e}"))
+        })
+        .collect()
+}
+
 /// The relay of one daemon.
 pub struct NotificationRelay {
     log: Arc<ProjectNotificationLog>,
@@ -166,7 +209,12 @@ pub struct NotificationRelay {
     state: Mutex<RelayState>,
     /// Per session, the other host its orchestrator runs on and the orchestrator — read once from
     /// its changeset, which a start writes before the session's agent runs.
-    orchestrators: Mutex<HashMap<(String, String), Option<Destination>>>,
+    orchestrators: Mutex<HashMap<(String, String), (Option<Destination>, std::time::Instant)>>,
+    /// Per project, the destinations of each of its records the relay was told of as it was
+    /// appended ([`ProjectNotificationLog::on_append`]), by `seq`: what a record evicted before it was
+    /// relayed was owed to, so `lost` counts exactly those. An entry goes once every host it names
+    /// has taken it.
+    routes: Mutex<HashMap<String, BTreeMap<u64, Route>>>,
 }
 
 /// What one pass over the logs left.
@@ -207,12 +255,31 @@ impl NotificationRelay {
             state_file,
             state: Mutex::new(state),
             orchestrators: Mutex::new(HashMap::new()),
+            routes: Mutex::new(HashMap::new()),
         })
     }
 
     /// Relay until the log is dropped: a pass whenever a record is appended, again at once while
     /// batches are taken, and after `retry` while a host does not take its batch.
     pub async fn run(self: Arc<Self>, retry: Duration) {
+        let tapped = Arc::clone(&self);
+        if let Err(e) = self
+            .log
+            .on_append(Arc::new(move |project_id: &str, held: &HeldRecord| {
+                tapped.note(project_id, held);
+            }))
+        {
+            log::error!(
+                target: "tddy_session_activity::notification_relay",
+                "the notification relay cannot route records as they are appended: {e}"
+            );
+        }
+        // What the window already holds was appended before the relay was told of appends.
+        for project_id in self.log.project_ids() {
+            for held in self.log.held_records(&project_id).0 {
+                self.note(&project_id, &held);
+            }
+        }
         let appended = self.log.appended();
         loop {
             // Registered before the pass, so a record appended during it wakes the next one.
@@ -267,23 +334,41 @@ impl NotificationRelay {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Note where `held`, just appended to `project_id`, must go.
+    fn note(&self, project_id: &str, held: &HeldRecord) {
+        let destinations = self.destinations_of(project_id, held);
+        if destinations.is_empty() {
+            return;
+        }
+        self.lock_routes()
+            .entry(project_id.to_string())
+            .or_default()
+            .insert(
+                held.record.seq,
+                Route {
+                    os_user: held.os_user.clone(),
+                    destinations,
+                },
+            );
+    }
+
+    fn lock_routes(&self) -> std::sync::MutexGuard<'_, HashMap<String, BTreeMap<u64, Route>>> {
+        self.routes.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// One pass: every project's pending records, batched per host.
     async fn pass(&self) -> PassOutcome {
         let mut outcome = PassOutcome::default();
         for project_id in self.log.project_ids() {
-            let (held, oldest) = self.log.held_records(&project_id);
-            let mut by_host: BTreeMap<String, Vec<(HeldRecord, String)>> = BTreeMap::new();
-            for record in held {
-                for (host, anchor) in self.destinations_of(&project_id, &record) {
-                    by_host
-                        .entry(host)
-                        .or_default()
-                        .push((record.clone(), anchor));
-                }
-            }
-            for (host, routed) in by_host {
+            let (held, oldest_kept) = self.log.held_records(&project_id);
+            let window = Window {
+                oldest_kept,
+                newest: held.last().map(|held| held.record.seq),
+            };
+            let by_host = self.route(&project_id, held);
+            for (host, routed) in by_host.iter() {
                 match self
-                    .send_next_batch(&project_id, &host, routed, oldest)
+                    .send_next_batch(&project_id, host, routed, window)
                     .await
                 {
                     Ok(true) => outcome.progressed = true,
@@ -297,82 +382,212 @@ impl NotificationRelay {
                     }
                 }
             }
+            self.forget_taken_routes(&project_id);
         }
         outcome
     }
 
-    /// Send `host` the next batch of `routed` past its cursor; `Ok(true)` when one was taken.
+    /// The window's records grouped by the other host each was routed to, with the session there;
+    /// and every host still owed an evicted record, with nothing to send.
+    fn route(
+        &self,
+        project_id: &str,
+        held: Vec<HeldRecord>,
+    ) -> BTreeMap<String, Vec<(HeldRecord, String)>> {
+        let routes = self.lock_routes();
+        let Some(routes) = routes.get(project_id) else {
+            return BTreeMap::new();
+        };
+        let mut by_host: BTreeMap<String, Vec<(HeldRecord, String)>> = BTreeMap::new();
+        for route in routes.values() {
+            for (host, _) in &route.destinations {
+                by_host.entry(host.clone()).or_default();
+            }
+        }
+        for record in held {
+            let Some(route) = routes.get(&record.record.seq) else {
+                continue;
+            };
+            for (host, anchor) in &route.destinations {
+                by_host
+                    .entry(host.clone())
+                    .or_default()
+                    .push((record.clone(), anchor.clone()));
+            }
+        }
+        by_host
+    }
+
+    /// The records routed to `host` past `cursor` that the window evicted before they were sent:
+    /// how many, and the OS user of the first.
+    fn evicted_unsent(
+        &self,
+        project_id: &str,
+        host: &str,
+        cursor: u64,
+        window: Window,
+    ) -> (u64, Option<String>) {
+        // An empty window evicted everything it ever held.
+        let below = window.oldest_kept.unwrap_or(u64::MAX);
+        self.lock_routes()
+            .get(project_id)
+            .map_or((0, None), |routes| {
+                let from = cursor.saturating_add(1);
+                if from >= below {
+                    return (0, None);
+                }
+                let evicted: Vec<&Route> = routes
+                    .range(from..below)
+                    .map(|(_, route)| route)
+                    .filter(|route| route.names(host))
+                    .collect();
+                (
+                    evicted.len() as u64,
+                    evicted.first().map(|route| route.os_user.clone()),
+                )
+            })
+    }
+
+    /// Drop the routes every host they name has taken.
+    fn forget_taken_routes(&self, project_id: &str) {
+        let cursors = self.lock_state().cursors.clone();
+        if let Some(routes) = self.lock_routes().get_mut(project_id) {
+            routes.retain(|seq, route| {
+                route.destinations.iter().any(|(host, _)| {
+                    cursors
+                        .get(&(project_id.to_string(), host.clone()))
+                        .is_none_or(|cursor| cursor < seq)
+                })
+            });
+        }
+    }
+
+    /// The cursor of `key`, created at the first of `routed` for a host first concerned now.
+    fn cursor_of(&self, key: &(String, String), routed: &[(HeldRecord, String)]) -> u64 {
+        let mut state = self.lock_state();
+        if let Some(cursor) = state.cursors.get(key) {
+            return *cursor;
+        }
+        let (project_id, host) = key;
+        let first_routed = self.lock_routes().get(project_id).and_then(|routes| {
+            routes
+                .iter()
+                .find(|(_, route)| route.names(host))
+                .map(|(seq, _)| *seq)
+        });
+        let start = first_routed
+            .or_else(|| routed.first().map(|(held, _)| held.record.seq))
+            .map_or(0, |seq| seq.saturating_sub(1));
+        state.cursors.insert(key.clone(), start);
+        drop(state);
+        self.persist_best_effort();
+        start
+    }
+
+    /// Move `key`'s cursor to `through`, never back; persisted when `persist`.
+    fn advance(&self, key: (String, String), through: u64, persist: bool) {
+        {
+            let mut state = self.lock_state();
+            let at = state.cursors.entry(key).or_insert(0);
+            *at = (*at).max(through);
+        }
+        if persist {
+            self.persist_best_effort();
+        }
+    }
+
+    /// Send `host` the next batch of `routed` past its cursor; `Ok(true)` when one was taken (or
+    /// skipped for good), so another may follow at once.
     async fn send_next_batch(
         &self,
         project_id: &str,
         host: &str,
-        routed: Vec<(HeldRecord, String)>,
-        oldest_kept: Option<u64>,
+        routed: &[(HeldRecord, String)],
+        window: Window,
     ) -> Result<bool, String> {
         let key = (project_id.to_string(), host.to_string());
-        let cursor = {
-            let mut state = self.lock_state();
-            match state.cursors.get(&key) {
-                Some(cursor) => *cursor,
-                None => {
-                    // A host first concerned now starts at its first record.
-                    let first = routed.first().map_or(0, |(held, _)| held.record.seq);
-                    let start = first.saturating_sub(1);
-                    state.cursors.insert(key.clone(), start);
-                    drop(state);
-                    self.persist_best_effort();
-                    start
-                }
-            }
-        };
+        let cursor = self.cursor_of(&key, routed);
         let pending: Vec<&(HeldRecord, String)> = routed
             .iter()
             .filter(|(held, _)| held.record.seq > cursor)
             .collect();
+        let (lost, lost_os_user) = self.evicted_unsent(project_id, host, cursor, window);
         let Some((first, _)) = pending.first() else {
+            if let (true, Some(os_user)) = (lost > 0, lost_os_user) {
+                // Owed only records the window has evicted: say so, and move past them.
+                return self
+                    .report_only_lost(key, host, &os_user, lost, window)
+                    .await
+                    .map(|()| true);
+            }
             return Ok(false);
         };
         let os_user = first.os_user.clone();
         let batch: Vec<&(HeldRecord, String)> = pending
-            .into_iter()
+            .iter()
+            .copied()
             .take_while(|(held, _)| held.os_user == os_user)
             .take(MAX_RECORDS_PER_BATCH)
             .collect();
-        let github_user = self
-            .ports
-            .github_user_of(&os_user)
-            .ok_or_else(|| format!("OS user {os_user} maps to no GitHub login on this host"))?;
-        // What the window evicted after the cursor, before it was relayed: counted, not skipped.
-        // Whose records they were is no longer known, so it is an upper bound.
-        let lost = oldest_kept.map_or(0, |oldest| oldest.saturating_sub(1).saturating_sub(cursor));
         let through_seq = batch.last().map_or(cursor, |(held, _)| held.record.seq);
-        let records = batch
-            .iter()
-            .map(|(held, anchor)| {
-                crate::project_notification_log::record_json(&held.record)
-                    .map(|json| RelayedRecord {
-                        record_json: json.to_string(),
-                        anchor_session_id: anchor.clone(),
-                    })
-                    .map_err(|e| format!("serialize a record: {e}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let Some(github_user) = self.ports.github_user_of(&os_user) else {
+            // Nobody on any host can be this user's: there is no one to deliver these to.
+            log::warn!(
+                target: "tddy_session_activity::notification_relay",
+                "OS user {os_user} maps to no GitHub login here; {} of its records for host {host} are not relayed",
+                batch.len()
+            );
+            self.advance(key, through_seq, true);
+            return Ok(true);
+        };
         let request = RelayRequest {
             origin_daemon_instance_id: self.ports.local_instance_id(),
             project_id: project_id.to_string(),
             github_user,
-            records,
+            records: relayed_records(&batch)?,
+            // What the window evicted, owed to this host, before it was relayed: counted, never
+            // skipped silently.
             lost,
             through_seq,
         };
-        self.ports.relay(host, &request).await?;
-        {
-            let mut state = self.lock_state();
-            let at = state.cursors.entry(key).or_insert(0);
-            *at = (*at).max(through_seq);
-        }
-        self.persist_best_effort();
+        tokio::time::timeout(RELAY_CALL_DEADLINE, self.ports.relay(host, &request))
+            .await
+            .map_err(|_| format!("host {host} did not answer within {RELAY_CALL_DEADLINE:?}"))??;
+        self.advance(key, through_seq, true);
         Ok(true)
+    }
+
+    /// Tell `host` that `lost` of its records were evicted before they could be relayed, when it is
+    /// owed nothing the window still holds.
+    async fn report_only_lost(
+        &self,
+        key: (String, String),
+        host: &str,
+        os_user: &str,
+        lost: u64,
+        window: Window,
+    ) -> Result<(), String> {
+        let through_seq = match window.oldest_kept {
+            Some(oldest) => oldest.saturating_sub(1),
+            None => window.newest.unwrap_or(0),
+        };
+        let Some(github_user) = self.ports.github_user_of(os_user) else {
+            self.advance(key, through_seq, true);
+            return Ok(());
+        };
+        let request = RelayRequest {
+            origin_daemon_instance_id: self.ports.local_instance_id(),
+            project_id: key.0.clone(),
+            github_user,
+            records: Vec::new(),
+            lost,
+            through_seq,
+        };
+        tokio::time::timeout(RELAY_CALL_DEADLINE, self.ports.relay(host, &request))
+            .await
+            .map_err(|_| format!("host {host} did not answer within {RELAY_CALL_DEADLINE:?}"))??;
+        self.advance(key, through_seq, true);
+        Ok(())
     }
 
     /// The other hosts `record` concerns, each with the session there it is relayed for. None for
@@ -419,13 +634,16 @@ impl NotificationRelay {
     /// `None` for a session started here, or by nobody.
     fn orchestrator_elsewhere(&self, os_user: &str, session_id: &str) -> Option<Destination> {
         let key = (os_user.to_string(), session_id.to_string());
-        if let Some(known) = self
+        if let Some((known, read_at)) = self
             .orchestrators
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .get(&key)
         {
-            return known.clone();
+            // A link, once read, does not change; its absence is read again after a while.
+            if known.is_some() || read_at.elapsed() < NO_ORCHESTRATOR_ELSEWHERE_FOR {
+                return known.clone();
+            }
         }
         let found = self.ports.sessions_base_for(os_user).and_then(|base| {
             let changeset =
@@ -440,7 +658,7 @@ impl NotificationRelay {
         self.orchestrators
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(key, found.clone());
+            .insert(key, (found.clone(), std::time::Instant::now()));
         found
     }
 

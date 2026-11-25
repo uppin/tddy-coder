@@ -22,6 +22,10 @@ use super::DaemonSessionMessages;
 
 const SESSION_SERVICE: &str = "session.SessionService";
 
+/// The longest a recipient is looked for on the other hosts: a host that has not answered by then
+/// does not hold up the message, which is refused instead when it was the one named.
+const LOCATE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The other connected hosts, as a message's sender sees them.
 pub(super) struct RecipientHosts {
     pub(super) routing: PeerRouting,
@@ -130,7 +134,19 @@ impl RecipientHosts {
             });
         }
         let mut unanswered = Vec::new();
-        while let Some(joined) = asking.join_next().await {
+        let until = tokio::time::Instant::now() + LOCATE_DEADLINE;
+        loop {
+            let joined = match tokio::time::timeout_at(until, asking.join_next()).await {
+                Ok(Some(joined)) => joined,
+                Ok(None) => break,
+                Err(_) => {
+                    unanswered.push(format!(
+                        "no host answered within {} s",
+                        LOCATE_DEADLINE.as_secs()
+                    ));
+                    break;
+                }
+            };
             let Ok((host, answer)) = joined else {
                 continue;
             };

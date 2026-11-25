@@ -229,24 +229,10 @@ impl ExecToolRpcHandler {
             };
             tokio::select! {
                 received = cues.recv() => match received {
-                    Some(cue) => {
-                        for owner in self.owners_concerned(&cue).await {
-                            let wake = owners.entry(owner).or_default();
-                            if wake.fire_at.is_none() {
-                                wake.fire_at = Some(Instant::now() + timings.settle);
-                            }
-                        }
-                    }
+                    Some(cue) => self.arm_settles(&cue, &mut owners, timings).await,
                     None => break,
                 },
-                Some(cue) = relayed.recv() => {
-                    for owner in self.owners_concerned(&cue).await {
-                        let wake = owners.entry(owner).or_default();
-                        if wake.fire_at.is_none() {
-                            wake.fire_at = Some(Instant::now() + timings.settle);
-                        }
-                    }
-                }
+                Some(cue) = relayed.recv() => self.arm_settles(&cue, &mut owners, timings).await,
                 Some((owner, woke)) = finished.recv() => {
                     let wake = owners.entry(owner).or_default();
                     wake.in_flight = false;
@@ -287,6 +273,21 @@ impl ExecToolRpcHandler {
                     let woke = handler.try_wake(&owner).await;
                     let _ = finished_tx.send((owner, woke));
                 });
+            }
+        }
+    }
+
+    /// Arm a settle for every owner `cue` concerns that has none armed.
+    async fn arm_settles(
+        &self,
+        cue: &WakeCue,
+        owners: &mut HashMap<WatchOwner, OwnerWake>,
+        timings: WakeTimings,
+    ) {
+        for owner in self.owners_concerned(cue).await {
+            let wake = owners.entry(owner).or_default();
+            if wake.fire_at.is_none() {
+                wake.fire_at = Some(Instant::now() + timings.settle);
             }
         }
     }

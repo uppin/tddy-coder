@@ -471,7 +471,7 @@ role's (see [Messages between sessions](#messages-between-sessions)).
 
 | Tool | Arguments | Answers |
 |---|---|---|
-| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id, display_name, delivery_route}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on, the status the web's session list shows, the name it was given (`null` when it has none; see [Session names](../web/session-drawer.md#session-names)), and how it is best messaged (`delivery_route`; see [Sending a session a turn § Which route](#which-route)). A host from before session names lists every session with `null`. A split session's agent half carries the branch its codebase half works on, recorded in its changeset at start, with no worktree of its own. A CLI agent session carries the orchestrator and recipe its changeset records. A host that does not answer is named in `unreachable_hosts`, never silently left out |
+| `ListProjectSessions` | — | `{"sessions": [{session_id, branch, worktree, is_active, agent_status, pending_elicitation, daemon_instance_id, host_label, display_name, delivery_route}], "unreachable_hosts": [{daemon_instance_id, reason}]}`: every other session of the project **on every eligible host**, each with the host it runs on and that host's label as the listing host's roster names it (`null` for a host the roster does not list), the status the web's session list shows, the name it was given (`null` when it has none; see [Session names](../web/session-drawer.md#session-names)), and how it is best messaged (`delivery_route`; see [Sending a session a turn § Which route](#which-route)). A host from before session names lists every session with `null`. A split session's agent half carries the branch its codebase half works on, recorded in its changeset at start, with no worktree of its own. A CLI agent session carries the orchestrator and recipe its changeset records. A host that does not answer is named in `unreachable_hosts`, never silently left out |
 | `StartSession` | the `StartSessionRequest` fields the New-session form can send, under their proto names: `session_type` (required), `daemon_instance_id`, `tool_path`, `agent`, `recipe`, `model`, `provider_account_id`, `provider_built_in`, `branch_worktree_intent`, `new_branch_name`, `selected_integration_base_ref`, `selected_branch_to_work_on`, `create_remote_branch`, `initial_prompt`, `permission_mode`, `dangerously_skip_permissions`, `work_queue_parent`, `work_queue_parent_daemon_instance_id`, `work_item_id`, `sandbox`, `managed_codebase`, `sandboxed_codebase`, `codebase_daemon_instance_id`, `ssh_config_host`, `target` (a derived-host id from `DescribeSessionStartOptions.derived_hosts`), `semantic_index`, `specialized_agents`, `attachments` (host documents), `display_name` (the session's name: one line, at most 80 characters; refused for a tool session type) | `{"start_id", "task_id", "daemon_instance_id"}` at once (see [Asynchronous session start](#asynchronous-session-start)); the start's outcome is a session started in the project as the caller's user, on this host or the eligible host `daemon_instance_id` names; the daemon that creates it records the home session in its changeset as `orchestrator_session_id`, with the home session's host as `orchestrator_daemon_instance_id`. See [StartSession](#startsession) |
 | `DescribeSessionStartOptions` | `daemon_instance_id?`, `session_type?`, `agent?`, `provider_account_id?` | the choices a `StartSession` on that host can make, from the RPCs the New-session form fills its pickers from. See [Start options](#start-options) |
 | `ReadSessionWorktree` | `session_id`, `path` (relative; empty for the root), `daemon_instance_id?` | a file's text (`content`, `truncated`, `byte_size`) or a directory's `entries`, through the same worktree reader as the Code pane |
@@ -853,14 +853,27 @@ started it. The message is recorded once, as a **`message` record of the project
 and read from there — nothing of the message is kept anywhere else.
 
 - **Who may address whom** is the daemon's rule, read from the sessions' own records: one project,
-  one operating-system user, on this host, never the caller itself, and one of the caller's
+  one operating-system user, on this host or another connected host, never the caller itself, and one of the caller's
   reaches — an **orchestrator** may address any session of its project it can see; a session, its
   orchestrator (the one its changeset names) and the project's main session; a **reply**
   (`reply_to`) may go to the sender of a message the caller received. Anything else is refused
   saying who the caller may address.
 - **The text** is non-empty and at most 8 KiB. The answer is `{message_id, to_session_id,
-  sent_at_unix_ms}`; `tddy-tools send --to <session-id> [--reply-to <message-id>] [<text> | -]`
-  calls the tool and prints it, exiting non-zero with the reason when refused.
+  sent_at_unix_ms}`; `tddy-tools send --to <session-id> [--reply-to <message-id>] [--host <daemon
+  instance id>] [<text> | -]` calls the tool and prints it, exiting non-zero with the reason when
+  refused.
+- **Across hosts.** The recipient may run on another connected daemon. Its host is found, in order:
+  the caller's own orchestrator on the host its changeset names (`orchestrator_daemon_instance_id`);
+  the sender of the message replied to, on the host that message came from; this host, when it holds
+  the recipient; otherwise the host `daemon_instance_id` names, or every connected host, asked
+  `ListSessions` with the caller's token — believing only a row a host reports for itself, waiting
+  at most 5 s. The addressing rule is the same wherever the recipient runs. The message is recorded
+  in the **sender's** log and relayed to the recipient's host
+  ([Watching sessions on other hosts](#watching-sessions-on-other-hosts)), so a message to the
+  caller's orchestrator, or a reply, is queued while the link is down and delivered once it is back.
+  A host the room does not list, or a named host that cannot be asked, is refused naming it — a
+  message is never queued for a host nobody can confirm. `ReadSessionMessages` names the sender's
+  host in `from_daemon_instance_id`; the monitor's `message` lines do too.
 - **Not for a person.** A message is an activity record, not an attention notification: the drawer,
   Telegram and Tddy Desktop's native notifications skip the source, and
   `ReadProjectNotifications` / `WaitProjectNotifications` never return one. It shares the log's
@@ -880,8 +893,6 @@ and read from there — nothing of the message is kept anywhere else.
 - **Delivered once.** A message addressed to a session is handed to it once across its watches and
   its reads, under the project's lock: a watch skips a message the inbox position has passed, and a
   read skips one a watch of the reader has already delivered.
-- **No cross-host.** A message never crosses to another daemon, and the tools take no
-  `daemon_instance_id`.
 
 #### Reporting to the orchestrator
 
@@ -1027,8 +1038,10 @@ interrupts it unless it opts into the idle wake.
   `RenewSessionWatch` turns it on or off, and keeps it when the call names none. Every watch answer
   carries it. One orchestrator holds at most 16 live watches.
 - **Visibility.** A watch sees exactly what the inbox tools see: the caller's project and operating-system
-  user, on this host, never the caller's own session. A `session_ids` entry with no session record
-  here, or one of another project, is refused naming the session; naming the caller's own session is
+  user, never the caller's own session — on this host and on every connected host
+  ([Watching sessions on other hosts](#watching-sessions-on-other-hosts)). A `session_ids` entry
+  that no connected host lists in the project (waiting at most 5 s for them), or one of another
+  project here, is refused naming the session; naming the caller's own session is
   refused saying why — except a watch of the kind `trunk_commit` alone, which is how an orchestrator
   watches its own trunk activity, or of the kind `work_queue` alone, which is how it watches its own
   queue's moves. A caller that is not an orchestrator is refused by the role guard — except its
@@ -1150,6 +1163,49 @@ refresh its home before it starts more work.
 - **Known limitations.** Only `github.com` remotes are watched; a project on GitHub Enterprise or
   elsewhere is logged and left unwatched. A burst of more than 100 commits between two polls is
   reported as a rewrite, since the last tip seen is outside the window read.
+
+### Watching sessions on other hosts
+
+An orchestrator watches, and is messaged by, the sessions it started on another connected daemon
+exactly as it does its own host's. Each host's project notification log stays the source of truth
+for its own sessions; the records that concern a session held elsewhere are **relayed** there and
+appended to that host's own log, so its watches, inboxes, idle wake, `WaitSessionWatchEvents` and
+`tddy-tools monitor` read them unchanged.
+
+- **What is relayed, and where.** Every record of a session whose orchestrator runs on another host
+  (its changeset names `orchestrator_daemon_instance_id`) goes to that host; a message goes to its
+  recipient's host; every record of a session another host's watch names in `session_ids` goes to
+  that host until the watch expires (`CreateSessionWatch` registers the follow, `RenewSessionWatch`
+  registers it again and names a session it could not). A record is routed when it is appended.
+  Only a host's own records are relayed — a relayed record never travels a second hop.
+- **Every event names its host.** Watch events, streamed events, monitor lines and
+  `ReadProjectNotifications` records carry `daemon_instance_id`: this host's id for its own
+  sessions, the origin's for a relayed record.
+- **Delivery.** The outbox is the sender's log. Per (project, destination host) the sender keeps a
+  cursor, persisted in `<data dir>/notification-relay.json` and advanced only when the destination
+  acknowledges a batch (at most 100 records, one operating-system user). A destination that does
+  not take its batch — unreachable, or not answering within 10 s — is retried every 5 s; nothing is
+  lost while its records stay in the sender's 1 000-record window. The receiver keeps, per origin
+  host, the highest origin `seq` it holds (recovered from its records on restart), so a batch sent
+  again after a lost acknowledgement appends nothing twice. Both ends persist, so either restarting
+  resumes where it stopped.
+- **Lost, never dropped silently.** A record routed to a host and evicted from the sender's window
+  before that host took it is counted in the next batch's `lost`; the receiver appends a **relay
+  gap** — a record no reader lists and no watch delivers as an event — and every watch reports its
+  count once in `lost`, including after the receiver's own window has evicted the gap.
+- **Transport.** No transport of its own: a batch is an `ExecuteTool` call addressed at the
+  destination under the internal name `tddy.relay.SessionNotifications` (a follow under
+  `tddy.relay.FollowSession`), over the peer forward every target tool uses. These names are
+  **never tools**: no listing or schema offers them, `StreamExecuteTool` refuses them, and
+  `ExecuteTool` serves them only when the call arrived over the common room, addressed at this host,
+  naming no session, carrying a **relay token** — one a fleet daemon minted with its own signing key
+  under the `relay` principal, for the GitHub user the batch names — and a body that is a relay
+  request. An agent holds only user and agent tokens, so its call is refused however it arrives.
+- **What a receiver accepts.** A relayed record is appended only when it is relayed for a session
+  the receiver holds in the batch's project, and that session is the orchestrator that started the
+  record's session, the recipient of its message, or the owner of a live watch naming its session.
+- **Answering and steering** a remote child need nothing of this: `AnswerSessionQuestion`,
+  `AnswerSessionPermission` and `SendSessionMessage` already reach its host as target tools.
 
 ### Following a session
 

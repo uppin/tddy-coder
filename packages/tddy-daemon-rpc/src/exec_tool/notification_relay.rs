@@ -7,12 +7,16 @@
 //!   [`RELAY_SESSION_NOTIFICATIONS`], forwarded through [`PeerRouting::rpc_served_by_peer`] exactly
 //!   as a target tool call is. No new transport.
 //! - **Receiving.** [`ExecToolRpcHandler::serve_relay_call`] answers the two internal names. They
-//!   are never tools: no listing offers them, and a call is served only when it arrived from a peer
-//!   over the common room, addressed at this host, carrying no session and no token (a relay call
-//!   never does), with a body that is a relay request. Everything else is refused — an agent's call
-//!   is refused on its own host, before any forward. A relayed record is accepted only when it is
-//!   relayed for a session this host holds in the batch's project; it is then appended to this
-//!   host's own project log, so its watches, inboxes and wakes see it as their own.
+//!   are never tools: no listing offers them, and a call is served only when it arrived over the
+//!   common room, addressed at this host, naming no session, with a body that is a relay request —
+//!   and **carrying a relay token**: one a fleet daemon minted with its own signing key under
+//!   [`TokenPrincipal::Relay`], for the very GitHub user the body names. An agent holds only user
+//!   and agent tokens, so an agent's call is refused however it arrives (on its own host before any
+//!   forward, and over a room by the token). A relayed record is accepted only when it is relayed
+//!   for a session this host holds in the batch's project, and names that session as its
+//!   orchestrator or its message's recipient, or is of a session that session's watch names; it
+//!   is then appended to this host's own project log, so its watches, inboxes and wakes see it as
+//!   their own.
 //!
 //! Feature: docs/ft/daemon/project-concept.md#watching-sessions-on-other-hosts
 
@@ -22,8 +26,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_daemon_auth::SessionTokens;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_github::{GitHubUser, TokenPrincipal};
 use tddy_rpc::{Request, RequestTransport, Status};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_session_activity::notification_relay::{
@@ -55,11 +61,83 @@ impl Default for RelayTimings {
     }
 }
 
+/// How long a relay token lives: one call, with room for a slow forward.
+const RELAY_TOKEN_TTL: Duration = Duration::from_secs(120);
+
+/// The credential a daemon presents on its own relay call to a peer.
+#[derive(Clone)]
+pub(super) struct RelayCredentials {
+    pub(super) routing: PeerRouting,
+    /// This daemon's tokens; `None` on a daemon that signs nothing, which cannot relay.
+    pub(super) tokens: Option<SessionTokens>,
+}
+
+impl RelayCredentials {
+    /// A fresh relay token for `github_user`, minted with this daemon's own key.
+    fn token_for(&self, github_user: &str) -> Result<String, String> {
+        let tokens = self
+            .tokens
+            .as_ref()
+            .ok_or("this daemon signs no tokens, so it cannot relay to its peers")?;
+        let user = GitHubUser {
+            id: 0,
+            login: github_user.to_string(),
+            avatar_url: String::new(),
+            name: github_user.to_string(),
+        };
+        Ok(tokens.signer().mint_relay(&user, RELAY_TOKEN_TTL))
+    }
+
+    /// `body` as an internal relay call to `host` for `github_user`: its answer, or why none.
+    async fn call(
+        &self,
+        host: &str,
+        tool_name: &str,
+        github_user: &str,
+        body: &impl serde::Serialize,
+    ) -> Result<ExecuteToolResponse, String> {
+        let request = ExecuteToolRequest {
+            session_token: self.token_for(github_user)?,
+            session_id: String::new(),
+            tool_name: tool_name.to_string(),
+            args_json: serde_json::to_string(body).map_err(|e| format!("serialize: {e}"))?,
+            daemon_instance_id: host.to_string(),
+            conversation_id: String::new(),
+        };
+        let answer: ExecuteToolResponse = self
+            .routing
+            .rpc_served_by_peer(EXEC_TOOL_SERVICE, "ExecuteTool", host, &request)
+            .await
+            .map_err(|status| status.message().to_string())?
+            .ok_or_else(|| format!("host {host} routes to this daemon"))?;
+        if answer.is_error {
+            return Err(answer.error_message);
+        }
+        Ok(answer)
+    }
+
+    /// Ask `host` to relay one of its sessions' records to this host for a watch here.
+    pub(super) async fn follow_on(
+        &self,
+        host: &str,
+        request: &FollowRequest,
+    ) -> Result<(), String> {
+        self.call(
+            host,
+            FOLLOW_SESSION_NOTIFICATIONS,
+            &request.github_user,
+            request,
+        )
+        .await
+        .map(|_| ())
+    }
+}
+
 /// [`RelayPorts`] over this daemon: its identity, its users, and the peer forward.
 struct DaemonRelayPorts {
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
-    routing: PeerRouting,
+    credentials: RelayCredentials,
 }
 
 #[async_trait]
@@ -80,48 +158,18 @@ impl RelayPorts for DaemonRelayPorts {
     }
 
     async fn relay(&self, host: &str, request: &RelayRequest) -> Result<RelayAck, String> {
-        let answer = call_peer(&self.routing, host, RELAY_SESSION_NOTIFICATIONS, request).await?;
+        let answer = self
+            .credentials
+            .call(
+                host,
+                RELAY_SESSION_NOTIFICATIONS,
+                &request.github_user,
+                request,
+            )
+            .await?;
         serde_json::from_str(&answer.result_json)
             .map_err(|e| format!("host {host} answered no relay acknowledgement: {e}"))
     }
-}
-
-/// Ask `host` to relay one of its sessions' records to this host for a watch here ([`FollowRequest`]).
-pub(super) async fn follow_on(
-    routing: &PeerRouting,
-    host: &str,
-    request: &FollowRequest,
-) -> Result<(), String> {
-    call_peer(routing, host, FOLLOW_SESSION_NOTIFICATIONS, request)
-        .await
-        .map(|_| ())
-}
-
-/// `body` as an internal relay call to `host` over the peer forward: its answer, or why there was
-/// none.
-async fn call_peer(
-    routing: &PeerRouting,
-    host: &str,
-    tool_name: &str,
-    body: &impl serde::Serialize,
-) -> Result<ExecuteToolResponse, String> {
-    let request = ExecuteToolRequest {
-        session_token: String::new(),
-        session_id: String::new(),
-        tool_name: tool_name.to_string(),
-        args_json: serde_json::to_string(body).map_err(|e| format!("serialize: {e}"))?,
-        daemon_instance_id: host.to_string(),
-        conversation_id: String::new(),
-    };
-    let answer: ExecuteToolResponse = routing
-        .rpc_served_by_peer(EXEC_TOOL_SERVICE, "ExecuteTool", host, &request)
-        .await
-        .map_err(|status| status.message().to_string())?
-        .ok_or_else(|| format!("host {host} routes to this daemon"))?;
-    if answer.is_error {
-        return Err(answer.error_message);
-    }
-    Ok(answer)
 }
 
 impl ExecToolRpcHandler {
@@ -137,7 +185,7 @@ impl ExecToolRpcHandler {
         let ports = Arc::new(DaemonRelayPorts {
             config: self.config.clone(),
             tddy_data_dir: self.tddy_data_dir.clone(),
-            routing: self.peer_routing.clone(),
+            credentials: self.relay_credentials(),
         });
         let relay = match NotificationRelay::open(log, ports, &state_dir) {
             Ok(relay) => Arc::new(relay),
@@ -158,6 +206,41 @@ impl ExecToolRpcHandler {
         Some(tokio::spawn(relay.run(timings.retry)))
     }
 
+    /// What this daemon's own relay calls to its peers present.
+    pub(super) fn relay_credentials(&self) -> RelayCredentials {
+        RelayCredentials {
+            routing: self.peer_routing.clone(),
+            tokens: self.project_home_host.session_tokens.clone(),
+        }
+    }
+
+    /// Refuse a relay call whose token is not a relay token a fleet daemon minted for
+    /// `github_user`.
+    fn refuse_a_call_without_a_relay_token(
+        &self,
+        session_token: &str,
+        github_user: &str,
+    ) -> Result<(), Status> {
+        let refused = || {
+            Status::permission_denied(
+                "a relay call is served only to a peer daemon: it carries no relay token minted for its user",
+            )
+        };
+        let tokens = self
+            .project_home_host
+            .session_tokens
+            .as_ref()
+            .ok_or_else(refused)?;
+        let claims = tokens
+            .verifier()
+            .verify_now(session_token)
+            .map_err(|_| refused())?;
+        if claims.principal != Some(TokenPrincipal::Relay) || claims.login != github_user {
+            return Err(refused());
+        }
+        Ok(())
+    }
+
     /// Answer a call of one of the relay's internal names — served only as a peer's relay call.
     pub(super) async fn serve_relay_call(
         &self,
@@ -173,7 +256,7 @@ impl ExecToolRpcHandler {
         }
         let local = local_instance_id_for_config(&self.config);
         let addressed_here = req.daemon_instance_id.is_empty() || req.daemon_instance_id == local;
-        if !addressed_here || !req.session_id.is_empty() || !req.session_token.is_empty() {
+        if !addressed_here || !req.session_id.is_empty() {
             return Err(Status::permission_denied(format!(
                 "{} is refused: the call is not a relay call addressed at this host",
                 req.tool_name
@@ -182,12 +265,14 @@ impl ExecToolRpcHandler {
         let result_json = if req.tool_name == RELAY_SESSION_NOTIFICATIONS {
             let relay: RelayRequest = serde_json::from_str(&req.args_json)
                 .map_err(|e| Status::invalid_argument(format!("not a relay request: {e}")))?;
+            self.refuse_a_call_without_a_relay_token(&req.session_token, &relay.github_user)?;
             serde_json::to_string(&self.take_relayed(relay).await?)
         } else {
             let follow: FollowRequest = serde_json::from_str(&req.args_json)
                 .map_err(|e| Status::invalid_argument(format!("not a follow request: {e}")))?;
+            self.refuse_a_call_without_a_relay_token(&req.session_token, &follow.github_user)?;
             self.take_follow(&follow)?;
-            Ok("{}".to_string())
+            serde_json::to_string(&serde_json::json!({ "following": follow.session_id }))
         }
         .map_err(|e| Status::internal(format!("serialize the answer: {e}")))?;
         Ok(ExecuteToolResponse {
@@ -239,6 +324,23 @@ impl ExecToolRpcHandler {
             let record = record_from_json(&relayed.record_json).map_err(|e| {
                 Status::invalid_argument(format!("a relayed record is not a log record: {e}"))
             })?;
+            if !self
+                .concerns(
+                    &record,
+                    &relayed.anchor_session_id,
+                    &relay.project_id,
+                    &os_user,
+                )
+                .await
+            {
+                log::warn!(
+                    "host {} relayed a record of session {} that does not concern session {}; dropped",
+                    relay.origin_daemon_instance_id,
+                    record.session_id,
+                    relayed.anchor_session_id
+                );
+                continue;
+            }
             anchors.insert(relayed.anchor_session_id);
             records.push(record);
         }
@@ -269,6 +371,42 @@ impl ExecToolRpcHandler {
         })
     }
 
+    /// Whether `record` concerns `anchor`, a session of this host: it names `anchor` as the
+    /// orchestrator that started its session, or as its message's recipient, or it is of a session
+    /// a live watch of `anchor` names.
+    async fn concerns(
+        &self,
+        record: &tddy_session_activity::project_notification_log::ProjectNotificationRecord,
+        anchor: &str,
+        project_id: &str,
+        os_user: &str,
+    ) -> bool {
+        if record.orchestrator_session_id.as_deref() == Some(anchor)
+            || record
+                .message
+                .as_ref()
+                .is_some_and(|message| message.to_session_id == anchor)
+        {
+            return true;
+        }
+        let (Some(watches), Some(log)) = (
+            self.project_home_host.session_watches.as_deref(),
+            self.project_home_host.notification_log.as_deref(),
+        ) else {
+            return false;
+        };
+        let owner = tddy_session_activity::session_watches::WatchOwner {
+            project_id: project_id.to_string(),
+            session_id: anchor.to_string(),
+            os_user: os_user.to_string(),
+        };
+        watches
+            .list(&owner, log, tddy_daemon_kernel::now_unix_ms())
+            .await
+            .iter()
+            .any(|listed| listed.watch.filter.session_ids.contains(&record.session_id))
+    }
+
     /// Register a peer's watch as following one of this host's sessions.
     fn take_follow(&self, follow: &FollowRequest) -> Result<(), Status> {
         let relay = self.project_home_host.relay.get().ok_or_else(|| {
@@ -284,6 +422,17 @@ impl ExecToolRpcHandler {
         relay.follow(follow);
         Ok(())
     }
+}
+
+/// Refuse one of the relay's internal names on `StreamExecuteTool`: a relay call is unary, so a
+/// stream naming one is never a relay call.
+pub(super) fn refuse_a_relay_name_on_a_stream(tool_name: &str) -> Result<(), Status> {
+    if tddy_session_activity::notification_relay::is_relay_tool(tool_name) {
+        return Err(Status::permission_denied(format!(
+            "{tool_name} is not a tool: it is answered only to another daemon over the common room"
+        )));
+    }
+    Ok(())
 }
 
 /// Whether `session_id` has a record under `sessions_base` naming `project_id`.

@@ -46,8 +46,7 @@ pub fn bridge_conn_resume_response(
 
 impl LaunchSessions {
     /// The caller's sessions on this host; with `include_peers`, also every other connected
-    /// daemon's own sessions, each row naming its host, and the daemons that did not answer
-    /// ([`PeerSessionListing`]).
+    /// daemon's ([`PeerSessionListing`]).
     pub async fn list_sessions_at_session_coordinate(
         &self,
         request: Request<ListSessionsRequest>,
@@ -67,8 +66,7 @@ impl LaunchSessions {
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = local_instance_id_for_config(&self.config);
-        // Asked only once the caller is authenticated, and before this host's own read, so the
-        // peers answer while it runs.
+        // Asked once the caller is authenticated, answering while this host's own read runs.
         let peers = req.include_peers.then(|| {
             PeerSessionListing::ask(&self.peer_routing, &local_daemon_id, &req.session_token)
         });
@@ -103,17 +101,9 @@ impl LaunchSessions {
             },
         )
         .await?;
-        let mut sessions = entries;
-        let mut unreachable_hosts = Vec::new();
-        if let Some(peers) = peers {
-            let answered = peers.answers().await;
-            sessions.extend(answered.sessions);
-            unreachable_hosts = answered.unreachable_hosts;
-        }
-        Ok(Response::new(ListSessionsResponse {
-            sessions,
-            unreachable_hosts,
-        }))
+        Ok(Response::new(
+            PeerSessionListing::listed_with(entries, peers).await,
+        ))
     }
 
     pub async fn start_session_at_session_coordinate(

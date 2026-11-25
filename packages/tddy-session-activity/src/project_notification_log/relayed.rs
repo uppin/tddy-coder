@@ -53,6 +53,34 @@ pub struct HeldRecord {
     pub record: ProjectNotificationRecord,
 }
 
+/// The relay gap `batch` reports, under `seq`: a record no reader lists and no watch delivers, whose
+/// [`ProjectNotificationRecord::relay_lost`] every watch reports as lost.
+fn gap_record(batch: &RelayedBatch, seq: u64) -> ProjectNotificationRecord {
+    ProjectNotificationRecord {
+        seq,
+        session_id: String::new(),
+        label: batch.origin.clone(),
+        kind: SessionNotificationKind::Activity,
+        source: SessionNotificationSource::ActivityStatus,
+        text: format!(
+            "{} records of host {} were evicted there before they could be relayed",
+            batch.lost, batch.origin
+        ),
+        agent: None,
+        question: None,
+        ended: None,
+        activity_status: None,
+        message: None,
+        at_unix_ms: tddy_daemon_kernel::now_unix_ms(),
+        orchestrator_session_id: None,
+        daemon_instance_id: Some(batch.origin.clone()),
+        // A gap carries no origin `seq`, so it never moves the origin's mark past a record it did
+        // not append.
+        origin_seq: None,
+        relay_lost: batch.lost,
+    }
+}
+
 /// Per origin host, the highest origin `seq` among `records`.
 pub(super) fn received_through_of(records: &[Held]) -> HashMap<String, u64> {
     let mut through = HashMap::new();
@@ -83,29 +111,7 @@ impl ProjectNotificationLog {
                 .unwrap_or(0);
             let mut appended = Vec::new();
             if batch.lost > 0 && batch.through_seq > held_through {
-                let gap = ProjectNotificationRecord {
-                    seq: state.newest_seq + 1,
-                    session_id: String::new(),
-                    label: batch.origin.clone(),
-                    kind: SessionNotificationKind::Activity,
-                    source: SessionNotificationSource::ActivityStatus,
-                    text: format!(
-                        "{} records of host {} were evicted there before they could be relayed",
-                        batch.lost, batch.origin
-                    ),
-                    agent: None,
-                    question: None,
-                    ended: None,
-                    activity_status: None,
-                    message: None,
-                    at_unix_ms: tddy_daemon_kernel::now_unix_ms(),
-                    orchestrator_session_id: None,
-                    daemon_instance_id: Some(batch.origin.clone()),
-                    // Below every record of the batch, so it never moves the origin's mark past
-                    // a record it did not append.
-                    origin_seq: None,
-                    relay_lost: batch.lost,
-                };
+                let gap = gap_record(&batch, state.newest_seq + 1);
                 append_held(
                     &path,
                     &mut state,
@@ -152,16 +158,6 @@ impl ProjectNotificationLog {
         Ok(appended)
     }
 
-    /// The highest `seq` of `origin`'s records `project_id` holds; `0` for none.
-    pub fn received_through(&self, project_id: &str, origin: &str) -> u64 {
-        self.project(project_id)
-            .lock()
-            .received_through
-            .get(origin)
-            .copied()
-            .unwrap_or(0)
-    }
-
     /// Every project this log holds records of, or has been asked about.
     pub fn project_ids(&self) -> Vec<String> {
         self.projects
@@ -186,6 +182,14 @@ impl ProjectNotificationLog {
             })
             .collect();
         (records, state.window.front().map(|held| held.record.seq))
+    }
+
+    /// Tell `hook` of every record of this host's own sessions as it is appended. One hook per log;
+    /// a second is refused.
+    pub fn on_append(&self, hook: super::AppendHook) -> Result<(), String> {
+        self.on_append
+            .set(hook)
+            .map_err(|_| "the log already has an append hook".to_string())
     }
 
     /// Woken whenever any project's log is appended to.

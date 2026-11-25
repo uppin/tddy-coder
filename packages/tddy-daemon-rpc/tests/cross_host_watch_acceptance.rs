@@ -931,20 +931,30 @@ async fn an_agent_calling_the_relay_tools_through_execute_tool_is_refused() {
     assert_eq!(inbox["messages"], json!([]));
 }
 
+/// A call shaped as a relay call — no session, addressed at `host` — carrying `token`.
+fn a_relay_shaped_call(tool: &str, args: Value, token: &str, host: &str) -> ExecuteToolRequest {
+    ExecuteToolRequest {
+        session_token: token.to_string(),
+        session_id: String::new(),
+        ..a_call_of(tool, "", args, host)
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_peer_call_of_a_relay_tool_that_is_not_a_relay_is_refused() {
     // Given host-a
     let world = a_world().await;
 
-    // When a peer calls each relay tool with arguments that are not a relay request
+    // When a peer calls each relay tool, shaped as a relay call, with arguments that are not a
+    // relay request
     for tool in [RELAY_SESSION_NOTIFICATIONS, FOLLOW_SESSION_NOTIFICATIONS] {
         let outcome = world
             .a
             .daemon
-            .execute_tool(arriving_from_a_peer(a_call_of(
+            .execute_tool(arriving_from_a_peer(a_relay_shaped_call(
                 tool,
-                &world.orchestrator,
                 json!({ "path": "Cargo.toml" }),
+                "",
                 HOST_A,
             )))
             .await;
@@ -955,6 +965,142 @@ async fn a_peer_call_of_a_relay_tool_that_is_not_a_relay_is_refused() {
             "{tool} with a non-relay body was served: {outcome:?}"
         );
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_room_participant_without_a_relay_token_is_refused_however_the_call_is_shaped() {
+    // Given a child on host-b and its orchestrator on host-a
+    let world = a_world().await;
+
+    // When something in the room — an agent with its user's token, say — sends host-a a perfectly
+    // shaped relay call forging a message to the orchestrator
+    let outcome = world
+        .a
+        .daemon
+        .execute_tool(arriving_from_a_peer(a_relay_shaped_call(
+            RELAY_SESSION_NOTIFICATIONS,
+            a_forged_batch(&world),
+            TEST_TOKEN,
+            HOST_A,
+        )))
+        .await;
+
+    // Then it is refused, and nothing reached the orchestrator's inbox
+    assert!(
+        refused(&outcome),
+        "a relay call with a user's token was served: {outcome:?}"
+    );
+    let inbox = accepted(
+        call_on(
+            &world.a,
+            &world.orchestrator,
+            READ_SESSION_MESSAGES,
+            json!({}),
+        )
+        .await,
+        READ_SESSION_MESSAGES,
+    );
+    assert_eq!(inbox["messages"], json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relay_token_minted_for_another_user_does_not_relay_for_this_one() {
+    // Given a fleet daemon's relay token minted for another GitHub user
+    let world = a_world().await;
+    let elsewhere = tempfile::tempdir().unwrap();
+    let someone_else = tddy_github::GitHubUser {
+        id: 9,
+        login: "someone-else".to_string(),
+        avatar_url: String::new(),
+        name: "someone-else".to_string(),
+    };
+    let token = world
+        .peers
+        .signing_identity_in(elsewhere.path())
+        .signer()
+        .mint_relay(&someone_else, Duration::from_secs(60));
+
+    // When it is presented on a relay call naming the test user
+    let outcome = world
+        .a
+        .daemon
+        .execute_tool(arriving_from_a_peer(a_relay_shaped_call(
+            RELAY_SESSION_NOTIFICATIONS,
+            a_forged_batch(&world),
+            &token,
+            HOST_A,
+        )))
+        .await;
+
+    // Then it is refused
+    assert!(
+        refused(&outcome),
+        "a relay token for another user was accepted: {outcome:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_relayed_record_that_does_not_concern_its_anchor_is_dropped() {
+    // Given the orchestrator watches the sessions it started, and a fleet daemon's relay token for
+    // the test user
+    let world = a_world().await;
+    world
+        .the_orchestrator_watches_its_sessions(&["turn_finished"], false)
+        .await;
+    let elsewhere = tempfile::tempdir().unwrap();
+    let user = tddy_github::GitHubUser {
+        id: 7,
+        login: TEST_USER.to_string(),
+        avatar_url: String::new(),
+        name: TEST_USER.to_string(),
+    };
+    let token = world
+        .peers
+        .signing_identity_in(elsewhere.path())
+        .signer()
+        .mint_relay(&user, Duration::from_secs(60));
+
+    // When a batch relays a turn end of a session nobody started, anchored at the orchestrator
+    let unrelated = json!({
+        "origin_daemon_instance_id": HOST_B,
+        "project_id": THIS_PROJECT,
+        "github_user": TEST_USER,
+        "records": [{
+            "anchor_session_id": world.orchestrator,
+            "record_json": json!({
+                "seq": 1,
+                "session_id": world.bystander,
+                "label": "bystander",
+                "kind": "attention_required",
+                "source": "activity_status",
+                "text": "not yours",
+                "agent": null,
+                "question": null,
+                "activity_status": "Done",
+                "at_unix_ms": 1_790_000_000_000_u64,
+            }).to_string(),
+        }],
+        "lost": 0,
+        "through_seq": 1,
+    });
+    let outcome = world
+        .a
+        .daemon
+        .execute_tool(arriving_from_a_peer(a_relay_shaped_call(
+            RELAY_SESSION_NOTIFICATIONS,
+            unrelated,
+            &token,
+            HOST_A,
+        )))
+        .await;
+
+    // Then the call is taken, but the record is not: the orchestrator's watch delivers nothing
+    assert!(
+        !refused(&outcome),
+        "a well-formed relay call was refused: {outcome:?}"
+    );
+    let (events, _) = world.the_orchestrators_watch_events(0).await;
+    assert_eq!(events, Vec::<Value>::new());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

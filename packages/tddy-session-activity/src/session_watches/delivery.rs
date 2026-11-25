@@ -3,6 +3,7 @@ use crate::project_notification_log::ProjectNotificationRecord;
 use crate::session_watches::inbox_position_of;
 use crate::session_watches::matcher::watch_matches;
 use crate::session_watches::matcher::watch_owes;
+use crate::session_watches::relay_gaps::{evicted_gaps_lost, note_gaps_reported, unreported_gaps};
 use crate::session_watches::PendingEnd;
 use crate::session_watches::ProjectWatches;
 use crate::session_watches::SessionWatch;
@@ -133,12 +134,7 @@ pub(super) fn apply_delivery(
     for watch in state.watches.iter().filter(|watch| delivers(watch)) {
         let (records, watch_lost) =
             log.records_after(&owner.project_id, &owner.os_user, watch.position);
-        let evicted_gaps = if watch_lost > 0 {
-            log.evicted_relay_lost_after(&owner.project_id, &owner.os_user, watch.position)
-        } else {
-            0
-        };
-        lost = lost.max(watch_lost + evicted_gaps);
+        lost = lost.max(watch_lost + evicted_gaps_lost(log, watch, watch_lost));
         for record in records.iter().filter(|r| watch_owes(watch, r, inbox)) {
             matched.entry(record.seq).or_insert_with(|| record.clone());
         }
@@ -183,31 +179,6 @@ pub(super) fn apply_delivery(
         events,
         lost,
         ended,
-    }
-}
-
-/// The relay gaps among `records` that `watch` has not reported yet: each gap's `seq` and how many
-/// records it lost. A gap is never an event, so it never moves a position; it is marked reported
-/// in [`SessionWatch::acked_above`] instead ([`note_gaps_reported`]), and pruned from there as the
-/// position passes it.
-pub(super) fn unreported_gaps<'a>(
-    watch: &'a SessionWatch,
-    records: &'a [ProjectNotificationRecord],
-) -> impl Iterator<Item = (u64, u64)> + 'a {
-    records
-        .iter()
-        .filter(move |record| {
-            record.relay_lost > 0
-                && record.seq > watch.position
-                && !watch.acked_above.contains(&record.seq)
-        })
-        .map(|record| (record.seq, record.relay_lost))
-}
-
-/// Mark `gaps` reported on `watch`, past its position.
-pub(super) fn note_gaps_reported(watch: &mut SessionWatch, gaps: &BTreeMap<u64, u64>) {
-    for seq in gaps.keys().filter(|seq| **seq > watch.position) {
-        watch.acked_above.insert(*seq);
     }
 }
 

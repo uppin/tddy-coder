@@ -1,6 +1,7 @@
-# Watches, messages and session lists across connected hosts
+# 2026-11-25 — Watches, messages and session lists across connected hosts
 
 **Type:** Feature
+**PR:** #1036
 **Work items:** n5 (cross-host watches and messages), n6 (every connected host's sessions in the
 session list)
 **Packages:** `tddy-session-activity`, `tddy-daemon-rpc`, `tddy-tool-engine`, `tddy-tools`,
@@ -51,7 +52,7 @@ host), persisted in `<data dir>/notification-relay.json`, and advances it only w
 acknowledges a batch (at most 100 records, one OS user). While a host is unreachable the relay
 retries (`RelayTimings::retry`, 5 s in production); nothing is dropped while the records stay in
 the 1 000-record window. A cursor the window has passed is reported in the next batch as `lost` —
-an upper bound, since an evicted record's destination is no longer known — and the receiver
+exact, because each record is routed when it is appended — and the receiver
 appends a **relay gap** record carrying the count, which every watch reports once in its `lost`,
 naming nothing as an event. The receiver remembers, per origin host, the highest origin `seq` it
 holds (recovered from the records on restart), so a batch resent after a lost acknowledgement
@@ -66,10 +67,13 @@ before any forward — and from a peer whose call is not a relay call (a session
 addressed at another host, or a body that is not a relay request). `StreamExecuteTool` refuses them
 outright.
 
-**Trust.** A relayed batch names the GitHub login of the records' OS user; the receiver maps it to
-its own OS user, and accepts a record only when it is relayed for a session it holds in the batch's
-project (the orchestrator, the message's recipient, or the watch's owner). Peers in the common room
-are trusted daemons, as for `IsSessionTerminalServed`.
+**Trust.** A relay call carries a short-lived token the sending daemon mints with its own signing
+key under the new `TokenPrincipal::Relay`, for the GitHub login the batch names; the receiver
+verifies it with the fleet's key directory and maps the login to its own OS user. It accepts a
+record only when it is relayed for a session it holds in the batch's project **and** that session
+is the record's orchestrator, its message's recipient, or the owner of a live watch naming the
+record's session. (A review of the first draft found the transport stamp alone admitted any room
+participant; the token closes that.)
 
 **Records.** `ProjectNotificationRecord` gains `daemon_instance_id` (the host the session runs on;
 `None` for this host's own), `origin_seq`, and `relay_lost` (non-zero only on a relay gap). Every
@@ -128,9 +132,13 @@ into one (`SendSessionMessage`) already routed; they are covered by
 2. **`ExecuteTool` forward over new typed RPCs.** Reuses the exact path the target tools use and
    avoids six `ExecToolService` implementors; accepted by the operator on condition the names are
    never tools (above), with tests.
-3. **Peer-trusted, transport-gated relay calls over carrying session tokens.** A background relay
-   holds no token; the receiver checks the anchor session instead.
-4. **A relay gap's `lost` is an upper bound.** Once evicted, a record's destinations are unknown.
+3. **A daemon-minted `relay` principal token over a user's session token.** A background relay
+   holds no user token, and an agent must not be able to forge one: only daemons hold signing keys.
+4. **Routes decided at append time.** So `lost` counts exactly the records owed to a host and
+   evicted, never unrelated records.
+5. **Bounds.** A relay call: 10 s. A recipient or watched session looked up on the other hosts:
+   5 s. `ListSessions` with `include_peers`: 3 s.
+6. **The drawer deduplicates by session id alone** (a UUID), not session id + host.
 
 ## Not done here
 
@@ -140,13 +148,34 @@ into one (`SendSessionMessage`) already routed; they are covered by
 - The project's main session as a recipient on another host is reached only when the sender's own
   project registry names it, as before.
 
+## Restructuring (file-length gate)
+
+Three files this change pushed past 500 production lines were brought back under it:
+`session_coordinate_handlers.rs` 509 → 499 (the peer merge moved into `peer_session_listing.rs`),
+`exec_tool/ports.rs` 501 → 495 (the stream refusal moved into `exec_tool/notification_relay.rs`),
+`session_watches/stream.rs` 514 → 492 (relay-gap handling in `session_watches/relay_gaps.rs`; the
+lease types moved, unchanged, into `session_watches/stream/lease.rs`).
+
+## Also in this PR
+
+- `tddy-tools`' `session_tool_livekit_dispatch` tests cleared a hand-kept list of transport
+  variables that predates `TDDY_REMOTE_DAEMON_SOCKET`; run inside a daemon-launched session they
+  picked up that session's own transport. They now clear every `TDDY_REMOTE_*` variable.
+- `SessionManager.refresh` drops an answer older than one already applied.
+
 ## Tests
 
 - `packages/tddy-daemon-rpc/tests/cross_host_watch_acceptance.rs` — two daemons in process over the
   in-memory peer forwarder (no LiveKit): messages both ways (including `reply_to`), link down then
   up (delivered once), unknown host refused, a remote sibling refused as on one host, a remote
   child's message, question and end through the watch naming the host, the idle wake, a followed
-  non-child session, eviction reported as lost, the relay names never offered or callable, and both
-  session lists.
+  non-child session, eviction reported as lost, the relay names never offered or callable (an agent
+  over `ExecuteTool`, a room participant with a user's token, a relay token for another user, a
+  record that does not concern its anchor), and both session lists.
+- `packages/tddy-daemon-rpc/tests/list_sessions_across_hosts_acceptance.rs` — unreachable hosts
+  named, one hop.
 - `packages/tddy-session-activity/tests/notification_relay_unit.rs` — routing, cursor on
-  acknowledgement, retry, restart, one hop, dedupe across a reopen, gap records.
+  acknowledgement, retry, restart, one hop, dedupe across a reopen, gap records, and records no host
+  was owed never counted lost.
+- `session_watches_unit.rs` — a relay gap reported once, and still whole after this host's window
+  evicted it. `sessionManager.test.ts` — a slower older pull never reverts a newer list.

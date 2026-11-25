@@ -23,7 +23,11 @@
 //!
 //! Feature: docs/ft/daemon/1-WIP/PRD-2026-11-17-session-watch-monitor.md
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+mod lease;
+
+use super::relay_gaps;
+pub(super) use lease::{Lease, StreamLeases};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use super::{SessionWatchStore, WatchOwner, MAX_EVENTS_PER_ANSWER};
@@ -324,13 +328,8 @@ impl SessionWatchStore {
             };
             let (records, watch_lost) =
                 log.records_after(&owner.project_id, &owner.os_user, watch.position);
-            let evicted_gaps = if watch_lost > 0 {
-                log.evicted_relay_lost_after(&owner.project_id, &owner.os_user, watch.position)
-            } else {
-                0
-            };
-            lost = lost.max(watch_lost + evicted_gaps);
-            gaps.extend(super::delivery::unreported_gaps(watch, &records));
+            lost = lost.max(watch_lost + relay_gaps::evicted_gaps_lost(log, watch, watch_lost));
+            gaps.extend(relay_gaps::unreported_gaps(watch, &records));
             let inbox = super::inbox_position_of(&state, owner);
             for record in records
                 .iter()
@@ -346,15 +345,12 @@ impl SessionWatchStore {
             }
         }
         // Relay gaps are reported once, here, and marked so on every streamed watch (n5).
-        lost += gaps.values().sum::<u64>();
+        let streamed = state
+            .watches
+            .iter_mut()
+            .filter(|watch| &watch.owner == owner && live_ids.contains(&watch.watch_id));
+        lost += relay_gaps::report_gaps(streamed, &gaps);
         if !gaps.is_empty() {
-            for watch in state
-                .watches
-                .iter_mut()
-                .filter(|watch| &watch.owner == owner && live_ids.contains(&watch.watch_id))
-            {
-                super::delivery::note_gaps_reported(watch, &gaps);
-            }
             self.persist_best_effort(&owner.project_id, &state);
         }
         let events: Vec<StreamedEvent> = matched
@@ -452,18 +448,6 @@ impl SessionWatchStore {
     }
 }
 
-/// One watch's lease: the stream holding it, when the lease lapses, the newest `seq` it was
-/// handed, and the `seq`s of this watch's records in the stream's latest answer — what its next
-/// `ack_seq` may acknowledge.
-#[derive(Debug, Clone)]
-pub(super) struct Lease {
-    pub(super) owner: WatchOwner,
-    pub(super) stream_id: String,
-    pub(super) lease_until_unix_ms: u64,
-    pub(super) handed: u64,
-    pub(super) latest_batch: BTreeSet<u64>,
-}
-
 impl StreamPick {
     /// Whether this pick takes `record`: of a picked kind, from a picked session.
     fn picks(&self, record: &ProjectNotificationRecord) -> bool {
@@ -505,10 +489,4 @@ fn acknowledge(
     watch.position = position;
     watch.acked_above.retain(|seq| *seq > position);
     (watch.position, &watch.acked_above) != (before.0, &before.1)
-}
-
-/// The in-memory leases of every stream on this host.
-#[derive(Debug, Default)]
-pub(super) struct StreamLeases {
-    pub(super) by_watch: HashMap<String, Lease>,
 }

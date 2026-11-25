@@ -489,3 +489,32 @@ async fn records_evicted_before_a_down_host_came_back_are_reported_lost() {
         .max();
     assert_eq!(lost, Some(3));
 }
+
+#[tokio::test]
+async fn records_no_host_was_owed_are_never_counted_lost() {
+    // Given a relay that relayed one record of the child
+    let world = a_world();
+    let relay = world.start();
+    world.a_turn_ends_in(CHILD, 0).await;
+    world.until_sent(ORCHESTRATORS_HOST, 1).await;
+
+    // When more records than the window keeps arrive of a session no other host is owed, and then
+    // another of the child
+    for n in 1..=PROJECT_NOTIFICATION_CAPACITY + 50 {
+        world.a_turn_ends_in(LOCAL_SESSION, n).await;
+    }
+    world.a_turn_ends_in(CHILD, 1).await;
+    world.until_sent(ORCHESTRATORS_HOST, 2).await;
+    relay.abort();
+
+    // Then nothing is reported lost: the evicted records were never owed to the orchestrator's host
+    let lost: Vec<u64> = world
+        .peers
+        .sent
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|(_, request)| request.lost)
+        .collect();
+    assert_eq!(lost, vec![0, 0]);
+}

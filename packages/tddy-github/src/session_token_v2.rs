@@ -77,6 +77,10 @@ pub enum TokenKind {
 pub enum TokenPrincipal {
     /// Minted for a session's agent (its `tddy-tools --mcp` server), under the user it acts for.
     Agent,
+    /// Minted by a daemon for its own call to a peer daemon relaying the user's sessions'
+    /// notifications (n5, cross-host watches): only a daemon holds a signing key, so a token with
+    /// this principal is a daemon's, never an agent's or a person's.
+    Relay,
 }
 
 /// Names the key that signed a token: the SHA-256 digest of the key's SPKI DER encoding, truncated
@@ -294,6 +298,16 @@ impl SessionTokenSigner {
         self.sign(SessionClaims {
             principal: Some(TokenPrincipal::Agent),
             session_id: Some(session_id.to_string()),
+            ..self.claims_for(user, TokenKind::Access, iat, ttl)
+        })
+    }
+
+    /// Mint a short-lived token for this daemon's own relay call to a peer, on behalf of `user`: it
+    /// names `user` and carries [`TokenPrincipal::Relay`].
+    pub fn mint_relay(&self, user: &GitHubUser, ttl: Duration) -> String {
+        let iat = unix_seconds(SystemTime::now());
+        self.sign(SessionClaims {
+            principal: Some(TokenPrincipal::Relay),
             ..self.claims_for(user, TokenKind::Access, iat, ttl)
         })
     }

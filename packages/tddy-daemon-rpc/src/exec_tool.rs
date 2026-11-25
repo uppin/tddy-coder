@@ -73,6 +73,10 @@ pub struct ExecToolRpcHandler {
 pub(crate) struct ProjectHomeHost {
     /// What an armed schedule's watcher signs its own short-lived tokens with (`#workqueue` 14/14).
     pub(crate) session_token_signer: Option<tddy_github::SessionTokenSigner>,
+    /// The tokens this daemon signs and verifies with: a relay call to a peer is minted with them,
+    /// and a peer's relay call verified (n5). `None` on a daemon that signs nothing, which neither
+    /// relays nor takes relayed records.
+    pub(crate) session_tokens: Option<tddy_daemon_auth::SessionTokens>,
     /// The GitHub inbox and the project credentials it reads with — `work_queue_status` reads PRs
     /// through it (`#workqueue` 6/14).
     pub(crate) pull_requests:
@@ -172,6 +176,7 @@ impl ExecToolRpcHandler {
                 work_queue_github: Arc::new(OnceLock::new()),
                 pull_requests: Arc::new(host.clone()),
                 session_token_signer: host.session_token_signer(),
+                session_tokens: host.session_tokens(),
                 relay: OnceLock::new(),
                 relayed_cues: OnceLock::new(),
             },
