@@ -41,7 +41,9 @@ which the session host's delivery serves). A session whose agent follows no tran
   unpaired one is a `completed` row (call id `transcript:<line end offset>:<n>`, or the transcript's
   own id), and a hook row paired with it later **adopts that id**, so the rows coalesce. Turns are
   aligned on the hooks' `Done` status and the transcript's `turn_end`, so a follower that is behind
-  never pairs one turn's call with the next turn's.
+  never pairs one turn's call with the next turn's. A hooks turn end also drops unpaired transcript
+  calls: Cursor's file carries almost no `turn_ended` lines, and leftovers would pair with the next
+  turn's hooks and misorder its opening text (n3).
 - **Order.** `ReadSessionTranscript` merges message frames with tool rows by timestamp, and a
   follower may read a line long after it was written. What the transcript says next happened before
   every hook call it has not reached yet, so a message is stamped no later than the earliest such
@@ -56,7 +58,8 @@ Which hook events carry spoken text is the spec's too (`activity.hook_messages`)
 
 Tests: `tests/cursor_transcript_activity.rs` (the real Cursor probe transcript and its hook calls:
 `ReadSessionTranscript` order for a live and a behind follower, the prompt recorded once, sanitised
-ids); `tests/claude_cli_transcript_messages.rs` (hook messages from `claude.yaml`).
+ids; a third turn behind and live, lost first-turn hooks without per-turn `turn_ended`, duplicate
+earlier turns); `tests/claude_cli_transcript_messages.rs` (hook messages from `claude.yaml`).
 
 ## `AgentActivityHub`
 
