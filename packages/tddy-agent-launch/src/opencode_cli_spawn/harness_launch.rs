@@ -8,6 +8,10 @@ use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ExitHook};
 use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_rpc::Status;
 
+pub(super) use super::harness_followers::HarnessFollowers;
+use super::harness_followers::{
+    follow_the_hook_log, follow_the_transcript, stopping_followers_on_exit, TranscriptPlace,
+};
 use crate::remote_agent_launch::{launch_on_target, RemoteLaunch};
 use crate::spec_launch::{
     in_a_pane_with_only_the_agent_env, launch_host_pty, plan_host_pty,
@@ -85,6 +89,10 @@ pub(super) struct HarnessSpecLaunch<'a> {
     /// The target the agent runs on, when the session named one: the agent is launched there
     /// through the remote-shell port instead of in a PTY (or tmux) on this host.
     pub(super) remote: Option<HarnessRemote>,
+    /// Where the session's followed files deliver, and the registry their followers are kept in:
+    /// an agent whose spec reads its own transcript (`coding_agent.activity`) has it followed, on
+    /// this host or on its target.
+    pub(super) followers: HarnessFollowers,
 }
 
 /// A harness launch on a session's target (`remote_agent_launch::launch_on_target`).
@@ -132,6 +140,7 @@ pub(super) async fn launch(
         env,
         on_exit,
         remote,
+        followers,
     } = launch;
     let failed = |e: crate::spec_launch::SpecLaunchError| {
         Status::internal(format!("failed to spawn {kind}: {e}"))
@@ -148,22 +157,17 @@ pub(super) async fn launch(
             ),
             _ => None,
         };
-        // The session's exit stops its follower and removes its log, after the launch's own
-        // exit work: the registry entry is registered below, once the agent is up.
+        // The session's exit stops its followers and removes its log, after the launch's own
+        // exit work: the registry entries are registered below, once the agent is up. In tmux the
+        // exit is the attached client's, and the agent may well outlive it — a dropped ssh, a
+        // detach, a restarted daemon: while its tmux session lives, the followers keep reading.
         let on_exit = match hook_log.as_ref() {
-            Some(_) => {
-                let followers = remote.hook_followers.clone();
-                let exited_session = session_id.to_string();
-                Some(Box::new(move |capture| {
-                    Box::pin(async move {
-                        if let Some(original) = on_exit {
-                            original(capture).await;
-                        }
-                        followers.stop_and_remove_log(&exited_session).await;
-                    })
-                        as std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-                }) as ExitHook)
-            }
+            Some(_) => Some(stopping_followers_on_exit(
+                on_exit,
+                remote.hook_followers.clone(),
+                session_id,
+                run.in_tmux.then(|| Arc::clone(&shell)),
+            )),
             None => on_exit,
         };
         let launched = launch_on_target(
@@ -192,10 +196,26 @@ pub(super) async fn launch(
             follow_the_hook_log(
                 &remote,
                 &log,
-                session_id,
+                (session_id, session_dir),
                 os_user,
                 worktree_path,
                 agent.spec.answer_wait_secs(),
+            );
+            // The transcript's `tail` lives as long as the session's hook log on the target.
+            follow_the_transcript(
+                agent,
+                &followers,
+                TranscriptPlace::Target {
+                    shell: Arc::clone(&shell),
+                    alive_while: log,
+                },
+                (session_id, session_dir, os_user),
+            )
+            .await;
+        } else if agent.spec.activity().followed_transcript().is_some() {
+            log::warn!(
+                "session {session_id}: its agent's transcript is not followed on the target: \
+                 the target session has no hook log to keep the follower alive"
             );
         }
         return Ok(LaunchedHarness {
@@ -220,12 +240,43 @@ pub(super) async fn launch(
             on_exit,
         };
         let launched = start_or_resume_in_tmux(cli_manager, run, tmux_launch).await?;
+        // An agent in tmux on this host outlives its client: its follower is stopped with the
+        // session (stop, delete), not with a terminal.
+        follow_the_transcript(
+            agent,
+            &followers,
+            TranscriptPlace::Host,
+            (session_id, session_dir, os_user),
+        )
+        .await;
         return Ok(LaunchedHarness {
             pid: launched.pane_pid,
             tmux_session: Some(launched.tmux_session),
         });
     }
-    let handle = launch_host_pty(
+    // A transcript follower on this host ends with the agent's PTY. It starts first, so an agent
+    // that exits at once finds it registered and its exit hook stops it; the transcript need not
+    // exist yet (`tail -F`).
+    let follows_transcript =
+        followers.delivery.is_some() && agent.spec.activity().followed_transcript().is_some();
+    let on_exit = if follows_transcript {
+        follow_the_transcript(
+            agent,
+            &followers,
+            TranscriptPlace::Host,
+            (session_id, session_dir, os_user),
+        )
+        .await;
+        Some(stopping_followers_on_exit(
+            on_exit,
+            followers.registry.clone(),
+            session_id,
+            None,
+        ))
+    } else {
+        on_exit
+    };
+    let handle = match launch_host_pty(
         agent,
         params,
         slots,
@@ -234,45 +285,18 @@ pub(super) async fn launch(
         on_exit,
     )
     .await
-    .map_err(failed)?;
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            // No agent, so no exit to stop the follower with.
+            followers.registry.stop_and_remove_log(session_id).await;
+            return Err(failed(error));
+        }
+    };
     Ok(LaunchedHarness {
         pid: handle.pid,
         tmux_session: None,
     })
-}
-
-/// Follow the hook log `log` of a target session that is up, delivering its hooks to the
-/// session's activity and answering its waiting hooks through the session's shell; the follower is
-/// registered so the session's exit stops it and removes the log.
-fn follow_the_hook_log(
-    remote: &HarnessRemote,
-    log: &str,
-    session_id: &str,
-    os_user: &str,
-    worktree_path: &Path,
-    answer_wait_secs: u64,
-) {
-    let (Some(token), Some(delivery)) = (remote.hook_token.as_ref(), remote.hook_delivery.as_ref())
-    else {
-        return;
-    };
-    let shell = Arc::clone(&remote.shell);
-    let sink = crate::remote_hook_delivery::ActivityHookSink::new(
-        Arc::clone(delivery),
-        session_id,
-        token,
-        os_user,
-    )
-    .answering_through(Arc::clone(&shell), worktree_path, answer_wait_secs);
-    let follower = crate::remote_hook_follower::RemoteHookFollower::start(
-        Arc::clone(&shell),
-        log,
-        token,
-        Arc::new(sink),
-    );
-    remote
-        .hook_followers
-        .insert(session_id, follower, shell, worktree_path.to_path_buf());
 }
 
 fn host_pty_session<'a>(

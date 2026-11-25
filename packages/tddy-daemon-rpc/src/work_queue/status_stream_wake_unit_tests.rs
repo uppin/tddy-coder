@@ -130,16 +130,40 @@ async fn the_status_stream_sends_a_new_snapshot_when_its_queue_changes() {
         .update(OWNER, |queue| queue.nodes.push(an_item("n2")))
         .unwrap();
 
-    // Then — a new snapshot carries it, with no GitHub event behind it
-    let next = tokio::time::timeout(Duration::from_secs(10), stream.next())
-        .await
-        .expect("a snapshot follows the change")
-        .expect("a frame")
-        .expect("a status");
+    // Then — a new snapshot carries it, with no GitHub event behind it. The stream sends a snapshot
+    // on every wake and does not dedupe them, so a wake that lands before the change (a watcher
+    // event for the queue's own record) may first resend the queue as it was. Each such snapshot
+    // must still be exactly the state before the change: read on until the one carrying n2, within
+    // one deadline for them all.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let mut before_the_change = Vec::new();
+    let after_the_change = loop {
+        let frame = tokio::time::timeout_at(deadline, stream.next())
+            .await
+            .unwrap_or_else(|_| {
+                panic!("a snapshot carrying n2 follows the change; got only {before_the_change:?}")
+            })
+            .expect("a frame")
+            .expect("a status");
+        let ids = item_ids(&frame);
+        if ids.iter().any(|id| id == "n2") {
+            break ids;
+        }
+        before_the_change.push(ids);
+    };
+    let unchanged = vec!["n1".to_string()];
     assert_eq!(
-        (item_ids(&first), item_ids(&next)),
         (
-            vec!["n1".to_string()],
+            item_ids(&first),
+            before_the_change
+                .iter()
+                .filter(|ids| **ids != unchanged)
+                .collect::<Vec<_>>(),
+            after_the_change
+        ),
+        (
+            unchanged.clone(),
+            Vec::<&Vec<String>>::new(),
             vec!["n1".to_string(), "n2".to_string()]
         )
     );

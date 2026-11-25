@@ -86,6 +86,7 @@ mod stream_relay;
 pub use agent_tool_socket::next_embedded_socket_path;
 pub mod local_token_tonic_adapter;
 pub mod relay_idle;
+pub mod tool_turns;
 pub mod toolchain;
 pub mod user_paths;
 pub mod users_file;
@@ -180,6 +181,12 @@ pub struct AgentActivityHub {
     >,
     /// Per-session stack of in-flight `call_id`s awaiting their terminal row.
     pending: StdMutex<HashMap<String, Vec<String>>>,
+    /// Per-session tool calls of the current turn, by the source that reported them first: how a
+    /// transcript's tool call is paired with its hook row.
+    tool_turns: tool_turns::ToolTurns,
+    /// Per-session messages recorded lately, so one said in both a hook and a transcript is
+    /// recorded once.
+    spoken: StdMutex<HashMap<String, std::collections::VecDeque<String>>>,
 }
 
 impl AgentActivityHub {
@@ -267,6 +274,32 @@ impl AgentActivityHub {
             .push(call_id.to_string());
     }
 
+    /// The current turn's tool calls, as each source reported them.
+    pub fn tool_turns(&self) -> &tool_turns::ToolTurns {
+        &self.tool_turns
+    }
+
+    /// How many recent messages per session [`Self::first_time_spoken`] remembers.
+    pub const SPOKEN_REMEMBERED: usize = 64;
+
+    /// Whether `message` (a role and its text, as the caller keys it) is new for the session among
+    /// the last [`Self::SPOKEN_REMEMBERED`]; remembered either way.
+    pub fn first_time_spoken(&self, session_id: &str, message: &str) -> bool {
+        let mut spoken = self
+            .spoken
+            .lock()
+            .expect("agent activity hub mutex poisoned");
+        let recent = spoken.entry(session_id.to_string()).or_default();
+        if recent.iter().any(|seen| seen == message) {
+            return false;
+        }
+        if recent.len() == Self::SPOKEN_REMEMBERED {
+            recent.pop_front();
+        }
+        recent.push_back(message.to_string());
+        true
+    }
+
     /// Take the most recent in-flight `call_id` for a session, if any.
     pub fn pop_pending(&self, session_id: &str) -> Option<String> {
         self.pending
@@ -280,6 +313,34 @@ impl AgentActivityHub {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_both_sources_report_is_new_only_the_first_time() {
+        // Given
+        let hub = AgentActivityHub::default();
+
+        // When the hooks and then the transcript report the same reply, and another session says
+        // the same
+        let first = hub.first_time_spoken("s1", "agent\u{0}done");
+        let again = hub.first_time_spoken("s1", "agent\u{0}done");
+        let elsewhere = hub.first_time_spoken("s2", "agent\u{0}done");
+
+        // Then
+        assert_eq!((first, again, elsewhere), (true, false, true));
+    }
+
+    #[test]
+    fn the_spoken_window_forgets_its_oldest_message() {
+        // Given a session that has said as many messages as the window holds, after "hello"
+        let hub = AgentActivityHub::default();
+        hub.first_time_spoken("s", "user\u{0}hello");
+        for n in 0..AgentActivityHub::SPOKEN_REMEMBERED {
+            hub.first_time_spoken("s", &format!("agent-{n}"));
+        }
+
+        // Then "hello" is new again
+        assert!(hub.first_time_spoken("s", "user\u{0}hello"));
+    }
 
     /// That the epoch and the unit are right: a stamp taken now has to land in this century. This
     /// says nothing about overflow — see [`saturates_a_millisecond_count_too_large_for_a_u64`],

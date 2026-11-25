@@ -1,6 +1,7 @@
 //! The `coding_agent` extension: its schema, its owner, and the validated view of one agent.
 
 pub(crate) mod acp;
+pub(crate) mod activity_slot;
 pub(crate) mod argv;
 pub(crate) mod effort_slot;
 pub(crate) mod headless_section;
@@ -24,6 +25,7 @@ use crate::route::RouteSupport;
 use crate::slots::conversation::ConversationSlot;
 use crate::slots::hooks;
 use crate::spec::acp::AcpSection;
+use crate::spec::activity_slot::{validate_activity_slot, ActivitySlot};
 use crate::spec::effort_slot::{validate_effort_slot, EffortSlot};
 use crate::spec::headless_section::HeadlessSection;
 use crate::spec::model_report_slot::{validate_model_report, ModelReportSource};
@@ -196,6 +198,9 @@ fn parse_section(
     validate_home_dirs(&agent.home_dirs)
         .map_err(|e| format!("home_dirs: {e}"))
         .map_err(invalid)?;
+    validate_activity_slot(&agent.activity)
+        .map_err(|e| format!("activity: {e}"))
+        .map_err(invalid)?;
     Ok(agent)
 }
 
@@ -344,6 +349,11 @@ pub struct CodingAgentSection {
     /// with no native peer messaging. Read through [`CodingAgentSpec::peer_name`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_name: Option<PeerNameSlot>,
+    /// Where a session's activity — what was said, and the tool calls — is read from: the agent's
+    /// hooks, its own transcript file, or both, and how that file's lines map to activity. Hooks
+    /// alone, naming no spoken message, when absent. Read through [`CodingAgentSpec::activity`].
+    #[serde(default, skip_serializing_if = "ActivitySlot::is_default")]
+    pub activity: ActivitySlot,
 }
 
 /// The `peer_name` slot: `peer_name: { flag: --name }`.
@@ -427,6 +437,11 @@ impl CodingAgentSpec {
     /// order; empty for an agent that reports none.
     pub fn model_report(&self) -> &[ModelReportSource] {
         &self.agent.model_report
+    }
+
+    /// `coding_agent.activity`: where a session's prompts, replies and tool calls are read from.
+    pub fn activity(&self) -> &ActivitySlot {
+        &self.agent.activity
     }
 
     /// `coding_agent.product`, or the agent id when the spec declares none.

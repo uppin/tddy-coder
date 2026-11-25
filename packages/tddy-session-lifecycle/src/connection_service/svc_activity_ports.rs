@@ -171,6 +171,15 @@ pub struct PeerRoutedActivity {
 }
 
 impl PeerRoutedActivity {
+    /// Record one line of a session's agent transcript: always this daemon's own, as the follower
+    /// that read it runs here.
+    pub async fn record_transcript_line(
+        &self,
+        line: tddy_session_activity::TranscriptLine,
+    ) -> Result<(), tddy_rpc::Status> {
+        self.local.record_transcript_line(line).await
+    }
+
     /// The peer one of the two forwarded unary calls is addressed at — or `None` when the call is
     /// this daemon's own to serve.
     ///

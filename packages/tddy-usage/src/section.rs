@@ -174,6 +174,16 @@ pub struct FieldEq {
     pub equals: String,
 }
 
+impl FieldEq {
+    /// Whether the value at `field` of `value` is the string `equals`.
+    pub fn holds_for(&self, value: &serde_json::Value) -> bool {
+        self.field
+            .lookup(value)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|actual| actual == self.equals)
+    }
+}
+
 /// How the kept records of one conversation fold into its totals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -98,13 +98,9 @@ fn keep(
 
 /// Whether `value` satisfies every `where` predicate of `spec`.
 fn passes_where(value: &Value, spec: &RecordSpec) -> bool {
-    spec.where_.iter().all(|predicate| {
-        predicate
-            .field
-            .lookup(value)
-            .and_then(Value::as_str)
-            .is_some_and(|actual| actual == predicate.equals)
-    })
+    spec.where_
+        .iter()
+        .all(|predicate| predicate.holds_for(value))
 }
 
 /// The kept records folded by `aggregate`: each counter and the cost summed, or the last one read.

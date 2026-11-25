@@ -7,7 +7,7 @@
 **Metrics:** **136 lines**
 **Thresholds breached:** length 74 > 60 (`/analyze-clean-code`)
 **Restructure:** not designed — deferred to the #agent-tools sweep node (developer, 2026-11-02)
-**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack length (135); still over 60 — unclaimed
+**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack length (135); still over 60 — unclaimed; regressed by 1 in #1035 (2026-11-25)
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured
 
 ## Measurement history
@@ -29,6 +29,7 @@
 | 2026-11-21 | 143 → 143 | #980 (`#orchestra` 2/9): touched (`place_slot_files_and_pointer` now in `start_steps`), unchanged; brace-matched fn line to closing brace on `origin/feature/orchestra/path-reach` (`c4dace05c`) and HEAD |
 | 2026-11-22 | 143 → 145 | #998 (resume main-launch claim): **worse by 2** — the launched pid and host kept for the `resumed` log line (`resume_guard::log_resumed`). Brace-matched fn line to closing brace on `origin/master` (`0a76c98fb`) and HEAD. Still over 60 |
 | 2026-11-24 | unchanged (145 by this counter on both) | `fix/target-hooks-log-relative-path`: `hooks_append_to_the_target_log` takes the worktree path so a target's hooks name their log absolutely; the call is the same line. Brace-matched fn line to closing brace on `origin/master` (`d11cc75c1`) and HEAD |
+| 2026-11-25 | 145 → 146 | **worse by 1** in #1035 (transcript activity source): the launch's `followers: HarnessFollowers::new(..)` field, which hands the session's delivery and follower registry to a host launch too. Measured fn line to closing brace on `origin/master` and HEAD; no coverage run. Not extracted: a one-line field in a struct literal |
 
 ## What would close it
 

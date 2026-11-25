@@ -12,7 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_agent_launch::remote_hook_follower::{
-    follow_command, HookLine, HookSink, RemoteHookFollower,
+    follow_command, FollowOffset, HookLine, HookSink, RemoteHookFollower,
 };
 use tddy_remote_shell::{InMemoryShell, ScriptedStream, ShellCall};
 use tddy_testing_commons::wait::eventually;
@@ -130,6 +130,17 @@ impl AFollowedTarget {
             LOG,
             TOKEN,
             self.daemon.clone(),
+        )
+    }
+
+    /// The daemon starts following the session's log, remembering how far it read in `offset`.
+    fn is_followed_remembering(&self, offset: FollowOffset) -> RemoteHookFollower {
+        RemoteHookFollower::start_resuming(
+            Arc::new(self.shell.clone()),
+            LOG,
+            TOKEN,
+            self.daemon.clone(),
+            offset,
         )
     }
 
@@ -286,4 +297,195 @@ async fn stopping_the_follower_ends_its_remote_command() {
         (ended, target.streamed_commands()),
         (Ok(Vec::new()), vec![the_follow_command_from(0)])
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stream_that_ends_mid_line_resumes_from_the_last_whole_line() {
+    // Given a followed log
+    let target = a_target();
+    let started = a_hook("SessionStart", "startup");
+    let prompted = a_hook("UserPromptSubmit", "fix the login page");
+    let whole_lines = started.line().len();
+    let tail = target.tails_the_log_from(0);
+    let resumed_tail = target.tails_the_log_from(whole_lines);
+    let _follower = target.is_followed();
+
+    // When one whole hook and the start of the next are read before the connection drops
+    let log = logged(&[&started, &prompted]);
+    tail.prints(&log[..whole_lines + 7]).await;
+    target.daemon.once_it_holds(1).await;
+    tail.ends_with(255).await;
+    target.has_been_asked_for(2).await;
+    resumed_tail.prints(&log[whole_lines..]).await;
+    let delivered = target.daemon.once_it_holds(2).await;
+
+    // Then the torn line is read again whole, from the first byte nothing was delivered from
+    assert_eq!(
+        (delivered, target.streamed_commands()),
+        (
+            vec![started.delivered(), prompted.delivered()],
+            vec![
+                the_follow_command_from(0),
+                the_follow_command_from(whole_lines)
+            ]
+        )
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_follower_of_the_same_log_resumes_where_the_last_one_stopped() {
+    // Given a follower that remembers how far it read, which has delivered two hooks and stopped
+    let target = a_target();
+    let remembered = tempfile::tempdir().expect("a session directory");
+    let offset = FollowOffset::persisted_at(remembered.path().join("hooks.offset"));
+    let started = a_hook("SessionStart", "startup");
+    let prompted = a_hook("UserPromptSubmit", "fix the login page");
+    let stopped = a_hook("Stop", "end_turn");
+    let delivered_before = logged(&[&started, &prompted]).len();
+    let tail = target.tails_the_log_from(0);
+    let first = target.is_followed_remembering(offset.clone());
+    tail.prints(logged(&[&started, &prompted])).await;
+    target.daemon.once_it_holds(2).await;
+    first.stop().await;
+
+    // When another follower of the log starts — a resume, a re-wire, a restarted daemon
+    let resumed_tail = target.tails_the_log_from(delivered_before);
+    let _second = target.is_followed_remembering(offset);
+    target.has_been_asked_for(2).await;
+    resumed_tail.prints(stopped.line()).await;
+    let delivered = target.daemon.once_it_holds(3).await;
+
+    // Then it reads on from the last byte delivered — never from the log's end, never again from 0
+    assert_eq!(
+        (delivered, target.streamed_commands()),
+        (
+            vec![
+                started.delivered(),
+                prompted.delivered(),
+                stopped.delivered()
+            ],
+            vec![
+                the_follow_command_from(0),
+                the_follow_command_from(delivered_before)
+            ]
+        )
+    );
+}
+
+#[tokio::test]
+async fn creating_the_hook_log_of_a_resumed_session_keeps_the_hooks_it_already_holds() {
+    // Given a worktree whose hook log holds a hook its follower has not read yet
+    let machine = tempfile::tempdir().expect("a directory standing for the target");
+    let worktree = machine.path().join("worktree");
+    std::fs::create_dir_all(&worktree).expect("the worktree");
+    let shell = tddy_remote_shell::LocalShell::new();
+    let log = tddy_agent_launch::remote_hook_follower::create_remote_hook_log(&shell, &worktree)
+        .await
+        .expect("the hook log is created");
+    let unread = a_hook("UserPromptSubmit", "fix the login page").line();
+    std::fs::write(&log, &unread).expect("the agent's hook appends");
+
+    // When the session resumes and its start creates the log again
+    let again = tddy_agent_launch::remote_hook_follower::create_remote_hook_log(&shell, &worktree)
+        .await
+        .expect("the hook log is created again");
+
+    // Then the log is the same file, and the hook is still there to be read
+    assert_eq!(
+        (again, std::fs::read_to_string(&log).expect("the log")),
+        (log, unread)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn behind_a_pty_that_turns_newlines_into_crlf_the_offset_still_counts_the_files_bytes() {
+    // Given a target whose shell runs the follower in a pty that kept its output processing
+    // (`onlcr`): every `\n` of the log arrives as `\r\n`
+    let target = a_target();
+    let started = a_hook("SessionStart", "startup");
+    let prompted = a_hook("UserPromptSubmit", "fix the login page");
+    let stopped = a_hook("Stop", "end_turn");
+    let file_bytes = logged(&[&started, &prompted]).len();
+    let tail = target.tails_the_log_from(0);
+    let resumed_tail = target.tails_the_log_from(file_bytes);
+    let _follower = target.is_followed();
+
+    // When two hooks arrive through the pty, the connection drops, and a third is logged
+    tail.prints(logged(&[&started, &prompted]).replace('\n', "\r\n"))
+        .await;
+    target.daemon.once_it_holds(2).await;
+    tail.ends_with(255).await;
+    target.has_been_asked_for(2).await;
+    resumed_tail
+        .prints(stopped.line().replace('\n', "\r\n"))
+        .await;
+    let delivered = target.daemon.once_it_holds(3).await;
+
+    // Then the reopened tail starts at the log's own byte, not at the stream's
+    assert_eq!(
+        (delivered, target.streamed_commands()),
+        (
+            vec![
+                started.delivered(),
+                prompted.delivered(),
+                stopped.delivered()
+            ],
+            vec![
+                the_follow_command_from(0),
+                the_follow_command_from(file_bytes)
+            ]
+        )
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_line_longer_than_the_cap_is_skipped_and_the_next_hook_still_arrives() {
+    // Given a followed log
+    let target = a_target();
+    let tail = target.tails_the_log_from(0);
+    let follower = target.is_followed();
+    let stopped = a_hook("Stop", "end_turn");
+
+    // When something writes a line past the cap before the next hook
+    let flood = vec![b'x'; tddy_agent_launch::log_follower::MAX_LINE_BYTES + 1];
+    tail.prints(&flood).await;
+    tail.prints(format!("\n{}", stopped.line())).await;
+    let delivered = target.daemon.once_it_holds(1).await;
+
+    // Then only the hook is delivered, and the flood was never handed on as a line
+    assert_eq!(
+        (delivered, follower.dropped_lines()),
+        (vec![stopped.delivered()], 0)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_hook_log_that_could_not_be_removed_is_read_on_at_the_next_start_not_replayed() {
+    // Given a session whose follower delivered a hook, on a target that refuses the log's removal
+    let target = a_target();
+    target.shell.answers_when(|request| {
+        request
+            .command
+            .starts_with("rm -f")
+            .then(|| tddy_remote_shell::ExecOutput::exited(1, "rm: Permission denied"))
+    });
+    let remembered = tempfile::tempdir().expect("a session directory");
+    let offset = FollowOffset::persisted_at(remembered.path().join("hooks.offset"));
+    let started = a_hook("SessionStart", "startup");
+    let tail = target.tails_the_log_from(0);
+    let followers = tddy_agent_launch::remote_hook_follower::RemoteHookFollowers::new();
+    followers.insert(
+        "s1",
+        target.is_followed_remembering(offset.clone()),
+        Arc::new(target.shell.clone()),
+        "/home/dev/repo/.worktrees/019d2c7e".into(),
+    );
+    tail.prints(started.line()).await;
+    target.daemon.once_it_holds(1).await;
+
+    // When the session ends and its log stays behind
+    followers.stop_and_remove_log("s1").await;
+
+    // Then the offset still counts what was delivered: a start that keeps the log reads on
+    assert_eq!(offset.load(LOG), started.line().len() as u64);
 }

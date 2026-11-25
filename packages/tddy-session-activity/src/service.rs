@@ -31,10 +31,12 @@ mod own_session_name;
 pub(crate) mod ports;
 mod question_answers;
 mod rpc;
+mod transcript_lines;
 mod transcript_messages;
 mod usage_pollers;
 
 pub use question_answers::AnswerWaitPorts;
+pub use transcript_lines::TranscriptLine;
 
 use std::path::PathBuf;
 use std::sync::Arc;

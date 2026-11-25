@@ -24,16 +24,13 @@ use std::fmt;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_remote_shell::{ExecRequest, FileMode, RemoteShell, RemoteShellError};
-use tokio::io::AsyncReadExt as _;
 
-/// Quote `arg` as one single-quoted POSIX shell word (`'\''` for an embedded quote).
-pub(crate) fn shell_quote(arg: &str) -> String {
-    format!("'{}'", arg.replace('\'', r"'\''"))
-}
+pub(crate) use crate::log_follower::shell_quote;
+pub use crate::log_follower::FollowOffset;
+use crate::log_follower::{FileFollower, FollowedFile, LineSink};
 
 /// Whether `event` is one a followed log may carry: installed by a hooks adapter (Claude Code,
 /// Muse or Cursor), or the message line a child reports to its orchestrator with
@@ -127,18 +124,31 @@ pub trait HookSink: Send + Sync {
 
 pub use crate::remote_hook_delivery::{ActivityHookSink, HookReportDelivery};
 
-/// The followers of this daemon's target sessions, by session id, with the shell and worktree
-/// each one's log lives on — so a session's exit, stop or delete can stop its follower and
-/// remove its log without re-deriving where either is.
+/// The followers of this daemon's sessions, by session id: a target session's hook-log follower,
+/// with the shell and worktree its log lives on, and any session's agent-transcript follower — so a
+/// session's exit, stop or delete can stop both and remove the hook log without re-deriving where
+/// either is.
 #[derive(Clone, Default)]
 pub struct RemoteHookFollowers {
-    entries: Arc<std::sync::Mutex<std::collections::HashMap<String, RemoteHookEntry>>>,
+    entries: Arc<std::sync::Mutex<std::collections::HashMap<String, SessionFollowers>>>,
+}
+
+#[derive(Default)]
+struct SessionFollowers {
+    hooks: Option<RemoteHookEntry>,
+    transcript: Option<TranscriptFollowerEntry>,
 }
 
 struct RemoteHookEntry {
-    follower: Option<RemoteHookFollower>,
+    follower: RemoteHookFollower,
     shell: Arc<dyn RemoteShell>,
     worktree: std::path::PathBuf,
+}
+
+struct TranscriptFollowerEntry {
+    follower: FileFollower,
+    /// A host lease file whose removal ends the follower's `tail`, for a session on this host.
+    lease: Option<std::path::PathBuf>,
 }
 
 impl RemoteHookFollowers {
@@ -148,7 +158,17 @@ impl RemoteHookFollowers {
         Self::default()
     }
 
-    /// Register `session_id`'s follower, replacing any registered before it (a resume).
+    fn with_session<T>(&self, session_id: &str, f: impl FnOnce(&mut SessionFollowers) -> T) -> T {
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(entries.entry(session_id.to_string()).or_default())
+    }
+
+    /// Register `session_id`'s hook-log follower, replacing any registered before it (a resume, a
+    /// re-attach to an agent still running in tmux). The replaced follower is stopped: two readers
+    /// of one log would deliver its hooks twice.
     pub fn insert(
         &self,
         session_id: &str,
@@ -156,64 +176,109 @@ impl RemoteHookFollowers {
         shell: Arc<dyn RemoteShell>,
         worktree: std::path::PathBuf,
     ) {
+        let replaced = self.with_session(session_id, |session| {
+            session.hooks.replace(RemoteHookEntry {
+                follower,
+                shell,
+                worktree,
+            })
+        });
+        if let Some(replaced) = replaced {
+            replaced.follower.follower.abort();
+        }
+    }
+
+    /// Register `session_id`'s agent-transcript follower, replacing — and stopping — any registered
+    /// before it. `lease` is the host file that keeps its `tail` alive, for a host session.
+    pub fn insert_transcript(
+        &self,
+        session_id: &str,
+        follower: FileFollower,
+        lease: Option<std::path::PathBuf>,
+    ) {
+        let replaced = self.with_session(session_id, |session| {
+            session
+                .transcript
+                .replace(TranscriptFollowerEntry { follower, lease })
+        });
+        if let Some(replaced) = replaced {
+            replaced.follower.abort();
+        }
+    }
+
+    /// Stop `session_id`'s registered hook-log follower at once, before its replacement starts: two
+    /// readers of one log starting from one persisted offset would deliver its hooks twice.
+    pub fn abort_hook_follower(&self, session_id: &str) {
+        if let Some(hooks) = self.with_session(session_id, |session| session.hooks.take()) {
+            hooks.follower.follower.abort();
+        }
+    }
+
+    /// Stop `session_id`'s registered transcript follower at once, before its replacement starts.
+    pub fn abort_transcript_follower(&self, session_id: &str) {
+        if let Some(transcript) = self.with_session(session_id, |session| session.transcript.take())
+        {
+            transcript.follower.abort();
+        }
+    }
+
+    /// Whether `session_id` has a follower registered: its hook log's or its transcript's.
+    pub fn follows(&self, session_id: &str) -> bool {
         self.entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(
-                session_id.to_string(),
-                RemoteHookEntry {
-                    follower: Some(follower),
-                    shell,
-                    worktree,
-                },
-            );
+            .get(session_id)
+            .is_some_and(|session| session.hooks.is_some() || session.transcript.is_some())
     }
 
-    /// Stop `session_id`'s follower and remove its hook log on its target. A session with no
-    /// follower registered has nothing to stop.
+    /// Stop `session_id`'s followers and remove its hook log on its target. A session with no
+    /// follower registered has nothing to stop. The transcript's offset is kept: the agent's own
+    /// file outlives the session, and a resume appends to it.
     pub async fn stop_and_remove_log(&self, session_id: &str) {
         let entry = self
             .entries
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .remove(session_id);
-        if let Some(mut entry) = entry {
-            if let Some(follower) = entry.follower.take() {
-                follower.stop().await;
+        let Some(entry) = entry else {
+            return;
+        };
+        if let Some(transcript) = entry.transcript {
+            transcript.follower.stop().await;
+            if let Some(lease) = transcript.lease {
+                crate::log_follower::remove_if_present(&lease, "a transcript lease");
             }
-            if let Err(error) = remove_remote_hook_log(entry.shell.as_ref(), &entry.worktree).await
-            {
-                log::warn!("removing session {session_id}'s hook log on its target: {error}");
+        }
+        if let Some(hooks) = entry.hooks {
+            let offset = hooks.follower.offset.clone();
+            hooks.follower.stop().await;
+            // Forgotten only with the log: a log that could not be removed is kept by the next
+            // start, and is read on from where this follower stopped, not replayed from its start.
+            match remove_remote_hook_log(hooks.shell.as_ref(), &hooks.worktree).await {
+                Ok(()) => offset.forget(),
+                Err(error) => {
+                    log::warn!("removing session {session_id}'s hook log on its target: {error}");
+                }
             }
         }
     }
 }
 
 /// The command a follower runs on the target to read `log_path` from the byte `offset` on, and
-/// everything appended after it, ending once the log is removed:
-///
-/// ```text
-/// tail -c +<offset + 1> -f '<log_path>' & t=$!; (while [ -e '<log_path>' ]; do sleep 1; done; kill "$t") >/dev/null 2>&1 & wait "$t"
-/// ```
-///
-/// `tail -c +N` starts at the Nth byte, counted from one. Ending the follower's client does not end
-/// a remote command — ssh without a terminal sends it no hang-up, and `tail -f` on a log nobody
-/// writes to never learns its reader is gone — so a watch of its own ends the `tail` within a
-/// second of the log's removal, which every session end performs. The watch runs in a background
-/// subshell, not in the shell that waits on `tail`, so it outlives that shell being killed with its
-/// client. The path is single-quoted for a POSIX shell.
+/// everything appended after it, ending once the log is removed: [`crate::log_follower::tail_command`]
+/// with the log as its own watch.
 #[must_use]
 pub fn follow_command(log_path: &str, offset: u64) -> String {
-    let log = shell_quote(log_path);
-    format!(
-        "tail -c +{} -f {log} & t=$!; (while [ -e {log} ]; do sleep 1; done; kill \"$t\") >/dev/null 2>&1 & wait \"$t\"",
-        offset + 1
-    )
+    crate::log_follower::tail_command(log_path, offset, log_path, false)
 }
+
+/// What the hook-log creation prints when the log is already there.
+const LOG_PRESENT: &str = "tddy-hook-log-present";
 
 /// Create the session's hook log in `worktree` on `shell`'s target — empty, readable and writable
 /// by its owner alone — and keep it out of the checkout's git status (`info/exclude`, as the
-/// session pointer is). Returns the log's path on the target: what
+/// session pointer is). A log already there — a resumed session's — is kept as it is. Returns the
+/// log's path on the target: what
 /// `tddy_core::HookCommandParams::remote_log` carries and [`RemoteHookFollower::start`] follows.
 pub async fn create_remote_hook_log(
     shell: &dyn RemoteShell,
@@ -224,14 +289,22 @@ pub async fn create_remote_hook_log(
         "if exclude=$(git -C {worktree} rev-parse --path-format=absolute --git-path info/exclude 2>/dev/null); then \
          mkdir -p \"$(dirname \"$exclude\")\"; \
          for entry in '/.tddy/hooks.log' '/.tddy/answers/'; do \
-         grep -qxF \"$entry\" \"$exclude\" 2>/dev/null || echo \"$entry\" >> \"$exclude\"; done; fi",
+         grep -qxF \"$entry\" \"$exclude\" 2>/dev/null || echo \"$entry\" >> \"$exclude\"; done; fi; \
+         if [ -e {log} ]; then echo {LOG_PRESENT}; fi",
         worktree = shell_quote(&worktree.to_string_lossy()),
+        log = shell_quote(&log),
     );
-    shell
+    let output = shell
         .exec(ExecRequest::new(exclude_command))
         .await?
         .success_or_exited()?;
-    shell.write_file(&log, b"", FileMode::OwnerOnly).await?;
+    // A resume finds the log its session left: it is kept, so a hook the follower has not read yet
+    // is still read, and the persisted offset still counts the same file's bytes. Asked in the same
+    // round trip — on Coder each costs seconds — and a failed one fails the start rather than being
+    // read as "no log".
+    if !String::from_utf8_lossy(&output.stdout).contains(LOG_PRESENT) {
+        shell.write_file(&log, b"", FileMode::OwnerOnly).await?;
+    }
     Ok(log)
 }
 
@@ -259,8 +332,9 @@ pub async fn remove_remote_hook_log(
 
 /// The reader of one target session's hook log, running until it is stopped.
 pub struct RemoteHookFollower {
-    task: Option<tokio::task::JoinHandle<()>>,
+    follower: FileFollower,
     dropped: Arc<AtomicU64>,
+    offset: FollowOffset,
 }
 
 impl RemoteHookFollower {
@@ -268,24 +342,48 @@ impl RemoteHookFollower {
     /// that carries `hook_token` to `sink`. Must be called inside a tokio runtime.
     ///
     /// A stream that ends, or cannot be opened, is opened again after a back-off, from the byte
-    /// the follower had reached.
+    /// the follower had delivered.
     pub fn start(
         shell: Arc<dyn RemoteShell>,
         log_path: &str,
         hook_token: &str,
         sink: Arc<dyn HookSink>,
     ) -> Self {
+        Self::start_resuming(shell, log_path, hook_token, sink, FollowOffset::in_memory())
+    }
+
+    /// [`Self::start`], from the byte `offset` holds and keeping it current: a follower started
+    /// with the same persisted offset — a resume, a re-wire, a restarted daemon — reads on from the
+    /// last line delivered, never from the log's end.
+    pub fn start_resuming(
+        shell: Arc<dyn RemoteShell>,
+        log_path: &str,
+        hook_token: &str,
+        sink: Arc<dyn HookSink>,
+        offset: FollowOffset,
+    ) -> Self {
         let dropped = Arc::new(AtomicU64::new(0));
-        let task = tokio::spawn(follow_log(
-            shell,
-            log_path.to_string(),
-            hook_token.to_string(),
+        let lines = Arc::new(HookLines {
+            log_path: log_path.to_string(),
+            hook_token: hook_token.to_string(),
             sink,
-            Arc::clone(&dropped),
-        ));
+            dropped: Arc::clone(&dropped),
+        });
+        let follower = FileFollower::start(
+            shell,
+            FollowedFile {
+                path: log_path.to_string(),
+                alive_while: log_path.to_string(),
+                waits_for_file: false,
+                label: "hook log",
+            },
+            offset.clone(),
+            lines,
+        );
         Self {
-            task: Some(task),
+            follower,
             dropped,
+            offset,
         }
     }
 
@@ -297,87 +395,33 @@ impl RemoteHookFollower {
 
     /// Stop following: the remote command is ended and nothing more is delivered. Returns once the
     /// reader is gone.
-    pub async fn stop(mut self) {
-        if let Some(task) = self.task.take() {
-            task.abort();
-            let _ = task.await;
-        }
+    pub async fn stop(self) {
+        self.follower.stop().await;
     }
 }
 
-/// Follow `log_path` until aborted: open its stream, deliver its lines, and when the stream
-/// ends open another from the byte reached, after a back-off.
-async fn follow_log(
-    shell: Arc<dyn RemoteShell>,
+/// A followed hook log's lines, checked and delivered as hooks.
+struct HookLines {
     log_path: String,
     hook_token: String,
     sink: Arc<dyn HookSink>,
     dropped: Arc<AtomicU64>,
-) {
-    let mut offset: u64 = 0;
-    let mut pending: Vec<u8> = Vec::new();
-    loop {
-        if let Ok(mut streamed) = shell
-            .exec_streamed(&follow_command(&log_path, offset))
-            .await
-        {
-            read_stream(
-                &mut streamed,
-                &mut offset,
-                &mut pending,
-                (&log_path, &hook_token),
-                &sink,
-                &dropped,
-            )
-            .await;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
 }
 
-/// Read one opened stream to its end, delivering every whole line it carries. `log` is the followed
-/// log's path and the session's hook token.
-async fn read_stream(
-    streamed: &mut tddy_remote_shell::StreamedExec,
-    offset: &mut u64,
-    pending: &mut Vec<u8>,
-    log: (&str, &str),
-    sink: &Arc<dyn HookSink>,
-    dropped: &AtomicU64,
-) {
-    let mut chunk = [0u8; 4096];
-    loop {
-        match streamed.stdout.read(&mut chunk).await {
-            Ok(0) | Err(_) => break,
-            Ok(read) => {
-                *offset += read as u64;
-                pending.extend_from_slice(&chunk[..read]);
-                deliver_whole_lines(pending, log, sink, dropped).await;
-            }
-        }
-    }
-}
-
-/// Deliver every newline-terminated line in `pending`, keeping a trailing partial line there. A line
-/// that is not a hook is counted and logged with why — never with its content, which is untrusted.
-async fn deliver_whole_lines(
-    pending: &mut Vec<u8>,
-    (log_path, hook_token): (&str, &str),
-    sink: &Arc<dyn HookSink>,
-    dropped: &AtomicU64,
-) {
-    while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
-        let mut line: Vec<u8> = pending.drain(..=end).collect();
-        line.pop();
-        if line.last() == Some(&b'\r') {
-            line.pop();
-        }
-        let text = String::from_utf8_lossy(&line);
-        match HookLine::parse(&text, hook_token) {
-            Ok(hook) => sink.deliver(hook).await,
+#[async_trait]
+impl LineSink for HookLines {
+    /// A line that is not a hook is counted and logged with why — never with its content, which is
+    /// untrusted.
+    async fn line(&self, line: &[u8], _end_offset: u64) {
+        let text = String::from_utf8_lossy(line);
+        match HookLine::parse(&text, &self.hook_token) {
+            Ok(hook) => self.sink.deliver(hook).await,
             Err(error) => {
-                dropped.fetch_add(1, Ordering::SeqCst);
-                log::warn!("remote hook log {log_path}: a line was dropped: {error}");
+                self.dropped.fetch_add(1, Ordering::SeqCst);
+                log::warn!(
+                    "remote hook log {}: a line was dropped: {error}",
+                    self.log_path
+                );
             }
         }
     }
@@ -531,7 +575,8 @@ mod tests {
         // Then
         assert_eq!(
             command,
-            "tail -c +1 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' & t=$!; \
+            "stty -opost 2>/dev/null; \
+             tail -c +1 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' 2>/dev/null & t=$!; \
              (while [ -e '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' ]; do sleep 1; done; \
              kill \"$t\") >/dev/null 2>&1 & wait \"$t\""
         );
@@ -548,7 +593,8 @@ mod tests {
         // Then
         assert_eq!(
             command,
-            "tail -c +4097 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' & t=$!; \
+            "stty -opost 2>/dev/null; \
+             tail -c +4097 -f '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' 2>/dev/null & t=$!; \
              (while [ -e '/home/dev/repo/.worktrees/s1/.tddy/hooks.log' ]; do sleep 1; done; \
              kill \"$t\") >/dev/null 2>&1 & wait \"$t\""
         );
@@ -565,7 +611,7 @@ mod tests {
         // Then
         assert_eq!(
             command,
-            r#"tail -c +1 -f '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' & t=$!; (while [ -e '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' ]; do sleep 1; done; kill "$t") >/dev/null 2>&1 & wait "$t""#
+            r#"stty -opost 2>/dev/null; tail -c +1 -f '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' 2>/dev/null & t=$!; (while [ -e '/home/dev/o'\''brien'\''s repo/.tddy/hooks.log' ]; do sleep 1; done; kill "$t") >/dev/null 2>&1 & wait "$t""#
         );
     }
 

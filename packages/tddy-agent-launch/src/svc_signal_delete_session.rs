@@ -87,6 +87,11 @@ impl LaunchSessions {
         }
         self.end_tmux_run(os_user, session_id, session_dir, session_token)
             .await?;
+        // An agent in tmux outlives its client, so no client's exit stopped its followers: its
+        // end does.
+        self.remote_hook_followers
+            .stop_and_remove_log(session_id)
+            .await;
         Ok(format!("tmux session of {session_id} killed"))
     }
 

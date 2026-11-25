@@ -20,7 +20,43 @@ writes the same format; see
 | sandbox | the host-side executor `DaemonToolHandler::execute` — a `running` row then a terminal `completed`/`error` row around `tool_engine::execute_tool_with_env`, publishing each to the hub | `tddy-daemon` |
 | claude-cli | the `PreToolUse`/`PostToolUse` hooks (`tddy-tools session-hook`) report `ReportAgentActivity` — over the session OS user's agent-tool socket ([transport](../../../docs/ft/daemon/claude-cli-session.md#which-transport-a-hook-reports-over)); the daemon pairs Pre→Post per session | hook → this crate |
 | tool | the **coder participant** over LiveKit while the session is live — its presenter appends rows and broadcasts `PresenterEvent::AgentActivity`; the daemon serves the file snapshot over `/rpc` as fallback | `tddy-coder` |
-| cursor-cli | the `preToolUse`/`postToolUse`/`postToolUseFailure` hooks (`tddy-tools session-hook`) report `ReportAgentActivity` — over the session OS user's agent-tool socket ([hook wiring](../../../docs/ft/daemon/cursor-cli-session.md#hook-wiring)); the daemon pairs pre→post by the `tool_use_id` both reports name, and rows carry source `cursor-cli` | hook → this crate |
+| cursor-cli | the `preToolUse`/`postToolUse`/`postToolUseFailure` hooks (`tddy-tools session-hook`) report `ReportAgentActivity` — over the session OS user's agent-tool socket ([hook wiring](../../../docs/ft/daemon/cursor-cli-session.md#hook-wiring)); the daemon pairs pre→post by the `tool_use_id` both reports name (every control or whitespace character recorded as `_` — Cursor's ids embed a `\n`), and rows carry source `cursor-cli`. What Cursor says comes from its own transcript ([below](#activity-from-an-agents-transcript)) | hook → this crate |
+
+## Activity from an agent's transcript
+
+An agent whose spec reads activity from its own transcript file (`coding_agent.activity` —
+[coding-agent-specs.md § Activity](../../tddy-coding-agent-specs/docs/coding-agent-specs.md#activity-coding_agentactivity))
+has that file followed by `tddy-agent-launch` (`transcript_follower`), on this host or on its target,
+each line mapped by the spec into `TranscriptEntry`s and delivered as a `TranscriptLine` to
+`ActivityServiceImpl::record_transcript_line` (through `HookReportDelivery::record_transcript_line`,
+which the session host's delivery serves). A session whose agent follows no transcript is refused.
+
+- **Messages** (`messages: transcript | both`) are appended to `acp-transcript.jsonl` as
+  `user_message_chunk` / `agent_message_chunk` frames and published on the hub's frame channel, as a
+  hook's [spoken message](../../../docs/ft/daemon/claude-cli-session.md#the-transcript-holds-what-was-said) is.
+- **Tool calls.** A transcript names no tool ids (Cursor's), so the two reports of one call are
+  paired by order (`AgentActivityHub::tool_turns`, `tddy-daemon-kernel`'s `ToolTurns`): the Nth call
+  of a tool one source reports in a turn is the Nth the other reports. With `tool_calls: hooks` a
+  paired `tool_use` records nothing — the hooks carry status and result. With `transcript | both`, an
+  unpaired one is a `completed` row (call id `transcript:<line end offset>:<n>`, or the transcript's
+  own id), and a hook row paired with it later **adopts that id**, so the rows coalesce. Turns are
+  aligned on the hooks' `Done` status and the transcript's `turn_end`, so a follower that is behind
+  never pairs one turn's call with the next turn's.
+- **Order.** `ReadSessionTranscript` merges message frames with tool rows by timestamp, and a
+  follower may read a line long after it was written. What the transcript says next happened before
+  every hook call it has not reached yet, so a message is stamped no later than the earliest such
+  call's start, minus 1 ms (`ToolTurns::earliest_unreached_hook_call`). A tool call is replayed at its
+  completion, so text between two calls that ran in parallel is placed before the later call's start.
+- **Dedupe.** With `messages: both`, a message both sources report is recorded once: the hub keeps
+  the last 64 (role, text) per session (`AgentActivityHub::first_time_spoken`); an identical message
+  repeated inside that window is dropped too.
+
+Which hook events carry spoken text is the spec's too (`activity.hook_messages`), read by
+`record_spoken_message` — no event name is matched in code.
+
+Tests: `tests/cursor_transcript_activity.rs` (the real Cursor probe transcript and its hook calls:
+`ReadSessionTranscript` order for a live and a behind follower, the prompt recorded once, sanitised
+ids); `tests/claude_cli_transcript_messages.rs` (hook messages from `claude.yaml`).
 
 ## `AgentActivityHub`
 

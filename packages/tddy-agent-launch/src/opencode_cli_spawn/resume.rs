@@ -17,7 +17,7 @@ use crate::harness_from_spec::{
     harness_template_params, resume_token_adapter, CliSessionAgent, CliSessionType, HarnessLaunch,
 };
 use crate::opencode_cli_spawn::harness_launch::{
-    launch, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
+    launch, HarnessFollowers, HarnessRemote, HarnessRun, HarnessSession, HarnessSpecLaunch,
 };
 use crate::session_acting_identity::SessionAccountAccess;
 use crate::usage_context::{record_usage_context, UsageSubject};
@@ -374,6 +374,7 @@ async fn resume_cli_harness_session(
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),
             }),
+            followers: HarnessFollowers::new(hook_delivery.clone(), hook_followers.clone()),
         },
         HarnessRun::resume(meta.tmux_session.is_some()),
     )

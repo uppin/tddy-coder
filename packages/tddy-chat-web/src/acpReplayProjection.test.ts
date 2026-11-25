@@ -163,3 +163,52 @@ describe("createReplayProjector", () => {
     expect(entries.map((entry) => entry.text)).toEqual(["First.", "Second."]);
   });
 });
+
+/** A recorded user prompt — what a hook-driven or transcript-followed session's user said. */
+function aUserTextFrame(text: string, atUnixMs: number): AcpAgentMessage {
+  return create(AcpAgentMessageSchema, {
+    id: 0n,
+    msg: {
+      case: "sessionUpdate",
+      value: {
+        sessionId: { value: "s1" },
+        timestampUnixMs: BigInt(atUnixMs),
+        update: {
+          update: {
+            case: "userMessageChunk",
+            value: { content: { block: { case: "text", value: { text } } } },
+          },
+        },
+      },
+    },
+  });
+}
+
+describe("a Cursor session's replay, its messages read from Cursor's own transcript", () => {
+  it("shows the prompt and every reply among the tool calls, in the recorded order", () => {
+    // Given — the probe session as `ReadSessionTranscript` replays it: the prompt and the replies
+    // come from Cursor's transcript, the three parallel tool calls from its hooks
+    const frames = [
+      aUserTextFrame("Read README.md, run git log, grep CodingBackend, then summarise.", 1_000),
+      anAgentTextFrame("Running the probe steps without modifying any files.", 1_001),
+      aToolCallFrame({ id: "call-read", title: "Read README.md", status: ToolCallStatus.COMPLETED, atUnixMs: 1_200 }),
+      aToolCallFrame({ id: "call-shell", title: "Shell git log --oneline -3", status: ToolCallStatus.COMPLETED, atUnixMs: 1_300 }),
+      aToolCallFrame({ id: "call-grep", title: "Grep CodingBackend", status: ToolCallStatus.COMPLETED, atUnixMs: 1_400 }),
+      anAgentTextFrame("**Probe complete:** tddy-coder is a TDD workflow monorepo.", 1_500),
+    ];
+
+    // When — the Activity panel projects the replay
+    const entries = projectReplayFrames(frames, 0);
+
+    // Then — the user's prompt and both replies are rows of their own, not dropped beside the tool
+    // chips, and the reply before the calls is not merged into the summary after them
+    expect(entries.map((entry) => [entry.from, entry.text])).toEqual([
+      ["user", "Read README.md, run git log, grep CodingBackend, then summarise."],
+      ["agent", "Running the probe steps without modifying any files."],
+      ["tool", "Read README.md"],
+      ["tool", "Shell git log --oneline -3"],
+      ["tool", "Grep CodingBackend"],
+      ["agent", "**Probe complete:** tddy-coder is a TDD workflow monorepo."],
+    ]);
+  });
+});

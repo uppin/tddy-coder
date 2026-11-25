@@ -121,6 +121,15 @@ extensions:
     model_report:
       - { kind: hook_field, field: model, events: [SessionStart] }
       - { kind: usage, events: [Stop], ignore: ["<synthetic>"] }
+    # What a session said (`coding_agent.activity`): `UserPromptSubmit` carries the prompt and
+    # `Stop` the turn's last reply. Tool calls come from the hooks too. The text Claude writes
+    # between tool calls reaches no hook; its transcript JSONL carries it (a follow-up).
+    activity:
+      messages: hooks
+      tool_calls: hooks
+      hook_messages:
+        - { event: UserPromptSubmit, field: prompt, role: user }
+        - { event: Stop, field: last_assistant_message, role: agent }
     context_globs: [AGENTS.md, ".agents/**", CLAUDE.md, ".claude/**", .mcp.json]
     # --- Headless (`#agent-tools 6/12`): one `claude -p` per turn, for the workflow backend
     # (`tddy-coder --agent claude`) and a headless coding subagent. It renders byte-for-byte what

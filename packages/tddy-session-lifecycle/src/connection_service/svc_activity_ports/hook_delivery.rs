@@ -50,6 +50,17 @@ impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for ActivityHoo
             .map_err(|status| status.message().to_string())
     }
 
+    async fn record_transcript_line(
+        &self,
+        line: tddy_session_activity::TranscriptLine,
+    ) -> Result<(), String> {
+        self.host
+            .activity_service()
+            .record_transcript_line(line)
+            .await
+            .map_err(|status| status.message().to_string())
+    }
+
     async fn post_message_to_orchestrator(
         &self,
         message: tddy_agent_launch::back_channel::RemoteMessage,
