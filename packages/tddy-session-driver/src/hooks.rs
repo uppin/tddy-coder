@@ -18,8 +18,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tddy_agent_launch::remote_hook_follower::{
-    create_remote_hook_log, remove_remote_hook_log, ActivityHookSink, HookLine, HookReportDelivery,
-    HookSink, RemoteHookFollower, RemoteHookFollowers,
+    create_remote_hook_log, remove_remote_hook_log, ActivityHookSink, HookDeliveryError, HookLine,
+    HookReportDelivery, HookSink, RemoteHookFollower, RemoteHookFollowers,
 };
 use tddy_coding_agent_specs::CodingAgentSpec;
 use tddy_core::HookCommandParams;
@@ -150,7 +150,7 @@ impl HookReportDelivery for RecordingDelivery {
     async fn report_session_status(
         &self,
         request: ReportSessionStatusRequest,
-    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, String> {
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, HookDeliveryError> {
         self.recorder.record_report(json!({
             "kind": "session_status",
             "session_id": request.session_id,
@@ -174,7 +174,7 @@ impl HookReportDelivery for RecordingDelivery {
     async fn await_question_answer(
         &self,
         _request: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
-    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, String> {
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, HookDeliveryError> {
         Ok(tddy_service::proto::activity::AwaitQuestionAnswerResponse {
             outcome: tddy_service::proto::activity::AwaitQuestionOutcome::NoOrchestrator as i32,
             ..Default::default()
@@ -184,7 +184,7 @@ impl HookReportDelivery for RecordingDelivery {
     async fn report_agent_activity(
         &self,
         request: ReportAgentActivityRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), HookDeliveryError> {
         self.recorder.record_report(json!({
             "kind": "agent_activity",
             "session_id": request.session_id,

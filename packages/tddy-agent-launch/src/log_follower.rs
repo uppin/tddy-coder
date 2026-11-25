@@ -1,13 +1,16 @@
-//! Following a growing file through the remote-shell port: the one byte-offset reader behind both a
-//! target session's hook log ([`crate::remote_hook_follower`]) and an agent's own transcript
-//! ([`crate::transcript_follower`]), on a target or — through `LocalShell` — on this host.
+//! Following a growing file through the remote-shell port: the byte-offset reader behind a
+//! target session's hook log ([`crate::remote_hook_follower`], streamed) and an agent's own
+//! transcript ([`crate::transcript_follower`], polled), on a target or — through `LocalShell` —
+//! on this host.
 //!
-//! The follower runs a `tail -c +<offset + 1>` of the file through [`RemoteShell::exec_streamed`]
-//! and hands every whole line to a [`LineSink`], in file order. Its offset counts the bytes of the
-//! lines it has **delivered**, never the bytes it has read: a torn last line is read again whole
-//! when a stream is reopened. That offset is kept in a [`FollowOffset`], which a follower that is to
-//! survive its own replacement (a resume, a re-wire, a restarted daemon) persists, so the next one
-//! reads on from the last delivered byte rather than from the file's start or its end.
+//! The streaming follower runs a `tail -c +<offset + 1>` of the file through
+//! [`RemoteShell::exec_streamed`] and hands every whole line to a [`LineSink`], in file order. The
+//! polling follower asks the file's size and reads only its new suffix with one-shot commands, for
+//! a file its writer rewrites atomically (n2). Both offsets count the bytes of the lines they have
+//! **delivered**, never the bytes read: a torn last line is read again whole on the next stream or
+//! poll. That offset is kept in a [`FollowOffset`], which a follower that is to survive its own
+//! replacement (a resume, a re-wire, a restarted daemon) persists, so the next one reads on from
+//! the last delivered byte rather than from the file's start or its end.
 //!
 //! A pty (`coder ssh` always runs its command in one) would turn every `\n` the file holds into
 //! `\r\n` on the stream (`onlcr`), and a follower counting stream bytes would then resume past what
@@ -38,6 +41,10 @@ pub(crate) fn shell_quote(arg: &str) -> String {
 /// must not cost a remote command every 200 ms.
 const REOPEN_BACKOFF: Duration = Duration::from_millis(200);
 const REOPEN_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+/// How often a polling follower asks for its file's size (an agent's transcript, n2): half a
+/// second costs one cheap `wc` per session between prompts and delays the feed imperceptibly.
+const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// The longest line a follower holds while waiting for its newline: a followed file is untrusted,
 /// and one that never writes a newline must not grow the daemon without bound. A longer line is
@@ -226,6 +233,25 @@ impl FileFollower {
         }
     }
 
+    /// Start polling `file` on `shell`'s machine from `offset`, delivering every whole line past
+    /// it to `sink`: for a file its writer rewrites atomically (an agent's transcript, n2), where
+    /// a `tail -F` would replay from the start. Must be called inside a tokio runtime.
+    ///
+    /// Every [`POLL_INTERVAL`] the file's size is asked for with one `wc`; grown, its new suffix
+    /// is read with one `tail -c` and delivered. A file that does not exist yet (a transcript
+    /// before its first prompt) reads as empty until it appears. `alive_while` is not watched: a
+    /// poll is one-shot commands that exit at once, so nothing runs on past an abort.
+    pub fn start_polling(
+        shell: Arc<dyn RemoteShell>,
+        file: FollowedFile,
+        offset: FollowOffset,
+        sink: Arc<dyn LineSink>,
+    ) -> Self {
+        Self {
+            task: Some(tokio::spawn(follow_polling(shell, file, offset, sink))),
+        }
+    }
+
     /// Stop following at once, without waiting for the reader to be gone: a follower being replaced
     /// by another of the same file, which must not deliver beside it.
     pub fn abort(&self) {
@@ -299,6 +325,111 @@ async fn follow(
             (backoff * 2).min(REOPEN_BACKOFF_MAX)
         };
         tokio::time::sleep(backoff).await;
+    }
+}
+
+/// Poll `file` until aborted: grown, its new suffix is delivered; shrunk (a transcript never
+/// shrinks), it is read from the start. A trailing partial line stays for the next poll.
+async fn follow_polling(
+    shell: Arc<dyn RemoteShell>,
+    file: FollowedFile,
+    offset: FollowOffset,
+    sink: Arc<dyn LineSink>,
+) {
+    let target = shell.address();
+    let mut delivered = offset.load(&file.path);
+    log::info!(
+        "polling the {} {} on {target} from byte {delivered}",
+        file.label,
+        file.path
+    );
+    loop {
+        match file_size(shell.as_ref(), &file.path).await {
+            Some(size) if size < delivered => {
+                log::warn!(
+                    "the {} {} on {target} shrank from byte {delivered} to {size}: reading from the start",
+                    file.label,
+                    file.path
+                );
+                delivered = 0;
+            }
+            Some(size) if size > delivered => {
+                match read_suffix(shell.as_ref(), &file.path, delivered).await {
+                    Some(bytes) => {
+                        deliver_whole_lines(&bytes, &mut delivered, (&offset, &file.path), &sink)
+                            .await;
+                    }
+                    None => {
+                        log::warn!(
+                            "the {} {} on {target} could not be read from byte {delivered}",
+                            file.label,
+                            file.path
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// The size of `path` on `shell`'s machine in bytes: `None` for a file that does not exist yet
+/// or cannot be asked for.
+async fn file_size(shell: &dyn RemoteShell, path: &str) -> Option<u64> {
+    let output = shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "wc -c < {}",
+            shell_quote(path)
+        )))
+        .await
+        .ok()?;
+    if output.status != 0 {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+/// The bytes of `path` from `from` on, `None` when they cannot be read.
+async fn read_suffix(shell: &dyn RemoteShell, path: &str, from: u64) -> Option<Vec<u8>> {
+    let output = shell
+        .exec(tddy_remote_shell::ExecRequest::new(format!(
+            "tail -c +{} {}",
+            from + 1,
+            shell_quote(path)
+        )))
+        .await
+        .ok()?;
+    (output.status == 0).then_some(output.stdout)
+}
+
+/// Deliver every whole line `bytes` holds — all but a trailing partial one — advancing `delivered`
+/// past each (a `\r` before a `\n` is a pty's, not the file's) and saving the offset.
+async fn deliver_whole_lines(
+    bytes: &[u8],
+    delivered: &mut u64,
+    (offset, followed): (&FollowOffset, &str),
+    sink: &Arc<dyn LineSink>,
+) {
+    let mut start = 0usize;
+    for (index, byte) in bytes.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+        let mut line = &bytes[start..index];
+        if line.last() == Some(&b'\r') {
+            line = &line[..line.len() - 1];
+        }
+        *delivered += line.len() as u64 + 1;
+        if line.len() > MAX_LINE_BYTES {
+            log::warn!(
+                "{followed}: the line ending at byte {delivered} is longer than {MAX_LINE_BYTES} bytes and is skipped"
+            );
+        } else {
+            sink.line(line, *delivered).await;
+        }
+        offset.save(*delivered, followed);
+        start = index + 1;
     }
 }
 

@@ -109,8 +109,9 @@ pub(crate) async fn hold_and_answer(
                 },
                 Err(error) => {
                     log::warn!(
-                        "holding for the answer of session {}'s waiting hook refused: {error}",
-                        hook.session_id
+                        "holding for the answer of session {}'s waiting hook refused: {}",
+                        hook.session_id,
+                        error.message()
                     );
                     None
                 }

@@ -213,6 +213,138 @@ impl ACursorHost {
         }
     }
 
+    /// The follower read one transcript line holding `entries` (a synthetic turn, not the fixture).
+    async fn transcript_entries_are_read(
+        &self,
+        entries: Vec<tddy_coding_agent_specs::TranscriptEntry>,
+        end_offset: u64,
+    ) {
+        self.service()
+            .record_transcript_line(TranscriptLine {
+                session_id: SESSION_ID.to_string(),
+                os_user: OS_USER.to_string(),
+                entries,
+                end_offset,
+            })
+            .await
+            .unwrap_or_else(|e| panic!("synthetic transcript line is accepted: {e:?}"));
+        tokio::time::sleep(Duration::from_millis(3)).await;
+    }
+
+    /// One full turn with `tools` (each: name, id), whose transcript holds the prompt, the opening
+    /// text with the tools, and the closing text — Hooks first (a behind follower), then transcript.
+    async fn a_behind_turn_runs(
+        &self,
+        turn: usize,
+        prompt: &str,
+        opening: &str,
+        tools: &[(&str, &str)],
+        closing: &str,
+        end_base: u64,
+    ) {
+        // Hooks of the whole turn fire before any transcript line is read.
+        self.hook_fires(
+            "beforeSubmitPrompt",
+            serde_json::json!({"hook_event_name": "beforeSubmitPrompt", "prompt": prompt,
+                               "conversation_id": CHAT_ID, "model": "composer-2.5"}),
+        )
+        .await;
+        for (tool, id) in tools {
+            self.tool_starts(tool, id, serde_json::json!({"turn": turn}))
+                .await;
+        }
+        for (tool, id) in tools {
+            self.tool_ends(tool, id).await;
+        }
+        self.turn_stops().await;
+        // Then the transcript lines arrive: prompt, opening+tools, closing, turn end.
+        use tddy_coding_agent_specs::TranscriptEntry as E;
+        self.transcript_entries_are_read(
+            vec![E::UserMessage {
+                text: prompt.to_string(),
+            }],
+            end_base,
+        )
+        .await;
+        let mut opening_entries = vec![E::AgentMessage {
+            text: opening.to_string(),
+        }];
+        for (tool, _) in tools {
+            opening_entries.push(E::ToolUse {
+                name: tool.to_string(),
+                input: serde_json::json!({"turn": turn}),
+                id: None,
+            });
+        }
+        self.transcript_entries_are_read(opening_entries, end_base + 100)
+            .await;
+        self.transcript_entries_are_read(
+            vec![E::AgentMessage {
+                text: closing.to_string(),
+            }],
+            end_base + 200,
+        )
+        .await;
+        self.transcript_entries_are_read(vec![E::TurnEnd], end_base + 300)
+            .await;
+    }
+
+    /// One full turn as a live follower sees it: the transcript's opening+tools line arrives
+    /// before the hooks report those tools (n3's other order).
+    async fn a_live_turn_runs(
+        &self,
+        turn: usize,
+        prompt: &str,
+        opening: &str,
+        tools: &[(&str, &str)],
+        closing: &str,
+        end_base: u64,
+    ) {
+        use tddy_coding_agent_specs::TranscriptEntry as E;
+        self.hook_fires(
+            "beforeSubmitPrompt",
+            serde_json::json!({"hook_event_name": "beforeSubmitPrompt", "prompt": prompt,
+                               "conversation_id": CHAT_ID, "model": "composer-2.5"}),
+        )
+        .await;
+        self.transcript_entries_are_read(
+            vec![E::UserMessage {
+                text: prompt.to_string(),
+            }],
+            end_base,
+        )
+        .await;
+        let mut opening_entries = vec![E::AgentMessage {
+            text: opening.to_string(),
+        }];
+        for (tool, _) in tools {
+            opening_entries.push(E::ToolUse {
+                name: tool.to_string(),
+                input: serde_json::json!({"turn": turn}),
+                id: None,
+            });
+        }
+        self.transcript_entries_are_read(opening_entries, end_base + 100)
+            .await;
+        for (tool, id) in tools {
+            self.tool_starts(tool, id, serde_json::json!({"turn": turn}))
+                .await;
+        }
+        for (tool, id) in tools {
+            self.tool_ends(tool, id).await;
+        }
+        self.transcript_entries_are_read(
+            vec![E::AgentMessage {
+                text: closing.to_string(),
+            }],
+            end_base + 200,
+        )
+        .await;
+        self.turn_stops().await;
+        self.transcript_entries_are_read(vec![E::TurnEnd], end_base + 300)
+            .await;
+    }
+
     /// What `ReadSessionTranscript` lists: each item's kind and text, in order.
     fn transcript(&self) -> Vec<(String, String)> {
         tddy_service::acp_replay::read_session_transcript(&self.session_dir())
@@ -427,4 +559,330 @@ async fn a_cursor_call_id_carries_no_newline() {
             "call-64785683-composer_call_60DHMwTE_fc_199e15db_2",
         ]
     );
+}
+
+#[tokio::test]
+async fn in_a_third_turn_behind_the_hooks_the_opening_text_still_comes_before_its_tools() {
+    // Given a cursor-cli session two turns in, followed from behind (n3's probe: turn 3's opening
+    // sentence landed after its Grep and Shell calls)
+    let host = ACursorHost::holding_a_cursor_session();
+    host.a_behind_turn_runs(
+        1,
+        "prompt one",
+        "opening one",
+        &[("Read", "t1-read")],
+        "closing one",
+        1000,
+    )
+    .await;
+    host.a_behind_turn_runs(
+        2,
+        "prompt two",
+        "opening two",
+        &[("Glob", "t2-glob")],
+        "closing two",
+        2000,
+    )
+    .await;
+
+    // When turn three runs: prompt, opening text, Grep and Shell, closing text
+    host.a_behind_turn_runs(
+        3,
+        "prompt three",
+        "opening three",
+        &[("Grep", "t3-grep"), ("Shell", "t3-shell")],
+        "closing three",
+        3000,
+    )
+    .await;
+
+    // Then turn three reads prompt, opening, Grep, Shell, closing — the opening before its tools
+    assert_eq!(turn_three_shape(&host), turn_three_order());
+}
+
+#[tokio::test]
+async fn in_a_third_turn_live_the_opening_text_still_comes_before_its_tools() {
+    // Given a cursor-cli session two turns in, followed live (n3's other order: the transcript
+    // line arrives before the hook rows)
+    let host = ACursorHost::holding_a_cursor_session();
+    host.a_live_turn_runs(
+        1,
+        "prompt one",
+        "opening one",
+        &[("Read", "t1-read")],
+        "closing one",
+        1000,
+    )
+    .await;
+    host.a_live_turn_runs(
+        2,
+        "prompt two",
+        "opening two",
+        &[("Glob", "t2-glob")],
+        "closing two",
+        2000,
+    )
+    .await;
+
+    // When turn three runs live: prompt, opening text, Grep and Shell, closing text
+    host.a_live_turn_runs(
+        3,
+        "prompt three",
+        "opening three",
+        &[("Grep", "t3-grep"), ("Shell", "t3-shell")],
+        "closing three",
+        3000,
+    )
+    .await;
+
+    // Then
+    assert_eq!(turn_three_shape(&host), turn_three_order());
+}
+
+#[tokio::test]
+async fn with_first_turn_hooks_lost_the_third_opening_still_comes_before_its_tools() {
+    // Given turn one whose hooks were refused before registration (n1: transcript landed, hooks
+    // did not), then turn two normally — and, as Cursor's file holds it, no `turn_ended` until
+    // the very end (a 142-line probe transcript carries exactly one).
+    let host = ACursorHost::holding_a_cursor_session();
+    use tddy_coding_agent_specs::TranscriptEntry as E;
+    // Turn one transcript only (its hooks never reached ToolTurns), no turn end.
+    host.transcript_entries_are_read(
+        vec![E::UserMessage {
+            text: "prompt one".to_string(),
+        }],
+        1000,
+    )
+    .await;
+    host.transcript_entries_are_read(
+        vec![
+            E::AgentMessage {
+                text: "opening one".to_string(),
+            },
+            E::ToolUse {
+                name: "Read".to_string(),
+                input: serde_json::json!({"turn": 1}),
+                id: None,
+            },
+            E::ToolUse {
+                name: "Shell".to_string(),
+                input: serde_json::json!({"turn": 1}),
+                id: None,
+            },
+            E::ToolUse {
+                name: "Grep".to_string(),
+                input: serde_json::json!({"turn": 1}),
+                id: None,
+            },
+        ],
+        1100,
+    )
+    .await;
+    host.transcript_entries_are_read(
+        vec![E::AgentMessage {
+            text: "closing one".to_string(),
+        }],
+        1200,
+    )
+    .await;
+    // Turn two behind the hooks, no turn end either.
+    host.hook_fires(
+        "beforeSubmitPrompt",
+        serde_json::json!({"hook_event_name": "beforeSubmitPrompt", "prompt": "prompt two",
+                           "conversation_id": CHAT_ID, "model": "composer-2.5"}),
+    )
+    .await;
+    host.tool_starts("Glob", "t2-glob", serde_json::json!({"turn": 2}))
+        .await;
+    host.tool_ends("Glob", "t2-glob").await;
+    host.turn_stops().await;
+    host.transcript_entries_are_read(
+        vec![E::UserMessage {
+            text: "prompt two".to_string(),
+        }],
+        2000,
+    )
+    .await;
+    host.transcript_entries_are_read(
+        vec![
+            E::AgentMessage {
+                text: "opening two".to_string(),
+            },
+            E::ToolUse {
+                name: "Glob".to_string(),
+                input: serde_json::json!({"turn": 2}),
+                id: None,
+            },
+        ],
+        2100,
+    )
+    .await;
+    host.transcript_entries_are_read(
+        vec![E::AgentMessage {
+            text: "closing two".to_string(),
+        }],
+        2200,
+    )
+    .await;
+
+    // When turn three runs (hooks first, then transcript, no turn end yet)
+    host.hook_fires(
+        "beforeSubmitPrompt",
+        serde_json::json!({"hook_event_name": "beforeSubmitPrompt", "prompt": "prompt three",
+                           "conversation_id": CHAT_ID, "model": "composer-2.5"}),
+    )
+    .await;
+    host.tool_starts("Grep", "t3-grep", serde_json::json!({"turn": 3}))
+        .await;
+    host.tool_starts("Shell", "t3-shell", serde_json::json!({"turn": 3}))
+        .await;
+    host.tool_ends("Grep", "t3-grep").await;
+    host.tool_ends("Shell", "t3-shell").await;
+    host.turn_stops().await;
+    host.transcript_entries_are_read(
+        vec![E::UserMessage {
+            text: "prompt three".to_string(),
+        }],
+        3000,
+    )
+    .await;
+    host.transcript_entries_are_read(
+        vec![
+            E::AgentMessage {
+                text: "opening three".to_string(),
+            },
+            E::ToolUse {
+                name: "Grep".to_string(),
+                input: serde_json::json!({"turn": 3}),
+                id: None,
+            },
+            E::ToolUse {
+                name: "Shell".to_string(),
+                input: serde_json::json!({"turn": 3}),
+                id: None,
+            },
+        ],
+        3100,
+    )
+    .await;
+    host.transcript_entries_are_read(
+        vec![E::AgentMessage {
+            text: "closing three".to_string(),
+        }],
+        3200,
+    )
+    .await;
+
+    // Then turn three still reads prompt, opening, Grep, Shell, closing
+    assert_eq!(turn_three_shape(&host), turn_three_order());
+}
+
+#[tokio::test]
+async fn with_duplicate_earlier_turns_the_third_opening_still_comes_before_its_tools() {
+    // Given turns one and two, then their transcript lines re-delivered as n2's re-read does
+    let host = ACursorHost::holding_a_cursor_session();
+    host.a_behind_turn_runs(
+        1,
+        "prompt one",
+        "opening one",
+        &[("Read", "t1-read")],
+        "closing one",
+        1000,
+    )
+    .await;
+    host.a_behind_turn_runs(
+        2,
+        "prompt two",
+        "opening two",
+        &[("Glob", "t2-glob")],
+        "closing two",
+        2000,
+    )
+    .await;
+    // The re-read duplicates of turns one and two (entries only; turn ends too, as the file holds)
+    use tddy_coding_agent_specs::TranscriptEntry as E;
+    for (turn, prompt, opening, tools, closing, base) in [
+        (
+            1,
+            "prompt one",
+            "opening one",
+            vec!["Read"],
+            "closing one",
+            1100,
+        ),
+        (
+            2,
+            "prompt two",
+            "opening two",
+            vec!["Glob"],
+            "closing two",
+            2100,
+        ),
+    ] {
+        host.transcript_entries_are_read(
+            vec![E::UserMessage {
+                text: prompt.to_string(),
+            }],
+            base,
+        )
+        .await;
+        let mut entries = vec![E::AgentMessage {
+            text: opening.to_string(),
+        }];
+        for tool in tools {
+            entries.push(E::ToolUse {
+                name: tool.to_string(),
+                input: serde_json::json!({"turn": turn}),
+                id: None,
+            });
+        }
+        host.transcript_entries_are_read(entries, base + 100).await;
+        host.transcript_entries_are_read(
+            vec![E::AgentMessage {
+                text: closing.to_string(),
+            }],
+            base + 200,
+        )
+        .await;
+        host.transcript_entries_are_read(vec![E::TurnEnd], base + 300)
+            .await;
+    }
+
+    // When turn three runs
+    host.a_behind_turn_runs(
+        3,
+        "prompt three",
+        "opening three",
+        &[("Grep", "t3-grep"), ("Shell", "t3-shell")],
+        "closing three",
+        3000,
+    )
+    .await;
+
+    // Then
+    assert_eq!(turn_three_shape(&host), turn_three_order());
+}
+
+/// Turn three's five items in transcript order, shortened to what identifies each.
+fn turn_three_shape(host: &ACursorHost) -> Vec<(String, String)> {
+    let turn_three: Vec<(String, String)> = host
+        .transcript()
+        .into_iter()
+        .filter(|(kind, text)| {
+            (kind == "user_message" && text == "prompt three")
+                || (kind == "agent_message" && (text == "opening three" || text == "closing three"))
+                || (kind == "tool_call" && (text.starts_with("Grep") || text.starts_with("Shell")))
+        })
+        .collect();
+    shape(&turn_three)
+}
+
+fn turn_three_order() -> Vec<(String, String)> {
+    vec![
+        ("user_message".to_string(), "prompt three".to_string()),
+        ("agent_message".to_string(), "opening three".to_string()),
+        ("tool_call".to_string(), "Grep".to_string()),
+        ("tool_call".to_string(), "Shell".to_string()),
+        ("agent_message".to_string(), "closing three".to_string()),
+    ]
 }

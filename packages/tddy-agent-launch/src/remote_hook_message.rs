@@ -36,6 +36,9 @@ pub(crate) async fn post_reported_message(
         return;
     };
     if let Err(error) = delivery.post_message_to_orchestrator(message).await {
-        log::warn!("session {session_id}: its report to its orchestrator was refused: {error}");
+        log::warn!(
+            "session {session_id}: its report to its orchestrator was refused: {}",
+            error.message()
+        );
     }
 }

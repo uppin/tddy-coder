@@ -12,7 +12,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pretty_assertions::assert_eq;
 use tddy_agent_launch::remote_hook_follower::{
-    follow_command, FollowOffset, HookLine, HookSink, RemoteHookFollower,
+    follow_command, ActivityHookSink, FollowOffset, HookDeliveryError, HookLine,
+    HookReportDelivery, HookSink, RemoteHookFollower,
 };
 use tddy_remote_shell::{InMemoryShell, ScriptedStream, ShellCall};
 use tddy_testing_commons::wait::eventually;
@@ -488,4 +489,150 @@ async fn a_hook_log_that_could_not_be_removed_is_read_on_at_the_next_start_not_r
 
     // Then the offset still counts what was delivered: a start that keeps the log reads on
     assert_eq!(offset.load(LOG), started.line().len() as u64);
+}
+
+/// A session host whose session is registered after its follower starts: every report is refused
+/// with "session not found" until `register()` runs, as `ActivityServiceImpl::hook_session` does
+/// when the start has not written `.session.yaml` yet (n1).
+struct RegisteringLate {
+    registered: std::sync::atomic::AtomicBool,
+    statuses: Mutex<Vec<String>>,
+    activities: Mutex<Vec<(String, String)>>,
+}
+
+impl RegisteringLate {
+    fn new() -> Self {
+        Self {
+            registered: std::sync::atomic::AtomicBool::new(false),
+            statuses: Mutex::new(Vec::new()),
+            activities: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn register(&self) {
+        self.registered
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn is_registered(&self) -> bool {
+        self.registered.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    async fn once_it_holds(
+        &self,
+        statuses: usize,
+        activities: usize,
+    ) -> (Vec<String>, Vec<(String, String)>) {
+        eventually(
+            &format!("{statuses} statuses and {activities} activities to land"),
+            OBSERVE,
+            || {
+                let held_statuses = self.statuses.lock().unwrap().clone();
+                let held_activities = self.activities.lock().unwrap().clone();
+                let (have_statuses, have_activities) = (held_statuses.len(), held_activities.len());
+                (have_statuses >= statuses && have_activities >= activities)
+                    .then_some((held_statuses, held_activities))
+                    .ok_or(format!(
+                        "landed so far: {have_statuses} statuses, {have_activities} activities"
+                    ))
+            },
+        )
+        .await
+    }
+}
+
+#[async_trait]
+impl HookReportDelivery for RegisteringLate {
+    async fn report_session_status(
+        &self,
+        request: tddy_service::proto::activity::ReportSessionStatusRequest,
+    ) -> Result<tddy_service::proto::activity::ReportSessionStatusResponse, HookDeliveryError> {
+        if !self.is_registered() {
+            return Err(HookDeliveryError::session_not_registered_yet());
+        }
+        self.statuses
+            .lock()
+            .unwrap()
+            .push(format!("{} {}", request.hook_event_name, request.status));
+        Ok(Default::default())
+    }
+
+    async fn await_question_answer(
+        &self,
+        _: tddy_service::proto::activity::AwaitQuestionAnswerRequest,
+    ) -> Result<tddy_service::proto::activity::AwaitQuestionAnswerResponse, HookDeliveryError> {
+        Ok(Default::default())
+    }
+
+    async fn report_agent_activity(
+        &self,
+        request: tddy_service::proto::activity::ReportAgentActivityRequest,
+    ) -> Result<(), HookDeliveryError> {
+        if !self.is_registered() {
+            return Err(HookDeliveryError::session_not_registered_yet());
+        }
+        self.activities
+            .lock()
+            .unwrap()
+            .push((request.event, request.tool_name));
+        Ok(())
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn hooks_logged_before_the_session_is_registered_land_once_it_is_with_no_duplicates() {
+    // Given a target session whose follower starts before its `.session.yaml` is written — the
+    // start writes it after the launch, and the follower starts inside the launch (n1)
+    let shell = InMemoryShell::new("buildbox");
+    let daemon = Arc::new(RegisteringLate::new());
+    let tail = shell.streams(the_follow_command_from(0));
+    let sink = ActivityHookSink::new(daemon.clone(), "s1", TOKEN, "dev");
+    let _follower = RemoteHookFollower::start(Arc::new(shell.clone()), LOG, TOKEN, Arc::new(sink));
+    // The probe's first turn: a prompt, one tool call, the turn's end
+    let prompt = a_hook("beforeSubmitPrompt", "do it").with_payload(
+        r#"{"hook_event_name":"beforeSubmitPrompt","prompt":"do it","conversation_id":"c1"}"#,
+    );
+    let pre = a_hook("preToolUse", "Read").with_payload(
+        r#"{"hook_event_name":"preToolUse","tool_name":"Read","tool_input":{"path":"a"},"tool_use_id":"t1"}"#,
+    );
+    let post = a_hook("postToolUse", "Read").with_payload(
+        r#"{"hook_event_name":"postToolUse","tool_name":"Read","tool_input":{"path":"a"},"tool_output":"{\"ok\":true}","tool_use_id":"t1"}"#,
+    );
+    let stop = a_hook("stop", "done")
+        .with_payload(r#"{"hook_event_name":"stop","status":"completed","conversation_id":"c1"}"#);
+
+    // When every hook is logged before the session registers, then it registers
+    tail.prints(logged(&[&prompt, &pre, &post, &stop])).await;
+    // Let the follower attempt delivery while unregistered (and, without the fix, consume them).
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    daemon.register();
+    let (statuses, activities) = daemon.once_it_holds(3, 2).await;
+
+    // Then every hook landed once, in order: the prompt and the stop as statuses, the tool call's
+    // pre and post as activity (the post also reports ExecutingTool)
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (statuses_after, activities_after) = (
+        daemon.statuses.lock().unwrap().clone(),
+        daemon.activities.lock().unwrap().clone(),
+    );
+    assert_eq!(
+        (
+            (statuses, activities),
+            (statuses_after.len(), activities_after.len())
+        ),
+        (
+            (
+                vec![
+                    "beforeSubmitPrompt Running".to_string(),
+                    "postToolUse ExecutingTool".to_string(),
+                    "stop Done".to_string(),
+                ],
+                vec![
+                    ("PreToolUse".to_string(), "Read".to_string()),
+                    ("PostToolUse".to_string(), "Read".to_string()),
+                ],
+            ),
+            (3, 2),
+        ),
+    );
 }

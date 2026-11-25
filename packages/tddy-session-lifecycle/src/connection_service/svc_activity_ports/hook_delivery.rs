@@ -17,54 +17,68 @@ impl tddy_agent_launch::remote_hook_follower::HookReportDelivery for ActivityHoo
     async fn report_session_status(
         &self,
         request: ReportSessionStatusRequest,
-    ) -> Result<ReportSessionStatusResponse, String> {
+    ) -> Result<
+        ReportSessionStatusResponse,
+        tddy_agent_launch::remote_hook_follower::HookDeliveryError,
+    > {
+        use tddy_agent_launch::remote_hook_follower::HookDeliveryError;
         self.host
             .activity_service()
             .report_session_status(Request::direct(request))
             .await
             .map(|response| response.into_inner())
-            .map_err(|status| status.message().to_string())
+            .map_err(HookDeliveryError::from_status)
     }
 
     async fn await_question_answer(
         &self,
         request: AwaitQuestionAnswerRequest,
-    ) -> Result<AwaitQuestionAnswerResponse, String> {
+    ) -> Result<
+        AwaitQuestionAnswerResponse,
+        tddy_agent_launch::remote_hook_follower::HookDeliveryError,
+    > {
+        use tddy_agent_launch::remote_hook_follower::HookDeliveryError;
         self.host
             .activity_service()
             .await_question_answer(Request::direct(request))
             .await
             .map(|response| response.into_inner())
-            .map_err(|status| status.message().to_string())
+            .map_err(HookDeliveryError::from_status)
     }
 
     async fn report_agent_activity(
         &self,
         request: ReportAgentActivityRequest,
-    ) -> Result<(), String> {
+    ) -> Result<(), tddy_agent_launch::remote_hook_follower::HookDeliveryError> {
+        use tddy_agent_launch::remote_hook_follower::HookDeliveryError;
         self.host
             .activity_service()
             .report_agent_activity(Request::direct(request))
             .await
             .map(|_| ())
-            .map_err(|status| status.message().to_string())
+            .map_err(HookDeliveryError::from_status)
     }
 
     async fn record_transcript_line(
         &self,
         line: tddy_session_activity::TranscriptLine,
-    ) -> Result<(), String> {
+    ) -> Result<(), tddy_agent_launch::remote_hook_follower::HookDeliveryError> {
+        use tddy_agent_launch::remote_hook_follower::HookDeliveryError;
         self.host
             .activity_service()
             .record_transcript_line(line)
             .await
-            .map_err(|status| status.message().to_string())
+            .map_err(HookDeliveryError::from_status)
     }
 
     async fn post_message_to_orchestrator(
         &self,
         message: tddy_agent_launch::back_channel::RemoteMessage,
-    ) -> Result<(), String> {
-        self.host.post_remote_message_to_orchestrator(message).await
+    ) -> Result<(), tddy_agent_launch::remote_hook_follower::HookDeliveryError> {
+        use tddy_agent_launch::remote_hook_follower::HookDeliveryError;
+        self.host
+            .post_remote_message_to_orchestrator(message)
+            .await
+            .map_err(HookDeliveryError::failed_precondition)
     }
 }

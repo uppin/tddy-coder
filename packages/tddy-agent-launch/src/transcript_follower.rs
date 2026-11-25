@@ -4,11 +4,12 @@
 //! hooks reach it by.
 //!
 //! The file is on the machine the agent runs on, so it is followed through that machine's shell —
-//! the session's remote shell on a target (SSH or Coder), `LocalShell` on this host — by the one
-//! [`crate::log_follower::FileFollower`] the hook log is followed with: the same byte offsets, the
-//! same pty rules, the same resume from the last delivered byte. Its path is rendered from the spec
-//! with that machine's values: on a target its home is the target shell's `$HOME` and its worktree
-//! the target's, never this host's.
+//! the session's remote shell on a target (SSH or Coder), `LocalShell` on this host — by polling
+//! ([`crate::log_follower::FileFollower::start_polling`]): the agent rewrites it atomically on
+//! every new prompt, and a `tail -F` would replay it from the start (n2). Byte offsets and resume
+//! from the last delivered byte are shared with the hook log's streaming follower. Its path is
+//! rendered from the spec with that machine's values: on a target its home is the target shell's
+//! `$HOME` and its worktree the target's, never this host's.
 //!
 //! The follower is the session's, not its terminal's: an agent run in tmux on a target outlives
 //! the client attached to it, and its follower keeps reading across a detach. Its offset is
@@ -128,8 +129,9 @@ pub struct TranscriptOwner {
 }
 
 /// Start following `path` on `shell`'s machine, mapping each line by `transcript` and delivering
-/// it to `delivery`, from the byte `offset` holds; the remote `tail` lives while `alive_while`
-/// exists there.
+/// it to `delivery`, from the byte `offset` holds. Polled, not tailed: the agent rewrites its
+/// transcript atomically on every new prompt, and a `tail -F` would replay it from the start
+/// (n2). A file that does not exist yet reads as empty until its first prompt appears.
 pub fn follow_transcript(
     shell: Arc<dyn RemoteShell>,
     file: (&str, &str),
@@ -139,7 +141,7 @@ pub fn follow_transcript(
     offset: FollowOffset,
 ) -> FileFollower {
     let (path, alive_while) = file;
-    FileFollower::start(
+    FileFollower::start_polling(
         shell,
         FollowedFile {
             path: path.to_string(),
@@ -184,20 +186,22 @@ impl LineSink for TranscriptLines {
         if entries.is_empty() {
             return;
         }
-        let delivered = self
-            .delivery
-            .record_transcript_line(tddy_session_activity::TranscriptLine {
+        let delivered = crate::remote_hook_delivery::record_transcript_holding_for_registration(
+            &self.delivery,
+            tddy_session_activity::TranscriptLine {
                 session_id: self.owner.session_id.clone(),
                 os_user: self.owner.os_user.clone(),
                 entries,
                 end_offset,
-            })
-            .await;
+            },
+        )
+        .await;
         if let Err(error) = delivered {
             log::warn!(
-                "agent transcript {}: the line ending at byte {end_offset} of session {} was refused: {error}",
+                "agent transcript {}: the line ending at byte {end_offset} of session {} was refused: {}",
                 self.path,
-                self.owner.session_id
+                self.owner.session_id,
+                error.message()
             );
         }
     }
