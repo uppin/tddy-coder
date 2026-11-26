@@ -12,7 +12,7 @@
 mod support;
 
 use std::io::Write;
-use std::os::fd::FromRawFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -22,12 +22,12 @@ use tddy_daemon_kernel::pre_exec_stages::{
 };
 use tddy_daemon_kernel::privilege_drop::PrivilegeChange;
 
-fn a_pipe() -> (std::fs::File, std::fs::File) {
+fn a_pipe() -> (OwnedFd, std::fs::File) {
     let mut fds = [0; 2];
     assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "pipe(2)");
     unsafe {
         (
-            std::fs::File::from_raw_fd(fds[0]),
+            OwnedFd::from_raw_fd(fds[0]),
             std::fs::File::from_raw_fd(fds[1]),
         )
     }

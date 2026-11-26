@@ -43,24 +43,33 @@ fn socket_dir() -> PathBuf {
 /// killed before it could remove its own leaves behind. A socket of a live process, one another
 /// account owns, and one something still listens on are left where they are.
 pub fn clear_dead_instances_sockets() {
-    let Ok(entries) = std::fs::read_dir(socket_dir()) else {
+    clear_dead_instances_sockets_on(&tddy_fs::DiskFs)
+}
+
+/// [`clear_dead_instances_sockets`] through the filesystem port.
+pub fn clear_dead_instances_sockets_on(fs: &dyn tddy_fs::Fs) {
+    let Ok(entries) = fs.read_dir(&socket_dir()) else {
         return;
     };
     let this_process = std::process::id();
     // SAFETY: reads this process's own credentials.
     let this_account = unsafe { libc::geteuid() };
-    for entry in entries.flatten() {
-        let Some(pid) = entry.file_name().to_str().and_then(instance_pid) else {
+    for path in entries {
+        let Some(pid) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(instance_pid)
+        else {
             continue;
         };
         if pid == this_process || process_is_alive(pid) {
             continue;
         }
-        if let Err(e) = crate::owner_socket::clear_stale_socket(&entry.path(), &[this_account]) {
+        if let Err(e) = crate::owner_socket::clear_stale_socket_on(fs, &path, &[this_account]) {
             log::debug!(
                 target: "tddy_daemon_kernel::agent_tool_socket",
                 "left {} in place: {e:#}",
-                entry.path().display()
+                path.display()
             );
         }
     }

@@ -10,6 +10,7 @@
 //!
 //! Both origin modules re-export every name here, so no caller in `tddy-daemon` changed.
 
+use std::io;
 use std::path::{Path, PathBuf};
 
 /// Home directory for an OS user (from passwd).
@@ -102,24 +103,7 @@ pub struct TddyUserHomeConfig {
 
 /// Load `~/.tddy/config.yaml` under `home`. Missing file returns `None`; parse errors are logged.
 pub fn load_tddy_user_config(home: &Path) -> Option<TddyUserHomeConfig> {
-    let path = home.join(".tddy").join("config.yaml");
-    if !path.is_file() {
-        return None;
-    }
-    let contents = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("tddy user config: read {}: {}", path.display(), e);
-            return None;
-        }
-    };
-    match serde_yaml::from_str::<TddyUserHomeConfig>(&contents) {
-        Ok(c) => Some(c),
-        Err(e) => {
-            log::warn!("tddy user config: parse {}: {}", path.display(), e);
-            None
-        }
-    }
+    load_tddy_user_config_on(&tddy_fs::DiskFs, home)
 }
 
 /// `spawn_path_extra` from the target user's `~/.tddy/config.yaml`, if set and non-empty.
@@ -132,7 +116,21 @@ pub fn spawn_path_extra_for_home(home: &Path) -> Option<String> {
 }
 
 /// [`load_tddy_user_config`] through the filesystem port.
-pub fn load_tddy_user_config_on(_fs: &dyn tddy_fs::Fs, _home: &Path) -> Option<TddyUserHomeConfig> {
-    // TODO(daemon-fs): implement
-    None
+pub fn load_tddy_user_config_on(fs: &dyn tddy_fs::Fs, home: &Path) -> Option<TddyUserHomeConfig> {
+    let path = home.join(".tddy").join("config.yaml");
+    let contents = match fs.read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            log::warn!("tddy user config: read {}: {}", path.display(), e);
+            return None;
+        }
+    };
+    match serde_yaml::from_str::<TddyUserHomeConfig>(&contents) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            log::warn!("tddy user config: parse {}: {}", path.display(), e);
+            None
+        }
+    }
 }

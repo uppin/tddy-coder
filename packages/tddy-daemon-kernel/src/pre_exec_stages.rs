@@ -13,11 +13,9 @@
 use std::time::{Duration, Instant};
 
 #[cfg(unix)]
-use std::fs::File;
+use std::io::{self, ErrorKind};
 #[cfg(unix)]
-use std::io::{self, ErrorKind, Read};
-#[cfg(unix)]
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 #[cfg(unix)]
 use crate::privilege_drop::{PrivilegeChange, TargetAccount};
@@ -97,8 +95,12 @@ struct Reached {
 /// `spawn <label> pid=<pid> still at <stage> after <n>s` every `heartbeat`.
 ///
 /// [`StagedCommand`] runs this on its own thread; a test drives it with a pipe it writes itself.
+///
+/// The reader is an owned descriptor rather than a `File` on purpose: the only thing this
+/// module ever needs from it is raw reads, and naming `std::fs` here would read as disk I/O to
+/// the filesystem-port guard — which this pipe is not.
 #[cfg(unix)]
-pub fn watch_stages(mut reader: File, label: &str, heartbeat: Duration) -> StageOutcome {
+pub fn watch_stages(reader: OwnedFd, label: &str, heartbeat: Duration) -> StageOutcome {
     let mut pending: Vec<u8> = Vec::with_capacity(2 * STAGE_RECORD_LEN);
     let mut last: Option<Reached> = None;
     let mut deadline = Instant::now() + heartbeat;
@@ -126,7 +128,7 @@ pub fn watch_stages(mut reader: File, label: &str, heartbeat: Duration) -> Stage
                 break;
             }
         }
-        let read = match reader.read(&mut chunk) {
+        let read = match read_fd(reader.as_raw_fd(), &mut chunk) {
             Ok(0) => break,
             Ok(read) => read,
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -305,9 +307,24 @@ fn record(stage_fd: RawFd, stage: PreExecStage) -> io::Result<()> {
     Ok(())
 }
 
+/// Read up to `buf.len()` bytes from `fd`: the byte count, `Ok(0)` at end-of-file.
+#[cfg(unix)]
+fn read_fd(fd: RawFd, buf: &mut [u8]) -> io::Result<usize> {
+    if buf.is_empty() {
+        return Ok(0);
+    }
+    // SAFETY: `fd` is an open descriptor owned by the caller, and `buf` is a live buffer of
+    // the length passed.
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast(), buf.len()) };
+    if n < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(n as usize)
+}
+
 /// A pipe whose ends are both close-on-exec, so the child's write end is gone once it execs.
 #[cfg(unix)]
-fn cloexec_pipe() -> io::Result<(File, File)> {
+fn cloexec_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
     let mut fds: [RawFd; 2] = [-1; 2];
     #[cfg(target_os = "linux")]
     // SAFETY: `fds` has room for the two descriptors `pipe2` writes.
@@ -320,8 +337,8 @@ fn cloexec_pipe() -> io::Result<(File, File)> {
     }
     // SAFETY: the pipe was created above, so both descriptors are open and owned by nobody else.
     // Owning them now means an error below closes both ends.
-    let reader = unsafe { File::from_raw_fd(fds[0]) };
-    let writer = unsafe { File::from_raw_fd(fds[1]) };
+    let reader = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+    let writer = unsafe { OwnedFd::from_raw_fd(fds[1]) };
     #[cfg(not(target_os = "linux"))]
     {
         // macOS has no `pipe2`, so the flag is set after creation, as std's own pipes do there.

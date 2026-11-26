@@ -70,6 +70,16 @@ pub fn enrol_first_login(
     github_user: &str,
     os_user: &str,
 ) -> Result<UserMapping, EnrolmentRefusal> {
+    enrol_first_login_on(&tddy_fs::DiskFs, users_path, github_user, os_user)
+}
+
+/// [`enrol_first_login`] through the filesystem port.
+pub fn enrol_first_login_on(
+    fs: &dyn tddy_fs::Fs,
+    users_path: &Path,
+    github_user: &str,
+    os_user: &str,
+) -> Result<UserMapping, EnrolmentRefusal> {
     let not_writable = |reason: String| EnrolmentRefusal::ConfigNotWritable { reason };
 
     // `users_path` is the `users.yaml` to write (its caller derives it beside the daemon's
@@ -77,7 +87,8 @@ pub fn enrol_first_login(
     // deployment has already enrolled somebody, including through a concurrent login. A missing
     // file is a refusal, never an empty mapping: the daemon loaded it at start, and the
     // installers render one, so a file that has gone is not one to resurrect.
-    let contents = std::fs::read_to_string(users_path)
+    let contents = fs
+        .read_to_string(users_path)
         .map_err(|e| not_writable(format!("{}: {e}", users_path.display())))?;
     let existing: Vec<UserMapping> = if contents.trim().is_empty() {
         Vec::new()
@@ -97,6 +108,7 @@ pub fn enrol_first_login(
     };
     let rewritten = serde_yaml::to_string(std::slice::from_ref(&mapping))
         .map_err(|e| not_writable(format!("failed to serialise the users row: {e}")))?;
-    tddy_core::atomic_file::write_atomic_labelled(users_path, rewritten).map_err(not_writable)?;
+    fs.write_atomic(users_path, rewritten.as_bytes(), None)
+        .map_err(|e| not_writable(format!("{}: {e}", users_path.display())))?;
     Ok(mapping)
 }

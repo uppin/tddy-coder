@@ -18,9 +18,17 @@ pub fn is_wrapper_shim_dir(dir: &Path) -> bool {
 
 #[cfg(unix)]
 fn is_executable_file(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(p)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    is_executable_file_on(&tddy_fs::DiskFs, p)
+}
+
+/// [`is_executable_file`] through the filesystem port.
+#[cfg(unix)]
+fn is_executable_file_on(fs: &dyn tddy_fs::Fs, p: &Path) -> bool {
+    // `metadata_follow`, as before: a harness behind a symlink is still the harness.
+    fs.metadata_follow(p)
+        .map(|meta| {
+            meta.kind == tddy_fs::FsKind::File && meta.mode.is_some_and(|mode| mode & 0o111 != 0)
+        })
         .unwrap_or(false)
 }
 
