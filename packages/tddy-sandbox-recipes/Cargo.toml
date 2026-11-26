@@ -17,5 +17,7 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 thiserror = "1"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 tempfile = "3"

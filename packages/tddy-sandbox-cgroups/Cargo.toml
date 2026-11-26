@@ -18,4 +18,6 @@ nix = { version = "0.30", features = ["sched", "mount", "fs", "process", "user"]
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"

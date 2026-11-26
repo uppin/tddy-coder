@@ -45,7 +45,7 @@ pub use exec_reads::{
     system_baseline_reads,
 };
 pub use log::{
-    append_line, egress_log_path, format_egress_logs, format_sandbox_diagnostics,
+    append_line, append_line_on, egress_log_path, format_egress_logs, format_sandbox_diagnostics,
     SANDBOX_EXEC_STDERR_LOG, SANDBOX_EXEC_STDOUT_LOG, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
     SANDBOX_SPAWN_MANIFEST,
 };

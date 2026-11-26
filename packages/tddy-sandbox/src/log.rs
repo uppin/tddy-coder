@@ -77,6 +77,12 @@ fn append_log_section(out: &mut String, path: &Path, name: &str) {
     let _ = writeln!(out, "--- {name} ({}) ---\n{body}", path.display());
 }
 
+/// [`append_line`] through the filesystem port.
+pub fn append_line_on(_fs: &dyn tddy_fs::Fs, _log_path: &Path, _line: &str) -> std::io::Result<()> {
+    // TODO(sandbox-fs): implement
+    Err(std::io::Error::other("TODO(sandbox-fs): implement"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
