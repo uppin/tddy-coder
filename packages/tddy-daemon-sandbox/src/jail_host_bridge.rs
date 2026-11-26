@@ -52,12 +52,21 @@ pub async fn bridge_sandbox_stdio<S: tddy_rpc::RpcService>(
     Ok((client, run_handle))
 }
 
+/// Read the in-jail server's ready marker through the filesystem port.
+#[cfg(not(target_os = "linux"))]
+fn read_ready_marker_on(
+    fs: &dyn tddy_fs::Fs,
+    ready_marker: &std::path::Path,
+) -> Result<String, String> {
+    fs.read_to_string(ready_marker).map_err(|e| e.to_string())
+}
+
 /// TCP dialer for the in-jail gRPC server (macOS Seatbelt path; Linux uses AF_UNIX).
 #[cfg(not(target_os = "linux"))]
 async fn connect_sandbox_client(
     ready_marker: &Path,
 ) -> Result<SandboxServiceClient<tonic::transport::Channel>, String> {
-    let port_str = std::fs::read_to_string(ready_marker).map_err(|e| e.to_string())?;
+    let port_str = read_ready_marker_on(&tddy_fs::DiskFs, ready_marker)?;
     let port: u16 = port_str
         .trim()
         .parse::<u16>()

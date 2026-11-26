@@ -137,7 +137,8 @@ impl TaskBody for SandboxActionBody {
         let cancel = ctx.cancel_token();
         let pid_slot = ctx.pid_slot();
         let result = tokio::task::spawn_blocking(move || {
-            run_confined_plan(
+            run_confined_plan_on(
+                &tddy_fs::DiskFs,
                 plan,
                 egress_dir,
                 stdout_ch,
@@ -348,7 +349,10 @@ impl ConfinedOutcome {
     }
 }
 
-fn run_confined_plan(
+/// Run `plan` confined, streaming its logs, through the filesystem port.
+#[allow(clippy::too_many_arguments)]
+fn run_confined_plan_on(
+    fs: &dyn tddy_fs::Fs,
     plan: SandboxPlan,
     egress_dir: PathBuf,
     stdout_ch: Option<Arc<TaskChannel>>,
@@ -380,10 +384,10 @@ fn run_confined_plan(
                 .map_err(|e| e.to_string())?
                 .code()
                 .unwrap_or(-1);
-            let _ = pump_log_tail(&stdout_path, stdout_off, &stdout_ch, &combined_ch, false);
-            let _ = pump_log_tail(&stderr_path, stderr_off, &stderr_ch, &combined_ch, true);
-            let stdout = std::fs::read(&stdout_path).unwrap_or_default();
-            let stderr = std::fs::read(&stderr_path).unwrap_or_default();
+            let _ = pump_log_tail_on(fs, &stdout_path, stdout_off, &stdout_ch, &combined_ch, false);
+            let _ = pump_log_tail_on(fs, &stderr_path, stderr_off, &stderr_ch, &combined_ch, true);
+            let stdout = read_bytes_on(fs, &stdout_path);
+            let stderr = read_bytes_on(fs, &stderr_path);
             pid_slot.lock().unwrap().retain(|&p| p != pid);
             break ConfinedOutcome::Completed {
                 stdout,
@@ -392,22 +396,24 @@ fn run_confined_plan(
             };
         }
 
-        stdout_off = pump_log_tail(&stdout_path, stdout_off, &stdout_ch, &combined_ch, false);
-        stderr_off = pump_log_tail(&stderr_path, stderr_off, &stderr_ch, &combined_ch, true);
+        stdout_off = pump_log_tail_on(fs, &stdout_path, stdout_off, &stdout_ch, &combined_ch, false);
+        stderr_off = pump_log_tail_on(fs, &stderr_path, stderr_off, &stderr_ch, &combined_ch, true);
         std::thread::sleep(Duration::from_millis(50));
     };
 
     Ok(outcome)
 }
 
-fn pump_log_tail(
+/// Pump newly appended bytes of the log at `path` into the channels through the filesystem port.
+fn pump_log_tail_on(
+    fs: &dyn tddy_fs::Fs,
     path: &Path,
     mut offset: usize,
     primary_ch: &Option<Arc<TaskChannel>>,
     combined_ch: &Option<Arc<TaskChannel>>,
     is_stderr: bool,
 ) -> usize {
-    let data = std::fs::read(path).unwrap_or_default();
+    let data = read_bytes_on(fs, path);
     if data.len() > offset {
         let chunk = Bytes::from(data[offset..].to_vec());
         offset = data.len();
@@ -420,6 +426,11 @@ fn pump_log_tail(
         }
     }
     offset
+}
+
+/// Read `path` through the filesystem port; anything unreadable reads as empty, as before.
+fn read_bytes_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Vec<u8> {
+    fs.read(path).unwrap_or_default()
 }
 
 #[cfg(target_os = "macos")]

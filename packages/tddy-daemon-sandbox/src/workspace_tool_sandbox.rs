@@ -406,16 +406,19 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
         };
 
         let pid = handle.pid();
-        std::fs::write(layout.sandbox_root.join(RUNNER_PID_FILE), pid.to_string()).map_err(
-            |e| {
-                let _ = handle.child_mut().kill();
-                let _ = handle.child_mut().wait();
-                SandboxError::Io(format!(
-                    "write runner pid under {}: {e}",
-                    layout.sandbox_root.display()
-                ))
-            },
-        )?;
+        write_runner_pid_on(
+            &tddy_fs::DiskFs,
+            &layout.sandbox_root,
+            &pid.to_string(),
+        )
+        .map_err(|e| {
+            let _ = handle.child_mut().kill();
+            let _ = handle.child_mut().wait();
+            SandboxError::Io(format!(
+                "write runner pid under {}: {e}",
+                layout.sandbox_root.display()
+            ))
+        })?;
 
         log::info!(
             target: "tddy_daemon_sandbox::workspace_tool_sandbox",
@@ -474,6 +477,14 @@ async fn start_jail_channel(
 /// Create the jail's own tree and return the layout naming it in the canonical spelling the
 /// kernel will report accesses under.
 fn prepare_jail_tree(session_dir: &Path) -> Result<WorkspaceSandboxLayout, SandboxError> {
+    prepare_jail_tree_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`prepare_jail_tree`] through the filesystem port.
+pub fn prepare_jail_tree_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<WorkspaceSandboxLayout, SandboxError> {
     let layout = WorkspaceSandboxLayout::under_session_dir(session_dir);
     for dir in [
         &layout.sandbox_root,
@@ -482,17 +493,32 @@ fn prepare_jail_tree(session_dir: &Path) -> Result<WorkspaceSandboxLayout, Sandb
         &layout.context_dir,
         &layout.egress_dir,
     ] {
-        std::fs::create_dir_all(dir).map_err(|e| {
+        fs.create_dir_all(dir).map_err(|e| {
             SandboxError::Io(format!("create workspace jail dir {}: {e}", dir.display()))
         })?;
     }
-    Ok(WorkspaceSandboxLayout::under_session_dir(&canonical(
-        session_dir,
+    Ok(WorkspaceSandboxLayout::under_session_dir(&canonical_on(
+        fs, session_dir,
     )))
 }
 
+/// Record the runner's pid for the session through the filesystem port.
+fn write_runner_pid_on(
+    fs: &dyn tddy_fs::Fs,
+    sandbox_root: &Path,
+    pid: &str,
+) -> std::io::Result<()> {
+    fs.write(&sandbox_root.join(RUNNER_PID_FILE), pid.as_bytes())
+}
+
 fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    canonical_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`canonical`] through the filesystem port: resolved when the path still exists, else the path
+/// as spelled.
+fn canonical_on(fs: &dyn tddy_fs::Fs, path: &Path) -> PathBuf {
+    fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Canonicalize a binary path the jail will exec, since its read allow-list is built from the
