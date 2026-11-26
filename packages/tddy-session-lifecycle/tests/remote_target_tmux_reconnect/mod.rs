@@ -328,6 +328,9 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 
 use super::cli_harness_support::{a_daemon_config, coding_agents_over};
 
+type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
 /// Shells that refuse every target with `reason` (a locked vault, an unreachable target).
 struct RefusingShells {
     reason: String,
@@ -359,10 +362,10 @@ impl ADaemonWithATarget {
         let config = a_daemon_config();
         let sessions_base = self.sessions_base.clone();
         let resolver_base = sessions_base.clone();
-        let sessions_base_resolver: Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync> =
+        let sessions_base_resolver: SessionsBaseResolver =
             Arc::new(move |_| Some(resolver_base.clone()));
         let user = current_os_user();
-        let user_resolver: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> =
+        let user_resolver: UserResolver =
             Arc::new(move |token| {
                 (token == super::cli_harness_support::VALID_TOKEN).then(|| user.clone())
             });
