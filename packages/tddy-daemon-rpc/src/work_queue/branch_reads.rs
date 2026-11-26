@@ -25,7 +25,7 @@ impl WorkQueueRpcHandler {
         &self,
         request: Request<QueryBranchRequest>,
     ) -> Result<Response<QueryBranchResponse>, Status> {
-        use tddy_service::proto::work_queue::{BranchRemote, BranchResolution, BranchWorktree};
+        use tddy_service::proto::work_queue::BranchResolution;
 
         let req = request.into_inner();
         let os_user_owned = self.authenticated_os_user(&req.session_token)?;
@@ -47,107 +47,9 @@ impl WorkQueueRpcHandler {
         let repo_root = self.repo_root_for_target(&sessions_base, os_user, &target)?;
         let branch = req.branch.trim().to_string();
 
-        // Session — the session that owns the branch, by the one rule `branch_owner` holds for every
-        // surface that asks (prefer active, then most-recently-updated).
-        let branch_for_scan = branch.clone();
-        let sessions_base_for_scan = sessions_base.clone();
-        let live = self.terminals.live_sessions().await;
-        let session = self
-            .query_branch_lanes
-            .session
-            .run(
-                format!("{}|{branch}", sessions_base.display()),
-                self.config.spawn_worker_request_timeout(),
-                "QueryBranch: scan sessions by branch",
-                move || {
-                    find_session_owning_branch(
-                        &DaemonSessionListing::new(live),
-                        &sessions_base_for_scan,
-                        &branch_for_scan,
-                    )
-                },
-            )
-            .await?;
-        let session = match session {
-            Some(s) => BranchSession {
-                exists: true,
-                session_id: s.session_id,
-                is_active: s.is_active,
-                status: s.status,
-            },
-            None => BranchSession::default(),
-        };
-
-        // Worktree — the on-disk worktree checked out for the branch (non-erroring), and whether it
-        // holds outstanding work. Dirtiness is deliberately *not* cached with the base comparison
-        // below: it is not a function of the two commits, and an operator's edit must show up on the
-        // next tick.
-        //
-        // Both halves are git subprocesses — a `worktree list` walk and a `status --porcelain` — so
-        // they run on the blocking pool like every other leg. A timeout degrades this leg to "no
-        // worktree" rather than failing the call, which is the same contract the other four keep.
-        let worktree_repo_root = repo_root.clone();
-        let branch_for_worktree = branch.clone();
-        let worktree = self
-            .query_branch_lanes
-            .worktree
-            .run(
-                format!("{repo_root:?}|{branch}"),
-                self.config.spawn_worker_request_timeout(),
-                "QueryBranch: read the branch's worktree",
-                move || {
-                    wire_same_anyhow(&worktree_leg(
-                        worktree_repo_root.as_deref(),
-                        &branch_for_worktree,
-                    ))
-                },
-            )
-            .await
-            .unwrap_or_else(|status| {
-                log::warn!(
-                    "QueryBranch: the worktree leg did not complete: {}",
-                    status.message()
-                );
-                BranchWorktree::default()
-            });
-
-        // Remote — `origin/<branch>` in the orchestrator's repo, which is what a descendant's
-        // worktree is created from. Only as fresh as the last fetch, so it can delay a spawn but
-        // never permit one that would fail inside `git fetch`.
-        //
-        // Shells out to `git rev-parse`, so it goes to the blocking pool like every other leg here:
-        // this handler is polled once per rendered row every few seconds, and a subprocess run
-        // inline would occupy a runtime worker thread for its whole duration.
-        let remote_repo_root = repo_root.clone();
-        let remote_branch = branch.clone();
-        let remote = self
-            .query_branch_lanes
-            .remote
-            .run(
-                format!("{repo_root:?}|{branch}"),
-                self.config.spawn_worker_request_timeout(),
-                "QueryBranch: remote ref",
-                move || {
-                    Ok(
-                        match remote_repo_root.as_deref().and_then(|root| {
-                            tddy_core::worktree::remote_branch_ref_sha(root, &remote_branch)
-                        }) {
-                            Some(sha) => BranchRemote { exists: true, sha },
-                            None => BranchRemote::default(),
-                        },
-                    )
-                },
-            )
-            .await
-            .unwrap_or_else(|status| {
-                // Degrades this leg alone — an absent remote ref only blocks a *descendant's* spawn, and
-                // reporting the RPC as failed would take the session, worktree and PR legs down with it.
-                log::warn!(
-                    "QueryBranch: resolving the remote ref for '{branch}' did not complete: {}",
-                    status.message()
-                );
-                BranchRemote::default()
-            });
+        let session = self.branch_session_leg(&sessions_base, &branch).await?;
+        let worktree = self.branch_worktree_leg(repo_root.clone(), &branch).await;
+        let remote = self.branch_remote_leg(repo_root.clone(), &branch).await;
 
         // Base sync — how the branch stands against the base the caller named. Like every other leg
         // it never fails the call: an unnamed base, an unknown checkout, a probe that could not run
@@ -177,6 +79,118 @@ impl WorkQueueRpcHandler {
                 base_sync,
             }),
         }))
+    }
+
+    /// Session — the session that owns the branch, by the one rule `branch_owner` holds for every
+    /// surface that asks (prefer active, then most-recently-updated).
+    async fn branch_session_leg(
+        &self,
+        sessions_base: &std::path::Path,
+        branch: &str,
+    ) -> Result<BranchSession, Status> {
+        let branch_for_scan = branch.to_string();
+        let sessions_base_for_scan = sessions_base.to_path_buf();
+        let live = self.terminals.live_sessions().await;
+        let owner = self
+            .query_branch_lanes
+            .session
+            .run(
+                format!("{}|{branch}", sessions_base.display()),
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: scan sessions by branch",
+                move || {
+                    find_session_owning_branch(
+                        &DaemonSessionListing::new(live),
+                        &sessions_base_for_scan,
+                        &branch_for_scan,
+                    )
+                },
+            )
+            .await?;
+        Ok(match owner {
+            Some(s) => BranchSession {
+                exists: true,
+                session_id: s.session_id,
+                is_active: s.is_active,
+                status: s.status,
+            },
+            None => BranchSession::default(),
+        })
+    }
+
+    /// Worktree — the on-disk worktree checked out for the branch (non-erroring), and whether it
+    /// holds outstanding work. Dirtiness is deliberately *not* cached with the base comparison: it
+    /// is not a function of the two commits, and an operator's edit must show up on the next tick.
+    ///
+    /// Both halves are git subprocesses — a `worktree list` walk and a `status --porcelain` — so
+    /// they run in the lane like every other leg. A timeout or a full lane degrades this leg to
+    /// "no worktree" rather than failing the call, which is the same contract the other legs keep.
+    async fn branch_worktree_leg(
+        &self,
+        repo_root: Option<PathBuf>,
+        branch: &str,
+    ) -> tddy_service::proto::work_queue::BranchWorktree {
+        let key = format!("{repo_root:?}|{branch}");
+        let branch_for_worktree = branch.to_string();
+        self.query_branch_lanes
+            .worktree
+            .run(
+                key,
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: read the branch's worktree",
+                move || wire_same_anyhow(&worktree_leg(repo_root.as_deref(), &branch_for_worktree)),
+            )
+            .await
+            .unwrap_or_else(|status| {
+                log::warn!(
+                    "QueryBranch: the worktree leg did not complete: {}",
+                    status.message()
+                );
+                tddy_service::proto::work_queue::BranchWorktree::default()
+            })
+    }
+
+    /// Remote — `origin/<branch>` in the orchestrator's repo, which is what a descendant's worktree
+    /// is created from. Only as fresh as the last fetch, so it can delay a spawn but never permit
+    /// one that would fail inside `git fetch`.
+    ///
+    /// Shells out to `git rev-parse`, so it runs in the lane: this handler is polled once per
+    /// rendered row every few seconds.
+    async fn branch_remote_leg(
+        &self,
+        repo_root: Option<PathBuf>,
+        branch: &str,
+    ) -> tddy_service::proto::work_queue::BranchRemote {
+        use tddy_service::proto::work_queue::BranchRemote;
+        let key = format!("{repo_root:?}|{branch}");
+        let remote_branch = branch.to_string();
+        self.query_branch_lanes
+            .remote
+            .run(
+                key,
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: remote ref",
+                move || {
+                    Ok(
+                        match repo_root.as_deref().and_then(|root| {
+                            tddy_core::worktree::remote_branch_ref_sha(root, &remote_branch)
+                        }) {
+                            Some(sha) => BranchRemote { exists: true, sha },
+                            None => BranchRemote::default(),
+                        },
+                    )
+                },
+            )
+            .await
+            .unwrap_or_else(|status| {
+                // Degrades this leg alone — an absent remote ref only blocks a *descendant's* spawn,
+                // and reporting the RPC as failed would take the other legs down with it.
+                log::warn!(
+                    "QueryBranch: resolving the remote ref for '{branch}' did not complete: {}",
+                    status.message()
+                );
+                BranchRemote::default()
+            })
     }
 
     pub(super) async fn get_pr_status_rpc(
