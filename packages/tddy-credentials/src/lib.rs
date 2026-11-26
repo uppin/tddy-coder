@@ -33,7 +33,6 @@
 //! accepted explicitly: a forgotten passphrase is a reset, which sets the old vault aside (never
 //! deletes it) and starts an empty one whose credentials must be linked again.
 
-mod atomic;
 mod kdf;
 pub mod record;
 pub mod secret;

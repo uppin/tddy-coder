@@ -44,3 +44,5 @@ thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"
+# The port guard this crate's `tests/fs_port.rs` runs over its own `src/`.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }

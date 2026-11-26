@@ -3,9 +3,9 @@
 //! # On-disk format
 //!
 //! One JSON file **per subject** (the user whose vault it is), mode `0600` from its first byte,
-//! replaced by swap-then-rename (`crate::atomic`) so a crash or a full disk can never leave a
-//! truncated vault behind — which would parse as an empty one and read to the operator as an
-//! ordinary "please sign in again".
+//! replaced by swap-then-rename ([`tddy_fs::Fs::write_atomic`]) so a crash or a full disk can never
+//! leave a truncated vault behind — which would parse as an empty one and read to the operator as
+//! an ordinary "please sign in again".
 //!
 //! ```json
 //! {
@@ -62,9 +62,11 @@ mod unlock;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq;
+use tddy_fs::Fs;
 use zeroize::Zeroizing;
 
 use crate::kdf::{hkdf_expand, keyed_name, to_hex};
@@ -75,8 +77,8 @@ use crypto::{
     unwrap_data_key, wrap_under_passphrase, VERIFIER_AAD, VERIFIER_PLAINTEXT,
 };
 use format::{
-    header_aad, read_vault_file, serialised, set_aside, write_vault_file, Header, SealedRecord,
-    VaultFile, SALT_BYTES,
+    header_aad, read_vault_file_on, serialised, set_aside_on, write_vault_file_on, Header,
+    SealedRecord, VaultFile, SALT_BYTES,
 };
 
 pub use unlock::{UnlockKey, MAX_UNLOCK_SLOTS};
@@ -188,13 +190,7 @@ impl CredentialStore {
         passphrase: &SecretString,
         subject: &str,
     ) -> Result<SessionVault, VaultError> {
-        // Held across the existence check and the write, so two creates racing for one path
-        // cannot both mint a data key and leave the loser sealing records the file never opens.
-        let _serialised = serialised();
-        if read_vault_file(path)?.is_some() {
-            return Err(VaultError::AlreadyInitialized);
-        }
-        create_file(path, passphrase, subject)
+        Self::create_on(Arc::new(tddy_fs::DiskFs), path, passphrase, subject)
     }
 
     /// Open `subject`'s vault at `path` with the passphrase it was created under.
@@ -206,7 +202,33 @@ impl CredentialStore {
         passphrase: &SecretString,
         subject: &str,
     ) -> Result<SessionVault, VaultError> {
-        let file = read_vault_file(path)?.ok_or(VaultError::Uninitialized)?;
+        Self::open_with_passphrase_on(Arc::new(tddy_fs::DiskFs), path, passphrase, subject)
+    }
+
+    /// [`Self::create`] through the filesystem port; the returned vault keeps writing through `fs`.
+    pub fn create_on(
+        fs: Arc<dyn tddy_fs::Fs>,
+        path: &Path,
+        passphrase: &SecretString,
+        subject: &str,
+    ) -> Result<SessionVault, VaultError> {
+        // Held across the existence check and the write, so two creates racing for one path
+        // cannot both mint a data key and leave the loser sealing records the file never opens.
+        let _serialised = serialised();
+        if read_vault_file_on(fs.as_ref(), path)?.is_some() {
+            return Err(VaultError::AlreadyInitialized);
+        }
+        create_file_on(fs, path, passphrase, subject)
+    }
+
+    /// [`Self::open_with_passphrase`] through the filesystem port.
+    pub fn open_with_passphrase_on(
+        fs: Arc<dyn tddy_fs::Fs>,
+        path: &Path,
+        passphrase: &SecretString,
+        subject: &str,
+    ) -> Result<SessionVault, VaultError> {
+        let file = read_vault_file_on(fs.as_ref(), path)?.ok_or(VaultError::Uninitialized)?;
         let kek = passphrase_kek(&file.header, passphrase, subject)?;
         let data_key = unwrap_data_key(
             &kek,
@@ -217,29 +239,7 @@ impl CredentialStore {
         // The data key authenticated under the KEK, so a verifier that fails under it is
         // corruption.
         check_verifier(&file.verifier, &data_key)?;
-        Ok(session(path, subject, data_key))
-    }
-
-    /// [`Self::create`] through the filesystem port; the returned vault keeps writing through `fs`.
-    pub fn create_on(
-        _fs: std::sync::Arc<dyn tddy_fs::Fs>,
-        _path: &Path,
-        _passphrase: &SecretString,
-        _subject: &str,
-    ) -> Result<SessionVault, VaultError> {
-        // TODO(fs-crate): implement
-        Err(VaultError::Io("TODO(fs-crate): implement".into()))
-    }
-
-    /// [`Self::open_with_passphrase`] through the filesystem port.
-    pub fn open_with_passphrase_on(
-        _fs: std::sync::Arc<dyn tddy_fs::Fs>,
-        _path: &Path,
-        _passphrase: &SecretString,
-        _subject: &str,
-    ) -> Result<SessionVault, VaultError> {
-        // TODO(fs-crate): implement
-        Err(VaultError::Io("TODO(fs-crate): implement".into()))
+        Ok(session(fs, path, subject, data_key))
     }
 
     /// Set the vault at `path` aside and create a fresh one under `new_passphrase` — the
@@ -257,9 +257,13 @@ impl CredentialStore {
         // into the old file after it is set aside, or into the gap before the fresh one exists.
         // The old file is not parsed first — a reset is also the way out of a vault this build
         // cannot read.
+        let fs = Arc::new(tddy_fs::DiskFs);
         let _serialised = serialised();
-        let aside = path.exists().then(|| set_aside(path)).transpose()?;
-        let fresh = create_file(path, new_passphrase, subject)?;
+        let aside = fs
+            .exists(path)
+            .then(|| set_aside_on(fs.as_ref(), path))
+            .transpose()?;
+        let fresh = create_file_on(fs, path, new_passphrase, subject)?;
         Ok((fresh, aside))
     }
 }
@@ -272,6 +276,7 @@ impl CredentialStore {
 /// Every operation re-reads the file rather than caching its records, so two handles over one
 /// vault — two sessions of the same user — never act on each other's stale view.
 pub struct SessionVault {
+    fs: Arc<dyn tddy_fs::Fs>,
     path: PathBuf,
     subject: String,
     data_key: SecretBytes,
@@ -295,7 +300,7 @@ impl SessionVault {
         let sealed = self.seal_entry(&VaultEntry::Record(record))?;
         file.records.retain(|existing| existing.id != sealed.id);
         file.records.push(sealed);
-        write_vault_file(&self.path, &file)
+        write_vault_file_on(self.fs.as_ref(), &self.path, &file)
     }
 
     /// The record held for this provider and account, or `None` when none is.
@@ -370,7 +375,7 @@ impl SessionVault {
         let sealed_tombstone = self.seal_entry(&tombstone)?;
         file.records.retain(|sealed| sealed.id != id);
         file.records.push(sealed_tombstone);
-        write_vault_file(&self.path, &file)
+        write_vault_file_on(self.fs.as_ref(), &self.path, &file)
     }
 
     /// Every slot, deletions included, in the store's own `(provider, account)` order.
@@ -395,7 +400,7 @@ impl SessionVault {
     /// A file replaced under a live session — by anything but this crate's own writes, which never
     /// change the data key — is one this session's key no longer opens: [`VaultError::Locked`].
     fn load(&self) -> Result<VaultFile, VaultError> {
-        let file = read_vault_file(&self.path)?.ok_or_else(|| {
+        let file = read_vault_file_on(self.fs.as_ref(), &self.path)?.ok_or_else(|| {
             VaultError::Io(format!(
                 "the credential store at {} is gone",
                 self.path.display()
@@ -410,7 +415,7 @@ impl SessionVault {
     ///
     /// Any other failure to read is a real one, not staleness — it is reported where it happens.
     pub(crate) fn is_stale(&self) -> bool {
-        !self.path.exists() || matches!(self.load(), Err(VaultError::Locked))
+        !self.fs.exists(&self.path) || matches!(self.load(), Err(VaultError::Locked))
     }
 
     fn record_id(&self, provider: &ProviderId, account: &AccountId) -> String {
@@ -571,9 +576,15 @@ impl From<OpenedEntry> for VaultEntry {
 }
 
 /// Session keys for a data key: the key itself and the subkey that names records.
-fn session(path: &Path, subject: &str, data_key: SecretBytes) -> SessionVault {
+fn session(
+    fs: Arc<dyn tddy_fs::Fs>,
+    path: &Path,
+    subject: &str,
+    data_key: SecretBytes,
+) -> SessionVault {
     let record_id_key = hkdf_expand(&data_key, RECORD_ID_INFO);
     SessionVault {
+        fs,
         path: path.to_path_buf(),
         subject: subject.to_string(),
         data_key,
@@ -583,7 +594,8 @@ fn session(path: &Path, subject: &str, data_key: SecretBytes) -> SessionVault {
 
 /// Write a fresh vault at `path` under `passphrase`. The caller holds [`serialised`] and has
 /// established that nothing is there.
-fn create_file(
+fn create_file_on(
+    fs: Arc<dyn tddy_fs::Fs>,
     path: &Path,
     passphrase: &SecretString,
     subject: &str,
@@ -597,8 +609,8 @@ fn create_file(
         header,
         records: Vec::new(),
     };
-    write_vault_file(path, &file)?;
-    Ok(session(path, subject, data_key))
+    write_vault_file_on(fs.as_ref(), path, &file)?;
+    Ok(session(fs, path, subject, data_key))
 }
 
 #[cfg(test)]

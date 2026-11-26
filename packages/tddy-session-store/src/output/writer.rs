@@ -2,18 +2,27 @@
 //! TDD artifact writers and structured output types live in `tddy-workflow-recipes`.
 
 use crate::error::WorkflowError;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Inject a "Related Documents" section with relative links to peer .md files.
 pub fn inject_cross_references(content: &str, session_dir: &Path, self_name: &str) -> String {
-    let mut peers: Vec<String> = fs::read_dir(session_dir)
+    inject_cross_references_on(&tddy_fs::DiskFs, content, session_dir, self_name)
+}
+
+/// [`inject_cross_references`] through the filesystem port.
+pub fn inject_cross_references_on(
+    fs: &dyn tddy_fs::Fs,
+    content: &str,
+    session_dir: &Path,
+    self_name: &str,
+) -> String {
+    let mut peers: Vec<String> = fs
+        .read_dir(session_dir)
         .ok()
         .into_iter()
         .flatten()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?.to_string();
             if name.ends_with(".md") && name != self_name {
                 Some(format!("[{}](./{})", name, name))
             } else {
@@ -70,30 +79,22 @@ fn slugify(s: &str, max_len: usize) -> String {
 
 /// Write the session ID to `.session` in the output directory.
 pub fn write_session_file(output_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
-    let session_path = output_dir.join(".session");
-    crate::atomic_file::write_atomic_labelled(&session_path, session_id)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_session_file_on(&tddy_fs::DiskFs, output_dir, session_id)
 }
 
 /// Read the session ID from `.session` in the plan directory.
 pub fn read_session_file(session_dir: &Path) -> Result<String, WorkflowError> {
-    let session_path = session_dir.join(".session");
-    fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+    read_session_file_on(&tddy_fs::DiskFs, session_dir)
 }
 
 /// Write the implementation session ID to `.impl-session` in the plan directory.
 pub fn write_impl_session_file(session_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
-    let session_path = session_dir.join(".impl-session");
-    crate::atomic_file::write_atomic_labelled(&session_path, session_id)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_impl_session_file_on(&tddy_fs::DiskFs, session_dir, session_id)
 }
 
 /// Read the implementation session ID from `.impl-session` in the plan directory.
 pub fn read_impl_session_file(session_dir: &Path) -> Result<String, WorkflowError> {
-    let session_path = session_dir.join(".impl-session");
-    fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+    read_impl_session_file_on(&tddy_fs::DiskFs, session_dir)
 }
 
 /// Subdirectory name for session directories under a base path.
@@ -120,10 +121,7 @@ pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {
 
 /// Create a session directory at `{base}/sessions/{id}/` using the given session id.
 pub fn create_session_dir_with_id(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
-    let sessions_dir = base.join(SESSIONS_SUBDIR);
-    let session_dir = sessions_dir.join(session_id);
-    fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    Ok(session_dir)
+    create_session_dir_with_id_on(&tddy_fs::DiskFs, base, session_id)
 }
 
 /// Create a session directory at `{base}/sessions/{id}/`.
@@ -137,37 +135,59 @@ pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf
 
 /// [`write_session_file`] through the filesystem port.
 pub fn write_session_file_on(
-    _fs: &dyn tddy_fs::Fs,
-    _output_dir: &Path,
-    _session_id: &str,
+    fs: &dyn tddy_fs::Fs,
+    output_dir: &Path,
+    session_id: &str,
 ) -> Result<(), WorkflowError> {
-    // TODO(fs-crate): implement
-    Err(WorkflowError::WriteFailed(
-        "TODO(fs-crate): implement".into(),
-    ))
+    let session_path = output_dir.join(".session");
+    fs.write_atomic(&session_path, session_id.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(format!("{}: {e}", session_path.display())))?;
+    Ok(())
 }
 
 /// [`read_session_file`] through the filesystem port.
 pub fn read_session_file_on(
-    _fs: &dyn tddy_fs::Fs,
-    _session_dir: &Path,
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
 ) -> Result<String, WorkflowError> {
-    // TODO(fs-crate): implement
-    Err(WorkflowError::SessionMissing(
-        "TODO(fs-crate): implement".into(),
-    ))
+    let session_path = session_dir.join(".session");
+    fs.read_to_string(&session_path)
+        .map_err(|e| WorkflowError::SessionMissing(e.to_string()))
+}
+
+/// [`write_impl_session_file`] through the filesystem port.
+pub fn write_impl_session_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    session_id: &str,
+) -> Result<(), WorkflowError> {
+    let session_path = session_dir.join(".impl-session");
+    fs.write_atomic(&session_path, session_id.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(format!("{}: {e}", session_path.display())))?;
+    Ok(())
+}
+
+/// [`read_impl_session_file`] through the filesystem port.
+pub fn read_impl_session_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<String, WorkflowError> {
+    let session_path = session_dir.join(".impl-session");
+    fs.read_to_string(&session_path)
+        .map_err(|e| WorkflowError::SessionMissing(e.to_string()))
 }
 
 /// [`create_session_dir_with_id`] through the filesystem port.
 pub fn create_session_dir_with_id_on(
-    _fs: &dyn tddy_fs::Fs,
-    _base: &Path,
-    _session_id: &str,
+    fs: &dyn tddy_fs::Fs,
+    base: &Path,
+    session_id: &str,
 ) -> Result<PathBuf, WorkflowError> {
-    // TODO(fs-crate): implement
-    Err(WorkflowError::WriteFailed(
-        "TODO(fs-crate): implement".into(),
-    ))
+    let sessions_dir = base.join(SESSIONS_SUBDIR);
+    let session_dir = sessions_dir.join(session_id);
+    fs.create_dir_all(&session_dir)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    Ok(session_dir)
 }
 
 #[cfg(test)]

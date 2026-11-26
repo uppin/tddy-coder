@@ -95,6 +95,6 @@ Gates: `./test -p tddy-fs -p tddy-session-store -p tddy-credentials`, clippy on 
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement
+- [x] TDD Green — implement
 - [ ] /validate-changes
 - [ ] /pr-wrap

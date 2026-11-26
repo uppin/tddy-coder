@@ -73,6 +73,21 @@ fn a_vault_that_cannot_be_written_is_not_left_half_created() {
     assert!(created.is_err());
     assert!(!fs.exists(the_vault_path()));
     // and the disk once it has room again creates it normally
-    CredentialStore::create_on(fs.clone(), the_vault_path(), &the_passphrase(), THE_OPERATOR)
-        .expect("a retry creates the vault");
+    CredentialStore::create_on(
+        fs.clone(),
+        the_vault_path(),
+        &the_passphrase(),
+        THE_OPERATOR,
+    )
+    .expect("a retry creates the vault");
+}
+
+#[test]
+fn production_code_reaches_disk_only_through_the_port() {
+    let hits = tddy_fs::testing::direct_disk_io_in(Path::new(env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        hits.is_empty(),
+        "direct disk I/O outside the port:\n{}",
+        hits.join("\n")
+    );
 }

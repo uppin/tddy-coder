@@ -2,6 +2,7 @@
 //! holds and the file does not.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use subtle::ConstantTimeEq;
 use zeroize::{Zeroize, Zeroizing};
@@ -9,7 +10,7 @@ use zeroize::{Zeroize, Zeroizing};
 use super::crypto::{
     check_verifier, random_bytes, random_key, seal, unlock_aad, unlock_kek, unwrap_data_key,
 };
-use super::format::{read_vault_file, serialised, write_vault_file, UnlockSlot};
+use super::format::{read_vault_file_on, serialised, write_vault_file_on, UnlockSlot};
 use super::{session, CredentialStore, SessionVault, VaultError};
 use crate::kdf::{from_hex, to_hex};
 use crate::secret::SecretBytes;
@@ -32,10 +33,11 @@ impl CredentialStore {
         path: &Path,
         unlock: &UnlockKey,
     ) -> Result<SessionVault, VaultError> {
-        let file = read_vault_file(path)?.ok_or(VaultError::Locked)?;
+        let fs = Arc::new(tddy_fs::DiskFs);
+        let file = read_vault_file_on(fs.as_ref(), path)?.ok_or(VaultError::Locked)?;
         let data_key = unlock.open_slot_in(&file.unlock_slots)?;
         check_verifier(&file.verifier, &data_key)?;
-        Ok(session(path, &unlock.subject, data_key))
+        Ok(session(fs, path, &unlock.subject, data_key))
     }
 }
 
@@ -162,7 +164,7 @@ impl SessionVault {
         file.unlock_slots.push(slot);
         let excess = file.unlock_slots.len().saturating_sub(MAX_UNLOCK_SLOTS);
         file.unlock_slots.drain(..excess);
-        write_vault_file(&self.path, &file)?;
+        write_vault_file_on(self.fs.as_ref(), &self.path, &file)?;
         Ok(unlock)
     }
 
@@ -181,7 +183,7 @@ impl SessionVault {
         file.unlock_slots.retain(|slot| slot.id != slot_id);
         let (slot, unlock) = self.new_unlock_slot(slot_id.to_string())?;
         file.unlock_slots.push(slot);
-        write_vault_file(&self.path, &file)?;
+        write_vault_file_on(self.fs.as_ref(), &self.path, &file)?;
         Ok(unlock)
     }
 
@@ -194,7 +196,7 @@ impl SessionVault {
         if file.unlock_slots.len() == before {
             return Ok(());
         }
-        write_vault_file(&self.path, &file)
+        write_vault_file_on(self.fs.as_ref(), &self.path, &file)
     }
 
     /// The ids of the unlock slots this vault holds, least recently used first.

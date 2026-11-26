@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
+use tddy_fs::Fs;
 
 use super::{VaultError, MAX_SET_ASIDE_VAULTS};
 
@@ -108,8 +109,11 @@ pub(super) fn header_aad(header: &Header) -> Result<Vec<u8>, VaultError> {
 }
 
 /// Read and parse the vault at `path`; `Ok(None)` when there is no file.
-pub(super) fn read_vault_file(path: &Path) -> Result<Option<VaultFile>, VaultError> {
-    let raw = match std::fs::read(path) {
+pub(super) fn read_vault_file_on(
+    fs: &dyn Fs,
+    path: &Path,
+) -> Result<Option<VaultFile>, VaultError> {
+    let raw = match fs.read(path) {
         Ok(raw) => raw,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(VaultError::Io(format!("reading {}: {e}", path.display()))),
@@ -178,12 +182,12 @@ fn describe(value: Option<&serde_json::Value>) -> String {
 ///
 /// Called under [`serialised`], so no write of this process lands between the rename and the fresh
 /// vault that replaces it.
-pub(super) fn set_aside(path: &Path) -> Result<PathBuf, VaultError> {
+pub(super) fn set_aside_on(fs: &dyn Fs, path: &Path) -> Result<PathBuf, VaultError> {
     let stem = path
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .ok_or_else(|| VaultError::Io(format!("{} names no vault file", path.display())))?;
-    let kept = count_set_aside(path, &stem)?;
+    let kept = count_set_aside_on(fs, path, &stem)?;
     if kept >= MAX_SET_ASIDE_VAULTS {
         return Err(VaultError::TooManySetAside { kept });
     }
@@ -200,9 +204,9 @@ pub(super) fn set_aside(path: &Path) -> Result<PathBuf, VaultError> {
             };
             path.with_file_name(format!("{stem}.locked-{now}{suffix}.vault"))
         })
-        .find(|candidate| !candidate.exists())
+        .find(|candidate| !fs.exists(candidate))
         .expect("some suffix is free");
-    std::fs::rename(path, &aside).map_err(|e| {
+    fs.rename(path, &aside).map_err(|e| {
         VaultError::Io(format!(
             "setting {} aside as {}: {e}",
             path.display(),
@@ -214,19 +218,21 @@ pub(super) fn set_aside(path: &Path) -> Result<PathBuf, VaultError> {
 
 /// How many vaults named `<stem>.locked-….vault` sit beside `path`. A subject's hex stem holds no
 /// `.`, so no other subject's live or set-aside vault can match another's prefix.
-fn count_set_aside(path: &Path, stem: &str) -> Result<usize, VaultError> {
+fn count_set_aside_on(fs: &dyn Fs, path: &Path, stem: &str) -> Result<usize, VaultError> {
     let dir = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
     let prefix = format!("{stem}.locked-");
-    let entries = std::fs::read_dir(dir)
+    let entries = fs
+        .read_dir(dir)
         .map_err(|e| VaultError::Io(format!("listing {}: {e}", dir.display())))?;
     let mut kept = 0;
     for entry in entries {
-        let entry = entry.map_err(|e| VaultError::Io(format!("listing {}: {e}", dir.display())))?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
+        let name = entry
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if name.starts_with(&prefix) && name.ends_with(".vault") {
             kept += 1;
         }
@@ -234,9 +240,15 @@ fn count_set_aside(path: &Path, stem: &str) -> Result<usize, VaultError> {
     Ok(kept)
 }
 
-pub(super) fn write_vault_file(path: &Path, file: &VaultFile) -> Result<(), VaultError> {
+pub(super) fn write_vault_file_on(
+    fs: &dyn Fs,
+    path: &Path,
+    file: &VaultFile,
+) -> Result<(), VaultError> {
     let bytes = serde_json::to_vec_pretty(file)
         .map_err(|e| VaultError::Io(format!("serialising {}: {e}", path.display())))?;
-    crate::atomic::write_owner_only(path, &bytes)
+    // Owner-only from the first byte, through the port's one atomic write — the crate's former
+    // private copy (`atomic.rs`) with the same swap-then-rename, `create_new` swap and mode.
+    fs.write_atomic(path, &bytes, Some(0o600))
         .map_err(|e| VaultError::Io(format!("writing {}: {e}", path.display())))
 }

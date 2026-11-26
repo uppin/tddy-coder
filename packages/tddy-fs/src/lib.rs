@@ -68,13 +68,31 @@ pub trait Fs: Send + Sync + Debug {
     }
 }
 
-/// [`Fs::write_atomic`] on the real disk, keeping the target's mode — the former
+/// Atomically replace `path` with `contents` on the real disk — the former
 /// `tddy_session_store::atomic_file::write_atomic`.
+///
+/// On success `path` holds all of `contents`. On failure `path` is untouched — it keeps its
+/// previous contents, or stays absent if it never existed — and the swap file is cleaned up.
+///
+/// Missing parent directories are created. An existing target's permission bits are carried over
+/// to the replacement, so a mode-0600 file does not widen to the process umask when it is
+/// rewritten. A target that does **not** exist yet gets whatever the process umask allows — for a
+/// secret, use [`write_atomic_with_mode`] instead.
 pub fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> io::Result<()> {
     DiskFs.write_atomic(path, contents.as_ref(), None)
 }
 
-/// [`Fs::write_atomic`] on the real disk at a fixed `mode`.
+/// [`write_atomic`], with the replacement's permissions fixed by the caller instead of copied from
+/// the target.
+///
+/// `write_atomic` can only carry over bits that already exist, so the **first** write to a path
+/// creates the swap file at the process umask — under the usual `0o022` that is a world-readable
+/// file. For session state that is merely untidy; for a secret it is a disclosure, and the first
+/// write is exactly when a secret is created. `mode` is applied when the swap file is created, so
+/// the bytes are never on disk at any wider mode, not even briefly.
+///
+/// `mode` is a Unix permission bitmask (`0o600` for owner-only). It is ignored on platforms without
+/// Unix permissions, where this behaves as [`write_atomic`].
 pub fn write_atomic_with_mode(
     path: &Path,
     contents: impl AsRef<[u8]>,
@@ -84,6 +102,9 @@ pub fn write_atomic_with_mode(
 }
 
 /// [`write_atomic`] with the target path folded into the error message.
+///
+/// Bare `io::Error`s from a swap-then-rename say `"No space left on device"` and nothing about
+/// which file was being replaced, which is exactly the fact an operator needs from the log.
 pub fn write_atomic_labelled(path: &Path, contents: impl AsRef<[u8]>) -> Result<(), String> {
     write_atomic(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }

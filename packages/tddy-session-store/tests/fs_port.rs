@@ -52,3 +52,13 @@ fn an_action_manifest_is_parsed_from_the_port() {
 
     assert_eq!(manifest.id, "build");
 }
+
+#[test]
+fn production_code_reaches_disk_only_through_the_port() {
+    let hits = tddy_fs::testing::direct_disk_io_in(Path::new(env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        hits.is_empty(),
+        "direct disk I/O outside the port:\n{}",
+        hits.join("\n")
+    );
+}
