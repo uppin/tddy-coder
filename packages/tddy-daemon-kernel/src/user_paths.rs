@@ -130,3 +130,9 @@ pub fn spawn_path_extra_for_home(home: &Path) -> Option<String> {
             .filter(|s| !s.is_empty())
     })
 }
+
+/// [`load_tddy_user_config`] through the filesystem port.
+pub fn load_tddy_user_config_on(_fs: &dyn tddy_fs::Fs, _home: &Path) -> Option<TddyUserHomeConfig> {
+    // TODO(daemon-fs): implement
+    None
+}

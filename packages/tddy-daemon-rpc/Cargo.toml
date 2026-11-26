@@ -72,6 +72,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `start_session_tool_acceptance` reads the recipe names the start-options catalogue offers.
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 # `work_queue_fixtures`: the sessions layout a PR stack lives in.

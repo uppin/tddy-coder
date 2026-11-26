@@ -50,6 +50,8 @@ tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `write_exec_plan`: the process a runner test puts in the PTY; `eventually` — the recording tests
 # wait on a file the periodic recorder writes.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

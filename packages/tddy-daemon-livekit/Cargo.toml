@@ -60,6 +60,8 @@ tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # LiveKit's own verifier: a minted token is checked the way the server checks it.
 livekit-api = "0.5"
 futures-util = "0.3"

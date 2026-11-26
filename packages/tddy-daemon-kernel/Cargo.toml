@@ -9,6 +9,8 @@ name = "tddy_daemon_kernel"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: the filesystem port every disk read and write goes through.
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4"
@@ -48,6 +50,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `test-util`: `tokio::time::pause` drives the stream idle timeout without waiting it out.
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }
 rstest = { workspace = true }

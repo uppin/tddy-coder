@@ -137,6 +137,8 @@ tower = "0.5"
 tokio-stream = "0.1"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 assert_cmd = "2"
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tddy-github = { path = "../tddy-github" }

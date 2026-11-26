@@ -38,6 +38,8 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # The minter the daemon wires from its `livekit:` block, so the mint suites run the production
 # adapter rather than a stand-in. A dev-dependency only: this crate reaches LiveKit through the port.
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
