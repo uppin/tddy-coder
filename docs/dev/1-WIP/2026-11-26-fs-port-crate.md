@@ -56,6 +56,11 @@ Published surface: `tddy_fs::{Fs, FsMetadata, FsKind, DiskFs, MemFs (new, fail_n
 `tddy_session_store::session_actions::parse_action_manifest_file_on`;
 `tddy_credentials::CredentialStore::{create_on, open_with_passphrase_on}`.
 26 failing tests (conformance 11, atomic_write 8, async_fs 1, session-store fs_port 3, credentials fs_port 3), each on `TODO(fs-crate)`.
+
+**Added in pass 2 (third commit), for n3–n13:** `tddy_fs::testing::direct_disk_io_in(crate_dir) -> Vec<String>` behind
+feature `testing` — the guard every migration node's `tests/fs_port.rs` runs over its own `src/` (skips `#[cfg(test)]`
+items and comments). Failing tests: `packages/tddy-fs/tests/direct_disk_io.rs` (4). Each migrated crate takes
+`tddy-fs = { path = "../tddy-fs", features = ["testing"] }` as a **dev-dependency**.
 Pre-existing tests of the three crates pass (`./test -p` scoped: tddy-fs, tddy-session-store, tddy-credentials).
 
 ## Prerequisites

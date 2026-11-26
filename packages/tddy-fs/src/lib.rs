@@ -9,6 +9,9 @@
 mod async_fs;
 mod disk;
 mod mem;
+/// Support for tests of crates migrating onto the port.
+#[cfg(feature = "testing")]
+pub mod testing;
 
 use std::fmt::Debug;
 use std::io;

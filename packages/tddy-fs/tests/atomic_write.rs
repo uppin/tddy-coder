@@ -61,7 +61,8 @@ fn a_failed_first_atomic_write_leaves_the_target_absent() {
 
     assert!(fs.write_atomic(path, b"secret", Some(0o600)).is_err());
     assert!(!fs.exists(path));
-    fs.write_atomic(path, b"secret", Some(0o600)).expect("the fault fires once");
+    fs.write_atomic(path, b"secret", Some(0o600))
+        .expect("the fault fires once");
     assert!(fs.exists(path));
 }
 

@@ -7,6 +7,8 @@ description = "The filesystem port: one trait for all disk I/O, with a real-disk
 [features]
 # `AsyncFs`, the facade `tokio::fs` call sites migrate onto.
 tokio = ["dep:tokio"]
+# `testing::direct_disk_io_in`, the guard each migrated crate's tests run over its own `src/`.
+testing = []
 
 [dependencies]
 # Unique swap-file names for the atomic write.
@@ -15,6 +17,6 @@ tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 # The crate itself with `tokio`, so `AsyncFs` is tested by a plain `./test -p tddy-fs`.
-tddy-fs = { path = ".", features = ["tokio"] }
+tddy-fs = { path = ".", features = ["tokio", "testing"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros"] }
