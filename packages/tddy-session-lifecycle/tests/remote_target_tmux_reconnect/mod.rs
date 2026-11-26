@@ -365,10 +365,9 @@ impl ADaemonWithATarget {
         let sessions_base_resolver: SessionsBaseResolver =
             Arc::new(move |_| Some(resolver_base.clone()));
         let user = current_os_user();
-        let user_resolver: UserResolver =
-            Arc::new(move |token| {
-                (token == super::cli_harness_support::VALID_TOKEN).then(|| user.clone())
-            });
+        let user_resolver: UserResolver = Arc::new(move |token| {
+            (token == super::cli_harness_support::VALID_TOKEN).then(|| user.clone())
+        });
         let mut host = DaemonSessionHost::new(
             config.clone(),
             sessions_base_resolver,
