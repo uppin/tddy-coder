@@ -53,7 +53,9 @@ listing — or a handle rebuilt from the index — still names it. Stopping it e
 detaches it.
 
 `kill_all` (daemon shutdown) closes the detach-watcher registry, empties the index
-(`drain_terminals`), cancels every task and SIGKILLs what outlives 5 s. A tmux-run main is only a tmux
+(`drain_terminals`), cancels every task and SIGKILLs what outlives 5 s. It waits on the async
+timer, never the blocking pool: on Tddy Desktop shutdown runs on the UI thread, and must not queue
+behind blocking work it does not own. A tmux-run main is only a tmux
 client, so cancelling it **detaches** it and the agent's tmux session keeps running; a tab's tmux
 session is the user's and is never touched. An ended terminal is classified (`tmux_reattach.rs`) when
 it is the main or a client of an agent's tmux session — a tmux-wrapped agent tab; a shell, and a tab

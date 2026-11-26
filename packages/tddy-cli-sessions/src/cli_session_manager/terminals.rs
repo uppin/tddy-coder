@@ -284,46 +284,46 @@ impl CliSessionManager {
             self.task_registry.cancel_task(id).await;
         }
 
-        tokio::task::spawn_blocking(move || {
-            #[cfg(unix)]
-            {
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-                while std::time::Instant::now() < deadline {
-                    let any_alive = pids
-                        .iter()
-                        .any(|&pid| unsafe { libc::kill(pid as i32, 0) } == 0);
-                    if !any_alive {
-                        break;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                let still_alive: Vec<u32> = pids
-                    .iter()
-                    .copied()
-                    .filter(|&pid| unsafe { libc::kill(pid as i32, 0) } == 0)
-                    .collect();
-                if still_alive.is_empty() {
-                    log::info!(
-                        target: "tddy_daemon::claude_cli_session",
-                        "kill_all: all processes exited cleanly after cancel"
-                    );
-                } else {
-                    log::warn!(
-                        target: "tddy_daemon::claude_cli_session",
-                        "kill_all: {} process(es) still alive after 5 s — sending SIGKILL: {:?}",
-                        still_alive.len(),
-                        still_alive
-                    );
-                    for &pid in &still_alive {
-                        let _ = tddy_session_activity::session_deletion::signal_pid(
-                            pid as i32,
-                            libc::SIGKILL,
-                        );
-                    }
-                }
-            }
-        })
-        .await
-        .ok();
+        #[cfg(unix)]
+        reap_or_kill(&pids).await;
+    }
+}
+
+/// How long [`CliSessionManager::kill_all`] lets cancelled processes exit before SIGKILL.
+#[cfg(unix)]
+const KILL_ALL_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+/// How often [`reap_or_kill`] checks whether the cancelled processes have exited.
+#[cfg(unix)]
+const KILL_ALL_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Wait up to [`KILL_ALL_GRACE`] for `pids` to exit, then SIGKILL the survivors.
+///
+/// Polled on the async timer rather than on the blocking pool: shutdown must not queue behind
+/// blocking work it does not own — on Tddy Desktop it runs on the UI thread, and a saturated pool
+/// held a quit for 7 minutes (2026-11-26).
+#[cfg(unix)]
+async fn reap_or_kill(pids: &[u32]) {
+    let is_alive = |pid: u32| unsafe { libc::kill(pid as i32, 0) } == 0;
+    let deadline = tokio::time::Instant::now() + KILL_ALL_GRACE;
+    while tokio::time::Instant::now() < deadline && pids.iter().any(|&pid| is_alive(pid)) {
+        tokio::time::sleep(KILL_ALL_POLL).await;
+    }
+    let still_alive: Vec<u32> = pids.iter().copied().filter(|&pid| is_alive(pid)).collect();
+    if still_alive.is_empty() {
+        log::info!(
+            target: "tddy_daemon::claude_cli_session",
+            "kill_all: all processes exited cleanly after cancel"
+        );
+        return;
+    }
+    log::warn!(
+        target: "tddy_daemon::claude_cli_session",
+        "kill_all: {} process(es) still alive after {:?} — sending SIGKILL: {:?}",
+        still_alive.len(),
+        KILL_ALL_GRACE,
+        still_alive
+    );
+    for &pid in &still_alive {
+        let _ = tddy_session_activity::session_deletion::signal_pid(pid as i32, libc::SIGKILL);
     }
 }

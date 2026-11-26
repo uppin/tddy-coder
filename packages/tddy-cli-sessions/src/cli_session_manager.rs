@@ -205,6 +205,9 @@ pub use recorded_terminals::RecordedTerminal;
 mod recorded_terminals_tests;
 
 #[cfg(test)]
+mod kill_all_tests;
+
+#[cfg(test)]
 mod live_agent_sessions_tests;
 
 mod process_tab;

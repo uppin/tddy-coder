@@ -613,6 +613,7 @@ fn a_sandboxed_session(session_id: &str) -> SessionMetadata {
         tmux_session: None,
         orchestration_mark: None,
         agent_conversations: Vec::new(),
+        owner_subject: None,
     }
 }
 
