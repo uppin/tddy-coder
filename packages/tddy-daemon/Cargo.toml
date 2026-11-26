@@ -48,6 +48,8 @@ tddy-core = { path = "../tddy-core" }
 # crate because `pub(crate)` does not cross a crate boundary, so a subsystem leaving this crate
 # could not otherwise reach them without depending on `connection_service`.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `#fs-port`: production disk I/O goes through the filesystem port.
+tddy-fs = { path = "../tddy-fs" }
 # The moved model registry: `runtime.rs` opens the store and registers both of its services, and
 # `connection_service` resolves registry assistants as `--agent` targets. `sqlx`,
 # `agent-client-protocol` and `tddy-acp` left with it.
