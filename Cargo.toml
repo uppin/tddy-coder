@@ -19,6 +19,7 @@ members = [
     "packages/tddy-log",
     "packages/tddy-agent-skills",
     "packages/tddy-changeset",
+    "packages/tddy-metrics",
     "packages/tddy-session-worktree",
     "packages/tddy-session-actions",
     "packages/tddy-toolcall",

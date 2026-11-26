@@ -71,6 +71,9 @@ pub use crate::config::sections::{IndexDaemonConfig, ProjectHomeConfig, RelayCon
 pub struct DaemonConfig {
     #[serde(default)]
     pub listen: ListenConfig,
+    /// The private Prometheus listener; `None` binds nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metrics: Option<MetricsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_bundle_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,6 +235,7 @@ impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
             listen: ListenConfig::default(),
+            metrics: None,
             web_bundle_path: None,
             toolchain_dir: None,
             livekit: None,
@@ -333,6 +337,25 @@ use crate::config::sections::LocalConfig;
 use crate::config::sections::SandboxCgroupConfig;
 use crate::config::timings::AgentWarmupConfig;
 use crate::config::timings::SessionRoomConfig;
+
+/// `metrics:` — the private Prometheus listener. Absent: no metrics listener is bound at all.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MetricsConfig {
+    /// Where `GET /metrics` is served, e.g. `127.0.0.1:9464`. Never the web listener.
+    pub listen: std::net::SocketAddr,
+}
+
+/// Refuse a `metrics.listen` that would put `/metrics` on the public web port.
+///
+/// Returns the error naming both settings when `metrics.listen`'s port equals `listen.web_port`.
+pub fn check_metrics_listen(
+    _listen: &ListenConfig,
+    _metrics: Option<&MetricsConfig>,
+) -> Result<(), String> {
+    // TODO(daemon-metrics): implement
+    Err("TODO(daemon-metrics): implement".to_string())
+}
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]

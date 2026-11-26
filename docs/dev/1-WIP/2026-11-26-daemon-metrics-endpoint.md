@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Complexity**: 4 — new crate + new external dep (`prometheus-client`, operator-approved 2026-11-26) + config contract + daemon wiring + RPC instrumentation seam
+**PR**: [#1046](https://github.com/uppin/tddy-coder/pull/1046)
 **PRD**: [PRD-2026-11-26-daemon-metrics-endpoint.md](../../ft/daemon/1-WIP/PRD-2026-11-26-daemon-metrics-endpoint.md)
 
 **Sequencing (hard gate):** do not start `/green` before `#target-reconnect` #1041 and #1042 have merged — they edit agent-launch, cli-sessions and session-lifecycle, which this streak migrates. Implementation runs as `#muse` sessions on `mantas-udoo-ros` (one session at a time, tight disk): keep every gate scoped with `./test -p <crate>` per crate, never a workspace run.
@@ -37,10 +38,23 @@ First push: `tddy-metrics` crate with `DaemonMetrics`, `serve_metrics` signature
 ## Green wave
 **Wave:** 1 of 2
 **Greenable independently:** yes
-**Concurrent with:** n1
+**Concurrent with:** n1 (#1045)
 **Blocks:** nothing
 
     n1 ⇒ n3, n4, n5, n6, n7, n8, n9, n10, n11, n12, n13      (n2: standalone)
+
+## Red-step state
+
+Published surface: `tddy_metrics::{DaemonMetrics (new, session_started, set_sessions_active, rpc_completed, set_livekit_rooms_connected, encode), MetricsServer (bind, local_addr, serve), StartResult, RpcCall}`;
+`tddy_daemon_kernel::config::{MetricsConfig, check_metrics_listen}` and `DaemonConfig::metrics`.
+`prometheus-client` resolved at 0.23.1 (0.26 exists — green may bump if the API is better; operator approval covers the crate).
+
+Failing (on `TODO(daemon-metrics)`): `tddy-metrics/tests/endpoint.rs` — 5 tests;
+`tddy-daemon-kernel/tests/metrics_config_unit.rs` — `metrics_on_the_web_port_is_refused_naming_both_settings`,
+`metrics_on_its_own_port_is_accepted`. Passing by design: the two parse tests (the config type *is* the published surface).
+Not yet written (green, wiring): `tddy-daemon` in-process check that the web listener serves no `/metrics` and that
+an RPC through `MultiRpcService` reaches `rpc_completed` — the daemon has no seam for it until green adds the wiring.
+Baseline: build + clippy `--all-targets` clean for tddy-metrics and tddy-daemon-kernel; the kernel's full suite was not run locally.
 
 ## Scope
 - [ ] `prometheus-client` added to workspace (via local crates proxy)
@@ -61,10 +75,10 @@ Gates: `./test -p tddy-metrics -p tddy-daemon-kernel -p tddy-daemon`.
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement
 - [ ] /validate-changes
 - [ ] /pr-wrap
