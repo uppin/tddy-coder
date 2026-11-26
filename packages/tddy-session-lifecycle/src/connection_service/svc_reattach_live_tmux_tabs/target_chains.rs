@@ -145,7 +145,7 @@ impl Reattach<'_> {
 
     /// Re-attach `session_id`'s `[target, tmux]` main on its target, through the recorded
     /// owner subject: the single-flight main re-attach the lazy path shares.
-    async fn target_main(
+    pub(super) async fn target_main(
         &self,
         session_id: &str,
         session_dir: &Path,
@@ -199,7 +199,7 @@ impl Reattach<'_> {
 
     /// Re-attach the `[target, tmux, agent]` tab `tab` on its target, through the recorded
     /// owner subject. A tmux session gone there is left for Resume, which recreates it.
-    async fn target_tab(
+    pub(super) async fn target_tab(
         &self,
         session_id: &str,
         tab: &TabEntry,
