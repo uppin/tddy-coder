@@ -28,6 +28,8 @@ tddy-credentials = { path = "../tddy-credentials" }
 # `SessionUserResolver` and `DaemonConfig` — the two shapes this crate needs from the daemon, and
 # the whole of what node 1 published so the auth subsystem could leave without depending on it.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-github = { path = "../tddy-github" }
 # `RoomTokenMinter`: the minter the token service answers through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }

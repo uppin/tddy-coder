@@ -113,9 +113,14 @@ impl DaemonSigningKey {
     /// There is **no** in-memory fallback for an unwritable path — a daemon that cannot persist
     /// its identity would mint a fresh one on every restart and invalidate every live session.
     pub fn load_or_generate(path: &Path) -> anyhow::Result<Self> {
-        match std::fs::read(path) {
-            Ok(pem) => Self::from_stored(path, &pem),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Self::generate_into(path),
+        Self::load_or_generate_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`Self::load_or_generate`] through the filesystem port.
+    pub fn load_or_generate_on(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<Self> {
+        match fs.read(path) {
+            Ok(pem) => Self::from_stored_on(fs, path, &pem),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Self::generate_into_on(fs, path),
             Err(e) => Err(e).with_context(|| format!("reading the signing key {}", path.display())),
         }
     }
@@ -161,8 +166,8 @@ impl DaemonSigningKey {
     /// A file that is present but unusable is a damaged or exposed identity, and replacing it would
     /// destroy the only copy of the key every peer has learned. The operator decides what happens
     /// to it; the daemon refuses to start.
-    fn from_stored(path: &Path, pem: &[u8]) -> anyhow::Result<Self> {
-        refuse_if_readable_by_others(path)?;
+    fn from_stored_on(fs: &dyn tddy_fs::Fs, path: &Path, pem: &[u8]) -> anyhow::Result<Self> {
+        refuse_if_readable_by_others_on(fs, path)?;
         let pem = std::str::from_utf8(pem)
             .map_err(|_| anyhow::anyhow!("{} is not a PEM signing key", path.display()))?;
         let signing_key = SigningKey::from_pkcs8_pem(pem).map_err(|e| {
@@ -181,23 +186,23 @@ impl DaemonSigningKey {
     /// one data directory would otherwise each generate a key and the second rename would
     /// silently replace the first's — leaving the first signing with a key no restart will find.
     /// The loser discards its key and loads the winner's.
-    fn generate_into(path: &Path) -> anyhow::Result<Self> {
+    fn generate_into_on(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<Self> {
         let signing_key = SigningKey::generate(&mut rand_core::OsRng);
         let pem = signing_key
             .to_pkcs8_pem(LineEnding::LF)
             .map_err(|e| anyhow::anyhow!("encoding a new signing key: {e}"))?;
         if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            create_owner_only_dir(dir)
+            fs.create_dir_all_with_mode(dir, OWNER_ONLY_DIR)
                 .with_context(|| format!("creating the signing key directory {}", dir.display()))?;
         }
         let staging = staging_path(path);
-        // `write_atomic_with_mode`, not `write_atomic`: the mode is applied when the file is
+        // `write_atomic` with a mode, not without: the mode is applied when the file is
         // created, so the private key is never on disk at the process umask, not even briefly.
-        tddy_core::atomic_file::write_atomic_with_mode(&staging, pem.as_bytes(), OWNER_ONLY_FILE)
+        fs.write_atomic(&staging, pem.as_bytes(), Some(OWNER_ONLY_FILE))
             .with_context(|| format!("writing the signing key {}", staging.display()))?;
-        let published = std::fs::hard_link(&staging, path);
+        let published = fs.hard_link(&staging, path);
         // The staging name is this call's alone, published or not.
-        let _ = std::fs::remove_file(&staging);
+        let _ = fs.remove_file(&staging);
         match published {
             Ok(()) => {
                 let key = Self::from_signing_key(signing_key);
@@ -209,7 +214,9 @@ impl DaemonSigningKey {
                 );
                 Ok(key)
             }
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Self::adopt_concurrent_key(path),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                Self::adopt_concurrent_key_on(fs, path)
+            }
             Err(e) => {
                 Err(e).with_context(|| format!("publishing the signing key {}", path.display()))
             }
@@ -218,14 +225,14 @@ impl DaemonSigningKey {
 
     /// Load the key another process published at `path` while this one was generating its own —
     /// the loser of a first-boot race keeps the winner's identity, never a second one.
-    fn adopt_concurrent_key(path: &Path) -> anyhow::Result<Self> {
-        let pem = std::fs::read(path).with_context(|| {
+    fn adopt_concurrent_key_on(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<Self> {
+        let pem = fs.read(path).with_context(|| {
             format!(
                 "reading the signing key {} another process wrote",
                 path.display()
             )
         })?;
-        Self::from_stored(path, &pem)
+        Self::from_stored_on(fs, path, &pem)
     }
 }
 
@@ -238,31 +245,18 @@ fn staging_path(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{name}.{}.new", uuid::Uuid::new_v4()))
 }
 
-#[cfg(unix)]
-fn create_owner_only_dir(dir: &Path) -> io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(OWNER_ONLY_DIR)
-        .create(dir)
-}
-
-#[cfg(not(unix))]
-fn create_owner_only_dir(dir: &Path) -> io::Result<()> {
-    std::fs::create_dir_all(dir)
-}
-
 /// Refuse a key file any other account can read or write.
 ///
 /// There is deliberately no repair-and-continue: a key that has been readable may already have
 /// been read, and tightening the mode would hide that from the one person who can judge it.
 #[cfg(unix)]
-fn refuse_if_readable_by_others(path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path)
+fn refuse_if_readable_by_others_on(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<()> {
+    // `metadata_follow`, as before: the key's own file is what must be closed.
+    let mode = fs
+        .metadata_follow(path)
         .with_context(|| format!("inspecting the signing key {}", path.display()))?
-        .permissions()
-        .mode()
+        .mode
+        .unwrap_or(0o777)
         & PERMISSION_BITS;
     if mode & GROUP_OR_OTHER_BITS != 0 {
         anyhow::bail!(
@@ -277,7 +271,7 @@ fn refuse_if_readable_by_others(path: &Path) -> anyhow::Result<()> {
 }
 
 #[cfg(not(unix))]
-fn refuse_if_readable_by_others(_path: &Path) -> anyhow::Result<()> {
+fn refuse_if_readable_by_others_on(_fs: &dyn tddy_fs::Fs, _path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
@@ -289,8 +283,13 @@ fn refuse_if_readable_by_others(_path: &Path) -> anyhow::Result<()> {
 /// directory holding a private signing key drift open with nothing ever saying so.
 #[cfg(unix)]
 pub fn auth_storage_looser_than_owner_only(dir: &Path) -> Option<String> {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(dir).ok()?.permissions().mode() & PERMISSION_BITS;
+    auth_storage_looser_than_owner_only_on(&tddy_fs::DiskFs, dir)
+}
+
+/// [`auth_storage_looser_than_owner_only`] through the filesystem port.
+#[cfg(unix)]
+pub fn auth_storage_looser_than_owner_only_on(fs: &dyn tddy_fs::Fs, dir: &Path) -> Option<String> {
+    let mode = fs.metadata_follow(dir).ok()?.mode? & PERMISSION_BITS;
     (mode & GROUP_OR_OTHER_BITS != 0).then(|| {
         format!(
             "auth_storage {} has mode {mode:03o}: other accounts can list the directory that \

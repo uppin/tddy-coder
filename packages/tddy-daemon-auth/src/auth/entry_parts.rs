@@ -1,9 +1,9 @@
 use crate::auth::auth_service_entry;
 use crate::auth::github_provider_kind;
-use crate::auth::probe_writable;
+use crate::auth::probe_writable_on;
 use crate::auth::GitHubProviderKind;
 use crate::auth::LiveKitTokenServiceImpl;
-use crate::signing_key::{auth_storage_looser_than_owner_only, SessionTokens};
+use crate::signing_key::{auth_storage_looser_than_owner_only_on, SessionTokens};
 use std::sync::Arc;
 use tddy_credentials::SessionVaults;
 use tddy_daemon_extensions::RoomTokenMinter;
@@ -66,9 +66,17 @@ pub(super) fn probed_credential_vaults(
     config: &DaemonConfig,
     lifetimes: crate::vault_lifetimes::VaultLifetimes,
 ) -> anyhow::Result<Option<Arc<SessionVaults>>> {
+    probed_credential_vaults_on(&tddy_fs::DiskFs, config, lifetimes)
+}
+
+pub(super) fn probed_credential_vaults_on(
+    fs: &dyn tddy_fs::Fs,
+    config: &DaemonConfig,
+    lifetimes: crate::vault_lifetimes::VaultLifetimes,
+) -> anyhow::Result<Option<Arc<SessionVaults>>> {
     let credential_vaults = match config.auth_storage.as_ref() {
         Some(dir) => {
-            probe_writable(dir).map_err(|e| {
+            probe_writable_on(fs, dir).map_err(|e| {
                 anyhow::anyhow!(
                     "config.auth_storage ({}) cannot hold credential vaults: {e}. \
                      Every GitHub login fails until it is writable by the daemon user.",
@@ -77,7 +85,7 @@ pub(super) fn probed_credential_vaults(
             })?;
             // Said once, here, at startup — and not repaired: see
             // `auth_storage_looser_than_owner_only`.
-            if let Some(warning) = auth_storage_looser_than_owner_only(dir) {
+            if let Some(warning) = auth_storage_looser_than_owner_only_on(fs, dir) {
                 log::warn!(target: crate::AUTH_LOG_TARGET, "{warning}");
             }
             Some(Arc::new(crate::vault_lifetimes::credential_vaults_in(
