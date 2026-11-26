@@ -406,19 +406,16 @@ impl WorkspaceSandboxProvisioner for JailedWorkspaceSandboxProvisioner {
         };
 
         let pid = handle.pid();
-        write_runner_pid_on(
-            &tddy_fs::DiskFs,
-            &layout.sandbox_root,
-            &pid.to_string(),
-        )
-        .map_err(|e| {
-            let _ = handle.child_mut().kill();
-            let _ = handle.child_mut().wait();
-            SandboxError::Io(format!(
-                "write runner pid under {}: {e}",
-                layout.sandbox_root.display()
-            ))
-        })?;
+        write_runner_pid_on(&tddy_fs::DiskFs, &layout.sandbox_root, &pid.to_string()).map_err(
+            |e| {
+                let _ = handle.child_mut().kill();
+                let _ = handle.child_mut().wait();
+                SandboxError::Io(format!(
+                    "write runner pid under {}: {e}",
+                    layout.sandbox_root.display()
+                ))
+            },
+        )?;
 
         log::info!(
             target: "tddy_daemon_sandbox::workspace_tool_sandbox",
@@ -498,7 +495,8 @@ pub fn prepare_jail_tree_on(
         })?;
     }
     Ok(WorkspaceSandboxLayout::under_session_dir(&canonical_on(
-        fs, session_dir,
+        fs,
+        session_dir,
     )))
 }
 

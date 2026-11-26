@@ -10,10 +10,15 @@ it.
 `Fs` is object-safe; crates hold it as `Arc<dyn Fs>` (or `&dyn Fs` for one call):
 
 - reads: `read`, `read_to_string`
-- writes: `write` (truncating), `append`, `write_atomic` / `write_atomic_with_mode` (below)
-- directories: `create_dir_all`, `remove_dir_all`, `read_dir` (full paths, sorted), `rename`
-- metadata: `metadata` (`FsMetadata`: kind, length, Unix mode, mtime), `exists`, `set_mode`,
-  `canonicalize`
+- writes: `write` (truncating), `append`, `write_atomic` / `write_atomic_with_mode` (below),
+  `hard_link` (never replaces an existing link, so a first-boot race keeps one winner)
+- directories: `create_dir_all`, `create_dir_all_with_mode` (mode rides on the creation, never
+  wider, not even briefly), `remove_dir` (empty only), `remove_dir_all`, `read_dir` (full
+  paths, sorted), `rename`
+- metadata: `metadata`, `metadata_follow` (what `execve` sees through a final symlink),
+  `FsMetadata` (kind, length, Unix mode, mtime, owning uid, device and inode numbers), `exists`,
+  `set_mode`, `canonicalize`
+- kinds: `FsKind` covers files, directories, symlinks and unix-domain sockets
 
 ## The atomic write
 
@@ -51,3 +56,11 @@ under `src/` where production code reaches the disk without the port — `std::f
 or a bare `fs::` path — skipping `#[cfg(test)]` items and comments. Each migrated crate runs it
 over itself in `tests/fs_port.rs` and takes `tddy-fs` with the `testing` feature as a
 dev-dependency.
+
+## Migrated crates
+
+`tddy-daemon-kernel`, `tddy-daemon-auth`, `tddy-daemon-sandbox`, `tddy-daemon-rpc`, `tddy-daemon`
+and `tddy-daemon-livekit` do their disk I/O through the port: guards plus one `MemFs` behaviour
+test per crate in each crate's `tests/fs_port.rs`. A socket file in a directory listing is an
+endpoint, not a manifest — consumers matching on `FsKind` handle `Socket` beside files and
+symlinks (for example the session listing skips it the way it skips unreadable entries).

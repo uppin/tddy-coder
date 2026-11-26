@@ -144,11 +144,7 @@ fn write_config(path: &Path, config: &DaemonConfig) -> Result<(), Status> {
 /// target's mode over the replacement is the port's own rule — so a write that fails midway
 /// leaves the operator's configuration exactly as it was, and the file keeps the mode they gave
 /// it.
-fn write_config_on(
-    fs: &dyn tddy_fs::Fs,
-    path: &Path,
-    config: &DaemonConfig,
-) -> Result<(), Status> {
+fn write_config_on(fs: &dyn tddy_fs::Fs, path: &Path, config: &DaemonConfig) -> Result<(), Status> {
     let yaml = serde_yaml::to_string(config)
         .map_err(|e| Status::internal(format!("failed to serialize the daemon config: {e}")))?;
     fs.write_atomic(path, yaml.as_bytes(), None).map_err(|e| {

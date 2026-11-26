@@ -170,10 +170,7 @@ fn hard_link_publishes_without_replacing() {
 #[test]
 fn hard_link_needs_an_existing_source() {
     each_adapter(|s| {
-        let err = s
-            .fs
-            .hard_link(&s.at("missing"), &s.at("link"))
-            .unwrap_err();
+        let err = s.fs.hard_link(&s.at("missing"), &s.at("link")).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     });
 }

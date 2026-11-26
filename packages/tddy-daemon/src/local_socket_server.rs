@@ -81,10 +81,7 @@ pub enum SocketSource {
 
 /// Clear the way for a self-bound local socket through the filesystem port: its directory
 /// exists, and no stale file sits at its path.
-pub fn prepare_self_bind_socket_on(
-    fs: &dyn tddy_fs::Fs,
-    path: &Path,
-) -> anyhow::Result<()> {
+pub fn prepare_self_bind_socket_on(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)
             .with_context(|| format!("create local socket dir {}", parent.display()))?;

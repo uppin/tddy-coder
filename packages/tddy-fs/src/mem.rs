@@ -67,9 +67,9 @@ impl Node {
 
     fn modified(&self) -> SystemTime {
         match self {
-            Node::File { modified, .. } | Node::Dir { modified, .. } | Node::Socket { modified, .. } => {
-                *modified
-            }
+            Node::File { modified, .. }
+            | Node::Dir { modified, .. }
+            | Node::Socket { modified, .. } => *modified,
         }
     }
 
@@ -187,7 +187,11 @@ impl MemFs {
         let key = normalized(path)?;
         let mut tree = self.lock();
         match tree.nodes.get_mut(&key) {
-            Some(Node::File { uid: slot, .. } | Node::Dir { uid: slot, .. } | Node::Socket { uid: slot, .. }) => {
+            Some(
+                Node::File { uid: slot, .. }
+                | Node::Dir { uid: slot, .. }
+                | Node::Socket { uid: slot, .. },
+            ) => {
                 *slot = uid;
                 Ok(())
             }
@@ -443,10 +447,8 @@ impl Fs for MemFs {
             }
             None => {
                 let id = tree.mint();
-                tree.nodes.insert(
-                    key,
-                    Node::file(id, 0, contents.to_vec(), DEFAULT_FILE_MODE),
-                );
+                tree.nodes
+                    .insert(key, Node::file(id, 0, contents.to_vec(), DEFAULT_FILE_MODE));
             }
         }
         Ok(())
@@ -478,7 +480,8 @@ impl Fs for MemFs {
             (None, _) => (DEFAULT_FILE_MODE, 0),
         };
         let id = tree.mint();
-        tree.nodes.insert(key, Node::file(id, uid, contents.to_vec(), mode));
+        tree.nodes
+            .insert(key, Node::file(id, uid, contents.to_vec(), mode));
         Ok(())
     }
 

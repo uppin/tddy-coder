@@ -6,7 +6,7 @@
 **Metrics:** **715 production lines** (2026-11-03, after #799) · budget 500
 **Thresholds breached:** length 684 > 500
 **Restructure:** `extract_module --to_file` — single seam, designed, **passes a plain `check`**, not applied
-**Status:** Open — regressed 2026-11-03 (+2 in #799); deferred to the #agent-tools sweep node — **unclaimed**
+**Status:** Open — regressed 2026-11-03 (+2 in #799); regressed 2026-11-26 (+24 in #1047, deferred to the post-stack sweep); deferred to the #agent-tools sweep node — **unclaimed**
 
 ## Measurement history
 
@@ -21,6 +21,7 @@
 | 2026-11-02 | 684 | **better** by 57 in PR #790 (`#agent-tools` 1/12): `host_ripgrep_grants`, `RipgrepGrants`, `binary_dependency_traversal_dirs` and their three `FIXME(grep-in-jail)` sites are deleted; the jail now lowers declared tools through `tddy_sandbox_recipes::tool_grants`. The provisioner gained tool resolution at jail start (`new`, `for_tddy_home`, `resolve_jail_tools`, `WORKSPACE_JAIL_TOOLS`). The standing deferral's premise (PR #548 deletes the ripgrep block) is void: the block is gone and the file is still over budget, so the seam below is what closes it |
 | 2026-11-02 | 713 | **worse** by 29 in PR #792 (`#agent-tools` 3/12): `build_workspace_tool_plan` lowers its tools' network (`lower_network`, the shim port, `--egress-*` runner args, `loopback_allow_ports`, `NetworkSpec.egress` / `allow_oauth_inbound`). Not split: stack-shared with every `#agent-tools` node, deferred to after the stack lands |
 | 2026-11-03 | 715 | **worse** by 2 in PR #799 (`#agent-tools` 10/12): the workspace tool jail's plan sets `context_dir` and `stdio`. Not split: deferred to the #agent-tools sweep node (developer) |
+| 2026-11-26 | 715 → 739 (+24) | **worse** by 24 in #1047 (`#fs-port` 3/13): the jail-tree preparation and runner-path seams through the port (`_on` forms + `MemFs` behaviour test). Not split here: only this node touches this file in the stack, but the split buries the migration diff — deferred to the sweep node after the stack lands |
 
 ## What would close it — designed seam
 

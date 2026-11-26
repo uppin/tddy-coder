@@ -384,7 +384,14 @@ fn run_confined_plan_on(
                 .map_err(|e| e.to_string())?
                 .code()
                 .unwrap_or(-1);
-            let _ = pump_log_tail_on(fs, &stdout_path, stdout_off, &stdout_ch, &combined_ch, false);
+            let _ = pump_log_tail_on(
+                fs,
+                &stdout_path,
+                stdout_off,
+                &stdout_ch,
+                &combined_ch,
+                false,
+            );
             let _ = pump_log_tail_on(fs, &stderr_path, stderr_off, &stderr_ch, &combined_ch, true);
             let stdout = read_bytes_on(fs, &stdout_path);
             let stderr = read_bytes_on(fs, &stderr_path);
@@ -396,7 +403,14 @@ fn run_confined_plan_on(
             };
         }
 
-        stdout_off = pump_log_tail_on(fs, &stdout_path, stdout_off, &stdout_ch, &combined_ch, false);
+        stdout_off = pump_log_tail_on(
+            fs,
+            &stdout_path,
+            stdout_off,
+            &stdout_ch,
+            &combined_ch,
+            false,
+        );
         stderr_off = pump_log_tail_on(fs, &stderr_path, stderr_off, &stderr_ch, &combined_ch, true);
         std::thread::sleep(Duration::from_millis(50));
     };

@@ -102,7 +102,9 @@ fn write_wip_tree_by(worktree_root: &Path, deadline: Instant) -> String {
     // staging area mid-session, which is the one thing this measurement must never do.
     let agents_index = Path::new(&git_dir).join("index");
     if let Err(e) = seed_scratch_index_on(&tddy_fs::DiskFs, &agents_index, &scratch_index) {
-        warn!("session_room: the index of {worktree_root:?} could not be copied for a WIP tree: {e}");
+        warn!(
+            "session_room: the index of {worktree_root:?} could not be copied for a WIP tree: {e}"
+        );
         return String::new();
     }
 
