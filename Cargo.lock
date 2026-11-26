@@ -12248,6 +12248,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "tddy-fs",
  "tddy-sandbox",
  "tddy-session-store",
  "tddy-toolcall",
@@ -12325,6 +12326,7 @@ dependencies = [
  "log",
  "serde",
  "serde_yaml",
+ "tddy-fs",
 ]
 
 [[package]]
@@ -12662,6 +12664,7 @@ dependencies = [
  "serde_yaml",
  "tddy-actions",
  "tddy-agent-backend",
+ "tddy-fs",
  "tddy-usage",
  "tddy-workflow",
  "tempfile",
@@ -12682,6 +12685,7 @@ dependencies = [
  "tddy-agent-backend",
  "tddy-coding-agent-specs",
  "tddy-discovery",
+ "tddy-fs",
  "tddy-usage",
  "tempfile",
  "tokio",

@@ -26,6 +26,8 @@ tddy-usage = { path = "../tddy-usage" }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # The context-glob table is compiled in and matched by `tddy-sandbox`, which parses every pattern
 # with `glob::Pattern` and treats an unparsable one as matching nothing. Both are dev-only here so
 # `context_globs_acceptance` can prove the table (and the exclusion list beside the matcher) parses

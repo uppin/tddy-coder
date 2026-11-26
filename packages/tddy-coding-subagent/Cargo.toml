@@ -24,6 +24,8 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-usage = { path = "../tddy-usage" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 # `spec_confinement_unit.rs` reads the built-in ACP specs straight from their embedded YAML.
 serde_yaml = "0.9"
