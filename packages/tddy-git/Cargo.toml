@@ -14,6 +14,8 @@ log = "0.4"
 tddy-remote-shell = { path = "../tddy-remote-shell" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # The remote checkout is driven through the in-memory shell the port ships for its consumers.

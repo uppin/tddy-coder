@@ -12752,6 +12752,7 @@ dependencies = [
  "sha2 0.11.0",
  "subtle",
  "tddy-credentials",
+ "tddy-fs",
  "thiserror 2.0.18",
  "x25519-dalek 2.0.1",
  "zeroize",
@@ -13180,6 +13181,7 @@ dependencies = [
  "serde_yaml",
  "tddy-agent-backend",
  "tddy-core",
+ "tddy-fs",
  "tddy-rpc",
  "tddy-service",
  "tddy-session-tool-client",
@@ -13248,6 +13250,7 @@ dependencies = [
  "async-trait",
  "log",
  "pretty_assertions",
+ "tddy-fs",
  "tddy-remote-shell",
  "tokio",
 ]
@@ -13256,6 +13259,7 @@ dependencies = [
 name = "tddy-git-clone"
 version = "0.1.0"
 dependencies = [
+ "tddy-fs",
  "tempfile",
 ]
 
@@ -13278,6 +13282,7 @@ dependencies = [
  "sha2 0.10.9",
  "tddy-core",
  "tddy-credentials",
+ "tddy-fs",
  "tddy-rpc",
  "tddy-service",
  "tempfile",
@@ -13339,6 +13344,7 @@ dependencies = [
  "tddy-credentials",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
+ "tddy-fs",
  "tddy-remote-shell",
  "tddy-rpc",
  "tddy-service",
@@ -13669,6 +13675,7 @@ dependencies = [
  "serde",
  "serde_yaml",
  "tddy-core",
+ "tddy-fs",
  "tddy-rpc",
  "tddy-service",
  "tempfile",
@@ -14906,6 +14913,7 @@ dependencies = [
  "sha2 0.10.9",
  "tddy-build",
  "tddy-build-qemu",
+ "tddy-fs",
  "tddy-rpc",
  "tddy-service",
  "tddy-task",

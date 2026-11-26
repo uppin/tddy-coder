@@ -9,4 +9,6 @@ name = "tddy-git-clone"
 path = "src/main.rs"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"

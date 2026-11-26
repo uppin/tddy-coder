@@ -51,6 +51,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `SecretString`: the token of the stand-in Coder account the listing's tests read.
 tddy-credentials = { path = "../tddy-credentials" }
 # `NoPeerForwarding`: a common room that is configured but carries nothing.
