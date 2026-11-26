@@ -117,7 +117,7 @@ impl CliSessionManager {
             None,
             os_user,
             on_exit,
-            tmux_session,
+            TmuxRun::with_location(tmux_session, os_user, None),
         )
         .await
     }
@@ -139,7 +139,7 @@ impl CliSessionManager {
         exit_code_in_output: Option<tddy_pty::ExitCodeInOutput>,
         os_user: Option<&str>,
         on_exit: Option<ExitHook>,
-        tmux_session: Option<&str>,
+        tmux_run: TmuxRun,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         let (ready_tx, ready_rx) = oneshot::channel();
         let mut spec = build_pty_spawn_spec(
@@ -183,7 +183,7 @@ impl CliSessionManager {
 
         let mut handle =
             self.build_pty_handle(task, terminal_id, kind, worktree_path, model, ready)?;
-        handle.tmux_session = tmux_session.map(str::to_string);
+        handle.tmux_session = tmux_run.session().map(str::to_string);
 
         self.register_spawned_terminal(session_id, terminal_id, &handle)
             .await;
@@ -195,22 +195,15 @@ impl CliSessionManager {
             ),
             None => None,
         };
-        self.spawn_cleanup_for(
-            (session_id, terminal_id, kind),
-            os_user,
-            tmux_session,
-            handle,
-            on_exit,
-        )
+        self.spawn_cleanup_for((session_id, terminal_id, kind), handle, on_exit, tmux_run)
     }
 
     fn spawn_cleanup_for(
         &self,
         (session_id, terminal_id, kind): (&str, &str, &str),
-        os_user: Option<&str>,
-        tmux_session: Option<&str>,
         handle: super::PtyHandle,
         on_exit: Option<PendingExit>,
+        tmux_run: TmuxRun,
     ) -> anyhow::Result<Arc<super::PtyHandle>> {
         self.spawn_terminal_cleanup(
             session_id.to_string(),
@@ -220,7 +213,11 @@ impl CliSessionManager {
             on_exit,
             // A tmux attach of the user's own session is a client of nothing the session keeps; a
             // main, or a tab wrapping an agent in tmux, is a client of its agent.
-            TmuxRun::new(tmux_session.filter(|_| kind != TMUX_KIND), os_user),
+            if kind == TMUX_KIND {
+                tmux_run.not_a_client()
+            } else {
+                tmux_run
+            },
         );
 
         finish_spawned_terminal(session_id, terminal_id, kind, handle)

@@ -16,7 +16,7 @@ fn a_tmux_run_main_whose_tmux_session_is_alive_ended_as_a_client_only() {
     // When the main's process ends
     let exit = classify_main_exit(Some("tddy-1234abcd"), |name| {
         probed.set(Some(name.to_string()));
-        true
+        Ok(true)
     });
 
     // Then only the client ended, and the probe was asked about the recorded session
@@ -27,7 +27,7 @@ fn a_tmux_run_main_whose_tmux_session_is_alive_ended_as_a_client_only() {
 #[test]
 fn a_tmux_run_main_whose_tmux_session_is_gone_ended_with_its_agent() {
     // When the main's process ends and tmux no longer has its session
-    let exit = classify_main_exit(Some("tddy-1234abcd"), |_| false);
+    let exit = classify_main_exit(Some("tddy-1234abcd"), |_| Ok(false));
 
     // Then the agent ended
     assert_eq!(exit, MainExit::AgentEnded);

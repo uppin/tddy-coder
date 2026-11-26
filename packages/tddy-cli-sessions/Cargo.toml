@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "The daemon's CLI session PTY runtime: PTY-hosted claude/cursor sessions and their terminals"
 
+[features]
+test-support = []
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"

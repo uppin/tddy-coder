@@ -36,6 +36,12 @@ processes.
   daemon's detach watcher holds its tmux session, and for the moment between the client's end and the
   watcher taking over: a listing never finds the session held by neither. Watchers are per terminal,
   so a main and each wrapped tab are watched on their own.
+- The watcher probes the tmux session wherever it lives, through a location that answers alive,
+  gone, or that it cannot be asked. "Cannot be asked" is never read as gone: the watcher backs off
+  from 10 s to at most 5 min between probes, and holds the session live for at most 15 min of
+  consecutive unreachability. Past that it releases the hold — the session lists inactive, its
+  agent is not announced ended and no state is dropped — and keeps probing at the cap, so a
+  location that answers alive again holds the session live once more.
 - A sandboxed session's liveness is read off the runner process its entry owns, never off the recorded
   pid. A main jail that dies on its own leaves the registry (see
   [A dead main jail](#a-dead-main-jail)), so the entry never outlives its runner.

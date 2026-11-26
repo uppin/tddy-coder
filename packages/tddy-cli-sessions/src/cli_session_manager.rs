@@ -120,6 +120,8 @@ pub struct CliSessionManager {
     /// How often a detached tmux-run agent (its client ended, its tmux session alive) is checked
     /// for being gone.
     detach_watch_interval: Duration,
+    detach_watch_cap: Duration,
+    detach_watch_grace: Duration,
     /// The watchers of detached tmux-run agents: `session_id → watcher`, stopped by a re-attach.
     detached_watchers: tmux_reattach::DetachedWatchers,
     /// The exit-hook watchers of tmux-run agents. Kept apart from `detached_watchers`, which a
@@ -164,6 +166,8 @@ impl CliSessionManager {
             main_recordings: Arc::new(RwLock::new(HashMap::new())),
             recording_interval: RECORDING_INTERVAL,
             detach_watch_interval: tmux_reattach::DETACH_WATCH_INTERVAL,
+            detach_watch_cap: tmux_reattach::DETACH_WATCH_MAX_INTERVAL,
+            detach_watch_grace: tmux_reattach::DETACH_UNREACHABLE_GRACE,
             detached_watchers: tmux_reattach::DetachedWatchers::default(),
             exit_hook_watched: tmux_exit_hook::ExitHookWatched::default(),
             agent_end_tx: agent_end::agent_end_channel(),
@@ -217,6 +221,7 @@ mod tmux_main;
 mod tmux_terminal;
 
 mod tmux_reattach;
+pub use crate::tmux_location::WatchBackoff;
 pub use tmux_reattach::{classify_main_exit, MainExit};
 
 mod tmux_exit_hook;

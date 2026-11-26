@@ -12,10 +12,16 @@ use super::{
     pty_handle, CliSessionManager, ExposedTerminalRegistry, ManagedWorkflowRegistry, TerminalIndex,
     MAIN_TERMINAL_ID,
 };
-use crate::tmux::tmux_session_alive;
+use crate::tmux_location::{HostTmux, SharedTmuxLocation, TmuxUnreachable, WatchBackoff};
 
 /// How often a detached tmux-run agent is checked for being gone.
 pub const DETACH_WATCH_INTERVAL: Duration = Duration::from_secs(10);
+
+/// The longest a watcher waits between probes while its location cannot be asked (D4).
+pub const DETACH_WATCH_MAX_INTERVAL: Duration = Duration::from_secs(300);
+
+/// How long a watcher holds a session live while its location cannot be asked (D4).
+pub const DETACH_UNREACHABLE_GRACE: Duration = Duration::from_secs(900);
 
 /// The watchers of detached tmux-run agents, by session and terminal.
 pub(crate) type DetachedWatchers = Arc<RwLock<Watchers>>;
@@ -32,11 +38,17 @@ pub(crate) struct Watchers {
     /// been told apart from the client: held, so the session is never between its terminal and its
     /// watcher.
     settling: std::collections::HashSet<(String, String)>,
+    /// `(session_id, terminal_id)` a watcher currently holds live. A watcher whose location stays
+    /// unreachable past the grace releases its hold but keeps probing (D4), so this — not the
+    /// watcher's presence — is what counts as live.
+    held: std::collections::HashSet<(String, String)>,
 }
 
 impl Watchers {
     /// Stop the watcher of `session_id`'s terminal `terminal_id`, if one runs.
     pub(crate) fn stop(&mut self, session_id: &str, terminal_id: &str) {
+        self.held
+            .remove(&(session_id.to_string(), terminal_id.to_string()));
         let Some(terminals) = self.by_session.get_mut(session_id) else {
             return;
         };
@@ -48,23 +60,21 @@ impl Watchers {
         }
     }
 
-    /// The sessions whose detached agent a watcher is still watching.
+    /// The sessions whose detached agent a watcher still holds live.
     pub(crate) fn watched_sessions(&self) -> Vec<String> {
-        self.by_session
+        self.held
             .iter()
-            .filter(|(_, terminals)| terminals.values().any(|watcher| !watcher.is_finished()))
+            .chain(self.settling.iter())
             .map(|(session_id, _)| session_id.clone())
-            .chain(
-                self.settling
-                    .iter()
-                    .map(|(session_id, _)| session_id.clone()),
-            )
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
             .collect()
     }
 
     /// Stop every watcher and refuse new ones.
     pub(crate) fn close(&mut self) {
         self.closed = true;
+        self.held.clear();
         for (_, terminals) in self.by_session.drain() {
             for (_, watcher) in terminals {
                 watcher.abort();
@@ -84,6 +94,8 @@ pub(crate) struct DetachWatch {
     /// otherwise.
     terminal_id: String,
     interval: Duration,
+    watch_cap: Duration,
+    watch_grace: Duration,
     /// Where an agent end is announced — read by both announcing sites: a main ending with its
     /// agent (`main_ended`) and a detached agent whose tmux session is gone (`start`).
     agent_ends: super::agent_end::AgentEndSender,
@@ -104,7 +116,13 @@ impl DetachWatch {
     /// workflow (its toolcall socket) and exposure are dropped — the cleanup a main exiting with its
     /// agent runs. A watcher already running for the terminal is replaced. Nothing starts once the
     /// manager has shut down.
-    pub(crate) async fn start(self, session_id: String, session: String, os_user: String) {
+    pub(crate) async fn start(
+        self,
+        session_id: String,
+        session: String,
+        location: SharedTmuxLocation,
+        os_user: String,
+    ) {
         let key = session_id.clone();
         let terminal_id = self.terminal_id.clone();
         let watchers = Arc::clone(&self.watchers);
@@ -114,7 +132,8 @@ impl DetachWatch {
             return;
         }
         registry.stop(&key, &terminal_id);
-        let watcher = tokio::spawn(self.watch_until_gone(session_id, session, os_user));
+        registry.held.insert((key.clone(), terminal_id.clone()));
+        let watcher = tokio::spawn(self.watch_until_gone(session_id, session, location, os_user));
         registry
             .by_session
             .entry(key)
@@ -122,33 +141,77 @@ impl DetachWatch {
             .insert(terminal_id, watcher.abort_handle());
     }
 
-    /// The watcher [`Self::start`] spawns: probe `session` every interval until it is gone — and
-    /// clean up — or the terminal is registered again.
-    async fn watch_until_gone(self, session_id: String, session: String, os_user: String) {
+    /// The watcher [`Self::start`] spawns: probe `session` at the backoff's cadence until it is
+    /// gone — and clean up — or the terminal is registered again. A location that cannot be
+    /// asked tears nothing down: the watcher backs off, and past the grace it releases its hold
+    /// without ending the agent, but keeps probing at the cap (D4).
+    async fn watch_until_gone(
+        self,
+        session_id: String,
+        session: String,
+        location: SharedTmuxLocation,
+        os_user: String,
+    ) {
+        let mut backoff =
+            WatchBackoff::with_limits(self.interval, self.watch_cap, self.watch_grace);
+        let mut holding = true;
         loop {
-            tokio::time::sleep(self.interval).await;
+            tokio::time::sleep(backoff.delay()).await;
             if self.terminal_is_registered(&session_id).await {
+                self.watchers
+                    .write()
+                    .await
+                    .held
+                    .remove(&(session_id.clone(), self.terminal_id.clone()));
                 return;
             }
-            let alive = {
-                let (os_user, session) = (os_user.clone(), session.clone());
-                tokio::task::spawn_blocking(move || tmux_session_alive(&os_user, &session)).await
-            };
-            match alive {
-                Ok(true) => continue,
+            match location.session_lives(&session).await {
+                Ok(true) => {
+                    backoff.on_alive();
+                    if !holding {
+                        holding = true;
+                        self.watchers
+                            .write()
+                            .await
+                            .held
+                            .insert((session_id.clone(), self.terminal_id.clone()));
+                    }
+                }
                 Ok(false) => {
                     log::info!(
                         target: "tddy_daemon::claude_cli_session",
                         "the agent of detached session {session_id} ended (tmux session {session:?} is gone): cleaning up"
                     );
                     self.detached_agent_ended(&session_id, &os_user).await;
+                    self.watchers
+                        .write()
+                        .await
+                        .held
+                        .remove(&(session_id.clone(), self.terminal_id.clone()));
                     return;
                 }
-                // A probe that did not finish tears nothing down: it is tried again.
-                Err(error) => log::warn!(
-                    target: "tddy_daemon::claude_cli_session",
-                    "could not tell whether tmux session {session:?} is alive: {error}"
-                ),
+                Err(error) => {
+                    log::warn!(
+                        target: "tddy_daemon::claude_cli_session",
+                        "could not tell whether tmux session {session:?} is alive at {}: {error}",
+                        location.describe()
+                    );
+                    let was_expired = backoff.grace_expired();
+                    backoff.on_unreachable();
+                    if backoff.grace_expired() && !was_expired && holding {
+                        holding = false;
+                        log::warn!(
+                            target: "tddy_daemon::claude_cli_session",
+                            "detached session {session_id} has been unreachable past the grace at {}; releasing its hold without ending its agent",
+                            location.describe()
+                        );
+                        self.watchers
+                            .write()
+                            .await
+                            .held
+                            .remove(&(session_id.clone(), self.terminal_id.clone()));
+                    }
+                }
             }
         }
     }
@@ -238,17 +301,17 @@ impl DetachWatch {
     /// **before** the client's terminal leaves the index, so the session is held by the terminal or
     /// by the watcher at every moment — a listing never finds it held by neither.
     pub(crate) async fn hold_detached_agent(self, session_id: String, tmux_run: TmuxRun) {
-        match (tmux_run.session, tmux_run.os_user) {
-            (Some(session), Some(os_user)) => {
+        match (tmux_run.session, tmux_run.location, tmux_run.os_user) {
+            (Some(session), Some(location), Some(os_user)) => {
                 log::debug!(
                     target: "tddy_cli_sessions::reattach",
                     "{session_id}: client ended, agent alive in tmux session {session}; watcher takes over"
                 );
-                self.start(session_id, session, os_user).await;
+                self.start(session_id, session, location, os_user).await;
             }
             _ => log::debug!(
                 target: "tddy_cli_sessions::reattach",
-                "{session_id}: client ended but the run names no tmux session or user; no watcher"
+                "{session_id}: client ended but the run names no tmux session or location; no watcher"
             ),
         }
     }
@@ -262,19 +325,44 @@ impl DetachWatch {
     }
 }
 
-/// The tmux session a terminal is a client of, and the OS user it runs as — both `None` for a
-/// terminal that is not a tmux client.
+/// The tmux session a terminal is a client of, where it lives, and the OS user it runs as — all
+/// `None` for a terminal that is not a tmux client.
 #[derive(Clone)]
 pub(crate) struct TmuxRun {
     session: Option<String>,
     os_user: Option<String>,
+    location: Option<SharedTmuxLocation>,
 }
 
 impl TmuxRun {
-    pub(crate) fn new(session: Option<&str>, os_user: Option<&str>) -> Self {
+    pub(crate) fn with_location(
+        session: Option<&str>,
+        os_user: Option<&str>,
+        location: Option<SharedTmuxLocation>,
+    ) -> Self {
+        let location = location.or_else(|| match (session, os_user) {
+            (Some(_), Some(user)) => Some(Arc::new(HostTmux::new(user)) as SharedTmuxLocation),
+            _ => None,
+        });
         TmuxRun {
             session: session.map(str::to_string),
             os_user: os_user.map(str::to_string),
+            location,
+        }
+    }
+
+    /// The tmux session the terminal is a client of, when it is one.
+    pub(crate) fn session(&self) -> Option<&str> {
+        self.session.as_deref()
+    }
+
+    /// The same run, but not a client of an agent's tmux session (a `tmux` tab on a person's own
+    /// session): nothing to classify or watch when its client ends.
+    pub(crate) fn not_a_client(self) -> Self {
+        TmuxRun {
+            session: None,
+            location: None,
+            ..self
         }
     }
 
@@ -290,25 +378,26 @@ impl TmuxRun {
     }
 }
 
-/// How a main terminal's process ended. The liveness probe runs a process, so it runs on the
-/// blocking pool. A probe that did not finish keeps the session's state: nothing is torn down on a
-/// guess.
+/// How a main terminal's process ended. A probe that cannot be asked keeps the session's state:
+/// nothing is torn down on a guess (D6).
 pub(crate) async fn classify_ended_main(tmux_run: TmuxRun) -> MainExit {
-    let TmuxRun { session, os_user } = tmux_run;
-    let classified = tokio::task::spawn_blocking(move || {
-        classify_main_exit(session.as_deref(), |name| {
-            os_user
-                .as_deref()
-                .is_some_and(|user| tmux_session_alive(user, name))
-        })
-    })
-    .await;
-    match classified {
-        Ok(exit) => exit,
+    let TmuxRun {
+        session, location, ..
+    } = tmux_run;
+    let Some(name) = session else {
+        return MainExit::AgentEnded;
+    };
+    let Some(location) = location else {
+        return MainExit::AgentEnded;
+    };
+    match location.session_lives(&name).await {
+        Ok(true) => MainExit::ClientOnly,
+        Ok(false) => MainExit::AgentEnded,
         Err(error) => {
             log::warn!(
                 target: "tddy_daemon::claude_cli_session",
-                "could not tell whether a main terminal's agent is still running, so its session is kept: {error}"
+                "could not tell whether a main terminal's agent is still running at {}, so its session is kept: {error}",
+                location.describe()
             );
             MainExit::ClientOnly
         }
@@ -327,15 +416,20 @@ pub enum MainExit {
 }
 
 /// Classify the end of a main terminal. `tmux_session` is the terminal's recorded tmux session
-/// (`None` for a PTY-run main); `tmux_session_alive` is the liveness probe, injected so the
-/// decision is testable without a tmux server. A terminal without a tmux session never probes.
+/// (`None` for a PTY-run main); the probe is injected so the decision is testable without a tmux
+/// server. A probe that cannot be asked keeps the session (D6). A terminal without a tmux
+/// session never probes.
 pub fn classify_main_exit(
     tmux_session: Option<&str>,
-    tmux_session_alive: impl FnOnce(&str) -> bool,
+    probe: impl FnOnce(&str) -> Result<bool, TmuxUnreachable>,
 ) -> MainExit {
     match tmux_session {
-        Some(name) if tmux_session_alive(name) => MainExit::ClientOnly,
-        _ => MainExit::AgentEnded,
+        Some(name) => match probe(name) {
+            Ok(true) => MainExit::ClientOnly,
+            Ok(false) => MainExit::AgentEnded,
+            Err(_) => MainExit::ClientOnly,
+        },
+        None => MainExit::AgentEnded,
     }
 }
 
@@ -348,6 +442,20 @@ impl CliSessionManager {
         self
     }
 
+    /// The same manager, with the detach watcher's backoff cap and unreachable grace (D4).
+    #[must_use]
+    pub fn with_detach_watch_backoff(
+        mut self,
+        interval: Duration,
+        cap: Duration,
+        grace: Duration,
+    ) -> Self {
+        self.detach_watch_interval = interval;
+        self.detach_watch_cap = cap;
+        self.detach_watch_grace = grace;
+        self
+    }
+
     pub(crate) fn detach_watch(&self) -> DetachWatch {
         DetachWatch {
             terminals: Arc::clone(&self.terminals),
@@ -356,6 +464,8 @@ impl CliSessionManager {
             watchers: Arc::clone(&self.detached_watchers),
             terminal_id: MAIN_TERMINAL_ID.to_string(),
             interval: self.detach_watch_interval,
+            watch_cap: self.detach_watch_cap,
+            watch_grace: self.detach_watch_grace,
             agent_ends: self.agent_end_tx.clone(),
             control: Arc::clone(&self.control),
         }
@@ -403,11 +513,136 @@ mod tests {
         // When a main cancelled by that shutdown exits as a client only
         manager
             .detach_watch()
-            .start("session-1".into(), "tddy-session".into(), "user".into())
+            .start(
+                "session-1".into(),
+                "tddy-session".into(),
+                Arc::new(HostTmux::new("user")),
+                "user".into(),
+            )
             .await;
 
         // Then no watcher outlives the shutdown
         assert!(manager.detached_watchers.read().await.by_session.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_location_reporting_gone_ends_the_detached_agent() {
+        use crate::tmux_location::FakeTmuxLocation;
+        // Given a watcher over a location whose tmux session is gone
+        let manager =
+            CliSessionManager::new().with_detach_watch_interval(Duration::from_millis(10));
+        let mut ends = manager.agent_ends();
+        let fake = std::sync::Arc::new(FakeTmuxLocation::new(&[]));
+        manager
+            .detach_watch()
+            .start(
+                "session-1".into(),
+                "tddy-session".into(),
+                fake,
+                "user".into(),
+            )
+            .await;
+
+        // Then the watcher announces the agent end with no exit code
+        let end = tokio::time::timeout(Duration::from_secs(5), ends.recv())
+            .await
+            .expect("the detached agent's end was announced")
+            .expect("channel open");
+        assert_eq!(end.session_id, "session-1");
+        assert_eq!(end.os_user.as_deref(), Some("user"));
+        assert_eq!(end.exit_code, None);
+
+        // And the watcher no longer holds the session live
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!manager
+            .detached_watchers
+            .read()
+            .await
+            .watched_sessions()
+            .contains(&"session-1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_watcher_releases_its_hold_after_the_grace_without_ending_the_agent() {
+        use crate::tmux_location::FakeTmuxLocation;
+        // Given a watcher whose location cannot be asked, with a short grace for the test
+        let manager = CliSessionManager::new().with_detach_watch_backoff(
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+            Duration::from_millis(60),
+        );
+        let mut ends = manager.agent_ends();
+        let fake = std::sync::Arc::new(FakeTmuxLocation::new(&["tddy-session"]));
+        fake.set_reachable(false);
+        manager
+            .detach_watch()
+            .start(
+                "session-1".into(),
+                "tddy-session".into(),
+                fake.clone(),
+                "user".into(),
+            )
+            .await;
+        assert!(manager
+            .detached_watchers
+            .read()
+            .await
+            .watched_sessions()
+            .contains(&"session-1".to_string()));
+
+        // When the grace passes
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Then the hold is released, no agent end is announced, and probing continues
+        assert!(!manager
+            .detached_watchers
+            .read()
+            .await
+            .watched_sessions()
+            .contains(&"session-1".to_string()));
+        assert!(tokio::time::timeout(Duration::from_millis(50), ends.recv())
+            .await
+            .is_err());
+        let probes = fake.probe_count();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(fake.probe_count() > probes, "the watcher keeps probing");
+    }
+
+    #[tokio::test]
+    async fn a_watcher_backs_off_while_its_location_is_unreachable() {
+        use crate::tmux_location::FakeTmuxLocation;
+        // Given a watcher whose location cannot be asked
+        let manager = CliSessionManager::new().with_detach_watch_backoff(
+            Duration::from_millis(20),
+            Duration::from_millis(50),
+            Duration::from_secs(60),
+        );
+        let fake = std::sync::Arc::new(FakeTmuxLocation::new(&["tddy-session"]));
+        fake.set_reachable(false);
+        manager
+            .detach_watch()
+            .start(
+                "session-1".into(),
+                "tddy-session".into(),
+                fake.clone(),
+                "user".into(),
+            )
+            .await;
+
+        // When it has probed several times, the gaps grow instead of staying at the base
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let instants = fake.probe_instants();
+        assert!(instants.len() >= 4, "probes: {}", instants.len());
+        let gaps: Vec<Duration> = instants.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        assert!(
+            gaps[1] > gaps[0],
+            "the second gap backs off from the first: {gaps:?}"
+        );
+        assert!(
+            gaps.iter().all(|gap| *gap <= Duration::from_millis(120)),
+            "gaps stay near the cap: {gaps:?}"
+        );
+        manager.kill_all().await;
     }
 
     #[tokio::test]
@@ -418,7 +653,12 @@ mod tests {
         // When a tmux-run main exits as a client only
         manager
             .detach_watch()
-            .start("session-1".into(), "tddy-session".into(), "user".into())
+            .start(
+                "session-1".into(),
+                "tddy-session".into(),
+                Arc::new(HostTmux::new("user")),
+                "user".into(),
+            )
             .await;
 
         // Then a watcher is registered for its session
