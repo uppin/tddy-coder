@@ -1,7 +1,10 @@
 use crate::screen_sharing_service::BridgeTarget;
 use crate::screen_sharing_service::DEFAULT_STREAM_FPS;
 use std::time::Duration;
-use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
+use tddy_daemon_kernel::config::{
+    resolve_ios_simulator_binary_path, resolve_rdp_binary_path, resolve_vnc_binary_path,
+    DaemonConfig,
+};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_rpc::Status;
 use tddy_service::proto::screen_sharing::{
@@ -48,6 +51,7 @@ pub(crate) fn prepare_bridge(
     let binary = match target.protocol {
         Protocol::Vnc => resolve_vnc_binary_path(config),
         Protocol::Rdp => resolve_rdp_binary_path(config),
+        Protocol::IosSimulator => resolve_ios_simulator_binary_path(config),
         Protocol::Unspecified => {
             return Err(format!(
                 "target {} names no protocol to bridge it with",
@@ -234,6 +238,8 @@ pub(crate) fn host_target_to_proto(t: &HostDesktopTarget) -> ProtoScreenSharingT
         username: t.username.clone(),
         x11_display: t.display,
         domain: String::new(),
+        // TODO(ios-simulator): list the target's device.
+        device_id: String::new(),
     }
 }
 

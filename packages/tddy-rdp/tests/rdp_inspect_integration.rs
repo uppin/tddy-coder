@@ -15,7 +15,7 @@ use ironrdp_server::{DesktopSize, RdpServer, RdpServerDisplay, RdpServerDisplayU
 use pretty_assertions::assert_eq;
 
 use tddy_rdp::rdp_client::RdpClient;
-use tddy_screenshare::{AdvertisedMethod, ScreenSharingClient};
+use tddy_screenshare::{AdvertisedMethod, ConnectTarget, ScreenSharingClient};
 
 /// How long an inspection may take before the test calls it a hang.
 const AN_INSPECTION_FINISHES_WITHIN: Duration = Duration::from_secs(10);
@@ -155,7 +155,7 @@ impl RunningDesktop {
     async fn inspected(&self) -> Vec<AdvertisedMethod> {
         tokio::time::timeout(
             AN_INSPECTION_FINISHES_WITHIN,
-            RdpClient::inspect("127.0.0.1", self.port),
+            RdpClient::inspect(&ConnectTarget::network("127.0.0.1", self.port)),
         )
         .await
         .unwrap_or_else(|_| {

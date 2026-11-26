@@ -260,6 +260,7 @@ pub(crate) fn host_remote_desktop_message(reading: &DesktopReachability) -> Host
             DesktopChannel::X11Display(display) => format!("Display :{display}"),
             DesktopChannel::Endpoint => String::new(),
         },
+        device_id: String::new(),
     }
 }
 

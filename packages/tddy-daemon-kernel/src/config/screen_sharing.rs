@@ -20,6 +20,10 @@ pub struct ScreenSharingConfig {
     /// Empty string (default) → `/tmp/.X11-unix`.
     #[serde(default)]
     pub x11_socket_dir: String,
+    /// Path to the `tddy-ios-emulator` bridge binary (macOS).
+    /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
+    #[serde(default)]
+    pub ios_simulator_binary_path: String,
 }
 
 /// Resolve the actual path to the `tddy-vnc` binary.
@@ -42,6 +46,15 @@ pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
         .and_then(|p| p.parent().map(|d| d.join("tddy-vnc")))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "tddy-vnc".to_string())
+}
+
+/// Resolve the actual path to the `tddy-ios-emulator` binary.
+///
+/// Resolution order, as for [`resolve_vnc_binary_path`]: explicit `ios_simulator_binary_path`,
+/// then a sibling of the current executable, then `"tddy-ios-emulator"` on PATH.
+pub fn resolve_ios_simulator_binary_path(config: &DaemonConfig) -> String {
+    let _ = config;
+    todo!("resolve_ios_simulator_binary_path")
 }
 
 /// Resolve the actual path to the `tddy-rdp` binary.

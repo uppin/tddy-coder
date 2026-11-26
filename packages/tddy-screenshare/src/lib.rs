@@ -5,7 +5,7 @@ pub mod inspect;
 pub mod streamer;
 
 pub use bridge::{run_bridge, BridgeConfig};
-pub use client::{Credentials, ScreenSharingClient};
+pub use client::{ConnectTarget, Credentials, ScreenSharingClient};
 pub use inspect::{
     read_inspect_report, run_inspect, write_inspect_report, AdvertisedMethod, BridgeMode,
     InspectReport, InspectTarget, INSPECT_FLAG,

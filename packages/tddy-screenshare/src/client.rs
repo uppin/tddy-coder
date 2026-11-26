@@ -13,22 +13,44 @@ pub struct Credentials {
     pub password: Option<String>,
 }
 
+/// Where a bridge connects: a network desktop at `host:port`, optionally naming one device on it.
+///
+/// `device` is absent for VNC and RDP. A device-scoped protocol (an iOS Simulator, named by its
+/// udid) needs it, and `port` is then 0.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConnectTarget {
+    pub host: String,
+    pub port: u16,
+    pub device: Option<String>,
+}
+
+impl ConnectTarget {
+    /// A network desktop with no device: what VNC and RDP connect to.
+    pub fn network(host: &str, port: u16) -> Self {
+        Self {
+            host: host.to_owned(),
+            port,
+            device: None,
+        }
+    }
+}
+
 /// Protocol-agnostic screen-sharing client trait.
 ///
 /// Implemented by `VncClientState` (tddy-vnc) and `RdpClient` (tddy-rdp).
 /// The generic bridge runner in `bridge.rs` is parameterised over this trait.
 #[async_trait::async_trait]
 pub trait ScreenSharingClient: Sized + Send + 'static {
-    /// Open a connection to the remote desktop at `host:port`.
+    /// Open a connection to the remote desktop `target` names.
     ///
     /// Each field of `credentials` is `None` for targets that don't require it.
-    async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self>;
+    async fn connect(target: &ConnectTarget, credentials: &Credentials) -> anyhow::Result<Self>;
 
-    /// The sign-in methods the desktop at `host:port` advertises, read without signing in.
+    /// The sign-in methods the desktop `target` names advertises, read without signing in.
     ///
     /// Reads the protocol's advertisement — the RFB security-type list, the X.224 Connection
     /// Confirm — and disconnects. Never sends a credential.
-    async fn inspect(host: &str, port: u16) -> anyhow::Result<Vec<AdvertisedMethod>>;
+    async fn inspect(target: &ConnectTarget) -> anyhow::Result<Vec<AdvertisedMethod>>;
 
     /// Current framebuffer dimensions `(width, height)` in pixels.
     ///

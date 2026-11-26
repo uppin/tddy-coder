@@ -1,0 +1,31 @@
+[package]
+name = "tddy-ios-emulator"
+version = "0.1.0"
+edition = "2021"
+description = "iOS Simulator bridge: streams a booted simulator's device screen to LiveKit and turns viewer input into taps and typing (macOS only)"
+
+[lib]
+name = "tddy_ios_emulator"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-ios-emulator"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+env_logger = "0.11"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "sync", "time"] }
+tddy-screenshare = { path = "../tddy-screenshare" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+serde_json = "1"
+tddy-screenshare = { path = "../tddy-screenshare" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time"] }

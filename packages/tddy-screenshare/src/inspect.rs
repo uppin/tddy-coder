@@ -8,7 +8,7 @@
 //! Runs only when an operator opens a desktop. The periodic probe stays a bare TCP connect, and
 //! inspect never sends a credential: it stops before any sign-in exchange begins.
 
-use crate::client::ScreenSharingClient;
+use crate::client::{ConnectTarget, ScreenSharingClient};
 
 pub use tddy_daemon_extensions::desktop_inspect::{
     read_inspect_report, write_inspect_report, AdvertisedMethod, InspectReport, InspectTarget,
@@ -43,7 +43,7 @@ impl BridgeMode {
 /// An inspection that fails — the desktop is unreachable, or broke the protocol — is returned as an
 /// error, so the bridge exits non-zero with the reason on stderr and writes no report.
 pub async fn run_inspect<C: ScreenSharingClient>(target: InspectTarget) -> anyhow::Result<()> {
-    let methods = C::inspect(&target.host, target.port).await?;
+    let methods = C::inspect(&ConnectTarget::network(&target.host, target.port)).await?;
     let mut stdout = std::io::stdout().lock();
     write_inspect_report(&mut stdout, &InspectReport { methods })?;
     Ok(())

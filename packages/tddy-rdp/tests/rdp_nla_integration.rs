@@ -22,7 +22,7 @@ use pretty_assertions::assert_eq;
 use tokio::sync::mpsc;
 
 use tddy_rdp::rdp_client::RdpClient;
-use tddy_screenshare::client::{Credentials, ScreenSharingClient as _};
+use tddy_screenshare::client::{ConnectTarget, Credentials, ScreenSharingClient as _};
 use tddy_screenshare::AuthenticationRefused;
 
 /// How long a sign-in may take before the test calls it a hang.
@@ -268,7 +268,7 @@ impl RunningDesktop {
     async fn sign_in_with(&self, credentials: &Credentials) -> anyhow::Result<RdpClient> {
         tokio::time::timeout(
             A_SIGN_IN_FINISHES_WITHIN,
-            RdpClient::connect("127.0.0.1", self.port, credentials),
+            RdpClient::connect(&ConnectTarget::network("127.0.0.1", self.port), credentials),
         )
         .await
         .unwrap_or_else(|_| {

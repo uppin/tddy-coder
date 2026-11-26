@@ -106,8 +106,10 @@ pub struct RdpClient {
 impl tddy_screenshare::ScreenSharingClient for RdpClient {
     /// Sends an X.224 Connection Request offering TLS and CredSSP, and reads the protocol the
     /// Connection Confirm selects (or the failure code it answers with); then disconnects.
-    async fn inspect(host: &str, port: u16) -> Result<Vec<tddy_screenshare::AdvertisedMethod>> {
-        let stream = TcpStream::connect(format!("{host}:{port}"))
+    async fn inspect(
+        target: &tddy_screenshare::ConnectTarget,
+    ) -> Result<Vec<tddy_screenshare::AdvertisedMethod>> {
+        let stream = TcpStream::connect(format!("{}:{}", target.host, target.port))
             .await
             .context("TCP connect")?;
         let mut framed = TokioFramed::new(stream);
@@ -141,11 +143,10 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
     }
 
     async fn connect(
-        host: &str,
-        port: u16,
+        target: &tddy_screenshare::ConnectTarget,
         credentials: &tddy_screenshare::Credentials,
     ) -> Result<Self> {
-        Self::connect_impl(host, port, credentials).await
+        Self::connect_impl(&target.host, target.port, credentials).await
     }
 
     fn framebuffer_dimensions(&self) -> (u32, u32) {

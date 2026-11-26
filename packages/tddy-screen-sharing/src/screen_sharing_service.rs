@@ -363,6 +363,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             username: req.username,
             x11_display: None,
             domain: String::new(),
+            device_id: String::new(),
         };
 
         let target = store
@@ -945,6 +946,7 @@ mod tests {
                     username: "ada".to_string(),
                     x11_display: None,
                     domain: String::new(),
+                    device_id: String::new(),
                 }))
                 .await
                 .map(|attached| attached.into_inner().target_id)
@@ -1091,6 +1093,7 @@ mod tests {
                     username: "ada".to_string(),
                     x11_display: None,
                     domain: String::new(),
+                    device_id: String::new(),
                 }))
                 .await
                 .expect_err("a stranger must not attach a desktop to a host")

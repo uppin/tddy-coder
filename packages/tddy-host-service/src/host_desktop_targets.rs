@@ -44,6 +44,10 @@ pub struct HostDesktopTarget {
     /// X11 channels existed — so those files still load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<u32>,
+    /// The iOS Simulator udid a [`DesktopProtocolId::IOS_SIMULATOR`] target streams. Absent for
+    /// every other protocol, and in every file written before simulators existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
 }
 
 /// The `screen_sharing.proto` `Protocol` discriminants, named so a fixture reads as a protocol
@@ -53,6 +57,7 @@ pub struct DesktopProtocolId;
 impl DesktopProtocolId {
     pub const VNC: i32 = 1;
     pub const RDP: i32 = 2;
+    pub const IOS_SIMULATOR: i32 = 3;
 }
 
 /// Stores desktop targets per host, separately from the session-scoped vault.
@@ -187,6 +192,7 @@ mod tests {
                 protocol: DesktopProtocolId::VNC,
                 username: "ada".to_string(),
                 display: None,
+                device: None,
             },
         }
     }

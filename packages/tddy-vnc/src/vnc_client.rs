@@ -314,16 +314,19 @@ fn tag_refused_sign_in(error: SecurityError) -> anyhow::Error {
 
 #[async_trait::async_trait]
 impl tddy_screenshare::ScreenSharingClient for VncClientState {
-    async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self> {
-        VncClientState::connect_with_credentials(host, port, credentials).await
+    async fn connect(
+        target: &tddy_screenshare::ConnectTarget,
+        credentials: &Credentials,
+    ) -> anyhow::Result<Self> {
+        VncClientState::connect_with_credentials(&target.host, target.port, credentials).await
     }
 
     /// Reads the server's security-type list (with `security::parse_security_types`) and, when
     /// VeNCrypt is offered, its subtype list; then disconnects without selecting a sign-in.
     async fn inspect(
-        host: &str,
-        port: u16,
+        target: &tddy_screenshare::ConnectTarget,
     ) -> anyhow::Result<Vec<tddy_screenshare::AdvertisedMethod>> {
+        let (host, port) = (&target.host, target.port);
         let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}"))
             .await
             .with_context(|| format!("failed to connect to VNC at {host}:{port}"))?;

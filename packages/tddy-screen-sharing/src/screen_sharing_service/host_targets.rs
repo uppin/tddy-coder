@@ -78,6 +78,8 @@ impl ScreenSharingServiceImpl {
                     protocol: req.protocol,
                     username: req.username,
                     display: req.x11_display,
+                    // TODO(ios-simulator): carry `req.device_id` and validate the iOS target.
+                    device: None,
                 },
             )
             .map_err(Status::internal)?;

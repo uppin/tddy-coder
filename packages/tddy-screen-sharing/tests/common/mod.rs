@@ -41,7 +41,8 @@ use tddy_screen_sharing::{
 };
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddTargetRequest, DesktopAuthMethod, DesktopCredentialAnswer,
-    InspectHostDesktopRequest, InspectHostDesktopResponse, Protocol, ScreenSharingService,
+    InspectHostDesktopRequest, InspectHostDesktopResponse, ListHostTargetsRequest, Protocol,
+    ScreenSharingService,
     ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
     StartStreamResponse, StopHostStreamRequest,
 };
@@ -778,6 +779,9 @@ pub struct DaemonBuilder {
     the_operators_vault: bool,
     /// Whether the operator's vault, when wired, is left sealed rather than unlocked.
     the_operators_vault_locked: bool,
+    /// Whether the stand-in is installed as the iOS Simulator bridge alone, with the VNC and RDP
+    /// bridge paths pointing at nothing, so a start that picks the wrong binary cannot succeed.
+    only_as_the_ios_bridge: bool,
 }
 
 /// A daemon whose bridge does `bridge` once it is spawned.
@@ -793,10 +797,17 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
         operator: TheOperator::TypesNoPassword,
         the_operators_vault: false,
         the_operators_vault_locked: false,
+        only_as_the_ios_bridge: false,
     }
 }
 
 impl DaemonBuilder {
+    /// Install the stand-in as the iOS Simulator bridge only; the VNC and RDP bridges are missing.
+    pub fn as_the_ios_simulator_bridge_only(mut self) -> Self {
+        self.only_as_the_ios_bridge = true;
+        self
+    }
+
     /// The bridge, run in inspect mode, reports that the desktop advertises `methods`.
     pub fn whose_desktop_advertises(mut self, methods: Vec<AdvertisedMethod>) -> Self {
         self.inspection = TheInspection::Reports(InspectReport { methods });
@@ -866,11 +877,20 @@ impl DaemonBuilder {
                 common_room: Some(THE_COMMON_ROOM.to_string()),
                 ..Default::default()
             }),
-            screen_sharing: Some(ScreenSharingConfig {
-                vnc_binary_path: bridge.binary.display().to_string(),
-                rdp_binary_path: bridge.binary.display().to_string(),
-                x11vnc_binary_path: x11vnc.binary.display().to_string(),
-                ..Default::default()
+            screen_sharing: Some({
+                let stand_in = bridge.binary.display().to_string();
+                let network_bridge = if self.only_as_the_ios_bridge {
+                    tools.path().join("no-such-bridge").display().to_string()
+                } else {
+                    stand_in.clone()
+                };
+                ScreenSharingConfig {
+                    vnc_binary_path: network_bridge.clone(),
+                    rdp_binary_path: network_bridge,
+                    x11vnc_binary_path: x11vnc.binary.display().to_string(),
+                    ios_simulator_binary_path: stand_in,
+                    ..Default::default()
+                }
             }),
             ..Default::default()
         });
@@ -1004,6 +1024,7 @@ impl DaemonUnderTest {
                 username: String::new(),
                 x11_display: None,
                 domain: String::new(),
+                device_id: String::new(),
             }))
             .await
             .expect("attaching an RDP desktop to a host")
@@ -1089,11 +1110,57 @@ impl DaemonUnderTest {
                 username: THE_OS_USER.to_string(),
                 x11_display: None,
                 domain: String::new(),
+                device_id: String::new(),
             }))
             .await
             .expect("attaching a desktop to a host")
             .into_inner()
             .target_id
+    }
+
+    /// Attach the booted iOS Simulator `udid` on `host` as a desktop, as the Hosts screen does when
+    /// an operator presses Connect on that simulator's channel.
+    pub async fn attach_an_ios_simulator_to(&self, host: &str, udid: &str) -> String {
+        self.try_to_attach_an_ios_simulator(host, "127.0.0.1", udid)
+            .await
+            .expect("attaching an iOS Simulator to a host")
+    }
+
+    /// The desktops attached to `host`, as the Hosts screen lists them.
+    pub async fn the_desktops_of(&self, host: &str) -> Vec<ProtoScreenSharingTarget> {
+        self.service
+            .list_host_targets(Request::direct(ListHostTargetsRequest {
+                session_token: A_SESSION_TOKEN.to_string(),
+                daemon_instance_id: host.to_string(),
+            }))
+            .await
+            .expect("listing a host's desktops")
+            .into_inner()
+            .targets
+    }
+
+    /// Ask to attach simulator `udid`, addressed at `address`, to `host`.
+    pub async fn try_to_attach_an_ios_simulator(
+        &self,
+        host: &str,
+        address: &str,
+        udid: &str,
+    ) -> Result<String, Status> {
+        self.service
+            .add_host_target(Request::direct(AddHostTargetRequest {
+                session_token: A_SESSION_TOKEN.to_string(),
+                daemon_instance_id: host.to_string(),
+                label: "iPhone 16 Pro · iOS 18.2".to_string(),
+                host: address.to_string(),
+                port: 0,
+                protocol: Protocol::IosSimulator as i32,
+                username: String::new(),
+                x11_display: None,
+                domain: String::new(),
+                device_id: udid.to_string(),
+            }))
+            .await
+            .map(|response| response.into_inner().target_id)
     }
 
     /// Attach X11 display `:display` of `host` as a desktop, as the Hosts screen does when an
@@ -1110,6 +1177,7 @@ impl DaemonUnderTest {
                 username: String::new(),
                 x11_display: Some(display),
                 domain: String::new(),
+                device_id: String::new(),
             }))
             .await
             .expect("attaching an X11 display to a host")

@@ -1,0 +1,38 @@
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-2" : [
+      {
+        "lastBootedAt" : "2026-11-25T09:12:44Z",
+        "dataPath" : "/Users/dev/Library/Developer/CoreSimulator/Devices/8A1C2E4F-1111-4222-8333-944455556666/data",
+        "logPath" : "/Users/dev/Library/Logs/CoreSimulator/8A1C2E4F-1111-4222-8333-944455556666",
+        "udid" : "8A1C2E4F-1111-4222-8333-944455556666",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro",
+        "state" : "Booted",
+        "name" : "iPhone 16 Pro"
+      },
+      {
+        "dataPath" : "/Users/dev/Library/Developer/CoreSimulator/Devices/1B2C3D4E-2222-4333-8444-A55566667777/data",
+        "logPath" : "/Users/dev/Library/Logs/CoreSimulator/1B2C3D4E-2222-4333-8444-A55566667777",
+        "udid" : "1B2C3D4E-2222-4333-8444-A55566667777",
+        "isAvailable" : true,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M2",
+        "state" : "Shutdown",
+        "name" : "iPad Air 11-inch (M2)"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-16-4" : [
+      {
+        "availabilityError" : "runtime profile not found",
+        "dataPath" : "/Users/dev/Library/Developer/CoreSimulator/Devices/9C8B7A6F-3333-4444-8555-B66677778888/data",
+        "logPath" : "/Users/dev/Library/Logs/CoreSimulator/9C8B7A6F-3333-4444-8555-B66677778888",
+        "udid" : "9C8B7A6F-3333-4444-8555-B66677778888",
+        "isAvailable" : false,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-14",
+        "state" : "Shutdown",
+        "name" : "iPhone 14"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.watchOS-11-2" : []
+  }
+}
