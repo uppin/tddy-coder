@@ -301,6 +301,7 @@ impl AnActivityHost {
 fn write_claude_cli_session(session_dir: &Path) {
     std::fs::create_dir_all(session_dir).expect("the session dir");
     let meta = SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id: CHILD.to_string(),

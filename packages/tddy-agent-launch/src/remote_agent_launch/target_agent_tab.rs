@@ -108,11 +108,13 @@ pub async fn launch_agent_tab_on_target(
     // An agent in tmux on the target is watched through its location: a dropped client holds
     // the tab while the tmux session lives (`#target-reconnect` 2/3).
     let tmux_run = match (&agent.tmux_session, location) {
-        (Some(name), Some(location)) => tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(
-            Some(name),
-            None,
-            Some(location),
-        ),
+        (Some(name), Some(location)) => {
+            tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(
+                Some(name),
+                None,
+                Some(location),
+            )
+        }
         _ => tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(None, None, None),
     };
     spawn_tab_client(

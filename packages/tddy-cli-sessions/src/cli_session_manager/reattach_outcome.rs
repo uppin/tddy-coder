@@ -52,9 +52,7 @@ impl std::fmt::Display for ReattachSkip {
                 f.write_str("the recorded session type is not an installed agent")
             }
             Self::AttachFailed => f.write_str("the attach failed"),
-            Self::NoOwnerSubject => {
-                f.write_str("the record names no owner to reach its target as")
-            }
+            Self::NoOwnerSubject => f.write_str("the record names no owner to reach its target as"),
             Self::TargetUnreachable(reason) => {
                 write!(f, "its target could not be reached: {reason}")
             }

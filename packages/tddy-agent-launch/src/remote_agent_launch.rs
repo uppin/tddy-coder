@@ -373,11 +373,7 @@ pub async fn launch_on_target(
             remote.tmux_location.clone(),
         )
     } else {
-        tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(
-            None,
-            session.os_user,
-            None,
-        )
+        tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(None, session.os_user, None)
     };
 
     let handle = session

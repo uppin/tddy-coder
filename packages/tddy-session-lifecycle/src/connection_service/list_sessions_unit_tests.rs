@@ -54,6 +54,7 @@ async fn list_sessions_unit_returns_new_metadata_fields() {
     fs::create_dir_all(&session_dir).unwrap();
 
     let metadata = SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id: session_id.to_string(),

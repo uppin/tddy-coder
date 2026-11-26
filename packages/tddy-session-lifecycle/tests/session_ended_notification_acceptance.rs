@@ -73,6 +73,7 @@ fn a_session_record(sessions_base: &Path, session_id: &str, name: &str) {
     let session_dir = sessions_base.join("sessions").join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     let meta = SessionMetadata {
+        owner_subject: None,
         display_name: Some(name.to_string()),
         effort: None,
         session_id: session_id.to_string(),

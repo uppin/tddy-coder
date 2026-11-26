@@ -450,6 +450,7 @@ fn write_session(data_dir: &Path) {
     let session_dir = data_dir.join("sessions").join(SESSION_ID);
     std::fs::create_dir_all(&session_dir).expect("the session dir");
     let meta = SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id: SESSION_ID.to_string(),

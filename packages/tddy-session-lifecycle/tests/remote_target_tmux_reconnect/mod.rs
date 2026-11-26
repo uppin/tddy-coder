@@ -12,16 +12,16 @@ use pretty_assertions::assert_eq;
 use tddy_core::session_metadata::read_session_metadata;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{ListSessionsRequest, SessionService as SessionServiceTrait};
+use tddy_terminal_rpc::proto::terminal_session::StreamReplayMode;
 use tddy_terminal_rpc::proto::terminal_session::{
     StreamTerminalOutputRequest, TerminalSessionService as TerminalSessionServiceTrait,
 };
-use tddy_terminal_rpc::proto::terminal_session::StreamReplayMode;
 use tddy_testing_commons::wait::{eventually, eventually_awaiting};
 
 use super::cli_harness_support::{current_os_user, VALID_TOKEN};
 use super::{
-    a_daemon_with_a_reachable_target, a_tmux_start_on_the_target, tmux_session_of, ADaemonWithATarget,
-    OBSERVE,
+    a_daemon_with_a_reachable_target, a_tmux_start_on_the_target, tmux_session_of,
+    ADaemonWithATarget, OBSERVE,
 };
 
 const MAIN: &str = "main";
@@ -178,12 +178,7 @@ async fn a_dropped_target_agent_tab_is_held_by_a_watcher() {
     let session_id = daemon.a_session_on_the_target().await;
     daemon.the_agent_on_the_target(&session_id).await;
     let tab = daemon
-        .opens_a_tab(
-            &session_id,
-            super::SESSION_TYPE,
-            "",
-            &["target", "tmux"],
-        )
+        .opens_a_tab(&session_id, super::SESSION_TYPE, "", &["target", "tmux"])
         .await
         .expect("an agent-in-tmux tab starts on the target");
     let name = daemon.recorded_tmux_session_of(&session_id, &tab);
@@ -258,7 +253,9 @@ async fn a_reattached_target_main_restarts_its_hook_log_follower() {
     // When a hook line is appended on the target after the re-attach — the follower was kept
     // with the tmux session, not with the client, so nothing needs restarting for it to be read
     let metadata = read_session_metadata(&daemon.session_dir(&session_id)).expect("metadata");
-    let token = metadata.hook_token.expect("the start recorded a hook token");
+    let token = metadata
+        .hook_token
+        .expect("the start recorded a hook token");
     let hook_log = daemon.target.hook_log_of(&session_id);
     let mut contents = std::fs::read_to_string(&hook_log).unwrap_or_default();
     contents.push_str(&format!("UserPromptSubmit\t{token}\t{{}}\n"));

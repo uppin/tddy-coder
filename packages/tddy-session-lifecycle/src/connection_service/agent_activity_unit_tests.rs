@@ -70,6 +70,7 @@ fn write_hook_session(session_dir: &std::path::Path, hook_token: &str, session_t
         .unwrap()
         .to_string();
     let metadata = SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id,

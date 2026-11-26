@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::ReattachSkip;
-use tddy_cli_sessions::tmux_location::{HostTmux, SharedTmuxLocation, TmuxClient, TmuxLocation, TmuxUnreachable};
+use tddy_cli_sessions::tmux_location::{
+    HostTmux, SharedTmuxLocation, TmuxClient, TmuxLocation, TmuxUnreachable,
+};
 
 use super::target_tmux_tab::{
     end_target_tmux_session_named, target_tmux_attach_command, target_tmux_session_lives,
@@ -103,7 +105,7 @@ pub fn tmux_location_of(
         .as_deref()
         .map(str::trim)
         .filter(|subject| !subject.is_empty())
-        .ok_or_else(|| ReattachSkip::NoOwnerSubject)?;
+        .ok_or(ReattachSkip::NoOwnerSubject)?;
     // Resolved once here so an unresolvable target skips with its reason, not at first probe.
     shells
         .target_of(session_dir, subject)

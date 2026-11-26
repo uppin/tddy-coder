@@ -216,6 +216,7 @@ async fn a_resumed_session_records_its_main_terminal() {
     let session_dir = sessions_base.join("sessions").join(session_id);
     std::fs::create_dir_all(&session_dir).unwrap();
     let meta = SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id: session_id.to_string(),

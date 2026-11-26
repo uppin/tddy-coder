@@ -78,7 +78,10 @@ async fn the_target_probe_reads_exit_255_as_unreachable_not_gone() {
     let lives = target_tmux_session_lives(&target, "tddy-s1").await;
 
     // Then it could not be told — never read as gone
-    assert!(lives.is_err(), "exit 255 is unreachable, not gone: {lives:?}");
+    assert!(
+        lives.is_err(),
+        "exit 255 is unreachable, not gone: {lives:?}"
+    );
 }
 
 #[tokio::test]
@@ -102,7 +105,10 @@ async fn the_target_probe_reads_a_missing_tmux_as_unreachable() {
     let lives = target_tmux_session_lives(&target, "tddy-s1").await;
 
     // Then it could not be told
-    assert!(lives.is_err(), "exit 127 is unreachable, not gone: {lives:?}");
+    assert!(
+        lives.is_err(),
+        "exit 127 is unreachable, not gone: {lives:?}"
+    );
 }
 
 #[tokio::test]
@@ -146,7 +152,10 @@ async fn the_target_attach_client_attaches_and_never_creates() {
 }
 
 /// A session directory whose record names `target` and owner subject `owner`.
-fn a_session_dir(target: Option<SessionTarget>, owner: Option<&str>) -> (tempfile::TempDir, PathBuf) {
+fn a_session_dir(
+    target: Option<SessionTarget>,
+    owner: Option<&str>,
+) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("a session directory");
     let session_dir = dir.path().join("s1");
     std::fs::create_dir_all(&session_dir).expect("the session directory");
@@ -171,10 +180,7 @@ fn a_session_without_an_owner_subject_resolves_no_target_location() {
     let location = tmux_location_of(&session_dir, "dev", &shells);
 
     // Then it is left for Resume, with no guess at whose vault reaches it
-    assert_eq!(
-        location.map(|_| ()),
-        Err(ReattachSkip::NoOwnerSubject)
-    );
+    assert_eq!(location.map(|_| ()), Err(ReattachSkip::NoOwnerSubject));
 }
 
 #[test]

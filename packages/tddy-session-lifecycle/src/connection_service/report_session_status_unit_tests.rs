@@ -62,6 +62,7 @@ fn write_claude_cli_session(session_dir: &std::path::Path, hook_token: &str) {
         .unwrap()
         .to_string();
     let metadata = SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id,
@@ -227,6 +228,7 @@ async fn report_session_status_rejects_non_claude_cli_session() {
         agent_session_id: None,
         ssh_config_host: None,
         target: None,
+        owner_subject: None,
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
