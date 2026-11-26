@@ -14,7 +14,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle;
-use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ClientTab};
+use tddy_cli_sessions::cli_session_manager::{CliSessionManager, ClientTab, TmuxRun};
 use tddy_core::ssh_exec::shell_single_quote;
 use tddy_remote_shell::{ExecRequest, RemoteShell};
 
@@ -71,6 +71,7 @@ pub async fn launch_tab_on_target(
         &tab,
         "bash",
         &target_shell_tab_command(tab.worktree),
+        TmuxRun::with_location(None, None, None),
     )
     .await
 }
@@ -99,6 +100,7 @@ pub(super) async fn spawn_tab_client(
     tab: &TargetTab<'_>,
     kind: &str,
     command: &str,
+    tmux_run: TmuxRun,
 ) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
     let client = transport_client(tab.shell.as_ref(), command);
     manager
@@ -111,6 +113,7 @@ pub(super) async fn spawn_tab_client(
                 argv: client.argv,
                 env: client.env,
                 exit_code_in_output: client.exit_code_in_output,
+                tmux_run,
             },
         )
         .await

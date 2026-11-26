@@ -404,6 +404,7 @@ impl AHarnessDaemon {
             AHarness::OpenCode | AHarness::Warp => None,
         };
         let meta = SessionMetadata {
+            owner_subject: None,
             display_name: None,
             effort: None,
             session_id: RESUMED_SESSION_ID.to_string(),

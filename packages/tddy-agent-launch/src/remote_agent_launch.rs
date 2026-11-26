@@ -16,6 +16,7 @@ mod tab_launch_status;
 mod target;
 mod target_agent_tab;
 mod target_tab;
+mod target_tmux_location;
 mod target_tmux_tab;
 
 use std::fmt;
@@ -61,10 +62,11 @@ pub use crate::remote_agent_launch::target_agent_tab::{
 pub use crate::remote_agent_launch::target_tab::{
     launch_tab_on_target, target_shell_tab_command, TargetTab,
 };
+pub use crate::remote_agent_launch::target_tmux_location::{tmux_location_of, TargetTmux};
 pub use crate::remote_agent_launch::target_tmux_tab::{
     enable_target_tmux_clipboard, enable_target_tmux_clipboard_logged,
     end_target_tmux_session_named, launch_tmux_tab_on_target, list_target_tmux_sessions,
-    target_tmux_session_lives, target_tmux_tab_command,
+    target_tmux_attach_command, target_tmux_session_lives, target_tmux_tab_command,
 };
 
 /// The base set of the agent's environment on a target, expanded by the target's own login shell:
@@ -220,6 +222,10 @@ pub struct RemoteLaunch<'a> {
     /// ([`remote_agent_tmux_command`]), named for the session ([`target_tmux_session_name`]):
     /// a dropped connection leaves it running, and a later launch re-attaches to it.
     pub tmux: bool,
+    /// Where that tmux session lives, for the main's `TmuxRun`: the client ending is classified
+    /// and watched through it (`#target-reconnect` 2/3). `None` names no location — the run is
+    /// then not watched, as a non-tmux run is not.
+    pub tmux_location: Option<tddy_cli_sessions::tmux_location::SharedTmuxLocation>,
 }
 
 /// The clone `worktree` was cut from, when it sits where a target checkout puts a session's
@@ -358,19 +364,33 @@ pub async fn launch_on_target(
     pre_trust_a_claude_clone(agent, &remote).await?;
 
     let client = client_argv_and_env(agent, &remote, &session, plan);
+    // A tmux run's main is a client of its tmux session at its location: a dropped transport
+    // is classified and watched there, not read as the agent ending (`#target-reconnect` 2/3).
+    let tmux_run = if remote.tmux {
+        tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(
+            Some(&target_tmux_session_name(session.session_id)),
+            session.os_user,
+            remote.tmux_location.clone(),
+        )
+    } else {
+        tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(None, session.os_user, None)
+    };
 
     let handle = session
         .manager
         .spawn_rendered_client_main(
             session.session_id,
-            session.session_type,
-            remote.session_dir.to_path_buf(),
-            session.model,
-            client.argv,
-            client.env,
-            session.os_user,
-            on_exit,
-            client.exit_code_in_output,
+            tddy_cli_sessions::cli_session_manager::ClientMain {
+                session_type: session.session_type.to_string(),
+                worktree_path: remote.session_dir.to_path_buf(),
+                model: session.model.to_string(),
+                argv: client.argv,
+                env: client.env,
+                os_user: session.os_user.map(str::to_string),
+                on_exit,
+                exit_code_in_output: client.exit_code_in_output,
+                tmux_run,
+            },
         )
         .await
         .map_err(|error| RemoteLaunchError::Spawn(error.to_string()))?;

@@ -464,6 +464,7 @@ mod tests {
 
     fn write_dead_pid_session(dir: &Path, sid: &str, pid: u32) {
         let metadata = SessionMetadata {
+            owner_subject: None,
             display_name: None,
             effort: None,
             session_id: sid.to_string(),
@@ -633,6 +634,7 @@ mod tests {
         .unwrap();
 
         let metadata = SessionMetadata {
+            owner_subject: None,
             display_name: None,
             effort: None,
             session_id: sid.to_string(),
@@ -699,6 +701,7 @@ mod tests {
         let dir = unified_session_dir_path(&base, sid);
         std::fs::create_dir_all(&dir).unwrap();
         let metadata = SessionMetadata {
+            owner_subject: None,
             display_name: None,
             effort: None,
             session_id: sid.to_string(),

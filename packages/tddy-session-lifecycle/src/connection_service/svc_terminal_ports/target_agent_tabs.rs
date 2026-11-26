@@ -53,6 +53,7 @@ impl CliManagerTerminalRoster {
                 session_dir: &session_dir,
             },
             &tab,
+            None,
         )
         .await
         .map_err(|error| tab_launch_status(&error))?;

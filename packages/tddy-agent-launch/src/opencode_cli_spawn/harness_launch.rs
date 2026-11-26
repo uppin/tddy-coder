@@ -113,6 +113,9 @@ pub(super) struct HarnessRemote {
     /// session's exit, stop and delete. `None` delivery starts no follower.
     pub(super) hook_delivery: Option<Arc<dyn crate::remote_hook_delivery::HookReportDelivery>>,
     pub(super) hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
+    /// Where the agent's tmux session lives when it runs in tmux on the target
+    /// (`#target-reconnect` 2/3): the main's client ending is watched through it.
+    pub(super) tmux_location: Option<tddy_cli_sessions::tmux_location::SharedTmuxLocation>,
 }
 
 /// Spawn the harness from its spec as the session's OS user — whose `HOME` and configured `PATH`
@@ -186,6 +189,7 @@ pub(super) async fn launch(
                     session_id,
                 ),
                 tmux: run.in_tmux,
+                tmux_location: remote.tmux_location.clone(),
             },
             host_pty_session(cli_manager, session_id, os_user, kind, model, env),
             on_exit,

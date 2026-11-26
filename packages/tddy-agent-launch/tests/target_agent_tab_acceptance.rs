@@ -376,6 +376,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
             },
             &settled.agent,
+            None,
         )
         .await
         .map_err(|error| error.to_string())?;
@@ -407,6 +408,7 @@ impl ADaemon {
                 session_dir: &self.session_dir,
             },
             &settled.agent,
+            None,
         )
         .await
     }

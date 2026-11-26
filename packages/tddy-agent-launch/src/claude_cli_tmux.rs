@@ -61,12 +61,14 @@ pub async fn reattach_recorded_main(
     tddy_data_dir: &Path,
     os_user: &str,
     session_id: &str,
+    shells: &Arc<dyn crate::tab_target_shell::TabTargetShell>,
 ) -> ReattachOutcome {
     log::debug!(
         target: "tddy_daemon::claude_cli_session",
         "re-attach of {session_id}: considering its recorded main"
     );
-    match reattach_when_recorded(manager, agents, tddy_data_dir, os_user, session_id).await {
+    match reattach_when_recorded(manager, agents, tddy_data_dir, os_user, session_id, shells).await
+    {
         Ok(()) => ReattachOutcome::Reattached,
         Err(skip) => ReattachOutcome::Skipped(skip),
     }
@@ -80,6 +82,7 @@ async fn reattach_when_recorded(
     tddy_data_dir: &Path,
     os_user: &str,
     session_id: &str,
+    shells: &Arc<dyn crate::tab_target_shell::TabTargetShell>,
 ) -> Result<(), ReattachSkip> {
     use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
     validate_session_id_segment(session_id).map_err(|_| ReattachSkip::InvalidSessionId)?;
@@ -96,6 +99,20 @@ async fn reattach_when_recorded(
             );
             return Err(ReattachSkip::UnreadableRecord);
         }
+    }
+    // A target session's tmux lives on its target: resolve its location from the record and
+    // attach there — never probe this host's tmux for it (`#target-reconnect` 2/3).
+    if meta.target.is_some() {
+        return reattach_target_main(
+            manager,
+            agents,
+            tddy_data_dir,
+            &session_dir,
+            &meta,
+            session_id,
+            shells,
+        )
+        .await;
     }
     require_live_tmux_session(os_user, session_id).await?;
     let worktree_path =
@@ -123,6 +140,51 @@ async fn reattach_when_recorded(
             Err(ReattachSkip::AttachFailed)
         }
     }
+}
+
+/// Re-attach the main of a target session: resolve its location from its record, probe the
+/// tmux session **there**, and attach a new transport client to it — attach only, so nothing
+/// is relaunched (`#target-reconnect` 2/3, D2). The hook-log follower needs no restart: it is
+/// its own streamed exec on the target and outlives the client with the tmux session.
+async fn reattach_target_main(
+    manager: &CliSessionManager,
+    agents: Option<&crate::spec_launch::HostCodingAgents>,
+    tddy_data_dir: &Path,
+    session_dir: &Path,
+    meta: &tddy_core::SessionMetadata,
+    session_id: &str,
+    shells: &Arc<dyn crate::tab_target_shell::TabTargetShell>,
+) -> Result<(), ReattachSkip> {
+    let location = crate::remote_agent_launch::tmux_location_of(session_dir, "", shells)?;
+    let name = meta
+        .tmux_session
+        .clone()
+        .unwrap_or_else(|| agent_tmux_session_name(session_id));
+    match location.session_lives(&name).await {
+        Ok(true) => {}
+        Ok(false) => return Err(ReattachSkip::TmuxSessionGone),
+        Err(error) => return Err(ReattachSkip::TargetUnreachable(error.0)),
+    }
+    let kind = recorded_cli_agent(agents, meta.session_type.as_deref(), session_id)?;
+    manager
+        .reattach_terminal_at_location(
+            session_id,
+            tddy_cli_sessions::cli_session_manager::MAIN_TERMINAL_ID,
+            kind.name,
+            session_dir.to_path_buf(),
+            location,
+            &name,
+        )
+        .await
+        .map_err(|error| {
+            log::warn!(
+                target: "tddy_daemon::claude_cli_session",
+                "could not re-attach the main terminal of {session_id} on its target: {error}"
+            );
+            ReattachSkip::AttachFailed
+        })?;
+    crate::claude_cli_spawn::record_main_terminal(manager, tddy_data_dir, session_id).await;
+    Ok(())
 }
 
 /// Whether `session_id`'s agent still runs in its tmux session; the skip that says why not.

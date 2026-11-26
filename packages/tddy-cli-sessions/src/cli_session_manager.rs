@@ -222,7 +222,7 @@ mod tmux_terminal;
 
 mod tmux_reattach;
 pub use crate::tmux_location::WatchBackoff;
-pub use tmux_reattach::{classify_main_exit, MainExit};
+pub use tmux_reattach::{classify_main_exit, MainExit, TmuxRun};
 
 mod tmux_exit_hook;
 pub use tmux_exit_hook::exit_hook_capture;
@@ -230,7 +230,7 @@ pub use tmux_exit_hook::exit_hook_capture;
 mod relaunch;
 
 mod launch;
-pub use launch::{ClientTab, HarnessLaunchExtras};
+pub use launch::{ClientMain, ClientTab, HarnessLaunchExtras};
 
 mod argv;
 

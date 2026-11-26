@@ -32,7 +32,7 @@ impl crate::launch_ports::LaunchSessions {
             roster_store: self.cli_manager.tab_rosters(),
             tab_jails: &self.tab_jails,
             tab_jail_spawn: &*tab_jail_spawn,
-            tab_target_shell: &*tab_target_shell,
+            tab_target_shell: std::sync::Arc::clone(&tab_target_shell),
         })
         .await
     }

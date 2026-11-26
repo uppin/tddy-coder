@@ -173,6 +173,7 @@ fn write_agent_def(tddy_data_dir: &Path, name: &str, base_url: &str) {
 
 fn a_managed_session(session_id: &str) -> SessionMetadata {
     SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id: session_id.to_string(),

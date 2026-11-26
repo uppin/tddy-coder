@@ -311,6 +311,7 @@ async fn wait_until_discovered(service: &DaemonSessionHost, peer_instance_id: &s
 /// is empty and always will be — a split session's agents are recorded beside the codebase.
 fn a_stopped_split_session() -> SessionMetadata {
     SessionMetadata {
+        owner_subject: None,
         display_name: None,
         effort: None,
         session_id: AGENT_SESSION_ID.to_string(),

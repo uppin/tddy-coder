@@ -62,6 +62,7 @@ impl DaemonSessionHost {
                 self.launch_coding_agents(),
                 self.tddy_data_dir.clone(),
                 Arc::clone(&self.agent_tool_sockets),
+                self.launch_sessions().tab_target_shell(),
             ),
         };
         let mut report = ReattachReport::default();

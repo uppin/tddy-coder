@@ -186,6 +186,8 @@ pub async fn launch_tmux_tab_on_target(
         &tab,
         TMUX_TAB_KIND,
         &command,
+        // A person's own tmux session: a client of nothing the session keeps, never watched.
+        tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(None, None, None),
     )
     .await
 }
@@ -212,7 +214,31 @@ pub async fn end_target_tmux_session_named(
     Ok(())
 }
 
-/// Whether the target `shell` reaches holds the tmux session `name`.
+/// The command a re-attach runs on a target: `tmux attach-session` to exactly `name` in
+/// `worktree`, through the target's login shell — attach only, never `new-session -A`, so a
+/// re-attach never (re)creates a session or relaunches an agent (`#target-reconnect` 2/3, D2).
+/// The client announces the clipboard feature (`-T clipboard`), as a host attach does.
+pub fn target_tmux_attach_command(worktree: &Path, name: &str) -> String {
+    let tmux = format!(
+        "exec tmux -T clipboard attach-session -t {}",
+        shell_single_quote(&format!("={name}"))
+    );
+    in_the_worktree(worktree, &tmux)
+}
+
+/// What tmux itself says when the session it was asked for is not there: the probe's *gone*
+/// answers. Anything else a probe exits with means the question could not be asked.
+fn tmux_says_gone(stderr: &str) -> bool {
+    let lowered = stderr.to_lowercase();
+    lowered.contains("can't find session")
+        || lowered.contains("no server running")
+        || lowered.contains("error connecting")
+}
+
+/// Whether the target `shell` reaches holds the tmux session `name` — tri-state
+/// (`#target-reconnect` 2/3): exit 0 lives; exit 1 with tmux's own gone words
+/// ([`tmux_says_gone`]) is gone; anything else — an `exec` failure, ssh's 255, a login shell
+/// without tmux (127), exit 1 with other words — is `Err`, could-not-tell, never gone.
 pub async fn target_tmux_session_lives(
     shell: &dyn RemoteShell,
     name: &str,
@@ -225,7 +251,15 @@ pub async fn target_tmux_session_lives(
         .exec(ExecRequest::new(target_login_run(&inner)))
         .await
         .map_err(RemoteLaunchError::Shell)?;
-    Ok(output.status == 0)
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    match output.status {
+        0 => Ok(true),
+        1 if tmux_says_gone(&stderr) => Ok(false),
+        status => Err(RemoteLaunchError::Shell(RemoteShellError::Exited {
+            status,
+            stderr,
+        })),
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,5 @@
+# 2026-11-26 — The tmux on a session's target behind the TmuxLocation port (#target-reconnect 2/3)
+
+**Type:** Feature
+
+`remote_agent_launch/target_tmux_location.rs`: `TargetTmux`, implementing node 1's `TmuxLocation` over `TabTargetShell` (resolved per call as the session's recorded `owner_subject`, so a later vault unlock is picked up); attach is `tmux -T clipboard attach-session -t '=<name>'` through the target login shell, never `new-session -A`; kill delegates to `end_target_tmux_session_named`. `tmux_location_of(session_dir, os_user, shells)` resolves `HostTmux` for a host record, `TargetTmux` for a target record, `ReattachSkip::NoOwnerSubject` for a target record without an owner, and `TargetUnreachable(reason)` when the owner's target cannot be resolved. `target_tmux_session_lives` is tri-state (255/127/other is unreachable, never gone). A target main (`launch_on_target`) and a `[target, tmux, agent]` tab are spawned with their `TmuxRun`, `reattach_recorded_main` resolves a target record's location and attaches there instead of probing the host's tmux, and target start/resume record `owner_subject`. Part of #1041.

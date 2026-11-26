@@ -262,6 +262,11 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
 - **Detach watcher.** A detached agent is watched: every **10 s** the daemon checks whether its tmux
   session still lives, and runs the agent-ended cleanup (toolcall socket, exposure) once it is gone. A
   re-attach stops the watcher; daemon shutdown stops every watcher and starts none.
+- **On a target** (`#target-reconnect` 2/3). The same lifecycle holds where the tmux session lives on
+  a target: the watcher's probe and the re-attach run there (`tmux attach-session` through the
+  target's login shell, as the record's `owner_subject`), a transport exit (ssh 255, no tmux on the
+  target) is *unreachable* — the watcher backs off and holds the session for its grace — never
+  *gone*, and Resume alone relaunches (`new-session -A`).
 - **Re-attach.** A session whose tmux session is alive and has no main terminal registered gets one
   re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane. A
   main counts as having run in tmux when its [tab roster](session-liveness.md#the-tab-roster) records

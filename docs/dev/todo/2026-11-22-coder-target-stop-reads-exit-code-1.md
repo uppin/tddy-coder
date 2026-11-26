@@ -14,3 +14,8 @@ stop from a real failure needs the main-exit classification to know the daemon s
 **What would close it:** classify a main that exits after the daemon signalled it as "stopped by the
 daemon" regardless of the exit status its transport reports, and cover a target stop in
 `coder_target_session_acceptance.rs`.
+
+**Narrowed by #target-reconnect 2/3 (#1041):** a tmux-run target main's client exit is no longer
+classified by its exit code at all — the tri-state target probe decides (`ClientOnly` while the
+tmux session lives, `AgentEnded` when gone, held when unreachable). What remains here is the
+non-tmux target run, whose main's exit still reads its transport's status.

@@ -930,3 +930,6 @@ async fn resuming_a_terminated_tmux_run_starts_a_fresh_agent_on_the_target() {
 
 #[path = "remote_target_tmux_tabs/mod.rs"]
 mod tmux_tabs;
+
+#[path = "remote_target_tmux_reconnect/mod.rs"]
+mod tmux_reconnect;

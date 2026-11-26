@@ -12,6 +12,8 @@
 //!
 //! PRD: docs/ft/daemon/1-WIP/PRD-2026-11-23-target-tmux.md (n2)
 
+use std::sync::Arc;
+
 use tddy_agent_launch::remote_agent_launch::{
     end_target_tmux_session_named, launch_agent_tab_on_target, launch_tmux_tab_on_target,
     list_target_tmux_sessions, tab_launch_status, target_tmux_session_lives, TargetTab,
@@ -137,6 +139,13 @@ impl CliManagerTerminalRoster {
                 session_dir: &session_dir,
             },
             &tab,
+            self.target_shell.clone().map(|shells| {
+                Arc::new(tddy_agent_launch::remote_agent_launch::TargetTmux::new(
+                    session_dir.clone(),
+                    launch.subject.clone(),
+                    shells,
+                )) as tddy_cli_sessions::tmux_location::SharedTmuxLocation
+            }),
         )
         .await
         .map_err(|error| tab_launch_status(&error))?;

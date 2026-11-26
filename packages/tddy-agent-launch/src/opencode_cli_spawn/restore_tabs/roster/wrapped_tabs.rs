@@ -139,6 +139,13 @@ pub(super) async fn restore_target_agent(
             session_dir: restore.session_dir,
         },
         &agent,
+        agent.tmux_session.as_ref().map(|_| {
+            std::sync::Arc::new(crate::remote_agent_launch::TargetTmux::new(
+                restore.session_dir.to_path_buf(),
+                restore.subject.to_string(),
+                std::sync::Arc::clone(&restore.tab_target_shell),
+            )) as tddy_cli_sessions::tmux_location::SharedTmuxLocation
+        }),
     )
     .await?;
     Ok(if resumed {
@@ -220,6 +227,13 @@ pub(super) async fn restore_target_tmux_agent(
             session_dir: restore.session_dir,
         },
         &agent,
+        Some(
+            std::sync::Arc::new(crate::remote_agent_launch::TargetTmux::new(
+                restore.session_dir.to_path_buf(),
+                restore.subject.to_string(),
+                std::sync::Arc::clone(&restore.tab_target_shell),
+            )) as tddy_cli_sessions::tmux_location::SharedTmuxLocation,
+        ),
     )
     .await?;
     Ok(if lived || resumed {
