@@ -49,9 +49,11 @@ have"*.
 
 One file per **subject** (the user whose vault it is):
 `CredentialStore::path_in(auth_storage, subject)` → `auth_storage/credentials-<hex subject>.vault`,
-mode `0600` from its first byte, replaced by swap-then-rename (`src/atomic.rs`) so a crash or a full
-disk never leaves a truncated vault. The subject is hex-encoded, so any login is a safe filename,
-including on a case-insensitive filesystem.
+mode `0600` from its first byte, replaced by swap-then-rename through the filesystem port
+(`tddy_fs::Fs::write_atomic` at fixed mode `0600`) so a crash or a full disk never leaves a
+truncated vault. The subject is hex-encoded, so any login is a safe filename, including on a
+case-insensitive filesystem. Every vault read and write goes through the port the vault was
+opened with (`SessionVault` holds it; `create_on` / `open_with_passphrase_on` inject it).
 
 ```json
 {

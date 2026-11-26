@@ -263,8 +263,8 @@ fn jsonschema_stays_with_the_session_action_pipeline() {
 
 /// The only workspace crates `tddy-session-store` may depend on. None of them depends on
 /// `tddy-core`, so none can close a cycle back into the crate the storage layer left.
-const STORAGE_CRATE_WORKSPACE_DEPENDENCIES: [&str; 3] =
-    ["tddy-workflow", "tddy-actions", "tddy-task"];
+const STORAGE_CRATE_WORKSPACE_DEPENDENCIES: [&str; 4] =
+    ["tddy-workflow", "tddy-actions", "tddy-task", "tddy-fs"];
 
 /// The allowlisted crates that reach `tddy-core`, directly or through another workspace crate.
 fn allowlisted_crates_reaching_the_god_crate() -> Vec<&'static str> {
@@ -274,13 +274,14 @@ fn allowlisted_crates_reaching_the_god_crate() -> Vec<&'static str> {
         .collect()
 }
 
-/// AC3 — `tddy-session-store` depends on the vocabulary and the action runtime, and nothing else of
-/// ours.
+/// AC3 — `tddy-session-store` depends on the vocabulary, the action runtime and the filesystem
+/// port, and nothing else of ours.
 ///
 /// `tddy-workflow` is where `#carve` 5/11 puts `ClarificationQuestion`, which `error.rs` names.
 /// `session_actions/runtime.rs` runs every manifest on the action runtime (`tddy-actions`) and
-/// tracks it in the task registry (`tddy-task`). Any other workspace dependency means the seam was
-/// cut in the wrong place.
+/// tracks it in the task registry (`tddy-task`). `tddy-fs` is the port every disk read and write
+/// goes through — a leaf crate, so it cannot reach back into `tddy-core`. Any other workspace
+/// dependency means the seam was cut in the wrong place.
 #[test]
 fn the_storage_crate_depends_on_no_workspace_crate_outside_its_allowlist() {
     // Given the new crate's manifest

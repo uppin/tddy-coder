@@ -49,7 +49,9 @@ New code should name `tddy_session_store::…` directly.
 
 ### Atomic file writes (`atomic_file`)
 
-The single way session and daemon state reaches disk. `std::fs::write` opens the target with
+The single way session and daemon state reaches disk — implemented by the filesystem port
+(`tddy_fs::Fs::write_atomic` on `DiskFs`) and re-exported here at its long-standing path, so
+every existing caller keeps compiling. `std::fs::write` opens the target with
 `O_TRUNC`, discarding the previous contents before the first replacement byte lands. A write that
 fails part-way (`ENOSPC` mid-write, or at writeback after a short `write`) therefore leaves a
 **truncated or empty** file where the state used to be. A 0-byte `.session.yaml` does not read as
@@ -67,9 +69,8 @@ process is still running and healthy.
   permission bits fixed by the caller and applied when the swap file is created. `write_atomic`
   can only carry over bits that already exist, so a **first** write lands at the process umask.
   Secrets use this variant so their bytes are never on disk at a wider mode, not even briefly.
-  `tddy-daemon-auth`'s signing key and `tddy-screen-sharing`'s vault write through it; the
-  credential vaults use `tddy-credentials`' own copy of the same writer (`atomic.rs`), so that crate
-  does not depend on `tddy-core`.
+  `tddy-daemon-auth`'s signing key, `tddy-screen-sharing`'s vault and the credential vaults write
+  through it, the vaults at fixed mode `0600` through the port.
   On platforms without Unix permissions it behaves as `write_atomic`.
 - **write_atomic_labelled(path, contents)**: `write_atomic` with the target path folded into the
   error string, since a bare `ENOSPC` names no file.
@@ -78,8 +79,9 @@ Consumers reach it as `tddy_core::atomic_file` or `tddy_session_store::atomic_fi
 that persists session or daemon state. That covers `tddy-changeset` (`session_metadata`,
 `session_context`, `changeset`), `tddy-workflow-engine` (`workflow/action_cache`),
 `tddy-session-actions` (`session_action_jobs/runner`), `tddy-agent-backend` (`backend/{codex,cursor}`)
-and `tddy-presenter`, and in this crate `output/writer.rs` and
-`session_actions/runtime.rs`. Beyond those it covers `tddy-workflow-recipes`, `tddy-projects`,
+and `tddy-presenter`, and in this crate `session_actions/runtime.rs` (`output/writer.rs`
+reaches the same writer through the port's `_on` forms). Beyond those it covers
+`tddy-workflow-recipes`, `tddy-projects`,
 `tddy-worktree-service`, `tddy-session-lifecycle`, `tddy-telegram`, `tddy-host-service`,
 `tddy-daemon-auth`, `tddy-screen-sharing` and `tddy-sandbox-recipes`.
 

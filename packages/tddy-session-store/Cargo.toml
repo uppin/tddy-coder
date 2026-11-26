@@ -9,9 +9,10 @@ name = "tddy_session_store"
 path = "src/lib.rs"
 
 [dependencies]
+# The filesystem port every disk read and write goes through (#fs-port).
+tddy-fs = { path = "../tddy-fs" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dashmap = "6"
-glob = "0.3"
 jsonschema = { version = "0.44", default-features = false }
 log = "0.4"
 regex = "1"
@@ -32,3 +33,5 @@ tddy-task = { path = "../tddy-task" }
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
+# The port guard this crate's `tests/fs_port.rs` runs over its own `src/`.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }

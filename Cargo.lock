@@ -12736,6 +12736,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "subtle",
+ "tddy-fs",
  "tempfile",
  "thiserror 2.0.18",
  "zeroize",
@@ -13185,6 +13186,16 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-fs"
+version = "0.1.0"
+dependencies = [
+ "tddy-fs",
+ "tempfile",
+ "tokio",
  "uuid",
 ]
 
@@ -14289,7 +14300,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dashmap 6.2.1",
- "glob",
  "jsonschema 0.44.1",
  "log",
  "regex",
@@ -14298,6 +14308,7 @@ dependencies = [
  "serde_yaml",
  "serial_test",
  "tddy-actions",
+ "tddy-fs",
  "tddy-task",
  "tddy-workflow",
  "tempfile",

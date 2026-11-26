@@ -89,6 +89,17 @@ pub fn resolve_allowlisted_path(
     raw: &str,
     purpose: &'static str,
 ) -> Result<PathBuf, SessionActionsError> {
+    resolve_allowlisted_path_on(&tddy_fs::DiskFs, session_dir, repo_root, raw, purpose)
+}
+
+/// [`resolve_allowlisted_path`] through the filesystem port.
+pub fn resolve_allowlisted_path_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    repo_root: Option<&Path>,
+    raw: &str,
+    purpose: &'static str,
+) -> Result<PathBuf, SessionActionsError> {
     debug!(
         target: "tddy_core::session_actions::paths",
         "resolve_allowlisted_path: purpose={purpose} raw={raw} session_dir={} repo_root={:?}",
@@ -103,10 +114,12 @@ pub fn resolve_allowlisted_path(
         });
     }
 
-    let session_canon = std::fs::canonicalize(session_dir).map_err(SessionActionsError::Io)?;
+    let session_canon = fs
+        .canonicalize(session_dir)
+        .map_err(SessionActionsError::Io)?;
 
     let repo_canon = if let Some(r) = repo_root.filter(|p| !p.as_os_str().is_empty()) {
-        Some(std::fs::canonicalize(r).map_err(SessionActionsError::Io)?)
+        Some(fs.canonicalize(r).map_err(SessionActionsError::Io)?)
     } else {
         None
     };
