@@ -62,6 +62,7 @@ extern "C" {
     fn xpc_dictionary_set_value(dictionary: XpcObject, key: *const c_char, value: XpcObject);
     fn xpc_get_type(object: XpcObject) -> *const c_void;
     fn xpc_release(object: XpcObject);
+    fn xpc_retain(object: XpcObject) -> XpcObject;
     fn xpc_connection_set_event_handler(
         connection: XpcObject,
         handler: &block2::Block<dyn Fn(XpcObject)>,
@@ -112,6 +113,20 @@ impl DtuhidInput {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Type `text` key by key; a character with no US keyboard usage is dropped.
+    fn type_text(&self, text: &str) -> anyhow::Result<()> {
+        for c in text.chars() {
+            let strokes = keystrokes_for_char(c);
+            if strokes.is_empty() {
+                log::debug!("ios-emulator: no US keyboard usage types {c:?}; dropped");
+            }
+            for stroke in strokes {
+                self.connection.send(&stroke)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Press and release the Home button.
     pub fn press_home(&self) -> anyhow::Result<()> {
         self.connection.send(&home_button(ButtonState::Down))?;
@@ -135,18 +150,7 @@ impl InputSink for DtuhidInput {
                 let phase = self.contact().up();
                 self.connection.send(&touch(x, y, phase))
             }
-            InputEvent::Text(text) => {
-                for c in text.chars() {
-                    let strokes = keystrokes_for_char(c);
-                    if strokes.is_empty() {
-                        log::debug!("ios-emulator: no US keyboard usage types {c:?}; dropped");
-                    }
-                    for stroke in strokes {
-                        self.connection.send(&stroke)?;
-                    }
-                }
-                Ok(())
-            }
+            InputEvent::Text(text) => self.type_text(&text),
             InputEvent::Key { key, pressed } => {
                 let state = if pressed {
                     ButtonState::Down
@@ -244,14 +248,19 @@ impl DtuhidConnection {
     /// throttled one reports no error.
     fn confirm_liveness(&self) -> anyhow::Result<()> {
         let probe = SendableXpc(xpc_object_of(&liveness_barrier()));
-        let connection = SendableXpc(self.connection);
+        // The thread holds its own reference: on a timeout the caller drops (cancels and releases)
+        // this connection while the synchronous send may still be blocked on it.
+        // SAFETY: retaining a live connection; released by the thread once the send returns.
+        let connection = SendableXpc(unsafe { xpc_retain(self.connection) });
         let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
             let (connection, probe) = (connection, probe);
-            // SAFETY: both objects are live; the reply is a +1 object released here.
+            // SAFETY: both objects are +1 references owned by this thread; the reply is a +1
+            // object, all released here.
             let is_error = unsafe {
                 let reply = xpc_connection_send_message_with_reply_sync(connection.0, probe.0);
                 xpc_release(probe.0);
+                xpc_release(connection.0);
                 let is_error = std::ptr::eq(xpc_get_type(reply), &_xpc_type_error);
                 xpc_release(reply);
                 is_error

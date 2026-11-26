@@ -19,8 +19,9 @@ const SIMULATOR_APP: &str = "Simulator";
 /// Height of a Simulator.app window's title bar, in points.
 const TITLE_BAR_POINTS: f64 = 28.0;
 
-/// Fail unless this process may capture the screen and post input events: without Screen
-/// Recording the capture is blank, without Accessibility the events are dropped silently.
+/// Fail unless this process may capture the screen and read the window's accessibility tree:
+/// without Screen Recording the capture is blank, without Accessibility Device Hub's device area
+/// cannot be found.
 pub(crate) fn require_permissions() -> anyhow::Result<()> {
     if !CGPreflightScreenCaptureAccess() {
         anyhow::bail!(
@@ -62,19 +63,14 @@ impl SimulatorWindows for XcapSimulatorWindows {
                 continue;
             }
             let title = window.title().context("reading a window title")?;
-            if !title.starts_with(device_name) {
+            if !titles_device(&title, device_name) {
                 continue;
             }
             let scale = window
                 .current_monitor()
                 .and_then(|monitor| monitor.scale_factor())
                 .context("reading the Simulator window's display scale")?;
-            let bounds = Rect {
-                x: f64::from(window.x().context("reading the window position")?),
-                y: f64::from(window.y().context("reading the window position")?),
-                width: f64::from(window.width().context("reading the window size")?),
-                height: f64::from(window.height().context("reading the window size")?),
-            };
+            let bounds = window_bounds(&window)?;
             let owner = window.app_name().context("reading the window owner")?;
             // Each app lays its window out its own way: Simulator.app shows the device below a
             // title bar; Device Hub shows it beside a sidebar and below a toolbar, at a place only
@@ -113,6 +109,24 @@ impl SimulatorWindows for XcapSimulatorWindows {
             rgba: image.into_raw(),
         })
     }
+}
+
+/// Where `window` is on screen, in points.
+fn window_bounds(window: &xcap::Window) -> anyhow::Result<Rect> {
+    Ok(Rect {
+        x: f64::from(window.x().context("reading the window position")?),
+        y: f64::from(window.y().context("reading the window position")?),
+        width: f64::from(window.width().context("reading the window size")?),
+        height: f64::from(window.height().context("reading the window size")?),
+    })
+}
+
+/// Whether a window titled `title` shows the device `device_name`: the title is the name alone or
+/// `<name> – <runtime>`, so "iPhone 16" does not match an "iPhone 16 Pro" window.
+fn titles_device(title: &str, device_name: &str) -> bool {
+    title
+        .strip_prefix(device_name)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(" –") || rest.starts_with(" -"))
 }
 
 /// Where a window shows its device, read from its owner's accessibility tree.
@@ -261,5 +275,20 @@ mod accessibility {
         };
         // SAFETY: `out` is a `T` matching `kind` (`CGPoint` / `CGSize`), written in place.
         unsafe { value.value(kind, NonNull::from(out).cast::<c_void>()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::titles_device;
+
+    #[test]
+    fn a_window_titled_for_a_longer_device_name_is_not_that_device() {
+        assert!(titles_device("iPhone 16 – iOS 18.2", "iPhone 16"));
+        assert!(titles_device("iPhone 16", "iPhone 16"));
+        assert!(
+            !titles_device("iPhone 16 Pro – iOS 18.2", "iPhone 16"),
+            "\"iPhone 16\" must not claim the iPhone 16 Pro's window"
+        );
     }
 }

@@ -272,7 +272,7 @@ mod production {
     use crate::macos::{require_permissions, XcapSimulatorWindows};
     use crate::simctl::XcrunSimctl;
 
-    /// Connect through `xcrun simctl`, xcap and CGEvent. The device is resolved before the
+    /// Connect through `xcrun simctl`, xcap and the device's `dtuhidd`. The device is resolved before the
     /// permissions are checked, so an unknown udid is reported as such whatever is granted.
     ///
     /// Input goes to the device's own `dtuhidd`, so it reaches the device whatever covers its window.

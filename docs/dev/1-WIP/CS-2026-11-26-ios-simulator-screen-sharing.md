@@ -210,13 +210,13 @@ agent shell ──xcrun simctl install/launch <udid>─────────�
 - Sharpness: the window is captured at its displayed size (Device Hub's default zoom shows a 1179×2556 device at 594×1292 px). "Physical/pixel-accurate" zoom in Device Hub gives native pixels; capturing above the displayed size needs ScreenCaptureKit or SimulatorKit.
 - Rotation or a device switch changes the frame size mid-stream. This is the same open item as `2026-10-18-screen-share-mid-session-resize`.
 - Window capture needs the Simulator window **visible and unminimised** on the logged-in console. A headless or locked-screen Mac cannot stream. `idb` (`idb_companion` video-stream + HID) is the upgrade that removes this, and it brings an external dependency.
-- No scroll-wheel input (blocked on the browser wheel item).
-- Multi-touch gestures (pinch) aren't supported. Simulator's option-drag could cover them later.
+- Multi-touch gestures (pinch): see the `dtuhidd` item above; Simulator's option-drag could cover them later.
+- `TODO(ios-simulator)` in `packages/tddy-ios-emulator/src/macos.rs`: the window bounds and device area are read once at connect, so a window moved or resized mid-stream is not followed (kept: shares the mid-session-resize open item).
 - An optional `tddy-tools emulator {list,boot,install,launch}` wrapper for agents. Plain `xcrun simctl` is enough for now.
 
 ## Decisions & Trade-offs
 - **One crate per OS** (developer, 2026-11-26): `tddy-ios-emulator` now, `tddy-android-emulator` later behind the same trait.
-- **Window capture + CGEvent, not `idb` or `simctl io screenshot`**: no new external tools. `simctl io` costs about 200 ms per frame, too slow to use as a stream. Cost: the window must be on screen (see debt).
+- **Window capture + `dtuhidd` input, not `idb_companion` or `simctl io screenshot`**: frames come from the window (xcap); input goes over XPC to the simulator's own `dtuhidd`, ported from meta/idb (MIT, `THIRD_PARTY_NOTICES`) rather than depending on `idb_companion`. History: CGEvent `post_to_pid` was tried first and Device Hub ignores it; Indigo HID is dropped from Xcode 27. `simctl io` costs about 200 ms per frame, too slow to stream. Cost: the window must be on screen (see debt).
 - **`connect` gains a `ConnectTarget`** rather than putting the udid into `host`: a typed field instead of an overloaded string. Cost: a mechanical edit in `tddy-vnc` and `tddy-rdp`.
 - **Local host only**: the bridge runs where the daemon runs, so a remote Mac runs its own daemon. No new transport is needed.
 - **No fallback** when a permission is missing. Start fails and names Screen Recording or Accessibility.
@@ -229,14 +229,23 @@ agent shell ──xcrun simctl install/launch <udid>─────────�
 - [x] `TODO(ios-simulator)` markers in `tddy-screen-sharing` `host_targets.rs` (device not yet carried) and `bridge_config.rs` (device not yet listed) are placeholders to replace
 - [x] `tddy-client-web` / `tddy-hosts-web` generated TS protos not regenerated yet
 ### From /validate-changes
+- [x] `dtuhid_xpc.rs` liveness probe: the probe thread used the connection without its own reference, so a timed-out attempt dropped (released) it under a blocked send. The thread now holds an `xpc_retain`ed reference.
+- [x] `macos.rs` window lookup matched by title prefix, so "iPhone 16" could take an "iPhone 16 Pro" window; now the name alone or `<name> –`/`<name> -` (unit-tested).
+- [x] Stale docs: `production::connect` ("CGEvent") and `require_permissions` (Accessibility is for the AX tree, not event posting).
+- [ ] `publish.sh` does not ship `tddy-ios-emulator` (the .deb is Linux, where it lists nothing); left as is.
 ### From /validate-tests
+- [x] `simulator_production.rs` (ignored, real device): fixed 3 s wait replaced by polling for a changed screen up to 10 s.
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+- [x] `macos.rs` `find`: window-bounds reading extracted to `window_bounds`; `dtuhid_xpc.rs` `post`: text typing extracted to `type_text`.
+
+## Restructuring
+- host_tooling.rs 463 → 517 production lines; decomposition deferred with developer consent (2026-11-27).
 
 ## Validation Results
 | Validation | Last Run | Status |
 |------------|----------|--------|
-| /validate-changes | Not yet run | Pending |
-| /validate-tests | Not yet run | Pending |
-| /validate-prod-ready | Not yet run | Pending |
-| /analyze-clean-code | Not yet run | Pending |
+| /validate-changes | 2026-11-27 | Pass after fixes (2 defects, 2 stale docs fixed; 1 note left) |
+| /validate-tests | 2026-11-27 | Pass: changed tests use Given/When/Then; one fixed wait replaced by polling |
+| /validate-prod-ready | 2026-11-27 | Pass: one tracked TODO; `println!` only in the bridge's `--list-devices` CLI output (not a TUI path) |
+| /analyze-clean-code | 2026-11-27 | Pass after two extractions; no changed file over 500 lines except host_tooling.rs (deferred) |

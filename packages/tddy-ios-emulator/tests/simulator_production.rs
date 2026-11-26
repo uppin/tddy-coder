@@ -118,8 +118,15 @@ fn a_tap_reaches_the_device_through_dtuhidd() {
     input.post(InputEvent::MouseDown(widget)).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(60));
     input.post(InputEvent::MouseUp(widget)).unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    let after = screenshot(&udid);
+    // The app opens with an animation: poll for a changed screen rather than guess its length.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let after = loop {
+        let now = screenshot(&udid);
+        if now != before || std::time::Instant::now() >= deadline {
+            break now;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    };
     input.press_home().unwrap();
 
     // Then
