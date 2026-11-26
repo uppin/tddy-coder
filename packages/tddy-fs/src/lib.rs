@@ -31,6 +31,14 @@ pub struct FsMetadata {
     /// Unix permission bits; `None` on platforms without them.
     pub mode: Option<u32>,
     pub modified: Option<SystemTime>,
+    /// Owning user id; `None` on platforms without one. The daemon's socket and `users.yaml`
+    /// guards refuse files owned by anyone outside an allowed set, so ownership travels with
+    /// the stat rather than through a second platform call.
+    pub uid: Option<u32>,
+    /// Device and inode: the identity a socket server compares to notice its file was replaced
+    /// or removed. `None` on platforms without them.
+    pub dev: Option<u64>,
+    pub ino: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +46,9 @@ pub enum FsKind {
     File,
     Dir,
     Symlink,
+    /// A unix-domain socket file: what the daemon binds, and what a stale-socket clear must
+    /// check for before removing anything.
+    Socket,
 }
 
 /// The filesystem port. Object safe: hold it as `Arc<dyn Fs>`.
@@ -53,10 +64,27 @@ pub trait Fs: Send + Sync + Debug {
     /// (never wider, not even briefly); without it an existing target's mode is carried over. On
     /// failure `path` is untouched and no swap file is left behind.
     fn write_atomic(&self, path: &Path, contents: &[u8], mode: Option<u32>) -> io::Result<()>;
+    /// Create `path` and every missing parent with exactly `mode`, never wider, not even
+    /// briefly: the mode is given to the creation, not applied afterwards. A `create_dir_all`
+    /// followed by `set_mode` leaves a window in which the directory is listable at the process
+    /// umask — for the owner-only socket and auth-storage directories, a window in which anyone
+    /// can list them.
+    fn create_dir_all_with_mode(&self, path: &Path, mode: u32) -> io::Result<()>;
     fn create_dir_all(&self, path: &Path) -> io::Result<()>;
+    /// Make `link` a hard link to `original`, failing when `link` already exists: unlike
+    /// `rename`, a link never silently replaces the winner of a first-boot race (two daemons
+    /// generating a signing key against one data directory — the loser keeps the winner's key
+    /// rather than publishing its own over it).
+    fn hard_link(&self, original: &Path, link: &Path) -> io::Result<()>;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
+    /// Remove an empty directory, failing on a non-empty one: `remove_dir_all` would delete a
+    /// directory the caller did not create (a failed bind's cleanup removing only what it made).
+    fn remove_dir(&self, path: &Path) -> io::Result<()>;
     fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Like [`Fs::metadata`], but following a final symlink: what `execve` does too, so a `PATH`
+    /// lookup for an executable must see the target's file bits rather than the link's.
+    fn metadata_follow(&self, path: &Path) -> io::Result<FsMetadata>;
     fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
     /// The entries of `path`, as full paths, sorted.
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>>;

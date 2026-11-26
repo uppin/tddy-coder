@@ -38,12 +38,24 @@ impl Fs for DiskFs {
         write_swapped(path, contents, mode)
     }
 
+    fn create_dir_all_with_mode(&self, path: &Path, mode: u32) -> io::Result<()> {
+        create_dir_with_mode(path, mode)
+    }
+
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         fs::create_dir_all(path)
     }
 
+    fn hard_link(&self, original: &Path, link: &Path) -> io::Result<()> {
+        fs::hard_link(original, link)
+    }
+
     fn remove_file(&self, path: &Path) -> io::Result<()> {
         fs::remove_file(path)
+    }
+
+    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        fs::remove_dir(path)
     }
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -54,21 +66,13 @@ impl Fs for DiskFs {
         fs::rename(from, to)
     }
 
+    fn metadata_follow(&self, path: &Path) -> io::Result<FsMetadata> {
+        // `metadata`, not `symlink_metadata`: a final symlink resolves to its target.
+        Ok(describe(&fs::metadata(path)?))
+    }
+
     fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        let meta = fs::symlink_metadata(path)?;
-        let kind = if meta.is_symlink() {
-            FsKind::Symlink
-        } else if meta.is_dir() {
-            FsKind::Dir
-        } else {
-            FsKind::File
-        };
-        Ok(FsMetadata {
-            kind,
-            len: meta.len(),
-            mode: file_mode(&meta),
-            modified: meta.modified().ok(),
-        })
+        Ok(describe(&fs::symlink_metadata(path)?))
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
@@ -86,6 +90,101 @@ impl Fs for DiskFs {
     fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         fs::canonicalize(path)
     }
+}
+
+fn describe(meta: &fs::Metadata) -> FsMetadata {
+    FsMetadata {
+        kind: kind_of(meta),
+        len: meta.len(),
+        mode: file_mode(meta),
+        modified: meta.modified().ok(),
+        uid: owner_of(meta),
+        dev: device_of(meta),
+        ino: inode_of(meta),
+    }
+}
+
+#[cfg(unix)]
+fn kind_of(meta: &fs::Metadata) -> FsKind {
+    use std::os::unix::fs::FileTypeExt;
+
+    let file_type = meta.file_type();
+    if file_type.is_symlink() {
+        FsKind::Symlink
+    } else if file_type.is_socket() {
+        FsKind::Socket
+    } else if meta.is_dir() {
+        FsKind::Dir
+    } else {
+        FsKind::File
+    }
+}
+
+#[cfg(not(unix))]
+fn kind_of(meta: &fs::Metadata) -> FsKind {
+    if meta.is_symlink() {
+        FsKind::Symlink
+    } else if meta.is_dir() {
+        FsKind::Dir
+    } else {
+        FsKind::File
+    }
+}
+
+#[cfg(unix)]
+fn owner_of(meta: &fs::Metadata) -> Option<u32> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(meta.uid())
+}
+
+#[cfg(not(unix))]
+fn owner_of(_meta: &fs::Metadata) -> Option<u32> {
+    None
+}
+
+#[cfg(unix)]
+fn device_of(meta: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(meta.dev())
+}
+
+#[cfg(not(unix))]
+fn device_of(_meta: &fs::Metadata) -> Option<u64> {
+    None
+}
+
+#[cfg(unix)]
+fn inode_of(meta: &fs::Metadata) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+
+    Some(meta.ino())
+}
+
+#[cfg(not(unix))]
+fn inode_of(_meta: &fs::Metadata) -> Option<u64> {
+    None
+}
+
+/// Create `path` and every missing parent at exactly `mode`.
+#[cfg(unix)]
+fn create_dir_with_mode(path: &Path, mode: u32) -> io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+
+    // The mode rides on the creation itself, so no window at the process umask. An
+    // existing directory keeps the mode its operator gave it — narrowing one the daemon did
+    // not create is the caller's to decide, never this call's.
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(mode)
+        .create(path)
+}
+
+/// Without Unix permission bits there is no mode to create with.
+#[cfg(not(unix))]
+fn create_dir_with_mode(path: &Path, _mode: u32) -> io::Result<()> {
+    fs::create_dir_all(path)
 }
 
 #[cfg(unix)]

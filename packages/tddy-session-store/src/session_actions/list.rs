@@ -215,7 +215,8 @@ fn collect_from_root_on(
                 Ok(tddy_fs::FsKind::File) | Ok(tddy_fs::FsKind::Symlink) => {
                     collect_manifest_on(fs, rel_base, query, by_path, &abs_path);
                 }
-                Err(_) => continue,
+                // A socket is an endpoint, not a manifest; an unreadable entry is skipped.
+                Ok(tddy_fs::FsKind::Socket) | Err(_) => continue,
             }
         }
     }

@@ -10,7 +10,13 @@
 **Sequencing (hard gate):** do not start `/green` before `#target-reconnect` #1041 and #1042 have merged — they edit agent-launch, cli-sessions and session-lifecycle, which this streak migrates. Implementation runs as `#muse` sessions on `mantas-udoo-ros` (one session at a time, tight disk): keep every gate scoped with `./test -p <crate>` per crate, never a workspace run.
 
 ## Responsibility
-Production disk I/O of these crates, moved onto `tddy-fs` (~147 fs lines incl. tests):
+Production disk I/O of these crates, moved onto `tddy-fs` (~147 fs lines incl. tests),
+**plus the additive `Fs`-surface extension this node owns** (operator decision, 2026-11-26:
+n1 #1045 is frozen, so n3 extends the port on this branch rather than cascading a stack).
+
+Added methods (additive only — no signature change to any existing method):
+`hard_link`, `create_dir_all_with_mode`, `remove_dir`, `metadata_follow`,
+`FsMetadata.uid`, `FsMetadata.dev`, `FsMetadata.ino`, `FsKind::Socket`.
 
 | Crate | fs lines (src/) |
 |---|---|
@@ -22,7 +28,9 @@ Production disk I/O of these crates, moved onto `tddy-fs` (~147 fs lines incl. t
 | `tddy-daemon-livekit` | 2 |
 
 ## Boundaries
-- Changes no on-disk format, path or mode; adds no `Fs` method (a missing one is n1's to add — raise it on n1's PR).
+- Changes no on-disk format, path or mode; `Fs` changes are **additive only** (new methods,
+new `FsMetadata`/`FsKind` members — never a changed signature or changed behaviour of an
+existing method). Any further missing surface is still n1's to add.
 - Touches no crate outside the table (callers outside it only get a `DiskFs` argument at composition sites).
 - Test-only crates (testing-commons, e2e, vm-testkit, test-hosts) keep real disk.
 
@@ -38,7 +46,7 @@ These surfaces are **theirs to create**; implementing one here collides with the
 
 | Node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `n1` fs-crate (#1045) | `tddy_fs::{Fs, DiskFs, MemFs, AsyncFs, write_atomic*}` | production code calls the port; tests inject `MemFs` | add methods to `Fs`, change adapters, or add another atomic writer |
+| `n1` fs-crate (#1045) | `tddy_fs::{Fs, DiskFs, MemFs, AsyncFs, write_atomic*}` | production code calls the port; tests inject `MemFs` | change existing `Fs` signatures/behaviour, change adapters' existing behaviour, or add another atomic writer — but n3 **does** extend the port additively on this branch (`hard_link`, `create_dir_all_with_mode`, `remove_dir`, `metadata_follow`, `FsMetadata::{uid, dev, ino}`, `FsKind::Socket`), per the operator decision in [Responsibility](#responsibility), because n1 is frozen |
 
 ## Draft PR contract
 First push: constructor/function signatures of the listed crates changed to take `Arc<dyn Fs>` (bodies keep

@@ -154,6 +154,163 @@ fn canonicalize_resolves_dot_dot() {
 }
 
 #[test]
+fn hard_link_publishes_without_replacing() {
+    each_adapter(|s| {
+        let original = written(s, "h/original", "key");
+        let link = s.at("h/link");
+        s.fs.hard_link(&original, &link).unwrap();
+        assert_eq!(s.fs.read_to_string(&link).unwrap(), "key");
+        // A link never silently replaces the winner: the target must not exist.
+        let err = s.fs.hard_link(&original, &link).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(s.fs.read_to_string(&original).unwrap(), "key");
+    });
+}
+
+#[test]
+fn hard_link_needs_an_existing_source() {
+    each_adapter(|s| {
+        let err = s
+            .fs
+            .hard_link(&s.at("missing"), &s.at("link"))
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    });
+}
+
+#[test]
+fn remove_dir_removes_only_an_empty_directory() {
+    each_adapter(|s| {
+        let empty = s.at("r/empty");
+        s.fs.create_dir_all(&empty).unwrap();
+        s.fs.remove_dir(&empty).unwrap();
+        assert!(!s.fs.exists(&empty));
+
+        written(s, "r/full/child", "x");
+        let err = s.fs.remove_dir(&s.at("r/full")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::DirectoryNotEmpty);
+        assert!(s.fs.exists(&s.at("r/full/child")));
+
+        let file = written(s, "r/file", "x");
+        let err = s.fs.remove_dir(&file).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotADirectory);
+
+        let err = s.fs.remove_dir(&s.at("r/absent")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    });
+}
+
+#[test]
+fn a_replacement_gets_a_new_identity_while_a_rename_keeps_it() {
+    each_adapter(|s| {
+        let path = written(s, "i/file", "one");
+        let before = s.fs.metadata(&path).unwrap();
+        let (dev, ino) = (before.dev, before.ino);
+        assert!(dev.is_some() && ino.is_some(), "{before:?}");
+
+        let moved = s.at("i/moved");
+        s.fs.rename(&path, &moved).unwrap();
+        let after_move = s.fs.metadata(&moved).unwrap();
+        assert_eq!((after_move.dev, after_move.ino), (dev, ino));
+
+        s.fs.write_atomic(&moved, b"two", None).unwrap();
+        let after_replace = s.fs.metadata(&moved).unwrap();
+        assert_eq!(after_replace.dev, dev);
+        assert_ne!(after_replace.ino, ino);
+    });
+}
+
+#[test]
+fn a_truncating_write_keeps_the_identity() {
+    each_adapter(|s| {
+        let path = written(s, "t/file", "one");
+        let ino = s.fs.metadata(&path).unwrap().ino;
+        s.fs.write(&path, b"two").unwrap();
+        assert_eq!(s.fs.metadata(&path).unwrap().ino, ino);
+        assert_eq!(s.fs.read_to_string(&path).unwrap(), "two");
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn create_dir_all_with_mode_lands_owner_only_from_birth() {
+    use std::os::unix::fs::PermissionsExt;
+
+    each_adapter(|s| {
+        let dir = s.at("m/owner-only");
+        s.fs.create_dir_all_with_mode(&dir, 0o700).unwrap();
+        assert_eq!(
+            s.fs.metadata(&dir).unwrap().mode.map(|m| m & 0o777),
+            Some(0o700)
+        );
+        // The mode is in the creation, so a check of the real directory straight after
+        // sees no wider window either.
+        if let Some(temp) = &s._dir {
+            assert_eq!(
+                std::fs::metadata(temp.path().join("m/owner-only"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn metadata_reports_the_owning_uid() {
+    each_adapter(|s| {
+        let path = written(s, "u/file", "x");
+        assert!(s.fs.metadata(&path).unwrap().uid.is_some());
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn metadata_follow_sees_through_a_symlink() {
+    each_adapter(|s| {
+        let target = written(s, "l/target", "hello");
+        let link = s.at("l/link");
+        // Only the real disk holds symlinks; the tree resolves lexically, so there a
+        // following stat is the same stat.
+        if s._dir.is_some() {
+            std::os::unix::fs::symlink(&target, &link).unwrap();
+            let followed = s.fs.metadata_follow(&link).unwrap();
+            assert_eq!((followed.kind, followed.len), (FsKind::File, 5));
+            assert_eq!(s.fs.metadata(&link).unwrap().kind, FsKind::Symlink);
+        } else {
+            let mem = s.fs.metadata_follow(&target).unwrap();
+            assert_eq!(mem, s.fs.metadata(&target).unwrap());
+        }
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn a_bound_socket_stats_as_a_socket() {
+    use std::os::unix::net::UnixListener;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("daemon.sock");
+    let listener = UnixListener::bind(&path).unwrap();
+    assert_eq!(DiskFs.metadata(&path).unwrap().kind, FsKind::Socket);
+    drop(listener);
+}
+
+#[test]
+fn a_recorded_socket_stats_as_a_socket_and_refuses_bytes() {
+    let mem = MemFs::new();
+    let path = PathBuf::from("/s/daemon.sock");
+    mem.create_dir_all(path.parent().unwrap()).unwrap();
+    mem.create_socket(&path).unwrap();
+    assert_eq!(mem.metadata(&path).unwrap().kind, FsKind::Socket);
+    assert!(mem.read(&path).is_err());
+    assert!(mem.write(&path, b"x").is_err());
+}
+
+#[test]
 fn exists_tells_a_present_path_from_an_absent_one() {
     each_adapter(|s| {
         let present = written(s, "e/here", "");
