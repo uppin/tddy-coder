@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Architecture Change
 **Complexity**: 4 — new crate + two consumer crates; adapter seam; conformance semantics (atomicity, modes)
+**PR**: [#1045](https://github.com/uppin/tddy-coder/pull/1045)
 **PRD**: [PRD-2026-11-26-fs-port-crate.md](../../ft/coder/1-WIP/PRD-2026-11-26-fs-port-crate.md)
 
 **Sequencing (hard gate):** do not start `/green` before `#target-reconnect` #1041 and #1042 have merged — they edit agent-launch, cli-sessions and session-lifecycle, which this streak migrates. Implementation runs as `#muse` sessions on `mantas-udoo-ros` (one session at a time, tight disk): keep every gate scoped with `./test -p <crate>` per crate, never a workspace run.
@@ -42,6 +43,21 @@ credentials tests that inject `MemFs`.
 
     n1 ⇒ n3, n4, n5, n6, n7, n8, n9, n10, n11, n12, n13      (n2: standalone)
 
+## Seam convention (for every migration node)
+
+An existing free function keeps its signature and delegates to a new `<fn>_on(fs: &dyn Fs, …)`
+(or `Arc<dyn Fs>` where the result keeps writing, e.g. `CredentialStore::create_on`) with `DiskFs`.
+Tests call the `_on` form with `MemFs`; callers outside the migrated crate are untouched.
+
+## Red-step state
+
+Published surface: `tddy_fs::{Fs, FsMetadata, FsKind, DiskFs, MemFs (new, fail_next_write, paths), AsyncFs, write_atomic, write_atomic_with_mode, write_atomic_labelled}`;
+`tddy_session_store::output::{write_session_file_on, read_session_file_on, create_session_dir_with_id_on}`,
+`tddy_session_store::session_actions::parse_action_manifest_file_on`;
+`tddy_credentials::CredentialStore::{create_on, open_with_passphrase_on}`.
+26 failing tests (conformance 11, atomic_write 8, async_fs 1, session-store fs_port 3, credentials fs_port 3), each on `TODO(fs-crate)`.
+Pre-existing tests of the three crates pass (`./test -p` scoped: tddy-fs, tddy-session-store, tddy-credentials).
+
 ## Prerequisites
 - [2026-09-23-atomic-file-leaf-crate.md](../todo/2026-09-23-atomic-file-leaf-crate.md) — ✅ RESOLVED HERE (`tddy-fs` is the leaf crate).
 
@@ -70,10 +86,10 @@ Gates: `./test -p tddy-fs -p tddy-session-store -p tddy-credentials`, clippy on 
 - [x] Record initial discovery
 - [x] Create/update PRD documentation
 - [x] Create changeset
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement
 - [ ] /validate-changes
 - [ ] /pr-wrap

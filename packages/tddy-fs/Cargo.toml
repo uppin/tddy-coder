@@ -1,0 +1,20 @@
+[package]
+name = "tddy-fs"
+version = "0.1.0"
+edition = "2021"
+description = "The filesystem port: one trait for all disk I/O, with a real-disk and an in-memory adapter, and the crash-safe atomic write as a port operation."
+
+[features]
+# `AsyncFs`, the facade `tokio::fs` call sites migrate onto.
+tokio = ["dep:tokio"]
+
+[dependencies]
+# Unique swap-file names for the atomic write.
+uuid = { version = "1", features = ["v7"] }
+tokio = { version = "1", features = ["rt"], optional = true }
+
+[dev-dependencies]
+# The crate itself with `tokio`, so `AsyncFs` is tested by a plain `./test -p tddy-fs`.
+tddy-fs = { path = ".", features = ["tokio"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }

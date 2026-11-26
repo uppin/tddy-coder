@@ -9,6 +9,8 @@ name = "tddy_credentials"
 path = "src/lib.rs"
 
 [dependencies]
+# The filesystem port every disk read and write goes through (#fs-port).
+tddy-fs = { path = "../tddy-fs" }
 # AEAD over each record, with the record's identity as associated data. Already this workspace's
 # authenticated cipher (tddy-screen-sharing), so the pattern is one a reviewer here has read before.
 # It wipes its own key on drop, unconditionally.

@@ -135,6 +135,41 @@ pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf
     create_session_dir_with_id(base, session_id)
 }
 
+/// [`write_session_file`] through the filesystem port.
+pub fn write_session_file_on(
+    _fs: &dyn tddy_fs::Fs,
+    _output_dir: &Path,
+    _session_id: &str,
+) -> Result<(), WorkflowError> {
+    // TODO(fs-crate): implement
+    Err(WorkflowError::WriteFailed(
+        "TODO(fs-crate): implement".into(),
+    ))
+}
+
+/// [`read_session_file`] through the filesystem port.
+pub fn read_session_file_on(
+    _fs: &dyn tddy_fs::Fs,
+    _session_dir: &Path,
+) -> Result<String, WorkflowError> {
+    // TODO(fs-crate): implement
+    Err(WorkflowError::SessionMissing(
+        "TODO(fs-crate): implement".into(),
+    ))
+}
+
+/// [`create_session_dir_with_id`] through the filesystem port.
+pub fn create_session_dir_with_id_on(
+    _fs: &dyn tddy_fs::Fs,
+    _base: &Path,
+    _session_id: &str,
+) -> Result<PathBuf, WorkflowError> {
+    // TODO(fs-crate): implement
+    Err(WorkflowError::WriteFailed(
+        "TODO(fs-crate): implement".into(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

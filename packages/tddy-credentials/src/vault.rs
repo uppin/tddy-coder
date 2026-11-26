@@ -220,6 +220,28 @@ impl CredentialStore {
         Ok(session(path, subject, data_key))
     }
 
+    /// [`Self::create`] through the filesystem port; the returned vault keeps writing through `fs`.
+    pub fn create_on(
+        _fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        _path: &Path,
+        _passphrase: &SecretString,
+        _subject: &str,
+    ) -> Result<SessionVault, VaultError> {
+        // TODO(fs-crate): implement
+        Err(VaultError::Io("TODO(fs-crate): implement".into()))
+    }
+
+    /// [`Self::open_with_passphrase`] through the filesystem port.
+    pub fn open_with_passphrase_on(
+        _fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        _path: &Path,
+        _passphrase: &SecretString,
+        _subject: &str,
+    ) -> Result<SessionVault, VaultError> {
+        // TODO(fs-crate): implement
+        Err(VaultError::Io("TODO(fs-crate): implement".into()))
+    }
+
     /// Set the vault at `path` aside and create a fresh one under `new_passphrase` — the
     /// forgotten-passphrase path.
     ///

@@ -29,6 +29,15 @@ pub struct ActionManifest {
     pub output_path_arg: Option<String>,
 }
 
+/// [`parse_action_manifest_file`] through the filesystem port.
+pub fn parse_action_manifest_file_on(
+    _fs: &dyn tddy_fs::Fs,
+    _path: &Path,
+) -> Result<ActionManifest, SessionActionsError> {
+    // TODO(fs-crate): implement
+    Err(std::io::Error::other("TODO(fs-crate): implement").into())
+}
+
 /// Load and deserialize one manifest file.
 pub fn parse_action_manifest_file(path: &Path) -> Result<ActionManifest, SessionActionsError> {
     debug!(
