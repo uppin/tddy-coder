@@ -24,6 +24,8 @@ uuid = { version = "1", features = ["v7"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 serial_test = "3"
 tempfile = "3"
 # An independent reference emulator: a snapshot is checked by rendering it in a VT that is not the

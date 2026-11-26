@@ -43,6 +43,8 @@ futures-util = "0.3"
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `work_item_link_tools.rs` links a session through the stack crate's own operation.
 tddy-work-queue = { path = "../tddy-work-queue" }
 prost = "0.13"

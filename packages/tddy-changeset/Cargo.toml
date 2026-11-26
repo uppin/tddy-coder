@@ -29,6 +29,8 @@ tddy-session-store = { path = "../tddy-session-store" }
 tddy-graph = { path = "../tddy-graph" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 tempfile = "3"

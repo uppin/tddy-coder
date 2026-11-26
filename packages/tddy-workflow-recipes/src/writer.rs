@@ -443,6 +443,29 @@ fn extract_markdown_section(content: &str, heading: &str) -> Option<String> {
     }
 }
 
+/// [`write_session_file`] through the filesystem port.
+pub fn write_session_file_on(
+    _fs: &dyn tddy_fs::Fs,
+    _output_dir: &Path,
+    _session_id: &str,
+) -> Result<(), WorkflowError> {
+    // TODO(workflow-fs): implement
+    Err(WorkflowError::WriteFailed(
+        "TODO(workflow-fs): implement".into(),
+    ))
+}
+
+/// [`read_session_file`] through the filesystem port.
+pub fn read_session_file_on(
+    _fs: &dyn tddy_fs::Fs,
+    _session_dir: &Path,
+) -> Result<String, WorkflowError> {
+    // TODO(workflow-fs): implement
+    Err(WorkflowError::SessionMissing(
+        "TODO(workflow-fs): implement".into(),
+    ))
+}
+
 #[cfg(test)]
 mod exploration_artifact_tests {
     use super::*;
