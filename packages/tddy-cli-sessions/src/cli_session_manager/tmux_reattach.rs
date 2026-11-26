@@ -456,6 +456,29 @@ impl CliSessionManager {
         self
     }
 
+    /// Hold `session_id`'s terminal `terminal_id` live with a detach watcher probing
+    /// `tmux_session` at `location`, in its unreachable state from the start: the startup
+    /// re-attach hands a target it could not reach to this watcher (`#target-reconnect` 3/3,
+    /// D5), which keeps probing on its backoff cadence without ending the agent.
+    pub async fn watch_detached(
+        &self,
+        session_id: &str,
+        terminal_id: &str,
+        tmux_session: &str,
+        location: SharedTmuxLocation,
+        os_user: &str,
+    ) {
+        self.detach_watch()
+            .for_terminal(terminal_id)
+            .start(
+                session_id.to_string(),
+                tmux_session.to_string(),
+                location,
+                os_user.to_string(),
+            )
+            .await;
+    }
+
     pub(crate) fn detach_watch(&self) -> DetachWatch {
         DetachWatch {
             terminals: Arc::clone(&self.terminals),

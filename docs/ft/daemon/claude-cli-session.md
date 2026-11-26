@@ -266,7 +266,11 @@ on the host: it shows in `tmux ls` and can be attached from any terminal over SS
   a target: the watcher's probe and the re-attach run there (`tmux attach-session` through the
   target's login shell, as the record's `owner_subject`), a transport exit (ssh 255, no tmux on the
   target) is *unreachable* — the watcher backs off and holds the session for its grace — never
-  *gone*, and Resume alone relaunches (`new-session -A`).
+  *gone*, and Resume alone relaunches (`new-session -A`). At daemon startup (`#target-reconnect`
+  3/3) the same re-attach runs eagerly for `[target, tmux]` mains and `[target, tmux, agent]`
+  tabs as the recorded `owner_subject`, restarting the session's hook-log follower; an unreachable
+  or vault-locked target is left under a watcher in its unreachable state, and a record without
+  `owner_subject` is left for Resume.
 - **Re-attach.** A session whose tmux session is alive and has no main terminal registered gets one
   re-attached — the agent is **never relaunched**, and the recorded `pid` is re-read from the pane. A
   main counts as having run in tmux when its [tab roster](session-liveness.md#the-tab-roster) records

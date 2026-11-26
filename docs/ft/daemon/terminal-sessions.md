@@ -242,8 +242,16 @@ A **target session** (`StartSessionRequest.target`, a Coder workspace or ssh hos
 - **Stop** (`SignalSession`) signals the local client, so it detaches, as Stop of a host tmux run does.
   **Delete** kills `tddy-<session>` on the target (a session already gone is not an error; an
   unreachable target refuses the delete `UNAVAILABLE` and leaves the session intact) and never touches
-  the daemon host's tmux. Resume's exit settle and the daemon-start re-attach never look for a target
-  session's tmux on the daemon host.
+  the daemon host's tmux. Resume's exit settle never looks for a target session's tmux on the
+  daemon host; the daemon-start re-attach (next bullet) looks only on the target.
+- **Daemon start** (`#target-reconnect` 3/3). The startup re-attach resolves every `[target, tmux]`
+  main (from its `.session.yaml` `target` + `tmux_session`, since a target main records no roster
+  entry) and every `[target, tmux, agent]` tab from the tab roster as the session's recorded
+  `owner_subject`, through the target's tmux location, and restarts the session's hook-log
+  follower. A target that cannot be reached, or whose owner's vault is locked, is left with that
+  reason and handed to a detach watcher in its unreachable state; startup never blocks on a target
+  beyond one exec deadline. A session without `owner_subject` is left ("records no owner subject")
+  for Resume. `[target, tmux-attach]` tabs — a person's own tmux — are never re-attached.
 
 A target session's **tmux tabs run on the target** too (`#target-tmux` 2/2):
 

@@ -486,8 +486,9 @@ async fn a_resume_resumes_the_agent_of_an_agent_in_tmux_tab_whose_tmux_session_i
 
 #[tokio::test]
 #[serial_test::serial]
-async fn the_startup_re_attach_leaves_target_tmux_tabs_for_resume() {
-    // Given a stopped session on the target whose roster records an agent in tmux tab on the target
+async fn the_startup_re_attach_leaves_a_target_tmux_tab_whose_tmux_session_is_gone() {
+    // Given a stopped session on the target whose roster records an agent in tmux tab on the
+    // target, in a tmux session that does not live there
     let daemon = a_daemon_with_a_reachable_target();
     let session_id = a_running_session_on_the_target(&daemon).await;
     daemon.stop(&session_id).await;
@@ -511,12 +512,12 @@ async fn the_startup_re_attach_leaves_target_tmux_tabs_for_resume() {
     // When a fresh daemon re-attaches live tmux tabs at startup
     let report = daemon.service.reattach_live_tmux_tabs().await;
 
-    // Then the target tab is left for resume, named as one that runs on its target — never looked
-    // for in this host's tmux
+    // Then the target tab is left for Resume, naming its gone tmux session on the target —
+    // never looked for in this host's tmux (`#target-reconnect` 3/3)
     let left: Vec<(String, bool)> = report
         .left
         .iter()
-        .map(|tab| (tab.terminal_id.clone(), tab.reason.contains("target")))
+        .map(|tab| (tab.terminal_id.clone(), tab.reason.contains("gone")))
         .collect();
     assert_eq!(
         (report.reattached.len(), left),
