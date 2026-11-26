@@ -11,7 +11,9 @@ use tddy_cli_sessions::cli_session_manager::ReattachSkip;
 use tddy_cli_sessions::tmux::agent_tmux_session_name;
 use tddy_cli_sessions::tmux_location::SharedTmuxLocation;
 use tddy_core::read_session_metadata;
-use tddy_core::tab_roster::{TabEntry, AGENT_KIND, HARNESS_PROPERTY, OS_USER_PROPERTY, SESSION_PROPERTY};
+use tddy_core::tab_roster::{
+    TabEntry, AGENT_KIND, HARNESS_PROPERTY, OS_USER_PROPERTY, SESSION_PROPERTY,
+};
 
 use super::{Reattach, ReattachReport};
 use crate::cli_session_manager::{ReattachOutcome, MAIN_TERMINAL_ID};

@@ -266,7 +266,6 @@ impl Reattach<'_> {
         }
     }
 
-
     /// Re-attach the tmux-wrapped secondary tab `tab`, which runs in tmux session `name` as
     /// `os_user`, to its live tmux session.
     async fn tab(
