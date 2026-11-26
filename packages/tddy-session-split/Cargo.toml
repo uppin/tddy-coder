@@ -38,6 +38,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "s
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 tempfile = "3"
 # `split_room_hosting_port.rs` scripts the codebase host on the common room, so it reads and

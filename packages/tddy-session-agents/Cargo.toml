@@ -71,6 +71,8 @@ tddy-projects = { path = "../tddy-projects" }
 tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 # `session_agent_roster`'s tests persist a roster into a real session directory.

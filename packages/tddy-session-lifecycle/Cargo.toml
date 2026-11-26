@@ -125,6 +125,8 @@ http = "1"
 tokio-stream = "0.1"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `work_queue_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # `usage_context_acceptance` reads back the context a launch records (`#usage-binding 2/5`).
