@@ -1,5 +1,8 @@
 //! Family P — `work_queue.WorkQueueService`.
 
+mod blocking_lane;
+#[cfg(test)]
+mod blocking_lane_unit_tests;
 mod branch_legs;
 mod branch_reads;
 pub(crate) mod chain_health;

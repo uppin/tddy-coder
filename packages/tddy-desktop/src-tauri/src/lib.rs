@@ -10,6 +10,7 @@
 //! because `fork` from a multi-threaded process can deadlock, and Tauri's runtime is
 //! multi-threaded from the moment it is touched.
 
+mod bounded_shutdown;
 mod config_source;
 mod file_drop;
 mod invocation;
