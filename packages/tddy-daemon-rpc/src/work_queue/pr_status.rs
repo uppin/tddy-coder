@@ -3,7 +3,6 @@
 
 use super::branch_legs::{base_sync_through_cache, base_sync_unavailable, base_sync_view};
 use super::WorkQueueRpcHandler;
-use tddy_session_lifecycle::connection_service::spawn_blocking_with_timeout;
 
 impl WorkQueueRpcHandler {
     /// The inbox and repository `target`'s PR reads go through, with the project's credential
@@ -121,18 +120,22 @@ impl WorkQueueRpcHandler {
         let probe_root = repo_root.to_path_buf();
         let probe_branch = branch.to_string();
         let probe_base = base_branch.to_string();
-        let probed = spawn_blocking_with_timeout(
-            self.config.spawn_worker_request_timeout(),
-            "QueryBranch: compare branch against base",
-            move || {
-                Ok(base_sync_through_cache(
-                    &probe_root,
-                    &probe_branch,
-                    &probe_base,
-                ))
-            },
-        )
-        .await;
+        let probed = self
+            .query_branch_lanes
+            .base_sync
+            .run(
+                format!("{}|{branch}|{base_branch}", repo_root.display()),
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: compare branch against base",
+                move || {
+                    Ok(base_sync_through_cache(
+                        &probe_root,
+                        &probe_branch,
+                        &probe_base,
+                    ))
+                },
+            )
+            .await;
 
         Some(match probed {
             Ok(Ok(sync)) => base_sync_view(sync),

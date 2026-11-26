@@ -15,9 +15,7 @@ use tddy_service::proto::work_queue::{
     GetPrStatusRequest, GetPrStatusResponse, QueryBranchRequest, QueryBranchResponse,
     ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
 };
-use tddy_session_lifecycle::connection_service::{
-    resolve_os_user, spawn_blocking_with_timeout, wire_same,
-};
+use tddy_session_lifecycle::connection_service::{resolve_os_user, wire_same};
 use tddy_session_lifecycle::session_reader::DaemonSessionListing;
 use tddy_session_lifecycle::user_sessions_path::{projects_path_for_user, sessions_base_for_user};
 use tddy_worktree_service::branch_owner::find_session_owning_branch;
@@ -54,18 +52,22 @@ impl WorkQueueRpcHandler {
         let branch_for_scan = branch.clone();
         let sessions_base_for_scan = sessions_base.clone();
         let live = self.terminals.live_sessions().await;
-        let session = spawn_blocking_with_timeout(
-            self.config.spawn_worker_request_timeout(),
-            "QueryBranch: scan sessions by branch",
-            move || {
-                find_session_owning_branch(
-                    &DaemonSessionListing::new(live),
-                    &sessions_base_for_scan,
-                    &branch_for_scan,
-                )
-            },
-        )
-        .await?;
+        let session = self
+            .query_branch_lanes
+            .session
+            .run(
+                format!("{}|{branch}", sessions_base.display()),
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: scan sessions by branch",
+                move || {
+                    find_session_owning_branch(
+                        &DaemonSessionListing::new(live),
+                        &sessions_base_for_scan,
+                        &branch_for_scan,
+                    )
+                },
+            )
+            .await?;
         let session = match session {
             Some(s) => BranchSession {
                 exists: true,
@@ -86,24 +88,28 @@ impl WorkQueueRpcHandler {
         // worktree" rather than failing the call, which is the same contract the other four keep.
         let worktree_repo_root = repo_root.clone();
         let branch_for_worktree = branch.clone();
-        let worktree = spawn_blocking_with_timeout(
-            self.config.spawn_worker_request_timeout(),
-            "QueryBranch: read the branch's worktree",
-            move || {
-                wire_same_anyhow(&worktree_leg(
-                    worktree_repo_root.as_deref(),
-                    &branch_for_worktree,
-                ))
-            },
-        )
-        .await
-        .unwrap_or_else(|status| {
-            log::warn!(
-                "QueryBranch: the worktree leg did not complete: {}",
-                status.message()
-            );
-            BranchWorktree::default()
-        });
+        let worktree = self
+            .query_branch_lanes
+            .worktree
+            .run(
+                format!("{repo_root:?}|{branch}"),
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: read the branch's worktree",
+                move || {
+                    wire_same_anyhow(&worktree_leg(
+                        worktree_repo_root.as_deref(),
+                        &branch_for_worktree,
+                    ))
+                },
+            )
+            .await
+            .unwrap_or_else(|status| {
+                log::warn!(
+                    "QueryBranch: the worktree leg did not complete: {}",
+                    status.message()
+                );
+                BranchWorktree::default()
+            });
 
         // Remote — `origin/<branch>` in the orchestrator's repo, which is what a descendant's
         // worktree is created from. Only as fresh as the last fetch, so it can delay a spawn but
@@ -114,30 +120,34 @@ impl WorkQueueRpcHandler {
         // inline would occupy a runtime worker thread for its whole duration.
         let remote_repo_root = repo_root.clone();
         let remote_branch = branch.clone();
-        let remote = spawn_blocking_with_timeout(
-            self.config.spawn_worker_request_timeout(),
-            "QueryBranch: remote ref",
-            move || {
-                Ok(
-                    match remote_repo_root.as_deref().and_then(|root| {
-                        tddy_core::worktree::remote_branch_ref_sha(root, &remote_branch)
-                    }) {
-                        Some(sha) => BranchRemote { exists: true, sha },
-                        None => BranchRemote::default(),
-                    },
-                )
-            },
-        )
-        .await
-        .unwrap_or_else(|status| {
-            // Degrades this leg alone — an absent remote ref only blocks a *descendant's* spawn, and
-            // reporting the RPC as failed would take the session, worktree and PR legs down with it.
-            log::warn!(
-                "QueryBranch: resolving the remote ref for '{branch}' did not complete: {}",
-                status.message()
-            );
-            BranchRemote::default()
-        });
+        let remote = self
+            .query_branch_lanes
+            .remote
+            .run(
+                format!("{repo_root:?}|{branch}"),
+                self.config.spawn_worker_request_timeout(),
+                "QueryBranch: remote ref",
+                move || {
+                    Ok(
+                        match remote_repo_root.as_deref().and_then(|root| {
+                            tddy_core::worktree::remote_branch_ref_sha(root, &remote_branch)
+                        }) {
+                            Some(sha) => BranchRemote { exists: true, sha },
+                            None => BranchRemote::default(),
+                        },
+                    )
+                },
+            )
+            .await
+            .unwrap_or_else(|status| {
+                // Degrades this leg alone — an absent remote ref only blocks a *descendant's* spawn, and
+                // reporting the RPC as failed would take the session, worktree and PR legs down with it.
+                log::warn!(
+                    "QueryBranch: resolving the remote ref for '{branch}' did not complete: {}",
+                    status.message()
+                );
+                BranchRemote::default()
+            });
 
         // Base sync — how the branch stands against the base the caller named. Like every other leg
         // it never fails the call: an unnamed base, an unknown checkout, a probe that could not run

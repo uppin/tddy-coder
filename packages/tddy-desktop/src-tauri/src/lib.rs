@@ -399,9 +399,17 @@ fn stop_daemon(app: &tauri::AppHandle) {
     let Some(shutdown) = app.try_state::<DaemonShutdown>() else {
         return;
     };
-    tauri::async_runtime::block_on(shutdown.children.shut_down());
+    let outcome = tauri::async_runtime::block_on(bounded_shutdown::shut_down_within(
+        bounded_shutdown::QUIT_DEADLINE,
+        shutdown.children.shut_down(),
+    ));
     shutdown.tasks.abort_all();
-    log::info!("[tddy-desktop] daemon stopped");
+    match outcome {
+        bounded_shutdown::ShutdownOutcome::Finished => log::info!("[tddy-desktop] daemon stopped"),
+        bounded_shutdown::ShutdownOutcome::GaveUpAfter(deadline) => log::warn!(
+            "[tddy-desktop] daemon children did not stop within {deadline:?} — quitting anyway"
+        ),
+    }
 }
 
 /// Where the dashboard is loaded from: a Vite dev server when `VITE_URL` names one, otherwise the

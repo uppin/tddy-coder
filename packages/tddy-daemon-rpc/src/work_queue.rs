@@ -52,6 +52,9 @@ pub struct WorkQueueRpcHandler {
     /// Where a move of a work item is published for its queue's owner (`#workqueue` 8/14); `None`
     /// on a host with no bus.
     notification_bus: Option<Arc<SessionNotificationBus>>,
+    /// The bounded, coalescing lanes `QueryBranch`'s blocking legs run in, so its polling cannot
+    /// fill the blocking pool the rest of the daemon needs.
+    query_branch_lanes: blocking_lane::QueryBranchLanes,
 }
 
 impl WorkQueueRpcHandler {
@@ -70,6 +73,7 @@ impl WorkQueueRpcHandler {
             pull_requests: Arc::new(host.clone()),
             session_token_signer: host.session_token_signer(),
             notification_bus: host.session_notification_bus(),
+            query_branch_lanes: blocking_lane::QueryBranchLanes::new(),
         }
     }
 }

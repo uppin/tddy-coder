@@ -42,8 +42,9 @@ tddy-spawn = { path = "../../tddy-spawn" }
 tddy-rpc = { path = "../../tddy-rpc" }
 tddy-tauri-rpc = { path = "../../tddy-tauri-rpc" }
 tddy-core = { path = "../../tddy-core" }
-# "signal" only: the runtime itself is Tauri's (`tauri::async_runtime`), which is tokio.
-tokio = { version = "1", features = ["signal", "net", "io-util", "rt"] }
+# The runtime itself is Tauri's (`tauri::async_runtime`), which is tokio. "time" bounds a quit
+# (`bounded_shutdown`).
+tokio = { version = "1", features = ["signal", "net", "io-util", "rt", "time"] }
 # The IPC commands' arguments are deserialized by Tauri, so the connect command's target needs a
 # `Deserialize`. Already in this crate's tree (tauri depends on it, derive included) — declaring it
 # adds no crate and compiles nothing new; it just makes what is already linked nameable here.

@@ -63,8 +63,13 @@ async fn concurrent_requests_for_one_key_share_a_single_blocking_job() {
             let lane = Arc::clone(&lane);
             let job = a_counted_job(&runs, "abc123");
             tokio::spawn(async move {
-                lane.run("project/feature/remote".to_string(), RPC_TIMEOUT, "remote", job)
-                    .await
+                lane.run(
+                    "project/feature/remote".to_string(),
+                    RPC_TIMEOUT,
+                    "remote",
+                    job,
+                )
+                .await
             })
         })
         .collect();
@@ -100,7 +105,10 @@ async fn a_saturated_lane_refuses_a_new_key_at_once() {
     let _ = release.send(());
     let status = refused.expect_err("a full lane refuses");
     assert_eq!(status.code(), Code::Unavailable);
-    assert!(started.elapsed() < Duration::from_secs(1), "refused at once");
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "refused at once"
+    );
     assert_eq!(runs.load(Ordering::SeqCst), 0, "the refused job never ran");
 }
 
@@ -130,5 +138,9 @@ async fn a_permit_comes_back_when_its_job_finishes() {
 
     // Then
     assert_eq!(second.expect("the lane has room again"), "second");
-    assert_eq!(runs.load(Ordering::SeqCst), 2, "a finished job is not reused");
+    assert_eq!(
+        runs.load(Ordering::SeqCst),
+        2,
+        "a finished job is not reused"
+    );
 }

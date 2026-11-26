@@ -1,7 +1,7 @@
 //! Quitting Tddy Desktop runs the daemon's shutdown on the main (UI) thread, so it must be bounded:
 //! a wedged blocking pool held the 2026-11-26 quit for 7 minutes ("Application not responding").
-//!
-//! TODO(red): stub — implemented in the green commit.
+//! Past the deadline the process exits anyway; tmux-run agents outlive it by design and the next
+//! start re-attaches them.
 
 use std::future::Future;
 use std::time::Duration;
@@ -13,13 +13,18 @@ pub(crate) enum ShutdownOutcome {
     GaveUpAfter(Duration),
 }
 
+/// How long a quit waits for the daemon's children: `kill_all`'s 5 s SIGKILL grace plus slack.
+pub(crate) const QUIT_DEADLINE: Duration = Duration::from_secs(10);
+
 /// Drive `shut_down` for at most `deadline`.
 pub(crate) async fn shut_down_within(
-    _deadline: Duration,
+    deadline: Duration,
     shut_down: impl Future<Output = ()>,
 ) -> ShutdownOutcome {
-    shut_down.await;
-    ShutdownOutcome::Finished
+    match tokio::time::timeout(deadline, shut_down).await {
+        Ok(()) => ShutdownOutcome::Finished,
+        Err(_) => ShutdownOutcome::GaveUpAfter(deadline),
+    }
 }
 
 #[cfg(test)]
