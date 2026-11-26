@@ -34,6 +34,8 @@ tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 pretty_assertions = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "sync"] }

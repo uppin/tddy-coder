@@ -14,6 +14,8 @@ serde = { version = "1", features = ["derive"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 rstest = { workspace = true }
 serde_yaml = "0.9"
 tempfile = "3"

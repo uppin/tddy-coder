@@ -12499,6 +12499,7 @@ dependencies = [
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
+ "tddy-fs",
  "tddy-pty",
  "tddy-rpc",
  "tddy-service",
@@ -13537,6 +13538,7 @@ dependencies = [
  "rstest 0.24.0",
  "serde",
  "serde_yaml",
+ "tddy-fs",
  "tempfile",
 ]
 
@@ -14095,6 +14097,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-discovery",
+ "tddy-fs",
  "tddy-github",
  "tddy-projects",
  "tddy-rpc",
@@ -14849,6 +14852,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tddy-fs",
  "tempfile",
 ]
 

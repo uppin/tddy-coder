@@ -59,3 +59,20 @@ pub fn session_answer_wait(
         )
     })
 }
+
+/// [`record_answer_wait`] through the filesystem port.
+pub fn record_answer_wait_on(
+    _fs: &dyn tddy_fs::Fs,
+    _session_dir: &Path,
+    _wait: Duration,
+) -> std::io::Result<()> {
+    // TODO(activity-fs): implement
+    Err(std::io::Error::other("TODO(activity-fs): implement"))
+}
+
+/// [`recorded_answer_wait`] through the filesystem port.
+#[must_use]
+pub fn recorded_answer_wait_on(_fs: &dyn tddy_fs::Fs, _session_dir: &Path) -> Option<Duration> {
+    // TODO(activity-fs): implement
+    None
+}
