@@ -57,6 +57,8 @@ wasmtime = { version = "36.0.19", default-features = false, features = ["compone
 testkit = []
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 tempfile = "3"
 # `tddy_fs::DiskFs` at the composition root of `server_support`: the `Workspace` the restructuring

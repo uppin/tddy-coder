@@ -33,6 +33,8 @@ tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 async-stream = "0.3"
 # Test-only: `integration_tests.rs` builds a `TddRecipe`. It is a dev-dependency because
 # `tddy-workflow-recipes` now depends on `tddy-github`, which depends on this crate for its

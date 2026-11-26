@@ -21,5 +21,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }

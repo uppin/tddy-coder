@@ -51,6 +51,8 @@ tddy-telegram = { path = "../tddy-telegram" }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 pretty_assertions = { workspace = true }
 # The spec-launch fixture: a host's coding agents resolved against a declared `ToolHost`.

@@ -36,6 +36,8 @@ tddy-coding-agent-specs = { path = "../tddy-coding-agent-specs" }
 tddy-zed-extensions = { path = "../tddy-zed-extensions" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # The `demo-toml` fixture builders the extension-verify suite shares with the other dependents.
 tddy-zed-extensions = { path = "../tddy-zed-extensions", features = ["testkit"] }
 assert_cmd = "2"

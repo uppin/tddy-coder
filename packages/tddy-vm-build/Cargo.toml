@@ -23,6 +23,8 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs"] }
 serde_yml = "0.0.12"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"

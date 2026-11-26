@@ -36,6 +36,8 @@ tddy-task = { path = "../tddy-task" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

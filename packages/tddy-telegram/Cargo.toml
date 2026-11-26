@@ -39,6 +39,8 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"
