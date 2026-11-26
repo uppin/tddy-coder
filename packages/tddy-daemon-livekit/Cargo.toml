@@ -54,6 +54,8 @@ tddy-session-activity = { path = "../tddy-session-activity" }
 # reads: a session room publishes the basenames in its metadata.
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
+# `#fs-port`: production disk I/O goes through the filesystem port.
+tddy-fs = { path = "../tddy-fs" }
 # `write_wip_tree_within` builds a scratch index outside the checkout, so a measurement never
 # touches the worktree's own `.git/index`.
 tempfile = "3"

@@ -101,11 +101,9 @@ fn write_wip_tree_by(worktree_root: &Path, deadline: Instant) -> String {
     // A copy, and never the file itself: `git add -A` against the agent's index would rewrite its
     // staging area mid-session, which is the one thing this measurement must never do.
     let agents_index = Path::new(&git_dir).join("index");
-    if agents_index.exists() {
-        if let Err(e) = std::fs::copy(&agents_index, &scratch_index) {
-            warn!("session_room: the index of {worktree_root:?} could not be copied for a WIP tree: {e}");
-            return String::new();
-        }
+    if let Err(e) = seed_scratch_index_on(&tddy_fs::DiskFs, &agents_index, &scratch_index) {
+        warn!("session_room: the index of {worktree_root:?} could not be copied for a WIP tree: {e}");
+        return String::new();
     }
 
     // A torn copy — the agent's git was rewriting its index as this read it — fails the staging
@@ -116,6 +114,26 @@ fn write_wip_tree_by(worktree_root: &Path, deadline: Instant) -> String {
         return String::new();
     }
     git_stdout_with(worktree_root, &["write-tree"], &scratch_env, deadline)
+}
+
+/// Seed `scratch_index` from the agent's own `index` through the filesystem port.
+///
+/// [`write_wip_tree_by`] stages against the scratch index, and the copy carries git's stat cache
+/// so staging only hashes what changed since the agent's last command. No agent index seeds
+/// nothing — staging then starts from an empty index, exactly as before.
+///
+/// A read-then-write rather than `std::fs::copy`: the scratch file is fresh out of a new temp
+/// dir, so there is no mode to carry over, and its lifetime ends with the directory.
+pub fn seed_scratch_index_on(
+    fs: &dyn tddy_fs::Fs,
+    agents_index: &Path,
+    scratch_index: &Path,
+) -> std::io::Result<()> {
+    if !fs.exists(agents_index) {
+        return Ok(());
+    }
+    let bytes = fs.read(agents_index)?;
+    fs.write(scratch_index, &bytes)
 }
 
 /// The worktree's `HEAD`, re-exported from where it now lives.
@@ -1755,7 +1773,12 @@ async fn join_room<S: RpcService>(
 /// `RemoveWorktree` is given a path by a browser that got it from a listing, which need not be
 /// spelled the way the session recorded it (`/tmp` vs `/private/tmp` on macOS, a symlinked home).
 fn same_worktree(a: &Path, b: &Path) -> bool {
-    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+    same_worktree_on(&tddy_fs::DiskFs, a, b)
+}
+
+/// [`same_worktree`] through the filesystem port.
+pub fn same_worktree_on(fs: &dyn tddy_fs::Fs, a: &Path, b: &Path) -> bool {
+    match (fs.canonicalize(a), fs.canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }
