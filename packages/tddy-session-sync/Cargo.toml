@@ -32,6 +32,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tddy-room-client = { path = "../tddy-room-client", features = ["test-support"] }
 # `stub_http_routed`: a daemon stand-in that records which RPC path a call reached.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

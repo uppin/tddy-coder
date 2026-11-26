@@ -19,6 +19,8 @@ serde_json = "1"
 tokio = { version = "1", features = ["process", "fs", "io-util", "macros", "sync"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 tempfile = "3"

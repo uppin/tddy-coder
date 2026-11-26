@@ -151,3 +151,13 @@ pub fn delete_upload(
 
     Ok(())
 }
+
+/// [`list_uploads`] through the filesystem port.
+pub fn list_uploads_on(
+    _fs: &dyn tddy_fs::Fs,
+    _sessions_base: &Path,
+    _session_id: &str,
+) -> Result<Vec<UploadEntry>, Status> {
+    // TODO(session-files-fs): implement
+    Err(Status::internal("TODO(session-files-fs): implement"))
+}
