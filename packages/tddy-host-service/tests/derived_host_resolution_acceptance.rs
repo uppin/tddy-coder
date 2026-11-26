@@ -73,6 +73,7 @@ impl HostToolingProbe for AHostWithTheCoderCli {
                 installed: true,
                 version: Some("v2.33.5".to_string()),
             },
+            ios_simulators: Vec::new(),
         }
     }
 }

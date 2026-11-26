@@ -255,4 +255,58 @@ describe("ConnectionProviderRegistry observability", () => {
     expect(notifications).toEqual(0);
     expect(registry.revision()).toEqual(1);
   });
+
+  it("lends a later wire's media to the host the first wire reaches", () => {
+    // Given the desktop's own wire, which carries calls only, and a common room reaching the same host
+    const registry = new ConnectionProviderRegistry();
+    registry.register(aProvidingConnection("ipc", aConnectionTo("this-host", "ipc", ["rpc"])));
+    registry.register(
+      aProvidingConnection("livekit", aConnectionTo("this-host", "livekit", ["rpc", "media", "presence"])),
+    );
+
+    // When
+    const connection = registry.connectHost("this-host");
+
+    // Then calls stay on the first wire, and only media is borrowed
+    expect(connection?.providerId).toBe("ipc");
+    expect([...(connection?.capabilities ?? [])].sort()).toEqual(["media", "rpc"]);
+  });
+
+  it("lends no media from a wire that has not reached the host", () => {
+    // Given a common room the host is not on yet
+    const registry = new ConnectionProviderRegistry();
+    registry.register(aProvidingConnection("ipc", aConnectionTo("this-host", "ipc", ["rpc"])));
+    registry.register(
+      aProvidingConnection("livekit", {
+        ...aConnectionTo("this-host", "livekit", ["rpc", "media"]),
+        status: "connecting",
+      }),
+    );
+
+    // When
+    const connection = registry.connectHost("this-host");
+
+    // Then
+    expect([...(connection?.capabilities ?? [])]).toEqual(["rpc"]);
+  });
+
+  it("resolves a borrowing host to the same connection each time", () => {
+    // Given
+    const registry = new ConnectionProviderRegistry();
+    registry.register(aProvidingConnection("ipc", aConnectionTo("this-host", "ipc", ["rpc"])));
+    registry.register(
+      aProvidingConnection("livekit", aConnectionTo("this-host", "livekit", ["rpc", "media"])),
+    );
+
+    // When
+    const [first, second] = [registry.connectHost("this-host"), registry.connectHost("this-host")];
+
+    // Then
+    expect(second).toBe(first);
+  });
 });
+
+/** A provider that hands out one fixed connection for the host it names. */
+function aProvidingConnection(id: string, connection: HostConnection): ConnectionProvider {
+  return { id, connectHost: (hostId) => (hostId === connection.hostId ? connection : null) };
+}

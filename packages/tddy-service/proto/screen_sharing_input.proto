@@ -21,10 +21,22 @@ message ScreenSharingKeyEvent {
   bool   pressed = 2;
 }
 
+// A scroll — mouse wheel or trackpad — over the framebuffer point (x, y). The deltas are in
+// framebuffer pixels, positive scrolling down and right (the browser's `WheelEvent` convention); the
+// bridge maps them to the protocol's own wheel: VNC wheel buttons, RDP wheel rotation, a swipe on a
+// touch screen.
+message ScreenSharingWheelEvent {
+  uint32 x       = 1;
+  uint32 y       = 2;
+  sint32 delta_x = 3;
+  sint32 delta_y = 4;
+}
+
 message ScreenSharingInputEvent {
   oneof event {
     ScreenSharingPointerEvent pointer = 1;
     ScreenSharingKeyEvent     key     = 2;
+    ScreenSharingWheelEvent   wheel   = 3;
   }
 }
 

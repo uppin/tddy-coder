@@ -302,8 +302,7 @@ pub struct TelegramConfig {
 
 pub use crate::config::screen_sharing::{
     resolve_ios_simulator_binary_path, resolve_rdp_binary_path, resolve_vnc_binary_path,
-    resolve_x11vnc_binary_path,
-    ScreenSharingConfig,
+    resolve_x11vnc_binary_path, ScreenSharingConfig,
 };
 
 pub(crate) mod access;

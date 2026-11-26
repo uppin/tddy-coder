@@ -38,6 +38,18 @@ function mouseAt(eventName: string, at: Point, options: Record<string, unknown>)
   });
 }
 
+function touchAt(eventName: string, at: Point) {
+  video().then(($el) => {
+    const box = $el[0].getBoundingClientRect();
+    const touch = { identifier: 1, clientX: box.left + at.x, clientY: box.top + at.y };
+    cy.wrap($el, { log: false }).trigger(eventName, {
+      touches: eventName === "touchend" ? [] : [touch],
+      changedTouches: [touch],
+      force: true,
+    });
+  });
+}
+
 /** Dispatch a keyboard event on the desktop picture; it bubbles to whatever is listening. */
 function key(eventName: "keydown" | "keyup", keyName: string, modifiers: Record<string, boolean>) {
   video().trigger(eventName, {
@@ -99,6 +111,18 @@ export const desktopPage = {
       expect(Math.round(box.width), "the width the desktop is rendered at").to.equal(size.width);
       expect(Math.round(box.height), "the height the desktop is rendered at").to.equal(size.height);
     });
+  },
+
+  /** Scroll by `delta` CSS pixels with the pointer at `at`, as a trackpad reports it. */
+  scrollAt(at: Point, delta: Point) {
+    mouseAt("wheel", at, { deltaX: delta.x, deltaY: delta.y, deltaMode: 0 });
+  },
+
+  /** A finger touching down at `at`, moving to `to`, and lifting there. */
+  dragAFingerFrom(at: Point, to: Point) {
+    touchAt("touchstart", at);
+    touchAt("touchmove", to);
+    touchAt("touchend", to);
   },
 
   movePointerTo(at: Point) {

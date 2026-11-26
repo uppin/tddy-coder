@@ -206,6 +206,18 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
         self.send_input_events(&[event]).await
     }
 
+    /// One wheel notch per axis that moved, at the pointer.
+    async fn inject_wheel(&mut self, x: u32, y: u32, delta_x: i32, delta_y: i32) -> Result<()> {
+        let events = wheel_mouse_pdus(x, y, delta_x, delta_y)
+            .into_iter()
+            .map(FastPathInputEvent::MouseEvent)
+            .collect::<Vec<_>>();
+        if events.is_empty() {
+            return Ok(());
+        }
+        self.send_input_events(&events).await
+    }
+
     async fn inject_key(&mut self, keysym: u32, pressed: bool) -> Result<()> {
         let scancode = keysym_to_scancode(keysym);
         let flags = if pressed {
@@ -457,4 +469,31 @@ fn keysym_to_scancode(keysym: u32) -> u8 {
         0xffc9 => 0x58, // F12
         _ => 0x00,
     }
+}
+
+/// One wheel notch (120 rotation units, as Windows counts them) per axis a scroll of
+/// `(delta_x, delta_y)` moved. RDP's vertical wheel is positive away from the user (scrolling up), so
+/// a downward scroll is negative; its horizontal wheel is positive to the right.
+pub fn wheel_mouse_pdus(x: u32, y: u32, delta_x: i32, delta_y: i32) -> Vec<MousePdu> {
+    const NOTCH: i16 = 120;
+    let at = |flags: PointerFlags, units: i16| MousePdu {
+        flags,
+        number_of_wheel_rotation_units: units,
+        x_position: x as u16,
+        y_position: y as u16,
+    };
+    let mut pdus = Vec::new();
+    if delta_y != 0 {
+        pdus.push(at(
+            PointerFlags::VERTICAL_WHEEL,
+            -NOTCH * delta_y.signum() as i16,
+        ));
+    }
+    if delta_x != 0 {
+        pdus.push(at(
+            PointerFlags::HORIZONTAL_WHEEL,
+            NOTCH * delta_x.signum() as i16,
+        ));
+    }
+    pdus
 }

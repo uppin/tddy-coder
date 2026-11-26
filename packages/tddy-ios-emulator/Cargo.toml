@@ -23,6 +23,17 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "process", "sync", "time"] }
 tddy-screenshare = { path = "../tddy-screenshare" }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-application-services = { version = "0.3.2", default-features = false, features = ["std", "libc", "HIServices", "AXError", "AXUIElement", "AXValue"] }
+objc2-core-foundation = { version = "0.3.2", features = ["CFArray", "CFCGTypes", "CFString"] }
+objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
+# CoreSimulator is messaged through the Objective-C runtime (loaded at run time, never linked), and
+# libxpc's event handler is a block.
+objc2 = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSString"] }
+block2 = "0.6.2"
+xcap = "0.9"
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }

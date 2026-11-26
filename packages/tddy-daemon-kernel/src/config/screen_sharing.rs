@@ -53,8 +53,19 @@ pub fn resolve_vnc_binary_path(config: &DaemonConfig) -> String {
 /// Resolution order, as for [`resolve_vnc_binary_path`]: explicit `ios_simulator_binary_path`,
 /// then a sibling of the current executable, then `"tddy-ios-emulator"` on PATH.
 pub fn resolve_ios_simulator_binary_path(config: &DaemonConfig) -> String {
-    let _ = config;
-    todo!("resolve_ios_simulator_binary_path")
+    let explicit = config
+        .screen_sharing
+        .as_ref()
+        .map(|c| c.ios_simulator_binary_path.as_str())
+        .unwrap_or("");
+    if !explicit.is_empty() {
+        return explicit.to_string();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("tddy-ios-emulator")))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "tddy-ios-emulator".to_string())
 }
 
 /// Resolve the actual path to the `tddy-rdp` binary.

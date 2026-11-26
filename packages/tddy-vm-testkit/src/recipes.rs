@@ -114,7 +114,8 @@ pub fn install_bundle_paths() -> Vec<(&'static str, &'static str)> {
 /// `tddy-sandbox-runner` is the payload inside every jail the daemon spawns, and
 /// `tddy-index-daemon` is the warm rust-analyzer index the daemon spawns as a sibling of its own
 /// executable, and `tddy-git-clone` is the clone helper a supervised daemon runs as the session
-/// user, found beside the daemon; the script installs all six regardless, so a deployment has to
+/// user, found beside the daemon, and `tddy-ios-emulator` is the iOS Simulator screen-sharing
+/// bridge, resolved beside the daemon too; the script installs all of them regardless, so a deployment has to
 /// carry them.
 ///
 /// `./release` builds every one of them.
@@ -129,6 +130,7 @@ pub fn deployed_binaries() -> Vec<&'static str> {
         "tddy-session-sync",
         "tddy-sandbox-runner",
         "tddy-index-daemon",
+        "tddy-ios-emulator",
         "tddy-git-clone",
     ]
 }

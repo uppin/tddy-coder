@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file screen_sharing_input.proto.
  */
 export const file_screen_sharing_input: GenFile = /*@__PURE__*/
-  fileDesc("ChpzY3JlZW5fc2hhcmluZ19pbnB1dC5wcm90bxIUc2NyZWVuX3NoYXJpbmdfaW5wdXQiRgoZU2NyZWVuU2hhcmluZ1BvaW50ZXJFdmVudBIJCgF4GAEgASgNEgkKAXkYAiABKA0SEwoLYnV0dG9uX21hc2sYAyABKA0iOAoVU2NyZWVuU2hhcmluZ0tleUV2ZW50Eg4KBmtleXN5bRgBIAEoDRIPCgdwcmVzc2VkGAIgASgIIqIBChdTY3JlZW5TaGFyaW5nSW5wdXRFdmVudBJCCgdwb2ludGVyGAEgASgLMi8uc2NyZWVuX3NoYXJpbmdfaW5wdXQuU2NyZWVuU2hhcmluZ1BvaW50ZXJFdmVudEgAEjoKA2tleRgCIAEoCzIrLnNjcmVlbl9zaGFyaW5nX2lucHV0LlNjcmVlblNoYXJpbmdLZXlFdmVudEgAQgcKBWV2ZW50IhcKFVNjcmVlblNoYXJpbmdJbnB1dEFjazKKAQoZU2NyZWVuU2hhcmluZ0lucHV0U2VydmljZRJtCgtTdHJlYW1JbnB1dBItLnNjcmVlbl9zaGFyaW5nX2lucHV0LlNjcmVlblNoYXJpbmdJbnB1dEV2ZW50Gisuc2NyZWVuX3NoYXJpbmdfaW5wdXQuU2NyZWVuU2hhcmluZ0lucHV0QWNrKAEwAWIGcHJvdG8z");
+  fileDesc("ChpzY3JlZW5fc2hhcmluZ19pbnB1dC5wcm90bxIUc2NyZWVuX3NoYXJpbmdfaW5wdXQiRgoZU2NyZWVuU2hhcmluZ1BvaW50ZXJFdmVudBIJCgF4GAEgASgNEgkKAXkYAiABKA0SEwoLYnV0dG9uX21hc2sYAyABKA0iOAoVU2NyZWVuU2hhcmluZ0tleUV2ZW50Eg4KBmtleXN5bRgBIAEoDRIPCgdwcmVzc2VkGAIgASgIIlEKF1NjcmVlblNoYXJpbmdXaGVlbEV2ZW50EgkKAXgYASABKA0SCQoBeRgCIAEoDRIPCgdkZWx0YV94GAMgASgREg8KB2RlbHRhX3kYBCABKBEi4gEKF1NjcmVlblNoYXJpbmdJbnB1dEV2ZW50EkIKB3BvaW50ZXIYASABKAsyLy5zY3JlZW5fc2hhcmluZ19pbnB1dC5TY3JlZW5TaGFyaW5nUG9pbnRlckV2ZW50SAASOgoDa2V5GAIgASgLMisuc2NyZWVuX3NoYXJpbmdfaW5wdXQuU2NyZWVuU2hhcmluZ0tleUV2ZW50SAASPgoFd2hlZWwYAyABKAsyLS5zY3JlZW5fc2hhcmluZ19pbnB1dC5TY3JlZW5TaGFyaW5nV2hlZWxFdmVudEgAQgcKBWV2ZW50IhcKFVNjcmVlblNoYXJpbmdJbnB1dEFjazKKAQoZU2NyZWVuU2hhcmluZ0lucHV0U2VydmljZRJtCgtTdHJlYW1JbnB1dBItLnNjcmVlbl9zaGFyaW5nX2lucHV0LlNjcmVlblNoYXJpbmdJbnB1dEV2ZW50Gisuc2NyZWVuX3NoYXJpbmdfaW5wdXQuU2NyZWVuU2hhcmluZ0lucHV0QWNrKAEwAWIGcHJvdG8z");
 
 /**
  * @generated from message screen_sharing_input.ScreenSharingPointerEvent
@@ -66,6 +66,43 @@ export const ScreenSharingKeyEventSchema: GenMessage<ScreenSharingKeyEvent> = /*
   messageDesc(file_screen_sharing_input, 1);
 
 /**
+ * A scroll — mouse wheel or trackpad — over the framebuffer point (x, y). The deltas are in
+ * framebuffer pixels, positive scrolling down and right (the browser's `WheelEvent` convention); the
+ * bridge maps them to the protocol's own wheel: VNC wheel buttons, RDP wheel rotation, a swipe on a
+ * touch screen.
+ *
+ * @generated from message screen_sharing_input.ScreenSharingWheelEvent
+ */
+export type ScreenSharingWheelEvent = Message<"screen_sharing_input.ScreenSharingWheelEvent"> & {
+  /**
+   * @generated from field: uint32 x = 1;
+   */
+  x: number;
+
+  /**
+   * @generated from field: uint32 y = 2;
+   */
+  y: number;
+
+  /**
+   * @generated from field: sint32 delta_x = 3;
+   */
+  deltaX: number;
+
+  /**
+   * @generated from field: sint32 delta_y = 4;
+   */
+  deltaY: number;
+};
+
+/**
+ * Describes the message screen_sharing_input.ScreenSharingWheelEvent.
+ * Use `create(ScreenSharingWheelEventSchema)` to create a new message.
+ */
+export const ScreenSharingWheelEventSchema: GenMessage<ScreenSharingWheelEvent> = /*@__PURE__*/
+  messageDesc(file_screen_sharing_input, 2);
+
+/**
  * @generated from message screen_sharing_input.ScreenSharingInputEvent
  */
 export type ScreenSharingInputEvent = Message<"screen_sharing_input.ScreenSharingInputEvent"> & {
@@ -84,6 +121,12 @@ export type ScreenSharingInputEvent = Message<"screen_sharing_input.ScreenSharin
      */
     value: ScreenSharingKeyEvent;
     case: "key";
+  } | {
+    /**
+     * @generated from field: screen_sharing_input.ScreenSharingWheelEvent wheel = 3;
+     */
+    value: ScreenSharingWheelEvent;
+    case: "wheel";
   } | { case: undefined; value?: undefined };
 };
 
@@ -92,7 +135,7 @@ export type ScreenSharingInputEvent = Message<"screen_sharing_input.ScreenSharin
  * Use `create(ScreenSharingInputEventSchema)` to create a new message.
  */
 export const ScreenSharingInputEventSchema: GenMessage<ScreenSharingInputEvent> = /*@__PURE__*/
-  messageDesc(file_screen_sharing_input, 2);
+  messageDesc(file_screen_sharing_input, 3);
 
 /**
  * Minimal ack sent by the bridge to keep the bidi stream alive.
@@ -107,7 +150,7 @@ export type ScreenSharingInputAck = Message<"screen_sharing_input.ScreenSharingI
  * Use `create(ScreenSharingInputAckSchema)` to create a new message.
  */
 export const ScreenSharingInputAckSchema: GenMessage<ScreenSharingInputAck> = /*@__PURE__*/
-  messageDesc(file_screen_sharing_input, 3);
+  messageDesc(file_screen_sharing_input, 4);
 
 /**
  * Input forwarding service: browser sends pointer/keyboard events over a bidi

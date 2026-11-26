@@ -570,7 +570,10 @@ async fn sign_in(
 ) -> anyhow::Result<VncClientState> {
     tokio::time::timeout(
         SIGN_IN_TIMEOUT,
-        <VncClientState as ScreenSharingClient>::connect(&ConnectTarget::network("127.0.0.1", server.port), credentials),
+        <VncClientState as ScreenSharingClient>::connect(
+            &ConnectTarget::network("127.0.0.1", server.port),
+            credentials,
+        ),
     )
     .await
     .expect("VNC sign-in did not finish within the timeout")

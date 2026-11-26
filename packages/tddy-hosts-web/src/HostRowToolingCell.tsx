@@ -59,6 +59,7 @@ export function HostRowToolingCell({ instanceId, addressInstanceId, online }: Ho
   return (
     <HostRowTooling
       instanceId={instanceId}
+      addressInstanceId={addressInstanceId}
       git={reading.tooling.git}
       githubCli={reading.tooling.githubCli}
       sshAgent={reading.tooling.sshAgent}

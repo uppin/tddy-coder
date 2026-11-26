@@ -28,6 +28,7 @@ DEV_RUNTIME_PACKAGES=(
   tddy-askpass         # ssh's SSH_ASKPASS helper for a daemon-run clone
   tddy-session-sync-cli # builds `tddy-session-sync`, mirrors a session's worktree
   tddy-git-clone         # the clone helper a supervised daemon runs as the session user
+  tddy-ios-emulator    # the iOS Simulator screen-sharing bridge; also lists booted simulators
 )
 
 # Resolve the build set: DEV_RUNTIME_PACKAGES plus any extra package names passed as arguments,

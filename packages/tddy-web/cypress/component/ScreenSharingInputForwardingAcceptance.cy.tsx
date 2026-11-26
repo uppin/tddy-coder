@@ -92,6 +92,36 @@ beforeEach(() => {
 // AC-IF-1 — the pointer reaches the desktop
 // ---------------------------------------------------------------------------
 
+describe("Scroll forwarding", () => {
+  it("sends a trackpad scroll to the desktop, scaled into its pixels, where the pointer is", () => {
+    // Given an open desktop at half size
+    const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
+
+    // When the operator scrolls down 30 picture pixels over the middle of it
+    desktopPage.scrollAt(THE_MIDDLE_OF_THE_WINDOW, { x: 0, y: 30 });
+
+    // Then the desktop is told to scroll 60 of its own pixels at the middle of its screen
+    bridge.expectWheels({ ...THE_MIDDLE_OF_THE_DESKTOP, deltaX: 0, deltaY: 60 });
+  });
+});
+
+describe("Touch forwarding", () => {
+  it("sends a finger drag as the left button pressed, moved and released", () => {
+    // Given an open desktop at half size
+    const bridge = givenADesktopOpenIn(A_HALF_SIZE_WINDOW);
+
+    // When a finger drags from the middle a little to the right
+    desktopPage.dragAFingerFrom(THE_MIDDLE_OF_THE_WINDOW, { x: 490, y: 270 });
+
+    // Then
+    bridge.expectPointerLandings(
+      { ...THE_MIDDLE_OF_THE_DESKTOP, buttonMask: BUTTON.left },
+      { x: 980, y: 540, buttonMask: BUTTON.left },
+      { x: 980, y: 540, buttonMask: BUTTON.none },
+    );
+  });
+});
+
 describe("Pointer forwarding", () => {
   it("sends a button press and its release to the desktop", () => {
     // Given an open desktop

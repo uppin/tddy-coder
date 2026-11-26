@@ -28,6 +28,8 @@ import { HostRowSshConfig } from "./HostRowSshConfig";
 
 export interface HostRowToolingProps {
   instanceId: string;
+  /** The id that host answers on now (its routing id); defaults to `instanceId`. */
+  addressInstanceId?: string;
   git: HostGitIdentity | undefined;
   githubCli: HostGithubCli | undefined;
   /** Added by `#hosts-screen 5/8`, and optional for the same reason the two above accept
@@ -135,6 +137,7 @@ function githubCliCell(githubCli: HostGithubCli | undefined): ToolingCell {
 
 export function HostRowTooling({
   instanceId,
+  addressInstanceId,
   git,
   githubCli,
   sshAgent,
@@ -164,7 +167,11 @@ export function HostRowTooling({
       <HostRowSshConfig instanceId={instanceId} />
       {/* No readings is no claim: a host nothing has answered for yet renders an empty section
           rather than a protocol row asserting something about a probe that has not run. */}
-      <HostRowRemoteDesktop instanceId={instanceId} readings={remoteDesktop ?? []} />
+      <HostRowRemoteDesktop
+        instanceId={instanceId}
+        addressInstanceId={addressInstanceId}
+        readings={remoteDesktop ?? []}
+      />
     </span>
   );
 }

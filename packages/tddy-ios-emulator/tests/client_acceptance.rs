@@ -5,9 +5,7 @@ mod common;
 
 use common::*;
 use pretty_assertions::assert_eq;
-use tddy_ios_emulator::{
-    DeviceState, InputEvent, ScreenPoint, SimulatorError, SpecialKey,
-};
+use tddy_ios_emulator::{DeviceState, InputEvent, ScreenPoint, SimulatorError, SpecialKey};
 use tddy_screenshare::ScreenSharingClient;
 
 const LEFT_BUTTON: u32 = 1;
@@ -15,7 +13,9 @@ const NO_BUTTON: u32 = 0;
 const XK_A_LOWER: u32 = 0x61;
 const XK_RETURN: u32 = 0xff0d;
 
-fn simulator_error(result: anyhow::Result<tddy_ios_emulator::IosSimulatorClient>) -> SimulatorError {
+fn simulator_error(
+    result: anyhow::Result<tddy_ios_emulator::IosSimulatorClient>,
+) -> SimulatorError {
     result
         .err()
         .expect("expected connect to fail")
@@ -109,6 +109,23 @@ async fn a_polled_frame_is_the_device_area_with_the_title_bar_cropped_off() {
 }
 
 #[tokio::test]
+async fn a_polled_frame_is_only_the_device_area_of_a_window_with_a_sidebar() {
+    // Given
+    let blue = [0, 0, 255, 255];
+    let host = a_simulator_host()
+        .with_booted_iphone_in(a_small_retina_window_with_a_sidebar())
+        .showing_frames(vec![a_window_frame_with_a_sidebar(blue)]);
+    let mut client = host.connect(IPHONE_UDID).await.unwrap();
+
+    // When
+    client.poll_events().await.unwrap();
+
+    // Then
+    assert_eq!(client.framebuffer_dimensions(), (8, 8));
+    assert_eq!(client.get_rgba_frame(), a_device_frame_of(blue).as_slice());
+}
+
+#[tokio::test]
 async fn poll_events_reports_a_change_only_when_the_frame_differs() {
     // Given
     let (red, green) = ([255, 0, 0, 255], [0, 255, 0, 255]);
@@ -197,4 +214,31 @@ async fn a_simulator_advertises_no_sign_in_methods() {
 
     // Then
     assert_eq!(methods, vec![]);
+}
+
+#[tokio::test]
+async fn a_scroll_down_becomes_an_upward_swipe_from_the_pointer() {
+    // Given
+    let host = a_simulator_host().with_booted_iphone();
+    let mut client = host.connect(IPHONE_UDID).await.unwrap();
+
+    // When: scroll down by 4 device pixels over (4, 6)
+    client.inject_wheel(4, 6, 0, 4).await.unwrap();
+
+    // Then: the finger goes down at (4, 6) and lifts at (4, 2)
+    let events = host.input.events();
+    assert_eq!(
+        events.first(),
+        Some(&InputEvent::MouseDown(ScreenPoint { x: 102.0, y: 204.0 }))
+    );
+    assert_eq!(
+        events.last(),
+        Some(&InputEvent::MouseUp(ScreenPoint { x: 102.0, y: 202.0 }))
+    );
+    assert!(
+        events[1..events.len() - 1]
+            .iter()
+            .all(|event| matches!(event, InputEvent::MouseDrag(_))),
+        "a swipe moves between its ends: {events:?}"
+    );
 }

@@ -42,9 +42,8 @@ use tddy_screen_sharing::{
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddTargetRequest, DesktopAuthMethod, DesktopCredentialAnswer,
     InspectHostDesktopRequest, InspectHostDesktopResponse, ListHostTargetsRequest, Protocol,
-    ScreenSharingService,
-    ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
-    StartStreamResponse, StopHostStreamRequest,
+    ScreenSharingService, ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest,
+    StartStreamRequest, StartStreamResponse, StopHostStreamRequest,
 };
 use tddy_testing_commons::process_is_alive;
 use tddy_testing_commons::stub_scripts::make_executable;
@@ -803,7 +802,7 @@ pub fn a_daemon_whose_bridge(bridge: TheBridge) -> DaemonBuilder {
 
 impl DaemonBuilder {
     /// Install the stand-in as the iOS Simulator bridge only; the VNC and RDP bridges are missing.
-    pub fn as_the_ios_simulator_bridge_only(mut self) -> Self {
+    pub fn installed_as_the_ios_simulator_bridge_only(mut self) -> Self {
         self.only_as_the_ios_bridge = true;
         self
     }

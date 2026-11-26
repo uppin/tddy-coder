@@ -83,6 +83,16 @@ pub trait ScreenSharingClient: Sized + Send + 'static {
     /// `keysym` is an X11 keysym value; `pressed` is `true` for key-down.
     async fn inject_key(&mut self, keysym: u32, pressed: bool) -> anyhow::Result<()>;
 
+    /// Scroll over framebuffer point `(x, y)` by `(delta_x, delta_y)` framebuffer pixels, positive
+    /// scrolling down and right.
+    async fn inject_wheel(
+        &mut self,
+        x: u32,
+        y: u32,
+        delta_x: i32,
+        delta_y: i32,
+    ) -> anyhow::Result<()>;
+
     /// Cleanly close the connection (best-effort; errors are ignored by the bridge).
     async fn stop(&mut self) -> anyhow::Result<()>;
 }

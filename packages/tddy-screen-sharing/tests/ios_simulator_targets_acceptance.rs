@@ -21,7 +21,7 @@ const AN_IPHONE_SCREEN: (u32, u32) = (1206, 2622);
 async fn a_simulator_starts_through_the_ios_bridge_at_the_size_it_reported() {
     // Given
     let daemon = a_daemon_whose_bridge(TheBridge::ready_at(AN_IPHONE_SCREEN.0, AN_IPHONE_SCREEN.1))
-        .as_the_ios_simulator_bridge_only()
+        .installed_as_the_ios_simulator_bridge_only()
         .start();
     let target_id = daemon.attach_an_ios_simulator_to(A_HOST, AN_IPHONE).await;
 
@@ -39,7 +39,7 @@ async fn a_simulator_starts_through_the_ios_bridge_at_the_size_it_reported() {
 async fn the_ios_bridge_is_told_which_simulator_to_stream() {
     // Given
     let daemon = a_daemon_whose_bridge(TheBridge::ready_at(AN_IPHONE_SCREEN.0, AN_IPHONE_SCREEN.1))
-        .as_the_ios_simulator_bridge_only()
+        .installed_as_the_ios_simulator_bridge_only()
         .start();
     let target_id = daemon.attach_an_ios_simulator_to(A_HOST, AN_IPHONE).await;
 
@@ -59,7 +59,7 @@ async fn the_ios_bridge_is_told_which_simulator_to_stream() {
 async fn a_simulator_addressed_at_another_machine_is_refused() {
     // Given
     let daemon = a_daemon_whose_bridge(TheBridge::ready_at(AN_IPHONE_SCREEN.0, AN_IPHONE_SCREEN.1))
-        .as_the_ios_simulator_bridge_only()
+        .installed_as_the_ios_simulator_bridge_only()
         .start();
 
     // When
@@ -81,7 +81,7 @@ async fn a_simulator_addressed_at_another_machine_is_refused() {
 async fn a_simulator_target_without_a_device_is_refused() {
     // Given
     let daemon = a_daemon_whose_bridge(TheBridge::ready_at(AN_IPHONE_SCREEN.0, AN_IPHONE_SCREEN.1))
-        .as_the_ios_simulator_bridge_only()
+        .installed_as_the_ios_simulator_bridge_only()
         .start();
 
     // When
@@ -93,8 +93,7 @@ async fn a_simulator_target_without_a_device_is_refused() {
     // Then
     assert_eq!(refusal.code, Code::InvalidArgument, "{refusal:?}");
     assert_eq!(
-        refusal.message,
-        "an iOS Simulator target must name a device udid",
+        refusal.message, "an iOS Simulator target must name a device udid",
         "{refusal:?}"
     );
 }
@@ -103,7 +102,7 @@ async fn a_simulator_target_without_a_device_is_refused() {
 async fn an_attached_simulator_is_listed_with_its_device() {
     // Given
     let daemon = a_daemon_whose_bridge(TheBridge::ready_at(AN_IPHONE_SCREEN.0, AN_IPHONE_SCREEN.1))
-        .as_the_ios_simulator_bridge_only()
+        .installed_as_the_ios_simulator_bridge_only()
         .start();
     let target_id = daemon.attach_an_ios_simulator_to(A_HOST, AN_IPHONE).await;
 
@@ -116,4 +115,26 @@ async fn an_attached_simulator_is_listed_with_its_device() {
         .find(|target| target.id == target_id)
         .expect("the attached simulator is listed");
     assert_eq!(listed.device_id, AN_IPHONE);
+}
+
+#[tokio::test]
+async fn a_simulator_starts_without_asking_the_operator_to_sign_in() {
+    // Given
+    let daemon = a_daemon_whose_bridge(TheBridge::ready_at(AN_IPHONE_SCREEN.0, AN_IPHONE_SCREEN.1))
+        .installed_as_the_ios_simulator_bridge_only()
+        .start();
+    let target_id = daemon.attach_an_ios_simulator_to(A_HOST, AN_IPHONE).await;
+
+    // When
+    daemon
+        .open_the_desktop_of(A_HOST, &target_id)
+        .await
+        .expect("a simulator whose bridge reported ready starts");
+
+    // Then
+    assert_eq!(
+        daemon.questions_asked(),
+        vec![],
+        "a simulator has no sign-in"
+    );
 }

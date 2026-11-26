@@ -16,22 +16,33 @@ pub struct ScreenPoint {
     pub y: f64,
 }
 
-/// The device screen inside a Simulator.app window.
+/// The device screen inside the window that shows it.
 ///
-/// The window's title bar is cropped off; everything below it is the device. `scale` is the
-/// display's backing scale (2.0 on Retina), so the streamed frame is `device_area × scale` pixels.
+/// Everything in the window outside the device area — a title bar, a sidebar, a toolbar — is
+/// cropped off. `scale` is the display's backing scale (2.0 on Retina), so the streamed frame is
+/// `device_area × scale` pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DeviceViewport {
+    window: Rect,
     device_area: Rect,
     scale: f64,
 }
 
 impl DeviceViewport {
-    /// The viewport of a window whose frame is `window` (screen points), with a title bar
-    /// `title_bar` points tall, on a display of backing `scale`.
+    /// The viewport of a device shown at `device_area` inside a window whose frame is `window`
+    /// (both in screen points), on a display of backing `scale`.
+    pub fn new(window: Rect, device_area: Rect, scale: f64) -> Self {
+        Self {
+            window,
+            device_area,
+            scale,
+        }
+    }
+
+    /// The viewport of a window whose device is everything below a title bar `title_bar` points
+    /// tall — Simulator.app's layout.
     pub fn within_window(window: Rect, title_bar: f64, scale: f64) -> Self {
-        let _ = (window, title_bar, scale);
-        todo!("DeviceViewport::within_window")
+        Self::new(window, below_title_bar(window, title_bar), scale)
     }
 
     /// The device area in screen points.
@@ -41,19 +52,36 @@ impl DeviceViewport {
 
     /// The streamed frame's size in pixels.
     pub fn pixel_size(&self) -> (u32, u32) {
-        let _ = self.scale;
-        todo!("DeviceViewport::pixel_size")
+        (
+            (self.device_area.width * self.scale).round() as u32,
+            (self.device_area.height * self.scale).round() as u32,
+        )
     }
 
-    /// The pixel rows of a captured window frame that belong to the title bar, cropped off.
-    pub fn title_bar_rows(&self, window_frame_height: u32) -> u32 {
-        let _ = window_frame_height;
-        todo!("DeviceViewport::title_bar_rows")
+    /// Where the device area starts within a captured window frame, in pixels: everything to its
+    /// left and above it is cropped off.
+    pub fn crop_offset(&self) -> (u32, u32) {
+        (
+            ((self.device_area.x - self.window.x) * self.scale).round() as u32,
+            ((self.device_area.y - self.window.y) * self.scale).round() as u32,
+        )
     }
 
     /// Where device pixel `(x, y)` of the streamed frame lies on screen.
     pub fn to_screen(&self, x: u32, y: u32) -> ScreenPoint {
-        let _ = (x, y);
-        todo!("DeviceViewport::to_screen")
+        ScreenPoint {
+            x: self.device_area.x + f64::from(x) / self.scale,
+            y: self.device_area.y + f64::from(y) / self.scale,
+        }
+    }
+}
+
+/// The part of `window` below a title bar `title_bar` points tall.
+pub fn below_title_bar(window: Rect, title_bar: f64) -> Rect {
+    Rect {
+        x: window.x,
+        y: window.y + title_bar,
+        width: window.width,
+        height: window.height - title_bar,
     }
 }

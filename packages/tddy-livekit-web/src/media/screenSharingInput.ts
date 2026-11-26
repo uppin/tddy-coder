@@ -40,6 +40,27 @@ export function framebufferPointFor(
   };
 }
 
+/** CSS pixels one wheel "line" scrolls, for a `WheelEvent` reported in lines (`deltaMode` 1). */
+const PIXELS_PER_LINE = 16;
+
+/**
+ * A wheel or trackpad scroll, in framebuffer pixels: the event's delta converted to CSS pixels
+ * (`deltaMode` 0 pixels, 1 lines, 2 pages of the rendered picture), then scaled as a pointer is.
+ * Positive is down and right, as the browser reports it. Rounded, since the wire carries integers.
+ */
+export function framebufferWheelDeltaFor(
+  delta: Point,
+  deltaMode: number,
+  renderedSize: Size,
+  framebufferSize: Size,
+): Point {
+  const unit = deltaMode === 1 ? { x: PIXELS_PER_LINE, y: PIXELS_PER_LINE } : deltaMode === 2 ? { x: renderedSize.width, y: renderedSize.height } : { x: 1, y: 1 };
+  return {
+    x: Math.round(((delta.x * unit.x) / renderedSize.width) * framebufferSize.width),
+    y: Math.round(((delta.y * unit.y) / renderedSize.height) * framebufferSize.height),
+  };
+}
+
 /**
  * The X11 keysyms of the keys whose `KeyboardEvent.key` is a name rather than the character it
  * types. Each modifier is the left-hand one: a browser reports which side was pressed in `location`,

@@ -53,6 +53,8 @@ fn an_install_tree() -> InstallTree {
         // Spawned by the daemon as a sibling of its own executable, so `install` requires it for
         // the same reason and with the same preflight.
         "tddy-index-daemon",
+        // The iOS Simulator screen-sharing bridge, resolved beside the daemon; `install` requires it.
+        "tddy-ios-emulator",
         // The clone helper a supervised daemon runs as the session user; `install` requires it
         // beside the daemon for the same sibling-resolution reason.
         "tddy-git-clone",

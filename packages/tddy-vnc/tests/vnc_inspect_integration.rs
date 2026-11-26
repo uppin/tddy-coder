@@ -90,7 +90,10 @@ impl AdvertisingServer {
     async fn inspected(&self) -> Vec<AdvertisedMethod> {
         tokio::time::timeout(
             AN_INSPECTION_FINISHES_WITHIN,
-            <VncClientState as ScreenSharingClient>::inspect(&ConnectTarget::network("127.0.0.1", self.port)),
+            <VncClientState as ScreenSharingClient>::inspect(&ConnectTarget::network(
+                "127.0.0.1",
+                self.port,
+            )),
         )
         .await
         .expect("inspecting the VNC server did not finish within the timeout")

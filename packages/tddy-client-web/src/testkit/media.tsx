@@ -3,7 +3,7 @@ import { createElement, useCallback, useEffect, useMemo, useSyncExternalStore } 
 import { createClient, type Client } from "@connectrpc/connect";
 import type { DescService } from "@bufbuild/protobuf";
 import type { InMemoryRpcBackend } from "tddy-connectrpc-testkit";
-import type { MediaPort, PresencePort, RoomHandle, RoomParticipant, RoomRpcPort, RoomState, RoomStatus } from "../ports/media";
+import type { MediaPort, PresencePort, ReceivedVideoStats, RoomHandle, RoomParticipant, RoomRpcPort, RoomState, RoomStatus } from "../ports/media";
 
 /** A subscribable cell: what each double's readers re-render on. */
 function aStore() {
@@ -87,6 +87,8 @@ export interface MediaDouble extends MediaPort {
   readonly forwardedInput: ReadonlyArray<ForwardedInput>;
   /** Give (or take) `identity` camera video in `room`; `useHasCameraVideo` readers re-render. */
   setCameraVideo(room: RoomHandle, identity: string, hasVideo: boolean): void;
+  /** How `identity`'s track `trackName` is arriving, as `useReceivedVideoStats` reports it. */
+  receiveVideoAt(identity: string, trackName: string, stats: ReceivedVideoStats): void;
   /** The presenter room a hint naming `roomName` joins, as `usePresenterRoom` reports it. */
   presentRoom(roomName: string, state: { room: RoomHandle | null; status: RoomStatus; error?: string | null }): void;
 }
@@ -103,6 +105,8 @@ export function aMediaDouble(overrides: Partial<MediaPort> = {}): MediaDouble {
   const store = aStore();
   const cameras = new Set<string>();
   const presenterRooms = new Map<string, RoomState>();
+  const receivedVideo = new Map<string, ReceivedVideoStats>();
+  const trackKey = (identity: string, trackName: string) => `${identity}\u0000${trackName}`;
   const forwarded: ForwardedInput[] = [];
   const NO_ROOM: RoomState = { room: null, status: "idle", error: null };
   const cameraKey = (room: RoomHandle | null, identity: string) => `${roomName(room)}\u0000${identity}`;
@@ -115,6 +119,14 @@ export function aMediaDouble(overrides: Partial<MediaPort> = {}): MediaDouble {
       if (hasVideo) cameras.add(cameraKey(room, identity));
       else cameras.delete(cameraKey(room, identity));
       store.notify();
+    },
+    receiveVideoAt: (identity, trackName, stats) => {
+      receivedVideo.set(trackKey(identity, trackName), stats);
+      store.notify();
+    },
+    useReceivedVideoStats: (_room, identity, trackName) => {
+      useSyncExternalStore(store.subscribe, store.version);
+      return receivedVideo.get(trackKey(identity, trackName)) ?? null;
     },
     presentRoom: (name, state) => {
       presenterRooms.set(name, { room: state.room, status: state.status, error: state.error ?? null });

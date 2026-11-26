@@ -24,6 +24,14 @@ import {
 // What a spec talks about
 // ---------------------------------------------------------------------------
 
+/** A scroll the bridge received: where, and by how many framebuffer pixels. */
+export interface Wheel {
+  readonly x: number;
+  readonly y: number;
+  readonly deltaX: number;
+  readonly deltaY: number;
+}
+
 /** Where a pointer landed on the framebuffer, and which buttons were down when it did. */
 export interface PointerLanding {
   readonly x: number;
@@ -76,6 +84,9 @@ export interface AFakeBridge {
    * places on the desktop.
    */
   expectPointerLandings(...expected: PointerLanding[]): void;
+
+  /** Assert the scrolls the bridge received are exactly these, in this order. */
+  expectWheels(...expected: Wheel[]): void;
 
   /** Assert the key strokes the bridge received are exactly these, in this order. */
   expectKeyStrokes(...expected: KeyStroke[]): void;
@@ -130,6 +141,14 @@ export function aBridgeRecordingInput(): AFakeBridge {
         return { x: p.x, y: p.y, buttonMask: p.buttonMask };
       });
 
+  const wheels = (): Wheel[] =>
+    received
+      .filter((e) => e.event.case === "wheel")
+      .map((e) => {
+        const w = e.event.value as { x: number; y: number; deltaX: number; deltaY: number };
+        return { x: w.x, y: w.y, deltaX: w.deltaX, deltaY: w.deltaY };
+      });
+
   const keyStrokes = (): KeyStroke[] =>
     received
       .filter((e) => e.event.case === "key")
@@ -146,6 +165,12 @@ export function aBridgeRecordingInput(): AFakeBridge {
     expectPointerLandings: (...expected) => {
       cy.wrap(null, { log: false }).should(() => {
         expect(pointerLandings(), "the pointer events the bridge received").to.deep.equal(expected);
+      });
+    },
+
+    expectWheels: (...expected) => {
+      cy.wrap(null, { log: false }).should(() => {
+        expect(wheels(), "the scroll events the bridge received").to.deep.equal(expected);
       });
     },
 

@@ -3,9 +3,7 @@
 //! PRD: `docs/ft/web/1-WIP/PRD-2026-11-26-ios-simulator-screen-sharing.md` AC-IOS-1.
 
 use pretty_assertions::assert_eq;
-use tddy_host_service::ios_simulators::{
-    ios_simulator_channels, BootedSimulator, SimulatorLister,
-};
+use tddy_host_service::ios_simulators::{ios_simulator_channels, BootedSimulator, SimulatorLister};
 use tddy_service::proto::host::{DesktopChannelKind, HostRemoteDesktop, ProbeOutcome};
 
 const PROTOCOL_IOS_SIMULATOR: i32 = 3;
@@ -83,7 +81,11 @@ fn a_simulator_is_offered_but_marked_unbridgeable_when_the_bridge_binary_is_miss
     // Then
     assert_eq!(
         channels,
-        vec![the_channel_for("UDID-IPHONE", "iPhone 16 Pro · iOS 18.2", false)]
+        vec![the_channel_for(
+            "UDID-IPHONE",
+            "iPhone 16 Pro · iOS 18.2",
+            false
+        )]
     );
 }
 

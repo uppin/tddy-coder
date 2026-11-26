@@ -97,6 +97,17 @@ export interface RemoteVideoProps {
   readonly videoRef?: Ref<HTMLVideoElement>;
 }
 
+/** How a received video track is arriving, sampled about once a second. */
+export interface ReceivedVideoStats {
+  /** Bits received per second, in kilobits, over the last sample interval. */
+  readonly kbps: number;
+  /** The size of the frames being decoded, in pixels. */
+  readonly width: number;
+  readonly height: number;
+  /** Frames decoded per second. */
+  readonly fps: number;
+}
+
 /** What {@link MediaPort.VideoPreview} renders: one participant's camera, in a dialog. */
 export interface ParticipantVideoPreviewProps {
   readonly room: RoomHandle | null;
@@ -120,6 +131,11 @@ export interface MediaPort {
   useHasCameraVideo(room: RoomHandle | null, identity: string): boolean;
   /** Renders the video track `trackName` of `identity` in `room`. */
   readonly RemoteVideo: ComponentType<RemoteVideoProps>;
+  /**
+   * How the video track `trackName` of `identity` in `room` is arriving, refreshed about once a
+   * second; `null` until the track is subscribed and a first interval has been measured.
+   */
+  useReceivedVideoStats(room: RoomHandle | null, identity: string, trackName: string): ReceivedVideoStats | null;
   /** The camera preview a roster opens for one participant. */
   readonly VideoPreview: ComponentType<ParticipantVideoPreviewProps>;
 }

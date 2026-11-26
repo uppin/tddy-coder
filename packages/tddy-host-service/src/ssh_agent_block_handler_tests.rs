@@ -60,6 +60,7 @@ fn a_probed_host() -> HostTooling {
         remote_desktop: Vec::new(),
         // Likewise for the block `#remote-shell 4/7` added: no `coder` CLI on this host.
         coder_cli: crate::host_tooling::CoderCliStatus::not_installed(),
+        ios_simulators: Vec::new(),
     }
 }
 

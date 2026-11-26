@@ -2,7 +2,9 @@
 //!
 //! Resolved like the VNC and RDP bridges: the configured path, else a sibling of the daemon.
 
-use tddy_daemon_kernel::config::{resolve_ios_simulator_binary_path, DaemonConfig, ScreenSharingConfig};
+use tddy_daemon_kernel::config::{
+    resolve_ios_simulator_binary_path, DaemonConfig, ScreenSharingConfig,
+};
 
 fn a_daemon_config_naming_the_ios_bridge_at(path: &str) -> DaemonConfig {
     DaemonConfig {

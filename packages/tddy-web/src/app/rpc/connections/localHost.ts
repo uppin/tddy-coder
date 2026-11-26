@@ -23,6 +23,15 @@
  * transport, asked once more rather than asked a second way; there is no separate notion of "is this
  * the desktop" anywhere. `DesktopIpcHostAcceptance.cy.tsx` pins it from both sides.
  *
+ * **Media is the one exception to "off the media server", and only once LiveKit is already up.** The
+ * IPC wire itself never carries media and its connections advertise `{"rpc"}`. But a screen shared
+ * from this machine (an iOS Simulator, say) is published by a bridge into the common room, and the
+ * viewer watches it there through the media port, which joins that room with a token of its own —
+ * the host connection carries none of it. So when the common room is joined *and* this host's daemon
+ * is on it, the connection registry lends the LiveKit connection's `media` to the IPC one
+ * (`tddy-client-web` `connections/registry.ts`). Calls and presence stay here; with no LiveKit
+ * configured, or this daemon not on the room, nothing is lent and the host is exactly `{"rpc"}`.
+ *
  * PRD: `docs/dev/1-WIP/2026-09-05-optional-livekit-desktop-ipc-host-prd.md`.
  */
 
@@ -52,9 +61,10 @@ import type {
 export const IPC_PROVIDER_ID = "ipc";
 
 /**
- * A frame pipe carries calls and nothing else — no tracks, no participant roster. Shared by every
- * connection this module issues, because the set is a property of the wire and not of the machine
- * at the other end of it; no caller may mutate it.
+ * A frame pipe carries calls and nothing else — no tracks, no participant roster. (Media can still be
+ * lent by a common room that reaches this host — see the module comment — but never by this wire.)
+ * Shared by every connection this module issues, because the set is a property of the wire and not
+ * of the machine at the other end of it; no caller may mutate it.
  */
 const IPC_CAPABILITIES: ReadonlySet<ConnectionCapability> = new Set<ConnectionCapability>(["rpc"]);
 
@@ -426,9 +436,9 @@ function openIpcSession(
  * reaching it through a media server is a round trip out of the machine and back to a roster already
  * in the binary. Precedence expresses that without a user-facing preference.
  *
- * Its connections advertise `{"rpc"}` and nothing else. The daemon *could* publish media into a
- * LiveKit room, but that would make the desktop's own host quietly require the thing this stack made
- * optional — so the media surfaces are absent, which node 4 already handles.
+ * Its connections advertise `{"rpc"}` and nothing else, so the desktop's own host never *requires*
+ * LiveKit. Where LiveKit is configured and joined anyway, the registry lends this host the common
+ * room's `media` (see the module comment); calls are still routed here, never through the room.
  *
  * It claims **exactly one** host, and returning `null` for every other is what leaves the peers to
  * the LiveKit provider registered behind it.

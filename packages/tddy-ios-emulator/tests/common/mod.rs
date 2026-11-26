@@ -5,6 +5,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+use tddy_ios_emulator::geometry::below_title_bar;
 use tddy_ios_emulator::{
     DeviceState, Frame, InputEvent, InputSink, IosSimulatorClient, Rect, SimDevice, Simctl,
     SimulatorPorts, SimulatorWindow, SimulatorWindows,
@@ -21,6 +22,7 @@ pub const TITLE_BAR_PIXEL: [u8; 4] = [200, 200, 200, 255];
 pub fn a_small_retina_window() -> SimulatorWindow {
     SimulatorWindow {
         id: 42,
+        owner_pid: 4242,
         title: format!("{IPHONE_NAME} – iOS 18.2"),
         bounds: Rect {
             x: 100.0,
@@ -28,8 +30,65 @@ pub fn a_small_retina_window() -> SimulatorWindow {
             width: 4.0,
             height: 5.0,
         },
-        title_bar: 1.0,
+        device_area: below_title_bar(
+            Rect {
+                x: 100.0,
+                y: 200.0,
+                width: 4.0,
+                height: 5.0,
+            },
+            1.0,
+        ),
         scale: 2.0,
+    }
+}
+
+/// Pixels of a window's chrome around the device: its sidebar and toolbar.
+pub const CHROME_PIXEL: [u8; 4] = [30, 30, 30, 255];
+
+/// A small Device Hub-like Retina window: 6×5 points with the device shown at (2, 1), 4×4 points —
+/// a 2-point sidebar on its left and a 1-point toolbar above it — so a 12×10 pixel frame whose
+/// device area is the 8×8 pixels at (4, 2).
+pub fn a_small_retina_window_with_a_sidebar() -> SimulatorWindow {
+    SimulatorWindow {
+        id: 43,
+        owner_pid: 4242,
+        title: format!("{IPHONE_NAME} – iOS 18.2"),
+        bounds: Rect {
+            x: 100.0,
+            y: 200.0,
+            width: 6.0,
+            height: 5.0,
+        },
+        device_area: Rect {
+            x: 102.0,
+            y: 201.0,
+            width: 4.0,
+            height: 4.0,
+        },
+        scale: 2.0,
+    }
+}
+
+/// A 12×10 frame of [`a_small_retina_window_with_a_sidebar`]: chrome everywhere but the 8×8 pixels
+/// at (4, 2), which are `device_pixel`.
+pub fn a_window_frame_with_a_sidebar(device_pixel: [u8; 4]) -> Frame {
+    let (width, height) = (12u32, 10u32);
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for row in 0..height {
+        for column in 0..width {
+            let on_device = (4..12).contains(&column) && (2..10).contains(&row);
+            rgba.extend_from_slice(if on_device {
+                &device_pixel
+            } else {
+                &CHROME_PIXEL
+            });
+        }
+    }
+    Frame {
+        width,
+        height,
+        rgba,
     }
 }
 
@@ -145,6 +204,14 @@ impl SimulatorScene {
         self.devices
             .push(a_device(IPHONE_UDID, DeviceState::Booted));
         self.window = Some(a_small_retina_window());
+        self
+    }
+
+    /// A booted iPhone shown in `window`.
+    pub fn with_booted_iphone_in(mut self, window: SimulatorWindow) -> Self {
+        self.devices
+            .push(a_device(IPHONE_UDID, DeviceState::Booted));
+        self.window = Some(window);
         self
     }
 

@@ -6,11 +6,13 @@ use crate::geometry::Rect;
 #[derive(Debug, Clone, PartialEq)]
 pub struct SimulatorWindow {
     pub id: u32,
+    /// The process that owns the window.
+    pub owner_pid: u32,
     pub title: String,
     /// The window frame in screen points, title bar included.
     pub bounds: Rect,
-    /// Height of the title bar in points.
-    pub title_bar: f64,
+    /// Where the device screen is shown, in screen points: inside `bounds`.
+    pub device_area: Rect,
     /// Backing scale of the display the window is on.
     pub scale: f64,
 }
@@ -27,6 +29,6 @@ pub trait SimulatorWindows: Send + Sync {
     /// The window showing the device called `device_name`; `None` when Simulator.app shows none.
     fn find(&self, device_name: &str) -> anyhow::Result<Option<SimulatorWindow>>;
 
-    /// Capture the whole window, title bar included, in pixels.
+    /// Capture the whole window, everything around the device included, in pixels.
     fn capture(&self, window: &SimulatorWindow) -> anyhow::Result<Frame>;
 }

@@ -6,7 +6,79 @@
  * a host through the registry the app supplied as `ClientsPort.connections`.
  */
 
-import type { ConnectionProvider, HostConnection } from "./types";
+import type { DescService } from "@bufbuild/protobuf";
+import type { Client, Transport } from "@connectrpc/connect";
+import type { SessionAttachmentHint, SessionConnection } from "./session";
+import type {
+  ConnectionCapability,
+  ConnectionProvider,
+  ConnectionStatus,
+  HostConnection,
+} from "./types";
+
+/**
+ * The capability a host's winning wire can **borrow** from a later wire that reaches the same host.
+ *
+ * Media alone, because media alone is not carried by the host connection: the media port joins the
+ * room a stream's start reply names, with a token of its own, so a host whose own wire carries only
+ * calls can still have its screen watched — provided some wire on this page reaches a media server
+ * that host publishes into. RPC and presence are properties of the wire a host is *reached over*,
+ * and borrowing them would route calls or rosters somewhere precedence said they must not go.
+ */
+const LENDABLE_CAPABILITIES: readonly ConnectionCapability[] = ["media"];
+
+/**
+ * The winning connection, with the lendable capabilities its lenders currently have.
+ *
+ * Everything but {@link capabilities} is the winner's: calls, sessions and status never move off
+ * the wire precedence chose. The capability set is read at the moment it is asked — a lender's
+ * status changes as its room connects and its peers come and go, without anything re-resolving
+ * this host, exactly as a LiveKit connection's own `status` does.
+ */
+class BorrowingMediaConnection implements HostConnection {
+  constructor(
+    private readonly winner: HostConnection,
+    private readonly lenders: readonly HostConnection[],
+  ) {}
+
+  get hostId(): string {
+    return this.winner.hostId;
+  }
+
+  get providerId(): string {
+    return this.winner.providerId;
+  }
+
+  get status(): ConnectionStatus {
+    return this.winner.status;
+  }
+
+  get error(): string | null {
+    return this.winner.error;
+  }
+
+  get capabilities(): ReadonlySet<ConnectionCapability> {
+    const lent = LENDABLE_CAPABILITIES.filter((capability) =>
+      this.lenders.some(
+        (lender) => lender.status === "connected" && lender.capabilities.has(capability),
+      ),
+    );
+    if (lent.length === 0) return this.winner.capabilities;
+    return new Set([...this.winner.capabilities, ...lent]);
+  }
+
+  clientFor<S extends DescService>(service: S): Client<S> {
+    return this.winner.clientFor(service);
+  }
+
+  transport(): Transport {
+    return this.winner.transport();
+  }
+
+  openSession(sessionId: string, hint: SessionAttachmentHint): SessionConnection {
+    return this.winner.openSession(sessionId, hint);
+  }
+}
 
 /**
  * The registered providers, in precedence order.
@@ -26,6 +98,10 @@ export class ConnectionProviderRegistry {
   private readonly listeners = new Set<() => void>();
   private currentRevision = 0;
   private notifyScheduled = false;
+  private readonly borrowed = new WeakMap<
+    HostConnection,
+    { lenders: readonly HostConnection[]; connection: HostConnection }
+  >();
 
   /** Append `provider`. A provider already registered under the same id replaces the earlier one. */
   register(provider: ConnectionProvider): void {
@@ -49,14 +125,38 @@ export class ConnectionProviderRegistry {
   /**
    * The first registered provider that can reach `hostId`, or `null` when none can.
    *
+   * Calls, sessions and status are that provider's alone. Its connection is handed back as it is
+   * unless a provider behind it also reaches the host with media the winner lacks; then the winner
+   * is returned borrowing that media (see {@link LENDABLE_CAPABILITIES}) for as long as the lender
+   * is connected to the host.
+   *
    * `null` is a normal answer — see `ConnectionProvider.connectHost`.
    */
   connectHost(hostId: string): HostConnection | null {
-    for (const provider of this.providers) {
-      const connection = provider.connectHost(hostId);
-      if (connection) return connection;
-    }
-    return null;
+    const reaching = this.providers.flatMap((provider) => provider.connectHost(hostId) ?? []);
+    const [winner, ...behind] = reaching;
+    if (!winner) return null;
+    const lenders = behind.filter((connection) =>
+      LENDABLE_CAPABILITIES.some(
+        (capability) =>
+          !winner.capabilities.has(capability) && connection.capabilities.has(capability),
+      ),
+    );
+    if (lenders.length === 0) return winner;
+    return this.borrowing(winner, lenders);
+  }
+
+  /**
+   * One borrowing connection per winner and set of lenders, so a host resolved twice is the same
+   * object while its routing holds — `useHostConnection` memoises on it, and a consumer keys effects
+   * on the clients behind it.
+   */
+  private borrowing(winner: HostConnection, lenders: readonly HostConnection[]): HostConnection {
+    const held = this.borrowed.get(winner);
+    if (held && sameMembers(held.lenders, lenders)) return held.connection;
+    const connection = new BorrowingMediaConnection(winner, lenders);
+    this.borrowed.set(winner, { lenders, connection });
+    return connection;
   }
 
   /** The ids of the registered providers, in precedence order. Diagnostics and tests. */
@@ -101,4 +201,8 @@ export class ConnectionProviderRegistry {
   revision(): number {
     return this.currentRevision;
   }
+}
+
+function sameMembers(a: readonly HostConnection[], b: readonly HostConnection[]): boolean {
+  return a.length === b.length && a.every((connection, index) => connection === b[index]);
 }
