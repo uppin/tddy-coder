@@ -26,4 +26,6 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "process", "sync", "io-util"] }

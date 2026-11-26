@@ -62,6 +62,8 @@ tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # The `demo-toml` fixture builders the extension-verify suite shares with the other dependents.
 tddy-zed-extensions = { path = "../tddy-zed-extensions", features = ["testkit"] }
 # tddy-lsp's deterministic fake server, so the suites exercise a warm index without a real

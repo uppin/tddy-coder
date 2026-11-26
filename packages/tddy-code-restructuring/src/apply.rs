@@ -331,6 +331,12 @@ fn run_git(root: &Path, args: &[&str], spawns: &SpawnRecorder) -> Result<()> {
     }
 }
 
+/// [`hash_file`] through the filesystem port.
+pub fn hash_file_on(_fs: &dyn tddy_fs::Fs, _path: &Path) -> Result<String> {
+    // TODO(code-tools-fs): implement
+    Err(std::io::Error::other("TODO(code-tools-fs): implement").into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
