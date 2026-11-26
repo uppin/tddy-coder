@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_agent_launch::claude_cli_tmux::agent_tmux_session_is_alive;
+use tddy_agent_launch::tab_target_shell::TabTargetShell;
 use tddy_cli_sessions::tmux::{agent_tmux_session_name, tmux_session_alive};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
@@ -17,6 +18,8 @@ use tddy_core::tab_roster::{
     read_tab_roster, TabEntry, AGENT_KIND, HARNESS_PROPERTY, OS_USER_PROPERTY, SESSION_PROPERTY,
     TARGET_KIND, TMUX_KIND,
 };
+
+mod target_chains;
 
 use super::svc_terminal_ports::TmuxMainReattach;
 use super::DaemonSessionHost;
@@ -55,14 +58,16 @@ impl DaemonSessionHost {
     /// `tmux_session` its `.session.yaml` records. Nothing is relaunched: a tab whose tmux session
     /// is gone is left for Resume.
     pub async fn reattach_live_tmux_tabs(&self) -> ReattachReport {
+        let shells = self.launch_sessions().tab_target_shell();
         let reattach = Reattach {
             host: self,
+            shells: Arc::clone(&shells),
             main: TmuxMainReattach::new(
                 Arc::clone(&self.cli_manager),
                 self.launch_coding_agents(),
                 self.tddy_data_dir.clone(),
                 Arc::clone(&self.agent_tool_sockets),
-                self.launch_sessions().tab_target_shell(),
+                shells,
             ),
         };
         let mut report = ReattachReport::default();
@@ -117,6 +122,7 @@ fn session_ids_under(tddy_data_dir: &Path) -> Vec<String> {
 /// path.
 struct Reattach<'a> {
     host: &'a DaemonSessionHost,
+    shells: Arc<dyn TabTargetShell>,
     main: TmuxMainReattach,
 }
 
@@ -131,20 +137,37 @@ impl Reattach<'_> {
                 return;
             }
         };
+        // A target session's main may record its tmux node without a `target` node (its
+        // `.session.yaml` is the target record): its main is a target chain either way.
+        let session_is_target = read_session_metadata(&session_dir)
+            .ok()
+            .is_some_and(|metadata| metadata.target.is_some());
         let mut main_in_roster = false;
         for tab in &roster.tabs {
             let Some(tmux) = tab.launch.iter().find(|node| node.kind == TMUX_KIND) else {
                 continue;
             };
             main_in_roster |= tab.terminal_id == MAIN_TERMINAL_ID;
-            // A tab on a target keeps its tmux there, which only a caller's credentials reach: never
-            // looked for in this host's tmux, it is left for Resume (`#target-tmux` 2/2).
-            if tab.launch.first().map(|node| node.kind.as_str()) == Some(TARGET_KIND) {
-                report.leave(
-                    session_id,
-                    &tab.terminal_id,
-                    "it runs in tmux on its target, which Resume re-attaches",
-                );
+            // A tab on a target keeps its tmux on its target: re-attached there through the
+            // session's recorded owner subject (`#target-reconnect` 3/3), never looked for in
+            // this host's tmux. A person's own tmux (`tmux-attach`) records no `tmux` node, so
+            // it is skipped by the find above and never re-attached.
+            if tab.launch.first().map(|node| node.kind.as_str()) == Some(TARGET_KIND)
+                || (session_is_target && tab.terminal_id == MAIN_TERMINAL_ID)
+            {
+                if tab.terminal_id == MAIN_TERMINAL_ID {
+                    self.target_main(
+                        session_id,
+                        &session_dir,
+                        tmux.property(SESSION_PROPERTY),
+                        tmux.property(OS_USER_PROPERTY),
+                        report,
+                    )
+                    .await;
+                } else {
+                    self.target_tab(session_id, tab, tmux, &session_dir, report)
+                        .await;
+                }
                 continue;
             }
             let (Some(os_user), Some(name)) = (
@@ -179,7 +202,21 @@ impl Reattach<'_> {
         session_dir: &Path,
         report: &mut ReattachReport,
     ) {
-        // A target session's tmux runs on its target, never in a tmux server of this host.
+        // A target main records no roster entry: its `.session.yaml` (`target` + `tmux_session`)
+        // is the record, re-attached on its target as its owner subject (`#target-reconnect` 3/3).
+        let target_tmux = read_session_metadata(session_dir)
+            .ok()
+            .and_then(|metadata| {
+                (metadata.target.is_some())
+                    .then(|| metadata.tmux_session.clone())
+                    .flatten()
+            });
+        if let Some(name) = target_tmux {
+            self.target_main(session_id, session_dir, Some(&name), None, report)
+                .await;
+            return;
+        }
+        // A host session's tmux runs here, never in a tmux server of its target.
         let ran_in_tmux = read_session_metadata(session_dir)
             .ok()
             .is_some_and(|metadata| metadata.tmux_session.is_some() && metadata.target.is_none());

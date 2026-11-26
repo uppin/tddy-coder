@@ -62,6 +62,15 @@ configured user whose tmux server holds that session, and the main is left when 
 does. The lazy re-attach — the first stream, input or history read of a main, or Resume — stays, for
 whatever the startup pass left.
 
+A **target session's** chains are re-attached on their target, not this host (`#target-reconnect`
+3/3): a `[target, tmux]` main — known from its `.session.yaml` `target` + `tmux_session`, since a
+target main records no roster entry — and every `[target, tmux, agent]` tab are resolved as the
+session's recorded `owner_subject` through its target tmux location, with the hook-log follower
+restarted. A target that cannot be reached, or whose owner's vault is locked, is left with that
+reason and handed to a detach watcher in its unreachable state; a session without `owner_subject`
+is left ("records no owner subject") for Resume. `[target, tmux-attach]` tabs — a person's own
+tmux — are never re-attached.
+
 Each main re-attach attempt announces how it ended — re-attached, already attached, or skipped for a
 named reason — on the terminal manager's `reattach_finished()` stream and in the log under the
 `tddy_cli_sessions::reattach` target.

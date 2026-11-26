@@ -312,3 +312,425 @@ async fn a_target_session_whose_tmux_ended_while_detached_ends() {
         (session_id.as_str(), None)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Daemon-start re-attach of target chains (`#target-reconnect` 3/3)
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use tddy_agent_launch::tab_target_shell::{TabTarget, TabTargetShell};
+use tddy_cli_sessions::cli_session_manager::CliSessionManager;
+use tddy_core::tab_roster::{LaunchNode, TabEntry, TabRoster};
+use tddy_rpc::Status;
+use tddy_session_lifecycle::connection_service::DaemonSessionHost;
+
+use super::cli_harness_support::{a_daemon_config, coding_agents_over};
+
+type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
+type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// Shells that refuse every target with `reason` (a locked vault, an unreachable target).
+struct RefusingShells {
+    reason: String,
+}
+
+impl TabTargetShell for RefusingShells {
+    fn target_of(
+        &self,
+        _session_dir: &std::path::Path,
+        _subject: &str,
+    ) -> Result<TabTarget, Status> {
+        Err(Status::failed_precondition(self.reason.clone()))
+    }
+}
+
+impl ADaemonWithATarget {
+    /// A fresh daemon over this daemon's sessions directory, as a restart stands for: no
+    /// terminals registered, the same records and the same target.
+    fn a_fresh_daemon(&self) -> (Arc<DaemonSessionHost>, Arc<CliSessionManager>) {
+        self.a_fresh_daemon_with(None)
+    }
+
+    /// [`Self::a_fresh_daemon`], resolving targets through `shells` when given.
+    fn a_fresh_daemon_with(
+        &self,
+        shells: Option<Arc<dyn TabTargetShell>>,
+    ) -> (Arc<DaemonSessionHost>, Arc<CliSessionManager>) {
+        let manager = Arc::new(CliSessionManager::new());
+        let config = a_daemon_config();
+        let sessions_base = self.sessions_base.clone();
+        let resolver_base = sessions_base.clone();
+        let sessions_base_resolver: SessionsBaseResolver =
+            Arc::new(move |_| Some(resolver_base.clone()));
+        let user = current_os_user();
+        let user_resolver: UserResolver = Arc::new(move |token| {
+            (token == super::cli_harness_support::VALID_TOKEN).then(|| user.clone())
+        });
+        let mut host = DaemonSessionHost::new(
+            config.clone(),
+            sessions_base_resolver,
+            sessions_base,
+            user_resolver,
+            None,
+            tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker,
+            tddy_session_lifecycle::peer_routing::PeerRouting::local_only(&config),
+            Arc::new(tddy_daemon_kernel::operator_channel::NoOperatorChannel),
+            Arc::clone(&manager),
+            coding_agents_over(&self.sessions_base),
+        );
+        if let Some(shells) = shells {
+            host = host.with_tab_target_shell(shells);
+        }
+        let host = Arc::new(host);
+        host.install_sandbox_rpc_bridge();
+        (host, manager)
+    }
+
+    /// Whether `session_id` lists active on `host`.
+    async fn is_listed_active_on(host: &DaemonSessionHost, session_id: &str) -> bool {
+        use tddy_service::proto::session::SessionService as _;
+        host.list_sessions(Request::direct(ListSessionsRequest {
+            session_token: super::cli_harness_support::VALID_TOKEN.to_string(),
+            include_peers: false,
+        }))
+        .await
+        .expect("the sessions are listed")
+        .into_inner()
+        .sessions
+        .into_iter()
+        .find(|entry| entry.session_id == session_id)
+        .is_some_and(|entry| entry.is_active)
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_reattaches_a_live_target_main() {
+    // Given a tmux run on the target whose client is gone, as a daemon that went away leaves it
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target succeeds");
+    let agent = daemon.the_agent_on_the_target(&session_id).await;
+    daemon.the_main_client_drops(&session_id).await;
+    let (fresh, fresh_manager) = daemon.a_fresh_daemon();
+
+    // When the fresh daemon re-attaches live tmux tabs at startup
+    let report = fresh.reattach_live_tmux_tabs().await;
+
+    // Then the main is re-attached to the same tmux session, its agent not relaunched
+    assert_eq!(
+        (
+            report.reattached.contains(
+                &tddy_session_lifecycle::connection_service::ReattachedTab {
+                    session_id: session_id.clone(),
+                    terminal_id: MAIN.to_string(),
+                    tmux_session: tmux_session_of(&session_id),
+                }
+            ),
+            fresh_manager.get(&session_id).await.is_some(),
+            daemon.agent_runs().len(),
+            agent.is_alive(),
+        ),
+        (true, true, 1, true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_reattaches_a_live_target_agent_tab() {
+    // Given a [target, tmux, agent] tab whose local client is gone, its tmux session living on
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon.a_session_on_the_target().await;
+    daemon.the_agent_on_the_target(&session_id).await;
+    let tab = daemon
+        .opens_a_tab(&session_id, super::SESSION_TYPE, "", &["target", "tmux"])
+        .await
+        .expect("an agent-in-tmux tab starts on the target");
+    let name = daemon.recorded_tmux_session_of(&session_id, &tab);
+    eventually(
+        "the tab's tmux session to live on the target",
+        OBSERVE,
+        || {
+            daemon
+                .target
+                .has_tmux_session(&name)
+                .then_some(())
+                .ok_or_else(|| format!("tmux session {name} is not there yet"))
+        },
+    )
+    .await;
+    let pid = daemon
+        .manager
+        .get_terminal(&session_id, &tab)
+        .await
+        .expect("the tab is registered")
+        .pid;
+    // SAFETY: a plain kill(2) of the tab's local client this test's daemon spawned.
+    unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+    eventually_awaiting("the tab's terminal to be gone", OBSERVE, || async {
+        daemon
+            .manager
+            .get_terminal(&session_id, &tab)
+            .await
+            .is_none()
+            .then_some(())
+            .ok_or_else(|| "the tab is still registered".to_string())
+    })
+    .await;
+    let (fresh, fresh_manager) = daemon.a_fresh_daemon();
+
+    // When the fresh daemon re-attaches at startup
+    let report = fresh.reattach_live_tmux_tabs().await;
+
+    // Then the tab is re-attached to its tmux session on the target, not relaunched
+    assert_eq!(
+        (
+            report.reattached.contains(
+                &tddy_session_lifecycle::connection_service::ReattachedTab {
+                    session_id: session_id.clone(),
+                    terminal_id: tab.clone(),
+                    tmux_session: name.clone(),
+                }
+            ),
+            fresh_manager
+                .get_terminal(&session_id, &tab)
+                .await
+                .is_some(),
+            daemon.target.has_tmux_session(&name),
+        ),
+        (true, true, true),
+        "report: {report:?}; tmux sessions on target: {:?}",
+        daemon.target.tmux(&["list-sessions"]).stdout
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_leaves_an_unreachable_target_and_watches_it() {
+    // Given a tmux run on the target whose client is gone
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target succeeds");
+    daemon.the_agent_on_the_target(&session_id).await;
+    daemon.the_main_client_drops(&session_id).await;
+
+    // When a fresh daemon whose target cannot be reached re-attaches at startup
+    let shells: Arc<dyn TabTargetShell> = Arc::new(RefusingShells {
+        reason: "the stand-in target cannot be reached: ssh: connect failed".to_string(),
+    });
+    let (fresh, _fresh_manager) = daemon.a_fresh_daemon_with(Some(shells));
+    let report = fresh.reattach_live_tmux_tabs().await;
+
+    // Then the main is left naming the unreachability, and a watcher holds the session live
+    let left_reason = report
+        .left
+        .iter()
+        .find(|tab| tab.session_id == session_id && tab.terminal_id == MAIN)
+        .map(|tab| tab.reason.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (
+            report
+                .reattached
+                .iter()
+                .any(|tab| tab.session_id == session_id),
+            left_reason.contains("could not be reached"),
+            ADaemonWithATarget::is_listed_active_on(&fresh, &session_id).await,
+        ),
+        (false, true, true),
+        "left: {left_reason:?}"
+    );
+
+    // And when the target is reachable again, a fresh daemon re-attaches it
+    let (reachable, reachable_manager) = daemon.a_fresh_daemon();
+    let report = reachable.reattach_live_tmux_tabs().await;
+    assert_eq!(
+        (
+            report.reattached.contains(
+                &tddy_session_lifecycle::connection_service::ReattachedTab {
+                    session_id: session_id.clone(),
+                    terminal_id: MAIN.to_string(),
+                    tmux_session: tmux_session_of(&session_id),
+                }
+            ),
+            reachable_manager.get(&session_id).await.is_some(),
+        ),
+        (true, true)
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_leaves_a_pre_subject_target_session_for_resume() {
+    // Given a tmux run on the target recorded before owner subjects were kept
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target succeeds");
+    daemon.the_agent_on_the_target(&session_id).await;
+    daemon.the_main_client_drops(&session_id).await;
+    let session_dir = daemon.session_dir(&session_id);
+    let mut metadata = read_session_metadata(&session_dir).expect("metadata reads");
+    metadata.owner_subject = None;
+    tddy_core::session_metadata::write_session_metadata(&session_dir, &metadata)
+        .expect("metadata writes");
+    let (fresh, _fresh_manager) = daemon.a_fresh_daemon();
+
+    // When the fresh daemon re-attaches at startup
+    let report = fresh.reattach_live_tmux_tabs().await;
+
+    // Then the main is left for Resume, naming the missing owner subject
+    let left_reason = report
+        .left
+        .iter()
+        .find(|tab| tab.session_id == session_id && tab.terminal_id == MAIN)
+        .map(|tab| tab.reason.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (
+            report
+                .reattached
+                .iter()
+                .any(|tab| tab.session_id == session_id),
+            left_reason.contains("records no owner subject"),
+        ),
+        (false, true),
+        "left: {left_reason:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_never_attaches_a_persons_tmux_on_the_target() {
+    // Given a session on the target whose roster records a person's own tmux there
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon.a_session_on_the_target().await;
+    daemon.the_agent_on_the_target(&session_id).await;
+    daemon.stop(&session_id).await;
+    let os_user = current_os_user();
+    tddy_core::tab_roster::write_tab_roster(
+        &daemon.session_dir(&session_id),
+        &TabRoster {
+            tabs: vec![TabEntry::new(
+                "019b-persons-tmux",
+                vec![
+                    LaunchNode::target(),
+                    LaunchNode::tmux_attach("work", &os_user),
+                ],
+            )],
+            ..Default::default()
+        },
+    )
+    .expect("the roster is written");
+    let (fresh, _fresh_manager) = daemon.a_fresh_daemon();
+
+    // When the fresh daemon re-attaches at startup
+    let report = fresh.reattach_live_tmux_tabs().await;
+
+    // Then the person's tmux tab is never re-attached
+    assert!(
+        !report
+            .reattached
+            .iter()
+            .any(|tab| tab.terminal_id == "019b-persons-tmux"),
+        "reattached: {:?}",
+        report.reattached
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_leaves_a_target_whose_owner_vault_is_locked() {
+    // Given a tmux run on the target whose client is gone
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target succeeds");
+    daemon.the_agent_on_the_target(&session_id).await;
+    daemon.the_main_client_drops(&session_id).await;
+
+    // When a fresh daemon whose owner's vault is locked re-attaches at startup
+    let shells: Arc<dyn TabTargetShell> = Arc::new(RefusingShells {
+        reason: format!(
+            "the Coder vault of {} is locked; unlock it",
+            current_os_user()
+        ),
+    });
+    let (fresh, _fresh_manager) = daemon.a_fresh_daemon_with(Some(shells));
+    let report = fresh.reattach_live_tmux_tabs().await;
+
+    // Then the main is left naming the locked vault
+    let left_reason = report
+        .left
+        .iter()
+        .find(|tab| tab.session_id == session_id && tab.terminal_id == MAIN)
+        .map(|tab| tab.reason.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        (
+            report
+                .reattached
+                .iter()
+                .any(|tab| tab.session_id == session_id),
+            left_reason.contains("locked"),
+        ),
+        (false, true),
+        "left: {left_reason:?}"
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn daemon_start_restarts_the_hook_log_follower_of_a_reattached_target_main() {
+    // Given a tmux run on the target re-attached by a fresh daemon at startup
+    let daemon = a_daemon_with_a_reachable_target();
+    let session_id = daemon
+        .start(a_tmux_start_on_the_target())
+        .await
+        .expect("a tmux start on a target succeeds");
+    daemon.the_agent_on_the_target(&session_id).await;
+    daemon.the_main_client_drops(&session_id).await;
+    let (fresh, _fresh_manager) = daemon.a_fresh_daemon();
+    let report = fresh.reattach_live_tmux_tabs().await;
+    assert!(
+        report
+            .reattached
+            .iter()
+            .any(|tab| tab.session_id == session_id && tab.terminal_id == MAIN),
+        "the main is re-attached: {report:?}"
+    );
+
+    // When a hook line is appended on the target after the startup re-attach
+    let metadata = read_session_metadata(&daemon.session_dir(&session_id)).expect("metadata");
+    let token = metadata
+        .hook_token
+        .expect("the start recorded a hook token");
+    let hook_log = daemon.target.hook_log_of(&session_id);
+    let mut contents = std::fs::read_to_string(&hook_log).unwrap_or_default();
+    contents.push_str(&format!("UserPromptSubmit\t{token}\t{{}}\n"));
+    std::fs::write(&hook_log, contents).expect("the hook line is appended");
+
+    // Then the restarted follower reads it: the session's activity moves on
+    eventually_awaiting(
+        "the hook to be read after startup re-attach",
+        OBSERVE,
+        || async {
+            let status = read_session_metadata(&daemon.session_dir(&session_id))
+                .ok()
+                .and_then(|metadata| metadata.activity_status);
+            match status.as_deref() {
+                Some("Running") => Ok(()),
+                other => Err(format!("the session's activity so far: {other:?}")),
+            }
+        },
+    )
+    .await;
+}
