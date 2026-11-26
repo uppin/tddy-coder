@@ -64,6 +64,7 @@ pub async fn launch_agent_tab_on_target(
     terminal_id: &str,
     tab: TargetTab<'_>,
     agent: &TargetAgentTab,
+    location: Option<tddy_cli_sessions::tmux_location::SharedTmuxLocation>,
 ) -> Result<Arc<PtyHandle>, RemoteLaunchError> {
     reach_the_worktree(&tab).await?;
     // An agent the target's login `PATH` lacks fails the tab naming it, before its terminal starts.
@@ -104,6 +105,16 @@ pub async fn launch_agent_tab_on_target(
             target_login_exec(&plan.argv, &plan.env)
         ),
     };
+    // An agent in tmux on the target is watched through its location: a dropped client holds
+    // the tab while the tmux session lives (`#target-reconnect` 2/3).
+    let tmux_run = match (&agent.tmux_session, location) {
+        (Some(name), Some(location)) => tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(
+            Some(name),
+            None,
+            Some(location),
+        ),
+        _ => tddy_cli_sessions::cli_session_manager::TmuxRun::with_location(None, None, None),
+    };
     spawn_tab_client(
         manager,
         session_id,
@@ -111,6 +122,7 @@ pub async fn launch_agent_tab_on_target(
         &tab,
         &agent.kind,
         &command,
+        tmux_run,
     )
     .await
 }

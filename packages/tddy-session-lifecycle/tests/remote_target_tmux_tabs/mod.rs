@@ -66,7 +66,7 @@ impl ADaemonWithATarget {
     }
 
     /// Open a tab of `kind` (attached to `tmux_session` for a tmux kind) wrapped in `wrapped_in`.
-    async fn opens_a_tab(
+    pub(crate) async fn opens_a_tab(
         &self,
         session_id: &str,
         kind: &str,
@@ -172,7 +172,7 @@ impl ADaemonWithATarget {
     }
 
     /// The tmux session the recorded chain of `terminal_id` names.
-    fn recorded_tmux_session_of(&self, session_id: &str, terminal_id: &str) -> String {
+    pub(crate) fn recorded_tmux_session_of(&self, session_id: &str, terminal_id: &str) -> String {
         self.roster_entry_of(session_id, terminal_id)
             .launch
             .iter()

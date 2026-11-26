@@ -157,6 +157,7 @@ async fn a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal() {
             start_timeout: START_TIMEOUT,
             clone_root: None,
             tmux: false,
+            tmux_location: None,
         },
         HostPtySession {
             manager: &manager,

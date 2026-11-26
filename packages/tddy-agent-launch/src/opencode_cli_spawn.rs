@@ -350,6 +350,16 @@ pub(crate) async fn start_cli_harness_session(
                 hook_token: wiring.hooks.as_ref().map(|hooks| hooks.hook_token.clone()),
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),
+                // Resolved per call as the start's caller, so a later unlock is picked up.
+                tmux_location: run_in_tmux.then(|| {
+                    Arc::new(crate::remote_agent_launch::TargetTmux::new(
+                        session_dir.clone(),
+                        subject.clone(),
+                        Arc::new(crate::tab_target_shell::SessionTargetShells::new(
+                            coder_credentials.clone(),
+                        )),
+                    )) as tddy_cli_sessions::tmux_location::SharedTmuxLocation
+                }),
             }),
             followers: HarnessFollowers::new(hook_delivery.clone(), hook_followers.clone()),
         },
@@ -388,6 +398,8 @@ pub(crate) async fn start_cli_harness_session(
             .filter(|alias| !alias.is_empty())
             .map(str::to_string),
         target: target.clone(),
+        // Who reached the target, for a caller-less re-attach to resolve it again (D3).
+        owner_subject: target.as_ref().map(|_| subject.clone()),
         managed_codebase,
         session_role: Some(role_name.to_string()).filter(|role| !role.is_empty()),
         effort: Some(effort.trim().to_string()).filter(|effort| !effort.is_empty()),

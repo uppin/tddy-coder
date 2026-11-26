@@ -55,6 +55,25 @@ impl crate::launch_ports::LaunchSessions {
         // Resolved before anything is re-wired: a Coder target whose vault has been locked
         // since the start refuses the resume here, and the session is kept as it was.
         let target_shell = self.resumed_target_shell(req, &metadata)?;
+        // A target session recorded before owner subjects were kept gains the resume's caller
+        // as its owner, so a later caller-less re-attach can resolve its target (D3).
+        let caller = (self.user_resolver)(&req.session_token).unwrap_or_default();
+        if metadata.target.is_some()
+            && metadata
+                .owner_subject
+                .as_deref()
+                .is_none_or(|owner| owner.trim().is_empty())
+            && !caller.trim().is_empty()
+        {
+            metadata.owner_subject = Some(caller.clone());
+        }
+        let tmux_location = target_shell.as_ref().map(|_| {
+            Arc::new(crate::remote_agent_launch::TargetTmux::new(
+                session_dir.to_path_buf(),
+                caller.clone(),
+                self.tab_target_shell(),
+            )) as tddy_cli_sessions::tmux_location::SharedTmuxLocation
+        });
         let session_agent = self
             .agent_to_launch(kind.clone(), &target_shell, metadata.tmux_session.is_some())
             .await?;
@@ -112,6 +131,7 @@ impl crate::launch_ports::LaunchSessions {
                 hook_delivery: self.hook_report_delivery.clone(),
                 hook_followers: self.remote_hook_followers.clone(),
                 target_shell,
+                tmux_location,
             },
         )
         .await?;
@@ -230,6 +250,8 @@ struct ResumedSession<'a> {
     hook_followers: crate::remote_hook_follower::RemoteHookFollowers,
     /// The shell that reaches the session's target, resolved from its recorded target.
     target_shell: Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
+    /// Where the resumed agent's tmux session lives on its target (`#target-reconnect` 2/3).
+    tmux_location: Option<tddy_cli_sessions::tmux_location::SharedTmuxLocation>,
 }
 
 /// A session whose worktree is gone has nothing for its agent to continue.
@@ -271,6 +293,7 @@ async fn resume_cli_harness_session(
         hook_delivery,
         hook_followers,
         target_shell,
+        tmux_location,
     } = session;
     let SplitLaunchParts {
         args: split_args,
@@ -373,6 +396,7 @@ async fn resume_cli_harness_session(
                 hook_token: meta.hook_token.clone(),
                 hook_delivery: hook_delivery.clone(),
                 hook_followers: hook_followers.clone(),
+                tmux_location: tmux_location.clone(),
             }),
             followers: HarnessFollowers::new(hook_delivery.clone(), hook_followers.clone()),
         },

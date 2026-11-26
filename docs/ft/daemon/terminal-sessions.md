@@ -228,9 +228,15 @@ A **target session** (`StartSessionRequest.target`, a Coder workspace or ssh hos
 - **Identity is the tmux session name.** No pid file is written (the agent is the tmux server's child,
   not tddy's): the start waits for the pane's pid (`display-message -p -t '=tddy-<session>:'
   '#{pane_pid}'`), and the session pointer's owner records that pid.
-- **Dropped connection.** The local client exits and the session lists inactive while the agent keeps
-  running. No automatic reconnect
-  ([`docs/dev/todo/2026-11-23-target-tmux-auto-reconnect.md`](../../dev/todo/2026-11-23-target-tmux-auto-reconnect.md)).
+- **Dropped connection.** The local client exits and the session stays live while the agent keeps
+  running (`#target-reconnect` 2/3): the exit is classified by probing `tddy-<session>` on the
+  target (exit 255 or a missing tmux is *unreachable*, never *gone*), a detach watcher holds the
+  session and polls the target, and the first stream of `main` attaches a new transport client
+  with `tmux attach-session` — never `new-session -A`, so a re-attach never relaunches the agent.
+  A target that stays unreachable past the watcher's grace lists the session inactive without
+  ending its agent. The start records `owner_subject` — who reached the target — so the watcher
+  and the lazy re-attach, which have no caller, can resolve the target again; a record without
+  one is left for Resume.
 - **Resume** runs the same `new-session -A`: it re-attaches to a live agent, and starts it again with
   its resume arguments when the tmux session is gone.
 - **Stop** (`SignalSession`) signals the local client, so it detaches, as Stop of a host tmux run does.

@@ -55,7 +55,7 @@ pub struct RosterRestore<'a> {
     pub tab_jail_spawn: &'a dyn TabJailSpawn,
     /// What resolves the session's target a `target` → `shell` tab reopens on
     /// (`#session-liveness` 6/8).
-    pub tab_target_shell: &'a dyn TabTargetShell,
+    pub tab_target_shell: std::sync::Arc<dyn TabTargetShell>,
 }
 
 /// Restore every entry of the session's roster other than main, in roster order, each under its

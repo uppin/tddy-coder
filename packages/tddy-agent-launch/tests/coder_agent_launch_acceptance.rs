@@ -313,6 +313,7 @@ impl ADaemon {
                 start_timeout: START_TIMEOUT,
                 clone_root: None,
                 tmux: false,
+                tmux_location: None,
             },
             HostPtySession {
                 manager: &self.manager,

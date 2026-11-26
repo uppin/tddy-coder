@@ -159,6 +159,7 @@ impl DaemonSessionHost {
                 self.coding_agents.clone(),
                 self.tddy_data_dir.clone(),
                 Arc::clone(&self.agent_tool_sockets),
+                self.launch_sessions().tab_target_shell(),
             )),
             tmux,
             initial_frame_bytes: tddy_terminal_rpc::bridge::DEFAULT_INITIAL_FRAME_BYTES,
@@ -206,6 +207,8 @@ pub(super) struct TmuxMainReattach {
     /// outlived its daemon reports its hooks and makes its tool calls over that user's socket, and
     /// a fresh daemon serves a user's socket only once something asks for it.
     agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    /// What resolves a target session's target for its re-attach (`#target-reconnect` 2/3).
+    target_shells: Arc<dyn tddy_agent_launch::tab_target_shell::TabTargetShell>,
     in_flight: tokio::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
@@ -215,12 +218,14 @@ impl TmuxMainReattach {
         coding_agents: Arc<tddy_agent_launch::spec_launch::HostCodingAgents>,
         tddy_data_dir: PathBuf,
         agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+        target_shells: Arc<dyn tddy_agent_launch::tab_target_shell::TabTargetShell>,
     ) -> Self {
         TmuxMainReattach {
             manager,
             coding_agents,
             tddy_data_dir,
             agent_tool_sockets,
+            target_shells,
             in_flight: tokio::sync::Mutex::default(),
         }
     }
@@ -266,11 +271,12 @@ impl TmuxMainReattach {
                     &self.tddy_data_dir,
                     os_user,
                     session_id,
+                    &self.target_shells,
                 )
                 .await
             }
         };
-        self.manager.announce_reattach(session_id, attached);
+        self.manager.announce_reattach(session_id, attached.clone());
         // The last access out forgets the session's gate (every clone is taken under this lock, so
         // a count of two — the map's and this one — means nobody else holds or waits on it).
         let mut in_flight = self.in_flight.lock().await;
