@@ -16,6 +16,8 @@ mod pull_base_rpc;
 mod repoint_rpc;
 
 pub use guards::validate_repoint_target;
+/// `#fs-port` seam: [`referencing_sessions_by_stack`](project_stacks::referencing_sessions_by_stack) through the port, for `MemFs` tests.
+pub use project_stacks::referencing_sessions_by_stack_on;
 
 use std::path::PathBuf;
 use std::sync::Arc;
