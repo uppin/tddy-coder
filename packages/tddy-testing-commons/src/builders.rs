@@ -269,6 +269,7 @@ impl SessionMetadataBuilder {
             agent_session_id: None,
             ssh_config_host: None,
             target: None,
+            owner_subject: None,
             managed_codebase: false,
             session_role: None,
             tmux_session: None,

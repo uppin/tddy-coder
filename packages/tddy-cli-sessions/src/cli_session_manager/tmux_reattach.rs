@@ -328,14 +328,14 @@ impl DetachWatch {
 /// The tmux session a terminal is a client of, where it lives, and the OS user it runs as — all
 /// `None` for a terminal that is not a tmux client.
 #[derive(Clone)]
-pub(crate) struct TmuxRun {
+pub struct TmuxRun {
     session: Option<String>,
     os_user: Option<String>,
     location: Option<SharedTmuxLocation>,
 }
 
 impl TmuxRun {
-    pub(crate) fn with_location(
+    pub fn with_location(
         session: Option<&str>,
         os_user: Option<&str>,
         location: Option<SharedTmuxLocation>,

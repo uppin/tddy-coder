@@ -127,6 +127,13 @@ pub struct SessionMetadata {
     /// fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<crate::session_target::SessionTarget>,
+    /// Who started the session on its `target` — the GitHub login whose vault reaches it — so a
+    /// watcher, a startup pass and a lazy re-attach, none of which has a caller, can resolve the
+    /// target again (`#target-reconnect` 2/3, D3). A GitHub login, not a secret. Absent for host
+    /// sessions, and for target sessions recorded before it was kept: those are left for Resume,
+    /// never resolved by guessing a subject from the OS user.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_subject: Option<String>,
     /// The session was started in managed-codebase mode: its agent reaches the code only through
     /// daemon tools. Absent reads as `false`, and `false` is never written, so a file from before
     /// this field reads exactly as it did. See `#project-home` 3/7.
@@ -338,6 +345,7 @@ pub fn write_initial_tool_session_metadata(
         agent_session_id: None,
         ssh_config_host: None,
         target: None,
+        owner_subject: None,
         managed_codebase: false,
         session_role: None,
         tmux_session: None,
@@ -495,6 +503,41 @@ mod tests {
             read.target,
             Some(crate::session_target::SessionTarget::ssh("buildbox"))
         );
+    }
+
+    #[test]
+    fn a_target_session_records_its_owner_subject() {
+        // Given a target session whose start recorded who reached the target
+        let dir = tempfile::tempdir().expect("a session directory");
+        let metadata = SessionMetadata {
+            target: Some(crate::session_target::SessionTarget::ssh("buildbox")),
+            owner_subject: Some("ada-on-github".to_string()),
+            ..a_claude_cli_session()
+        };
+
+        // When its record is written and read back
+        write_session_metadata(dir.path(), &metadata).expect("the record is written");
+        let file = fs::read_to_string(dir.path().join(SESSION_METADATA_FILENAME))
+            .expect("the record is on disk");
+        let read = read_session_metadata(dir.path()).expect("the record reads back");
+
+        // Then the owner subject survives, named in the file
+        assert!(file.contains("owner_subject: ada-on-github"), "{file}");
+        assert_eq!(read.owner_subject.as_deref(), Some("ada-on-github"));
+    }
+
+    #[test]
+    fn a_session_yaml_without_an_owner_subject_reads_none_and_writes_none() {
+        // Given a file written before owner subjects were recorded
+        let yaml = "session_id: s1\nproject_id: p1\ncreated_at: \"2026-10-22T00:00:00Z\"\nupdated_at: \"2026-10-22T00:00:00Z\"\nstatus: active\n";
+
+        // When it is read and written back
+        let metadata: SessionMetadata = serde_yaml::from_str(yaml).expect("legacy metadata parses");
+        let written = serde_yaml::to_string(&metadata).expect("metadata serializes");
+
+        // Then no owner is invented, and the record gains no key
+        assert_eq!(metadata.owner_subject, None);
+        assert!(!written.contains("owner_subject"), "{written}");
     }
 
     #[test]

@@ -13,7 +13,7 @@ use super::CliSessionManager;
 pub const REATTACH_CAPACITY: usize = 256;
 
 /// Why a re-attach left the session without a main terminal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReattachSkip {
     /// The session id is not a valid session directory name.
     InvalidSessionId,
@@ -31,25 +31,39 @@ pub enum ReattachSkip {
     AgentUnresolved,
     /// The attach itself did not take: no live pane, or an error (logged).
     AttachFailed,
+    /// A target session recorded no owner subject, so its target cannot be resolved without a
+    /// caller to reach it as (`#target-reconnect` 2/3, D3): left for Resume, never guessed.
+    NoOwnerSubject,
+    /// The session's target could not be resolved or reached, naming why (a locked vault, a
+    /// stopped workspace, a dropped connection).
+    TargetUnreachable(String),
 }
 
 impl std::fmt::Display for ReattachSkip {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::InvalidSessionId => "invalid session id",
-            Self::UnreadableRecord => "unreadable session record",
-            Self::NotTmuxRun => "the session did not run in tmux",
-            Self::TmuxSessionGone => "its tmux session is gone",
-            Self::TmuxProbeFailed => "its tmux session could not be probed",
-            Self::NoSessionType => "the record names no session type",
-            Self::AgentUnresolved => "the recorded session type is not an installed agent",
-            Self::AttachFailed => "the attach failed",
-        })
+        match self {
+            Self::InvalidSessionId => f.write_str("invalid session id"),
+            Self::UnreadableRecord => f.write_str("unreadable session record"),
+            Self::NotTmuxRun => f.write_str("the session did not run in tmux"),
+            Self::TmuxSessionGone => f.write_str("its tmux session is gone"),
+            Self::TmuxProbeFailed => f.write_str("its tmux session could not be probed"),
+            Self::NoSessionType => f.write_str("the record names no session type"),
+            Self::AgentUnresolved => {
+                f.write_str("the recorded session type is not an installed agent")
+            }
+            Self::AttachFailed => f.write_str("the attach failed"),
+            Self::NoOwnerSubject => {
+                f.write_str("the record names no owner to reach its target as")
+            }
+            Self::TargetUnreachable(reason) => {
+                write!(f, "its target could not be reached: {reason}")
+            }
+        }
     }
 }
 
 /// How one re-attach attempt ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReattachOutcome {
     /// The main terminal was registered by this attempt.
     Reattached,
@@ -86,7 +100,7 @@ impl CliSessionManager {
                 target: "tddy_cli_sessions::reattach",
                 "re-attach of {session_id} finished: {outcome:?}"
             ),
-            ReattachOutcome::Skipped(reason) => log::info!(
+            ReattachOutcome::Skipped(ref reason) => log::info!(
                 target: "tddy_cli_sessions::reattach",
                 "re-attach of {session_id} finished: skipped, {reason}"
             ),
