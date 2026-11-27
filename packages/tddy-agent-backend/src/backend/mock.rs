@@ -190,7 +190,8 @@ impl CodingBackend for MockBackend {
 
         if let Some(ref path) = request.conversation_output_path {
             let bytes = response.raw_stream.as_deref().unwrap_or(&response.output);
-            tokio::fs::write(path, bytes.as_bytes())
+            tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+                .write(path.clone(), bytes.as_bytes().to_vec())
                 .await
                 .map_err(|e| {
                     BackendError::InvocationFailed(format!(

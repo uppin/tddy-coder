@@ -69,6 +69,8 @@ pub struct SpecHeadlessBackend {
     curated_models: BackendModels,
     progress_callback: ProgressCallback,
     turn_deadline: Duration,
+    /// The filesystem turns read and write through — `DiskFs` until [`Self::with_fs`].
+    fs: Arc<dyn tddy_fs::Fs>,
 }
 
 impl std::fmt::Debug for SpecHeadlessBackend {
@@ -102,7 +104,15 @@ impl SpecHeadlessBackend {
             curated_models: BackendModels::default(),
             progress_callback: None,
             turn_deadline: DEFAULT_TURN_DEADLINE,
+            fs: Arc::new(tddy_fs::DiskFs),
         }
+    }
+
+    /// Turns read and write through `fs` (builder): the port a test drives with `MemFs`.
+    #[must_use]
+    pub fn with_fs(mut self, fs: Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     /// Every turn is cancelled, and its process group killed, once it has run for `deadline`.
@@ -235,7 +245,7 @@ impl SpecHeadlessBackend {
         let Some(path) = &request.system_prompt_path else {
             return Ok(request.system_prompt.clone());
         };
-        match (std::fs::read_to_string(path), self.protocol.system_prompt) {
+        match (self.fs.read_to_string(path), self.protocol.system_prompt) {
             (Ok(text), _) => Ok(Some(text)),
             (Err(e), SystemPromptDelivery::Prepend) => Err(BackendError::InvocationFailed(
                 format!("failed to read system_prompt_path {}: {e}", path.display()),
@@ -296,7 +306,7 @@ struct TurnRead {
     system_text: Option<String>,
     progress_callback: ProgressCallback,
     /// The request's conversation log, opened for appending.
-    conversation: Option<std::fs::File>,
+    conversation: Option<turn_read::ConversationLog>,
 }
 
 #[async_trait::async_trait]
@@ -359,7 +369,7 @@ impl CodingBackend for SpecHeadlessBackend {
         );
         // Opened before the spawn, so a log that cannot be opened refuses the turn with no child to
         // reap.
-        let conversation = open_conversation_log(&request)?;
+        let conversation = open_conversation_log(std::sync::Arc::clone(&self.fs), &request)?;
         let mut child = spawn_turn(&TurnCommand {
             program: &invocation.program,
             argv: &invocation.argv,

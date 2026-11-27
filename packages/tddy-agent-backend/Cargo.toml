@@ -5,6 +5,8 @@ edition = "2021"
 description = "The coding-agent backends (Claude, Codex, Cursor, ACP, mock, stub) and the stream parsers for their output"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs", features = ["tokio"] }
 # `backend/{acp,codex_acp}` carry `anyhow::Result` from the ACP client they drive.
 anyhow = "1"
 agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }

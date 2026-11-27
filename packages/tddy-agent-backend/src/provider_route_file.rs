@@ -5,8 +5,6 @@
 //! credential already does: a JSON file in the session directory, owner-only, named on the command
 //! line (`--provider-route-path`). `tddy-coder` refuses a route file anyone else can read.
 
-use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -115,22 +113,24 @@ pub fn route_from_json(json: &str) -> Result<HarnessRoute, String> {
 /// permission bit is refused, not only group or other read: a group-writable route file lets
 /// another account replace the endpoint and key a session runs on.
 pub fn load_route_file(path: &Path) -> Result<HarnessRoute, String> {
-    let mut file = std::fs::File::open(path).map_err(|e| {
-        format!(
-            "the provider route file {} could not be opened: {e}",
-            path.display()
-        )
-    })?;
-    let mode = file
-        .metadata()
+    load_route_file_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`load_route_file`] through the filesystem port.
+///
+/// The mode is read from the file's metadata and the bytes from the same path: the port has
+/// no open-file handle to pin the two together, as the `File` it replaces did.
+pub fn load_route_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<HarnessRoute, String> {
+    let mode = fs
+        .metadata_follow(path)
         .map_err(|e| {
             format!(
                 "the provider route file {} could not be inspected: {e}",
                 path.display()
             )
         })?
-        .permissions()
-        .mode()
+        .mode
+        .unwrap_or(0)
         & 0o777;
     if mode & 0o077 != 0 {
         return Err(format!(
@@ -139,8 +139,7 @@ pub fn load_route_file(path: &Path) -> Result<HarnessRoute, String> {
             path.display()
         ));
     }
-    let mut json = String::new();
-    file.read_to_string(&mut json).map_err(|e| {
+    let json = fs.read_to_string(path).map_err(|e| {
         format!(
             "the provider route file {} could not be read: {e}",
             path.display()

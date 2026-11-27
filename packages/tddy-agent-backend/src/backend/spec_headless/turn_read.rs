@@ -84,13 +84,11 @@ pub(super) fn read_turn(
             "session_id": session_id,
             "is_resume": is_resume,
         });
-        let _ = writeln!(file, "{entry}");
-        let _ = file.flush();
+        file.write_line(&entry.to_string());
     }
     let mut on_conversation_line = |line: &str| {
         if let Some(file) = conversation.as_mut() {
-            let _ = writeln!(file, "{line}");
-            let _ = file.flush();
+            file.write_line(line);
         }
     };
     let has_conversation = request.conversation_output_path.is_some();
@@ -155,24 +153,39 @@ pub(super) fn read_turn(
     })
 }
 
+/// An open conversation log: where it is, and the port each line is appended through.
+pub(super) struct ConversationLog {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    path: std::path::PathBuf,
+}
+
+impl ConversationLog {
+    fn write_line(&mut self, line: &str) {
+        let _ = self.fs.append(&self.path, format!("{line}\n").as_bytes());
+    }
+}
+
 /// The request's conversation log, opened for appending, when it names one.
 pub(super) fn open_conversation_log(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     request: &InvokeRequest,
-) -> Result<Option<std::fs::File>, BackendError> {
+) -> Result<Option<ConversationLog>, BackendError> {
     request
         .conversation_output_path
         .as_ref()
         .map(|path| {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-                .map_err(|e| {
-                    BackendError::InvocationFailed(format!(
-                        "failed to open conversation output {}: {e}",
-                        path.display()
-                    ))
-                })
+            // The probe append of zero bytes is the open, and its error is the refusal the
+            // `OpenOptions` call reported.
+            fs.append(path, b"").map_err(|e| {
+                BackendError::InvocationFailed(format!(
+                    "failed to open conversation output {}: {e}",
+                    path.display()
+                ))
+            })?;
+            Ok(ConversationLog {
+                fs,
+                path: path.clone(),
+            })
         })
         .transpose()
 }
