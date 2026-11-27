@@ -95,6 +95,7 @@ members = [
     "packages/tddy-code-analysis",
     "packages/tddy-code-restructuring",
     "packages/tddy-index-daemon",
+    "packages/tddy-ios-emulator",
     "packages/tddy-lsp-executor",
     "packages/tddy-pty",
     "packages/tddy-terminal-rpc",

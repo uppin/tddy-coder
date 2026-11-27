@@ -104,6 +104,7 @@ fn a_host_committing_as(name: &str, email: &str, gh_login: &str) -> HostTooling 
         remote_desktop: Vec::new(),
         // And for the block `#remote-shell 4/7` added: no `coder` CLI on this host.
         coder_cli: crate::host_tooling::CoderCliStatus::not_installed(),
+        ios_simulators: Vec::new(),
     }
 }
 
@@ -435,4 +436,34 @@ async fn host_tooling_calls_naming_different_github_hosts_are_probed_separately(
         probe.probed_github_hostnames(),
         vec![None, Some("github.example.com".to_string())]
     );
+}
+
+/// The booted simulators a probe lists are offered on the wire beside the desktop readings.
+#[tokio::test]
+async fn host_tooling_offers_the_booted_simulators_as_desktop_channels() {
+    // Given
+    let simulator = HostRemoteDesktop {
+        outcome: tddy_service::proto::host::ProbeOutcome::Ok as i32,
+        protocol: 3,
+        can_bridge: true,
+        desktop_reachable: true,
+        channel_id: "ios:UDID-IPHONE".into(),
+        kind: DesktopChannelKind::IosSimulator as i32,
+        label: "iPhone 16 Pro · iOS 18.2".into(),
+        device_id: "UDID-IPHONE".into(),
+        ..Default::default()
+    };
+    let probe = RecordingHostToolingProbe::answering(HostTooling {
+        ios_simulators: vec![simulator.clone()],
+        ..a_host_committing_as("Ada Lovelace", "ada@example.com", "hubot")
+    });
+    let service = a_daemon_probing_with(probe).build();
+
+    // When
+    let tooling = tooling_asked_of(&service, VERIFIABLE_TOKEN, THIS_DAEMON)
+        .await
+        .unwrap();
+
+    // Then
+    assert_eq!(tooling.remote_desktop, vec![simulator]);
 }

@@ -28,7 +28,10 @@ use tddy_credentials::{
 use tddy_daemon_extensions::desktop_inspect::{
     read_inspect_report, AdvertisedMethod, InspectTarget, INSPECT_FLAG,
 };
-use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
+use tddy_daemon_kernel::config::{
+    resolve_ios_simulator_binary_path, resolve_rdp_binary_path, resolve_vnc_binary_path,
+    DaemonConfig,
+};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_host_service::host_keypair::HostKeypair;
 use tddy_rpc::{Request, Response, Status};
@@ -127,6 +130,7 @@ fn inspect_bridge_binary(
     match Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified) {
         Protocol::Vnc => Ok(resolve_vnc_binary_path(config)),
         Protocol::Rdp => Ok(resolve_rdp_binary_path(config)),
+        Protocol::IosSimulator => Ok(resolve_ios_simulator_binary_path(config)),
         Protocol::Unspecified => Err(Status::failed_precondition(format!(
             "target {} names no protocol to inspect it with",
             target.target_id

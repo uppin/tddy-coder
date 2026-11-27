@@ -10,9 +10,9 @@ How the browser turns a watched desktop into a usable one: `useScreenSharingInpu
 
 | File | Holds |
 |---|---|
-| `tddy-livekit-web` `src/media/screenSharingInput.ts` | `framebufferPointFor`, `keysymFor`, `rfbButtonMaskFor` — pure, total, unit-tested |
+| `tddy-livekit-web` `src/media/screenSharingInput.ts` | `framebufferPointFor`, `framebufferWheelDeltaFor`, `keysymFor`, `rfbButtonMaskFor` — pure, total, unit-tested |
 | `tddy-livekit-web` `src/media/useScreenSharingInput.ts` (the `MediaPort`'s `useScreenSharingInput`) | the stream's lifetime, event capture, coalescing, the closing chord |
-| `tddy-hosts-web` `src/ScreenSharingOverlay.tsx` | mounts the hook, renders the picture, the chord label and the unavailable notice |
+| `tddy-hosts-web` `src/ScreenSharingOverlay.tsx` | mounts the hook, renders the picture sized to the desktop's aspect, the chord label, the unavailable notice and the received-video readout |
 
 One overlay serves both scopes — a host's desktop and a session's — so both get the same input
 behaviour from the same code. There is no host-scoped or session-scoped input path.
@@ -32,7 +32,7 @@ Three properties of the bridge that the client's design depends on, each verifia
 - `stream_input` **always answers `Ok`**. A bridge that cannot inject drops commands silently. So a
   view-only server is never *reported* as one.
 
-## The two translations
+## The translations
 
 **Coordinates.** `framebufferPointFor` scales a pointer from the rendered element's pixels into
 framebuffer pixels, rounding to the nearest whole one. The element's box is read on **every event**,
@@ -58,6 +58,12 @@ pinned by tests:
 
 A key with no keysym is **dropped** — nothing is sent, and `preventDefault` is not called either, so
 the browser keeps a key that was never going anywhere.
+
+**Wheel.** `framebufferWheelDeltaFor` converts a `WheelEvent`'s delta to CSS pixels by its
+`deltaMode` (0 pixels, 1 lines of 16 px, 2 pages of the rendered picture), then scales it into
+framebuffer pixels exactly as a pointer is, rounded for the wire's integers. Positive is down and
+right, the browser's convention, and the bridge maps that to its protocol's wheel
+([tddy-screenshare client-and-bridge.md](../../tddy-screenshare/docs/client-and-bridge.md)).
 
 **Buttons.** `rfbButtonMaskFor` reads `MouseEvent.buttons` — the set currently held, not the button
 that triggered the event — because `button_mask` says what is down *now*: a release is the buttons
@@ -118,6 +124,13 @@ outside the element gives a framebuffer coordinate off the end of the desktop.
   than the data channel carries it or the desktop acts on it. A pending move is **flushed before**
   any button event, never dropped: a desktop told the button went down before it was told the
   pointer arrived acts on the wrong place.
+- **Wheel events are summed per animation frame**, like moves, and sent as one
+  `ScreenSharingWheelEvent` at the pointer's framebuffer point. The listener is non-passive and
+  prevents the default, so the page under the overlay does not scroll.
+- **A touch is the left button.** `touchstart` and `touchmove` send `button_mask` 1 at the first
+  changed touch's point and `touchend` / `touchcancel` send 0, so a phone or tablet viewer taps and
+  drags the desktop. The listeners are non-passive and prevent the default, so the page's own touch
+  scrolling and zooming do not act while a finger is on the picture. One touch only.
 - **`contextmenu` is prevented** on the picture. The right-button press is forwarded and the remote
   desktop opens its own menu; the browser's would land on top of it.
 - **Nothing is forwarded from a zero-sized picture** — the scaling would be `NaN`, which a `uint32`
@@ -146,8 +159,9 @@ outside the element gives a framebuffer coordinate off the end of the desktop.
 
 ## Not forwarded
 
-Scroll wheel, audio, clipboard, file transfer, multi-monitor, touch and pen. Wheel is the closest to
-free: RFB expresses it as buttons 4 and 5, which `button_mask` already carries.
+Audio, clipboard, file transfer, multi-monitor, pen, and multi-touch gestures (pinch): only the first
+changed touch is forwarded. A scroll carries no momentum of its own — each animation frame's sum is
+one event.
 
 ## Superseded neighbours
 

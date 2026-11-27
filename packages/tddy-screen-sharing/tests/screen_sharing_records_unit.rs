@@ -27,6 +27,7 @@ fn a_vnc_target() -> ScreenSharingTarget {
         username: "ada".to_string(),
         x11_display: None,
         domain: String::new(),
+        device_id: String::new(),
     }
 }
 
@@ -40,6 +41,7 @@ fn an_rdp_target() -> ScreenSharingTarget {
         username: "tester".to_string(),
         x11_display: None,
         domain: String::new(),
+        device_id: String::new(),
     }
 }
 

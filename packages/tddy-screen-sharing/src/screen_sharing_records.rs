@@ -148,6 +148,7 @@ pub fn target_from(record: &CredentialRecord) -> Result<ScreenSharingTarget, Tar
             .unwrap_or_default(),
         x11_display: None,
         domain: String::new(),
+        device_id: String::new(),
     })
 }
 
@@ -155,6 +156,7 @@ fn protocol_name(protocol: Protocol) -> &'static str {
     match protocol {
         Protocol::Vnc => "VNC",
         Protocol::Rdp => "RDP",
+        Protocol::IosSimulator => "IOS_SIMULATOR",
         Protocol::Unspecified => "UNSPECIFIED",
     }
 }
@@ -163,6 +165,7 @@ fn protocol_named(name: &str) -> Option<Protocol> {
     match name {
         "VNC" => Some(Protocol::Vnc),
         "RDP" => Some(Protocol::Rdp),
+        "IOS_SIMULATOR" => Some(Protocol::IosSimulator),
         "UNSPECIFIED" => Some(Protocol::Unspecified),
         _ => None,
     }

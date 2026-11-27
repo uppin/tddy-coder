@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { framebufferPointFor, keysymFor, rfbButtonMaskFor } from "./screenSharingInput";
+import { framebufferPointFor, framebufferWheelDeltaFor, keysymFor, rfbButtonMaskFor } from "./screenSharingInput";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -204,5 +204,34 @@ describe("the RFB button mask a browser's held buttons become", () => {
     // would click something over there that the operator never asked for.
     expect(rfbButtonMaskFor(BROWSER.back | BROWSER.forward)).toBe(0);
     expect(rfbButtonMaskFor(BROWSER.primary | BROWSER.back)).toBe(RFB.left);
+  });
+});
+
+describe("framebufferWheelDeltaFor", () => {
+  const HALF_SIZE = { width: 960, height: 540 };
+  const FULL_HD = { width: 1920, height: 1080 };
+
+  it("scales a pixel scroll into the framebuffer as a pointer is", () => {
+    // When
+    const delta = framebufferWheelDeltaFor({ x: 0, y: 50 }, 0, HALF_SIZE, FULL_HD);
+
+    // Then
+    expect(delta).toEqual({ x: 0, y: 100 });
+  });
+
+  it("counts a line scroll as sixteen pixels a line", () => {
+    // When
+    const delta = framebufferWheelDeltaFor({ x: -1, y: 3 }, 1, HALF_SIZE, FULL_HD);
+
+    // Then
+    expect(delta).toEqual({ x: -32, y: 96 });
+  });
+
+  it("counts a page scroll as the picture's own size", () => {
+    // When
+    const delta = framebufferWheelDeltaFor({ x: 0, y: 1 }, 2, HALF_SIZE, FULL_HD);
+
+    // Then
+    expect(delta).toEqual({ x: 0, y: 1080 });
   });
 });

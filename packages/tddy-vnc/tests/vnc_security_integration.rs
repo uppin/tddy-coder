@@ -19,7 +19,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
-use tddy_screenshare::{AuthenticationRefused, Credentials, ScreenSharingClient};
+use tddy_screenshare::{AuthenticationRefused, ConnectTarget, Credentials, ScreenSharingClient};
 use tddy_vnc::vnc_client::VncClientState;
 
 // ── RFB security type numbers ─────────────────────────────────────────────────
@@ -570,7 +570,10 @@ async fn sign_in(
 ) -> anyhow::Result<VncClientState> {
     tokio::time::timeout(
         SIGN_IN_TIMEOUT,
-        <VncClientState as ScreenSharingClient>::connect("127.0.0.1", server.port, credentials),
+        <VncClientState as ScreenSharingClient>::connect(
+            &ConnectTarget::network("127.0.0.1", server.port),
+            credentials,
+        ),
     )
     .await
     .expect("VNC sign-in did not finish within the timeout")

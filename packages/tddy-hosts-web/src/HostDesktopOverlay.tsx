@@ -51,7 +51,18 @@ export interface HostDesktopOverlayProps {
    * daemon starts x11vnc for it. Absent for a desktop already listening on `port`.
    */
   x11Display?: number;
+  /**
+   * The iOS Simulator to open, for a simulator channel: sent as `AddHostTarget.deviceId`. A
+   * simulator has no sign-in, so it is started without inspecting it or asking for anything.
+   */
+  device?: SimulatorDevice;
   onClose: () => void;
+}
+
+/** A booted simulator a channel names: its udid, and what the Hosts screen calls it. */
+export interface SimulatorDevice {
+  deviceId: string;
+  label: string;
 }
 
 /**
@@ -72,12 +83,17 @@ function isTargetOfChannel(
   port: number,
   protocol: Protocol,
   x11Display: number | undefined,
+  device: SimulatorDevice | undefined,
 ): boolean {
+  if (device !== undefined) {
+    return target.deviceId === device.deviceId && target.protocol === protocol;
+  }
   if (x11Display !== undefined) {
     return target.x11Display === x11Display && target.protocol === protocol;
   }
   return (
     target.x11Display === undefined &&
+    target.deviceId === "" &&
     target.host === PROBED_HOST &&
     target.port === port &&
     target.protocol === protocol
@@ -111,24 +127,32 @@ async function targetForChannel(
   port: number,
   protocol: Protocol,
   x11Display: number | undefined,
+  device: SimulatorDevice | undefined,
 ): Promise<string> {
   const existing = await client.listHostTargets({ sessionToken, daemonInstanceId: hostId });
   const match = existing.targets.find((target) =>
-    isTargetOfChannel(target, port, protocol, x11Display),
+    isTargetOfChannel(target, port, protocol, x11Display, device),
   );
   if (match) return match.id;
 
   const added = await client.addHostTarget({
     sessionToken,
     daemonInstanceId: hostId,
-    label: x11Display === undefined ? PROBED_TARGET_LABEL : `Display :${x11Display}`,
+    label: targetLabel(x11Display, device),
     host: PROBED_HOST,
     port,
     protocol,
     username: "",
     x11Display,
+    deviceId: device?.deviceId ?? "",
   });
   return added.targetId;
+}
+
+/** What a target created for a channel is called: its device, its display, or "Desktop". */
+function targetLabel(x11Display: number | undefined, device: SimulatorDevice | undefined): string {
+  if (device !== undefined) return device.label;
+  return x11Display === undefined ? PROBED_TARGET_LABEL : `Display :${x11Display}`;
 }
 
 /** What `signInAndStart` needs from the overlay that is opening a desktop. */
@@ -224,6 +248,7 @@ export function HostDesktopOverlay({
   port,
   protocol,
   x11Display,
+  device,
   onClose,
 }: HostDesktopOverlayProps) {
   const client = useHostClient(ScreenSharingService, hostId);
@@ -253,8 +278,13 @@ export function HostDesktopOverlay({
   // open, so closing it releases the process rather than leaving one per desktop an operator looked
   // at. The stop is addressed at the target the start actually used, which is why it is captured
   // here rather than re-resolved.
+  // Held as its two strings so the effect below restarts only when the device itself changes.
+  const deviceId = device?.deviceId;
+  const deviceLabel = device?.label;
   useEffect(() => {
     if (!client) return;
+    const simulator =
+      deviceId === undefined ? undefined : { deviceId, label: deviceLabel ?? "" };
     let cancelled = false;
     let startedTargetId: string | null = null;
 
@@ -267,10 +297,11 @@ export function HostDesktopOverlay({
           port,
           protocol,
           x11Display,
+          simulator,
         );
         if (cancelled) return;
         startedTargetId = targetId;
-        await signInAndStart({
+        const inputs: SignInAndStartInputs = {
           client,
           hostId,
           targetId,
@@ -282,7 +313,14 @@ export function HostDesktopOverlay({
           setError,
           setSignInError,
           setQuestion,
-        });
+        };
+        if (simulator !== undefined) {
+          // Nothing to inspect and nobody to ask: a simulator is started as it is.
+          setOffered([DesktopAuthMethod.NONE]);
+          await startUntilSignedIn(inputs, true);
+        } else {
+          await signInAndStart(inputs);
+        }
       } catch (e) {
         if (cancelled) return;
         // The start failed, and the overlay says why in place of "Connecting…": a refused sign-in
@@ -306,7 +344,7 @@ export function HostDesktopOverlay({
           });
       }
     };
-  }, [client, hostId, port, protocol, x11Display]);
+  }, [client, hostId, port, protocol, x11Display, deviceId, deviceLabel]);
 
   // The bridge publishes into the room the start reply names, which is not this page's common room:
   // joining it is the same mint-and-connect the media port's `usePresenterRoom` performs, with no coordinates

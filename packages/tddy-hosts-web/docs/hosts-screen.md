@@ -85,12 +85,17 @@ finding that this host's config names no destinations — and each alias renders
 failed read never borrows the empty shape, because empty is the LocalShell choice in later flows and
 must not be stated when the config was not read.
 
-**`HostRowRemoteDesktop`** is the fourth section, taking `{instanceId, readings}`, one reading per
-desktop channel. An absent block renders as an empty list rather than a fabricated one. Each reading
+**`HostRowRemoteDesktop`** is the fourth section, taking `{instanceId, addressInstanceId?, readings}`,
+one reading per desktop channel. `addressInstanceId` is the id the host answers on this run (its
+routing id, which carries a per-run suffix when the daemon appends its startup timestamp); the
+host's connection and desktop calls are addressed by it, and it defaults to `instanceId`, which
+names the row. An absent block renders as an empty list rather than a fabricated one. Each reading
 is a `ChannelReading`. An endpoint channel is one `hosts-row-<id>-<vnc|rdp>` span, and an X11
 channel (`kind === X11_DISPLAY`) is `hosts-row-<id>-channel-<channelId>`, labelled with the
 reading's `label` ("Display :1") and with a desktop half of "Display available" or "Could not check
-the display", since it has no port until it is opened. Each span holds **two facts side by side**: the bridge
+the display", since it has no port until it is opened. An iOS Simulator channel (`kind === IOS_SIMULATOR`) is
+the same `channel-<channelId>` span, labelled with the reading's `label` ("iPhone 16 Pro · iOS 18.2")
+and with a desktop half of "Simulator booted". Each span holds **two facts side by side**: the bridge
 half (`Bridge ready` / `No bridge`) and the desktop half (`Desktop on :5900` / `No desktop on :5900`
 / `Could not check :5900`). They are never merged, because a host can serve a desktop tddy has no
 bridge for and a host with the bridge installed can be serving nothing — and the two "no"s ask for
@@ -104,7 +109,8 @@ is an existence check answered independently of the connect and a refused connec
 new about it — where a reading never came back at all, the daemon sends the neutral `canBridge:
 false` that renders as "No bridge".
 
-`PROTOCOL_NAMES` maps `screen_sharing.proto`'s `Protocol` values (`1` → VNC, `2` → RDP), the same
+`PROTOCOL_NAMES` maps `screen_sharing.proto`'s `Protocol` values (`1` → VNC, `2` → RDP, `3` → iOS
+Simulator), the same
 values the daemon puts on the wire rather than a second enumeration of them. A reading for any other
 value renders **nothing**: `protocol` is an open proto3 value, a newer daemon can probe a protocol
 this bundle cannot name, and there is no label to put on it — inventing one, or rendering a nameless
@@ -124,9 +130,12 @@ A fourth fact gates the button and the row cannot read it from a probe: whether 
 over a connection that **carries media**. `useHostConnection(instanceId)` plus
 `useHasCapability(connection, "media")` — the one predicate, never re-derived from a `Room`, a
 transport or a status string ([capability-gating.md](../../tddy-web/docs/capability-gating.md)). Without it the button
-is **absent, not disabled**: `IPC_CAPABILITIES` is `{"rpc"}`, so on a host reached that way a LiveKit
-track cannot arrive however reachable its desktop is, and a control that provably cannot work is
-worse than no control.
+is **absent, not disabled**: `IPC_CAPABILITIES` is `{"rpc"}`, so on a host reached that way alone a
+LiveKit track cannot arrive however reachable its desktop is, and a control that provably cannot work
+is worse than no control. Tddy Desktop's own host is reached over IPC, but when the common room is
+joined with that daemon on it the connection registry lends it the room's `media`
+([tddy-client-web § Media is lent](../../tddy-client-web/docs/README.md#media-is-lent-calls-are-not)),
+and the button appears.
 
 **`HostDesktopOverlay`** is what the button mounts — a thin host-scoped mount of
 `ScreenSharingOverlay`, subscribed to the bridge participant's LiveKit `VideoTrack`. No browser-side
@@ -144,13 +153,18 @@ VNC/RDP protocol client is added here, ever: the picture is always a daemon-prod
   `targetForChannel` reuses an existing host target and adds one only when none matches, which
   stops one target accumulating per connect. `isTargetOfChannel` decides the match. An X11 channel
   (`x11Display` prop) matches on `(protocol, x11Display)` and is added with `x11Display` set, so
-  the daemon starts x11vnc for it. An endpoint channel matches a target with no display on
+  the daemon starts x11vnc for it. An iOS Simulator channel (`device` prop, `{deviceId, label}`)
+  matches on `(protocol, deviceId)` and is added with `deviceId`, host `127.0.0.1`, port 0 and the
+  device's label. An endpoint channel matches a target with no display on
   `(127.0.0.1, port, protocol)`, the daemon's own loopback, because that is where the probe made
   its reading.
 - **A failed start says why, in place of "Connecting…".** `screenSharingStartFailureText`
   (`lib/screenSharingStartFailure.ts`) turns an `Unauthenticated` reply into "The desktop refused
   the sign-in: <reason>" and any other `ConnectError` into its raw message. The session tab's target
   rows use the same text, beside the row that was started.
+- **A simulator is started as it is.** For a `device` channel the overlay skips `InspectHostDesktop`
+  and the sign-in dialog, offers `NONE`, and starts the stream at once: the daemon raises no question
+  for one.
 - **Input is scaled into the reported size.** The start reply's `width`/`height` are the desktop's
   framebuffer size as its bridge saw it, and the overlay passes them to `useScreenSharingInput`.
 - **Start on mount, stop on unmount**, against the target the start actually used rather than one
@@ -218,6 +232,14 @@ at the bridge participant for as long as it is mounted and forwards the operator
 keyboard onto it — the same overlay, and so the same behaviour, on this scope and the session one.
 Escape goes to the desktop; `Ctrl+Alt+Esc` is the one chord the overlay keeps. See
 [`remote-desktop-input.md`](../../tddy-web/docs/remote-desktop-input.md).
+
+**The picture is sized to the desktop.** `ScreenSharingOverlay` renders the video in a box of the
+desktop's own aspect, as large as fits the viewport (`min(100vw, 100vh × w / h)` by
+`min(100vh, 100vw × h / w)`), so a small portrait stream such as a phone fills the height instead of
+sitting at its intrinsic size. Because the box *is* the picture, with no letterbox inside it, input
+maps through it exactly. In the box's corner `screen-sharing-overlay-stats` reads how the stream is
+arriving — bitrate, decoded size and frame rate, from the media port's `useReceivedVideoStats` —
+and is absent until a first interval is measured.
 
 **`HostRowToolingCell`** mounts `HostRowTooling` on every online row. `HostRowTooling` renders a report it
 is handed and fetches nothing; the cell is what asks. `useHostTooling(instanceId, online)` owns the
@@ -487,6 +509,13 @@ Connect adding a target with that `x11Display` and starting the stream on it, th
 label, and an X11 channel without `x11vnc` still listed with no Connect.
 `hostDesktopChannelsPage` exposes `connects(id)`, `connectTo(id, channelId)` and
 `channel(id, channelId)`.
+
+`cypress/component/HostsScreenIosSimulatorChannelAcceptance.cy.tsx` covers a booted simulator
+named by device and runtime, its bridge half, Connect attaching it by `deviceId`, and the start made
+without an inspection. `HostsScreenLocalHostMediaAcceptance.cy.tsx` covers the desktop's own host:
+Connect offered when the common room reaches it, the simulator watched in the room the start names,
+no Connect over its own wire alone, and the host addressed by the id it answers on this run.
+`ScreenSharingOverlayFitAcceptance.cy.tsx` covers the portrait fit and the stats readout.
 
 `cypress/component/HostDesktopConnectAcceptance.cy.tsx` covers the connect action and the overlay:
 the action offered over a media-carrying connection, withdrawn over one without media, withdrawn

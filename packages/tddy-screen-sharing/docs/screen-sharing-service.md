@@ -1,7 +1,7 @@
 # Screen-sharing service
 
-`tddy-screen-sharing` serves `screen_sharing.ScreenSharingService` and spawns the VNC/RDP bridge
-processes it streams from. It holds **no cryptography and no storage of its own**: a session
+`tddy-screen-sharing` serves `screen_sharing.ScreenSharingService` and spawns the VNC, RDP and
+iOS Simulator bridge processes it streams from. It holds **no cryptography and no storage of its own**: a session
 desktop's password, and a host desktop credential an operator asked to be remembered, are records in
 that user's credential store (`tddy-credentials`).
 
@@ -20,7 +20,7 @@ Product behaviour: [screen-sharing-sessions.md](../../../docs/ft/web/screen-shar
 | `screen_sharing_service::host_targets` | the bodies of the host-scoped RPCs (`list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream`) as `*_impl` members; `start_host_stream_impl` looks the target up with `find_host_target`, prepares the bridge and the sign-in, and hands them to `start_bridge_for_desktop` (the X11 `x11vnc` start, then the signed-in spawn) |
 | `screen_sharing_service::session_stream` | the body of the session-scoped `start_stream` as `start_stream_impl`, and `start_session_bridge`: the target lookup → password → `BridgeTarget` → spawn ladder, run only when the daemon config is present |
 | `x11vnc` | `X11vncServers`: one `x11vnc` per open X11 channel, keyed like its bridge; start (stopping the key's previous one first), wait until it accepts, stop; `x11vnc_arguments`, `X11VNC_HOST`, `DEFAULT_X11VNC_ACCEPT_TIMEOUT` (10 s) |
-| `bridge_config` | `BridgeSpawnConfig` and `PreparedBridge`, how a bridge's spawn configuration is built (`prepare_bridge`, `build_bridge_spawn_config`), and the bridge key, identity, track-name and LiveKit-room naming |
+| `bridge_config` | `BridgeSpawnConfig` (including `device`, the simulator udid, omitted from the JSON when absent) and `PreparedBridge`, how a bridge's spawn configuration is built (`prepare_bridge`, `build_bridge_spawn_config`; the protocol picks `resolve_{vnc,rdp,ios_simulator}_binary_path`), and the bridge key, identity, track-name and LiveKit-room naming |
 
 ## A start waits for its bridge
 
@@ -69,6 +69,24 @@ listening `host:port`. `start_host_stream` for one does the following:
 The x11vnc is stopped by `StopHostStream`, and by `reap_bridge` when a bridge exits on its own while
 its key still names it. A bridge that was stopped or replaced leaves the x11vnc alone, because its
 stopper owns that. A background task reaps every x11vnc child.
+
+## An iOS Simulator target is local and signs in with nothing
+
+`PROTOCOL_IOS_SIMULATOR` targets a booted simulator on the daemon's own Mac, bridged by
+`tddy-ios-emulator` (resolved by `resolve_ios_simulator_binary_path`: the
+`screen_sharing.ios_simulator_binary_path` config, else a sibling of the daemon, else `PATH`).
+
+- **Added only for this Mac.** `add_host_target` refuses, with `INVALID_ARGUMENT`, a target whose
+  `host` is not `127.0.0.1`, `::1` or `localhost` ("an iOS Simulator is bridged only on the Mac that
+  runs it, not at <host>") and one with an empty `device_id` ("an iOS Simulator target must name a
+  device udid"). It is refused when added rather than when started: a simulator on another Mac is
+  reached by that Mac's own daemon. Every other protocol carries no device.
+- **The device travels with the target.** `HostDesktopTarget.device` holds the udid, listed back on
+  `ScreenSharingTarget.device_id`, and `BridgeSpawnConfig.device` hands it to the bridge on stdin
+  with `port` 0.
+- **No sign-in.** `start_host_stream` gives an iOS target a `SignIn` of `DesktopAuthMethod::None`
+  with `Remembering::Nothing`: no `DESKTOP_CREDENTIALS` question is raised and the vault is not
+  consulted. Inspection, when asked, runs the bridge's `--inspect`, which advertises no method.
 
 ## A host desktop's sign-in
 
@@ -183,6 +201,7 @@ its stdin.
 | `tests/bridge_readiness_acceptance.rs` | a start against a `/bin/sh` stand-in bridge scripted per test (`tests/common`): refused sign-in, reported size on both scopes, early exit, silence past the timeout, and that a failed bridge is stopped |
 | `tests/x11_channels_acceptance.rs` | an X11 target through the RPC against stand-in `x11vnc` and bridge scripts (`tests/common`): argv `-display :1 -localhost`, the bridge pointed at the x11vnc's port, stop on close, one x11vnc after a reopen (also when the old bridge exits with its x11vnc), never-accepts → `DeadlineExceeded` with no bridge and the x11vnc stopped, and stop when the bridge fails to start or exits after running. The stand-ins are run once with `--warm-up` before any test clock starts, because a new executable's first exec on a loaded macOS machine can outlast a short accept window |
 | `tests/host_desktop_sign_in_acceptance.rs` | inspection (the methods its bridge read, only `{host, port}` on its stdin, an X11 display answered `NONE` with no bridge run, a failing bridge → `Unavailable` with its reason, `remembered`), the `DESKTOP_CREDENTIALS` question, the domain on the bridge's stdin, and Remember over the operator's real vault: no question on reopen, sealed only after the desktop accepts it, written nowhere without Remember, a refused credential never remembered, a refused remembered one never reused, a locked vault still asks, and Remember with a locked vault refused before the bridge starts |
+| `tests/ios_simulator_targets_acceptance.rs` | an iOS target against a stand-in installed as the iOS bridge only: started through that bridge at the size it reported, its stdin `device` the udid and `port` 0, a non-loopback host and a missing device refused with their exact messages, an attached simulator listed with its device, and a start that raises no sign-in prompt |
 | `tests/session_vault_target_store_acceptance.rs` | the store, over a real sealed vault: cross-session listing, locked, cleartext leakage |
 | `tests/screen_sharing_record_propagation.rs` | reconciliation of a screen-sharing record through the sync engine |
 | `tddy-service/tests/screen_sharing_carries_no_passphrase.rs` | the schema declares no unlock RPC and no passphrase field |

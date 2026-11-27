@@ -1,6 +1,6 @@
 //! LiveKit video track publisher — pushes a screen-sharing framebuffer as H.264.
 //!
-//! Pattern: RGBA → ABGR → I420 → `NativeVideoSource::capture_frame` → WebRTC H.264 pipeline.
+//! Pattern: RGBA → I420 → `NativeVideoSource::capture_frame` → WebRTC H.264 pipeline.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,8 +13,6 @@ use livekit::webrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 
-use crate::common::rgba_to_abgr;
-
 struct ScreenSharingStreamerState {
     /// Owned room, present when `start()` created the connection.
     /// `None` when the caller (e.g. `LiveKitParticipant`) owns the room.
@@ -24,6 +22,30 @@ struct ScreenSharingStreamerState {
     #[allow(dead_code)]
     _video_track: LocalVideoTrack,
     origin: Instant,
+}
+
+/// Convert an RGBA frame (bytes R, G, B, A per pixel) to I420.
+///
+/// libyuv names a format by its 32-bit word read little-endian, so its `ABGR` is the byte order
+/// R, G, B, A — exactly RGBA in memory — and the frame is handed over as it is. Reordering it to
+/// A, B, G, R bytes first would read alpha as red, which washes every colour towards pink.
+pub fn rgba_to_i420(rgba: &[u8], width: u32, height: u32) -> I420Buffer {
+    let mut i420_buffer = I420Buffer::new(width, height);
+    let (stride_y, stride_u, stride_v) = i420_buffer.strides();
+    let (data_y, data_u, data_v) = i420_buffer.data_mut();
+    yuv_helper::abgr_to_i420(
+        rgba,
+        width * 4,
+        data_y,
+        stride_y,
+        data_u,
+        stride_u,
+        data_v,
+        stride_v,
+        width as i32,
+        height as i32,
+    );
+    i420_buffer
 }
 
 /// Publishes a screen-sharing framebuffer as a LiveKit video track.
@@ -148,23 +170,7 @@ impl ScreenSharingStreamer {
         let guard = self.state.lock().await;
         let state = guard.as_ref().context("streamer already stopped")?;
 
-        let abgr = rgba_to_abgr(rgba);
-        let mut i420_buffer = I420Buffer::new(width, height);
-        let (stride_y, stride_u, stride_v) = i420_buffer.strides();
-        let (data_y, data_u, data_v) = i420_buffer.data_mut();
-
-        yuv_helper::abgr_to_i420(
-            &abgr,
-            width * 4,
-            data_y,
-            stride_y,
-            data_u,
-            stride_u,
-            data_v,
-            stride_v,
-            width as i32,
-            height as i32,
-        );
+        let i420_buffer = rgba_to_i420(rgba, width, height);
 
         let ts = state.origin.elapsed().as_micros() as i64;
         let video_frame = VideoFrame {

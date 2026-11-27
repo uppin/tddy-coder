@@ -52,6 +52,8 @@ const WIRING: &[&str] = &[
     "tddy-tools-cli",
     "tddy-rdp",
     "tddy-vnc",
+    // The iOS Simulator bridge: a screen-sharing bridge binary like tddy-vnc and tddy-rdp.
+    "tddy-ios-emulator",
     "tddy-e2e",
 ];
 

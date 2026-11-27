@@ -49,6 +49,8 @@ Five sections, each labelled with the tool it speaks for.
 | remote desktop | could not check | "Could not check :5900", with the reason on hover |
 | remote desktop (X11 display) | display available | "Display :1" with "Display available" — the daemon's user can connect to that display's X server socket |
 | remote desktop (X11 display) | no x11vnc | "Display :1" with "No bridge" — listed, with no Connect, until `x11vnc` is installed |
+| remote desktop (iOS Simulator) | booted | "iPhone 16 Pro · iOS 18.2" with "Simulator booted" — a booted simulator on this Mac |
+| remote desktop (iOS Simulator) | no bridge | the same, with "No bridge" — listed, with no Connect, until `tddy-ios-emulator` is beside the daemon |
 
 The remote-desktop section lists the host's **desktop channels**. Two are always there: VNC on
 `:5900` and RDP on `:3389`, including the ones nothing answered for. "No desktop on :5900" is a
@@ -62,7 +64,10 @@ Connect. Pressing Connect on an X11 channel has the daemon start `x11vnc` for th
 to loopback with no password, and the stream runs through it (see
 [screen-sharing-sessions.md](./screen-sharing-sessions.md) § Connecting from a host row). Without
 `x11vnc` on the host, its displays are still listed and report "No bridge", so the operator learns
-what to install.
+what to install. On a Mac the section also has **one channel per booted iOS Simulator**, named by
+device and runtime; shut-down devices are not listed, and a host with no Xcode, or that is not a
+Mac, lists none without reporting a failure (see
+[screen-sharing-sessions.md](./screen-sharing-sessions.md) § iOS Simulator).
 
 A host that has not answered yet renders a waiting marker, and a platform that cannot run the probes
 at all says so. Neither borrows the shape of a finding. The desktop section is the exception to the
@@ -231,6 +236,8 @@ than subscribed to, and only for hosts that are online.
 - [x] A display already served on its VNC port is not listed twice.
 - [x] Without `x11vnc` the X11 channels are listed but offer no Connect.
 - [x] A row with two connectable channels offers two Connect actions, each opening its own channel.
+- [x] A Mac lists each booted simulator by device and runtime; one whose bridge binary is missing is listed with no Connect.
+- [x] A host that cannot list simulators lists none and reports no failure.
 - [x] A host that does not answer reads "Tooling could not be read", never a blank cell.
 - [x] Two concurrent requests for one host run one probe.
 - [x] A request within the TTL runs no probe, and one after it probes again.

@@ -4,13 +4,15 @@ import type { RemoteVideoProps } from "tddy-client-web";
 import { asRoom } from "../roomHandle";
 
 /**
- * The video track `trackName` that `identity` publishes in `room`, attached to a `<video>` for as
- * long as it is subscribed. Renders the element whether or not the track has arrived, so a parent
- * can hold a ref to the picture from the first frame.
+ * The video track `trackName` that `identity` publishes in `room`, once it is subscribed; `null`
+ * before then and after the room or publisher goes.
  */
-export function RemoteVideo({ room: handle, identity, trackName, className, testId, videoRef }: RemoteVideoProps) {
+export function useRemoteVideoTrack(
+  handle: RemoteVideoProps["room"],
+  identity: string,
+  trackName: string,
+): VideoTrack | null {
   const room = asRoom(handle);
-  const ownRef = useRef<HTMLVideoElement>(null);
   const [videoTrack, setVideoTrack] = useState<VideoTrack | null>(null);
 
   useEffect(() => {
@@ -37,6 +39,18 @@ export function RemoteVideo({ room: handle, identity, trackName, className, test
       setVideoTrack(null);
     };
   }, [room, identity, trackName]);
+
+  return videoTrack;
+}
+
+/**
+ * The video track `trackName` that `identity` publishes in `room`, attached to a `<video>` for as
+ * long as it is subscribed. Renders the element whether or not the track has arrived, so a parent
+ * can hold a ref to the picture from the first frame.
+ */
+export function RemoteVideo({ room: handle, identity, trackName, className, testId, videoRef }: RemoteVideoProps) {
+  const ownRef = useRef<HTMLVideoElement>(null);
+  const videoTrack = useRemoteVideoTrack(handle, identity, trackName);
 
   useEffect(() => {
     const el = ownRef.current;

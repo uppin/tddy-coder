@@ -23,7 +23,7 @@ use tddy_service::proto::screen_sharing_input::{
     ScreenSharingInputService, ScreenSharingInputServiceServer,
 };
 
-use crate::client::{Credentials, ScreenSharingClient};
+use crate::client::{ConnectTarget, Credentials, ScreenSharingClient};
 use crate::streamer::ScreenSharingStreamer;
 use tddy_daemon_extensions::bridge_readiness::{
     write_readiness, AuthenticationRefused, BridgeReadiness, FailureKind,
@@ -63,6 +63,9 @@ pub struct BridgeConfig {
     /// Frames per second for the pump loop.
     #[serde(default = "default_fps")]
     pub fps: u32,
+    /// The one device on `host` this bridge streams (an iOS Simulator's udid); absent for VNC and RDP.
+    #[serde(default)]
+    pub device: Option<String>,
 }
 
 fn default_fps() -> u32 {
@@ -70,6 +73,15 @@ fn default_fps() -> u32 {
 }
 
 impl BridgeConfig {
+    /// Where the bridge connects: `host:port`, and the device when the config names one.
+    pub fn connect_target(&self) -> ConnectTarget {
+        ConnectTarget {
+            host: self.host.clone(),
+            port: self.port,
+            device: self.device.clone(),
+        }
+    }
+
     /// The credentials the bridge signs in with: each empty field becomes absent.
     pub fn credentials(&self) -> Credentials {
         let present = |value: &str| Some(value.to_owned()).filter(|v| !v.is_empty());
@@ -83,8 +95,21 @@ impl BridgeConfig {
 
 /// Input command forwarded from the RPC data channel to the pump loop.
 enum InputCmd {
-    Pointer { x: u32, y: u32, button_mask: u32 },
-    Key { keysym: u32, pressed: bool },
+    Pointer {
+        x: u32,
+        y: u32,
+        button_mask: u32,
+    },
+    Key {
+        keysym: u32,
+        pressed: bool,
+    },
+    Wheel {
+        x: u32,
+        y: u32,
+        delta_x: i32,
+        delta_y: i32,
+    },
 }
 
 /// Implements `ScreenSharingInputService` by forwarding events to the pump loop channel.
@@ -122,6 +147,12 @@ impl ScreenSharingInputService for InputForwarder {
                     Some(Event::Key(k)) => InputCmd::Key {
                         keysym: k.keysym,
                         pressed: k.pressed,
+                    },
+                    Some(Event::Wheel(w)) => InputCmd::Wheel {
+                        x: w.x,
+                        y: w.y,
+                        delta_x: w.delta_x,
+                        delta_y: w.delta_y,
                     },
                     None => continue,
                 };
@@ -251,7 +282,7 @@ async fn start_bridge<C: ScreenSharingClient>(
 ) -> Result<StartedBridge<C>, StartFailure> {
     let credentials = config.credentials();
 
-    let mut client = C::connect(&config.host, config.port, &credentials)
+    let mut client = C::connect(&config.connect_target(), &credentials)
         .await
         .context("screen sharing connect failed")
         .map_err(|e| classify(e, FailureKind::Connect))?;
@@ -364,6 +395,12 @@ async fn pump_loop<C: ScreenSharingClient>(
                         InputCmd::Key { keysym, pressed } => {
                             if let Err(e) = client.inject_key(keysym, pressed).await {
                                 error!("bridge: inject_key error: {}", e);
+                                return Err(e);
+                            }
+                        }
+                        InputCmd::Wheel { x, y, delta_x, delta_y } => {
+                            if let Err(e) = client.inject_wheel(x, y, delta_x, delta_y).await {
+                                error!("bridge: inject_wheel error: {}", e);
                                 return Err(e);
                             }
                         }

@@ -314,16 +314,19 @@ fn tag_refused_sign_in(error: SecurityError) -> anyhow::Error {
 
 #[async_trait::async_trait]
 impl tddy_screenshare::ScreenSharingClient for VncClientState {
-    async fn connect(host: &str, port: u16, credentials: &Credentials) -> anyhow::Result<Self> {
-        VncClientState::connect_with_credentials(host, port, credentials).await
+    async fn connect(
+        target: &tddy_screenshare::ConnectTarget,
+        credentials: &Credentials,
+    ) -> anyhow::Result<Self> {
+        VncClientState::connect_with_credentials(&target.host, target.port, credentials).await
     }
 
     /// Reads the server's security-type list (with `security::parse_security_types`) and, when
     /// VeNCrypt is offered, its subtype list; then disconnects without selecting a sign-in.
     async fn inspect(
-        host: &str,
-        port: u16,
+        target: &tddy_screenshare::ConnectTarget,
     ) -> anyhow::Result<Vec<tddy_screenshare::AdvertisedMethod>> {
+        let (host, port) = (&target.host, target.port);
         let tcp = tokio::net::TcpStream::connect(format!("{host}:{port}"))
             .await
             .with_context(|| format!("failed to connect to VNC at {host}:{port}"))?;
@@ -357,7 +360,39 @@ impl tddy_screenshare::ScreenSharingClient for VncClientState {
         self.keyboard_key(keysym, pressed).await
     }
 
+    /// One click of the RFB wheel buttons per axis that moved: 4 up, 5 down, 6 left, 7 right — each
+    /// pressed and released at the pointer.
+    async fn inject_wheel(
+        &mut self,
+        x: u32,
+        y: u32,
+        delta_x: i32,
+        delta_y: i32,
+    ) -> anyhow::Result<()> {
+        for mask in wheel_button_masks(delta_x, delta_y) {
+            self.pointer_event(x as u16, y as u16, mask).await?;
+            self.pointer_event(x as u16, y as u16, 0).await?;
+        }
+        Ok(())
+    }
+
     async fn stop(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
+}
+
+/// The RFB button-mask bits a scroll of `(delta_x, delta_y)` clicks: bit 3 (button 4) up, bit 4
+/// (button 5) down, bit 5 (button 6) left, bit 6 (button 7) right.
+pub fn wheel_button_masks(delta_x: i32, delta_y: i32) -> Vec<u8> {
+    let vertical = match delta_y.signum() {
+        -1 => Some(1 << 3),
+        1 => Some(1 << 4),
+        _ => None,
+    };
+    let horizontal = match delta_x.signum() {
+        -1 => Some(1 << 5),
+        1 => Some(1 << 6),
+        _ => None,
+    };
+    vertical.into_iter().chain(horizontal).collect()
 }

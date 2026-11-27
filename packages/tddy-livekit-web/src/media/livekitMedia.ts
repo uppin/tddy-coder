@@ -3,6 +3,7 @@ import { ParticipantVideoPreview } from "./ParticipantVideoPreview";
 import { RemoteVideo } from "./RemoteVideo";
 import { useHasCameraVideo } from "./useHasCameraVideo";
 import { usePresenterRoom } from "./usePresenterRoom";
+import { useReceivedVideoStats } from "./useReceivedVideoStats";
 import { useScreenSharingInput } from "./useScreenSharingInput";
 
 /** The LiveKit implementation of the media port: tracks, presenter room and screen-sharing input. */
@@ -11,5 +12,6 @@ export const livekitMedia: MediaPort = {
   useScreenSharingInput,
   useHasCameraVideo,
   RemoteVideo,
+  useReceivedVideoStats,
   VideoPreview: ParticipantVideoPreview,
 };

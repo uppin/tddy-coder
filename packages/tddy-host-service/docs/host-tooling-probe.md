@@ -534,12 +534,12 @@ claim.
 ### On the wire
 
 `HostRemoteDesktop` (`host.proto`) carries `{ outcome, protocol, can_bridge,
-desktop_reachable, port, failure_reason, channel_id, kind, display, label }`, and
+desktop_reachable, port, failure_reason, channel_id, kind, display, label, device_id }`, and
 `GetHostToolingResponse.remote_desktop` is `repeated`, one entry per desktop channel, beside the git, `gh` and ssh-agent blocks rather than on
 an RPC of its own.
 
 `protocol` is an `int32` holding **`screen_sharing.proto`'s `Protocol` values** (`1` = VNC, `2` =
-RDP), which `DesktopProtocol`'s discriminants mirror rather than restate. A second enum meaning the
+RDP, `3` = iOS Simulator), which `DesktopProtocol`'s discriminants mirror rather than restate. A second enum meaning the
 same thing is how two enums drift apart, and this one would have to agree with the service that
 actually spawns the bridges.
 
@@ -568,7 +568,7 @@ directory.
   `x11vnc` the display is still listed, so the operator learns what to install.
 
 On the wire each `HostRemoteDesktop` carries its channel identity: `kind` (`ENDPOINT` /
-`X11_DISPLAY`), `display`, `channel_id` (`vnc:5900`, `rdp:3389`, `x11:1`), and `label`
+`X11_DISPLAY` / `IOS_SIMULATOR`), `display`, `channel_id` (`vnc:5900`, `rdp:3389`, `x11:1`), and `label`
 ("Display :1"; empty for an endpoint). `channel_id` is how the web tells two channels apart.
 
 **Known limits.**
@@ -577,6 +577,25 @@ On the wire each `HostRemoteDesktop` carries its channel identity: `kind` (`ENDP
   identity for "the socket directory".
 - A display `:N` (N ≥ 1) already served on `5900 + N` is dropped here, and the endpoint probes
   read `:5900` only, so no reading offers it.
+
+### iOS Simulator channels
+
+`ios_simulators.rs` adds one reading per **booted iOS Simulator** on the host.
+`SubprocessHostToolingProbe::listing_ios_simulators_through(bridge)` wires it (`for_config` passes
+`resolve_ios_simulator_binary_path(config)`); `listing_ios_simulators_from(lister, bridge)` takes any
+`SimulatorLister`, which is how the tests inject one. A probe built without either lists none.
+The readings travel in `HostTooling.ios_simulators` and are appended after the desktop readings in
+`GetHostToolingResponse.remote_desktop`.
+
+- **Listing** (`BridgeBinarySimulatorLister`): runs `<bridge> --list-devices` and parses its one
+  JSON line of `{udid, name, runtime}` (`parse_listed_devices`). The bridge binary does the `simctl` work, so this crate
+  takes no dependency on its LiveKit stack. Any error — no binary, not macOS, no Xcode, unreadable
+  output — lists **no** simulators and is logged at debug; it never fails the probe.
+- **The reading** (`ios_simulator_channels(lister, can_bridge)`): `kind: IOS_SIMULATOR`,
+  `protocol: 3`, `outcome: Ok`, `desktop_reachable: true` (booted is what reachable means for a
+  simulator), `port: 0`, `channel_id: ios:<udid>`, `label: "<name> · <runtime>"` (e.g.
+  "iPhone 16 Pro · iOS 18.2"), `device_id: <udid>`. `can_bridge` is whether the bridge binary is
+  present (`binary_is_present`), the same for every simulator on the host.
 
 ### What this block does not do
 
@@ -660,6 +679,9 @@ a Unix host can never honestly give for them.
 | Integration | `host_tooling.rs` `#[cfg(test)]` | the desktop block arriving **beside** the other three rather than instead of them, and the two facts staying apart |
 | Unit | `x11_displays.rs` `#[cfg(all(test, unix))]` | enumeration against a temp socket directory (`test_util::AnX11SocketDir`, listeners bound by the test): ordered by number, dead sockets and non-`X<N>` names skipped, a missing directory empty |
 | Integration | `host_tooling.rs` `#[cfg(test)]` | X11 channels beside the endpoints: a display served on its VNC port not listed twice, and `can_bridge = false` without `x11vnc` |
+| Integration | `tests/ios_simulator_channels.rs` | each booted simulator as an exact `HostRemoteDesktop` named by device and runtime, unbridgeable without the bridge binary, none when the lister fails |
+| Integration | `tests/ios_simulator_listing.rs` | `parse_listed_devices`: the bridge's `--list-devices` line read as `BootedSimulator`s, and an unreadable line (e.g. `xcrun`'s "unable to find utility") an error |
+| Unit | `host_tooling.rs` `#[cfg(test)]` | simulators in the tooling report, bridgeable only when the bridge binary exists |
 | Unit | `host_messages.rs` `#[cfg(test)]` | the wire channel identity: `x11:1` / "Display :1" / `X11_DISPLAY`, and `vnc:5900` / `ENDPOINT` |
 | Integration | `host_tooling_handler_unit_tests.rs` | auth rejection, the OS user the probe is handed, peer routing, the agent block reaching the wire whole, and the cache wiring: two calls within the TTL run one probe, a different `github_hostname` is probed separately |
 | Unit | `host_tooling_cache.rs` `#[cfg(test)]` | dedup of concurrent callers, hit within the TTL, expiry, isolation by host, OS user and `github_hostname`, a dropped caller storing nothing, failed answers held, eviction of expired unheld slots |

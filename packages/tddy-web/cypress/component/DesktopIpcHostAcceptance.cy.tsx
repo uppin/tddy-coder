@@ -356,7 +356,40 @@ describe("a desktop app that is configured for LiveKit", () => {
     // not this node's, and asserting it back would be asserting the fixture.
     byTestId("provider").should("have.text", "livekit");
   });
+
+  it("can show its own host's screen once the common room reaches it, with calls still over IPC", () => {
+    // Given both providers, and this host's daemon on the common room
+    const providers = [anIpcProvider(), aLiveKitProvider()];
+
+    cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
+
+    // Then media is lent by the common room; calls and presence stay with the desktop's own wire
+    byTestId("provider").should("have.text", "ipc");
+    byTestId("capabilities").should("have.text", "media,rpc");
+  });
+
+  it("borrows no media while its own host is not on the common room yet", () => {
+    // Given a common room this host's daemon has not joined
+    const providers = [anIpcProvider(), aLiveKitProviderNotYetReaching(THIS_HOST)];
+
+    cy.mount(<ResolutionProbe providers={providers} hostId={THIS_HOST} />);
+
+    // Then
+    byTestId("capabilities").should("have.text", "rpc");
+  });
 });
+
+/** The LiveKit stand-in, joined but with `hostId`'s daemon not on the room. */
+function aLiveKitProviderNotYetReaching(hostId: string): ConnectionProvider {
+  const joined = aLiveKitProvider();
+  return {
+    id: joined.id,
+    connectHost: (asked) => {
+      const connection = joined.connectHost(asked);
+      return connection && asked === hostId ? { ...connection, status: "connecting" } : connection;
+    },
+  };
+}
 
 /**
  * A regression guard: the browser path must be untouched by everything the desktop build does.

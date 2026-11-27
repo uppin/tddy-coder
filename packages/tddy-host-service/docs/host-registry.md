@@ -62,7 +62,7 @@ directory holding everything scoped to it.
 | | |
 |---|---|
 | File | `host-desktop-targets.json` — `{ hosts: { <daemon_instance_id>: [HostDesktopTarget] } }` |
-| A target | `target_id`, `label`, `host`, `port`, `protocol`, `username`, and an optional `display`: the X11 display (`:N`) a daemon-started x11vnc serves in place of `host:port`. It is skipped when absent, so files written before it load unchanged |
+| A target | `target_id`, `label`, `host`, `port`, `protocol`, `username`, an optional `display`: the X11 display (`:N`) a daemon-started x11vnc serves in place of `host:port`, and an optional `device`: the udid of the iOS Simulator a `PROTOCOL_IOS_SIMULATOR` target streams (its `host` loopback, `port` 0). Both are skipped when absent, so files written before them load unchanged |
 | Publication | `tddy_core::atomic_file`, under a mutex held across each read-modify-write |
 
 The map is a `BTreeMap` so the file an operator opens is ordered the same way between writes rather

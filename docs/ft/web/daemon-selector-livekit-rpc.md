@@ -62,7 +62,10 @@ process, and `createIpcConnectionProvider` reaches it over the host application'
 registered ahead of the LiveKit provider, so its own host resolves in-process even when a common room
 is configured and could also reach that machine. It carries `{"rpc"}` and nothing else, so the same
 daemon is media-capable when a browser reaches it over the common room and not when its own desktop
-app reaches it in-process — the asymmetry capabilities-on-the-connection exists to express. See
+app reaches it in-process — the asymmetry capabilities-on-the-connection exists to express. One
+capability crosses: when the common room is joined and reaches that same daemon, it lends the
+in-process wire its **media**, so a desktop shared from the desktop app's own machine can be watched
+there. Calls still go in-process. See
 [`tddy-web` local host over IPC](../../../packages/tddy-web/docs/local-host-ipc.md).
 
 ## Scope boundary: daemon-level vs. per-session RPC

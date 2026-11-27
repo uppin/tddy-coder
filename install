@@ -382,7 +382,10 @@ DESKTOP_LINUX_BINARY_SRC="${ROOT_DIR}/target/release/tddy-desktop"
 # tddy-sandbox-runner and tddy-index-daemon are resolved as SIBLINGS OF THE RUNNING EXECUTABLE, which
 # for a macOS install is inside the .app, not BIN_DIR — so they are copied into both. On Linux the
 # executable IS in BIN_DIR and one copy serves both roles.
-DESKTOP_BINARIES=(tddy-coder tddy-tools tddy-sandbox-runner tddy-index-daemon tddy-remote-git-repo tddy-askpass tddy-session-sync)
+#
+# tddy-ios-emulator is the iOS Simulator screen-sharing bridge, resolved the same sibling way, which
+# is the one deployment where a simulator is on the daemon's own machine as a matter of course.
+DESKTOP_BINARIES=(tddy-coder tddy-tools tddy-sandbox-runner tddy-index-daemon tddy-ios-emulator tddy-remote-git-repo tddy-askpass tddy-session-sync)
 
 # --- generated files --------------------------------------------------------------------------
 #
@@ -1346,7 +1349,11 @@ fi
 # same reason: the daemon resolves it as a sibling of its own executable, with a bare name on PATH
 # as the only remaining fallback. Required in both modes, --user included, or the first restructure
 # a session asks for fails at spawn rather than at install time.
-INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner tddy-index-daemon tddy-git-clone)
+#
+# tddy-ios-emulator is the screen-sharing bridge for a booted iOS Simulator on this host, and the
+# program the daemon asks which simulators are booted. It is resolved as a sibling of the daemon too.
+# Off macOS it lists no simulators, so shipping it everywhere costs only its size.
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner tddy-index-daemon tddy-ios-emulator tddy-git-clone)
 if "$want_supervisor"; then
   INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
 fi

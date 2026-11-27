@@ -1,7 +1,10 @@
 use crate::screen_sharing_service::BridgeTarget;
 use crate::screen_sharing_service::DEFAULT_STREAM_FPS;
 use std::time::Duration;
-use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
+use tddy_daemon_kernel::config::{
+    resolve_ios_simulator_binary_path, resolve_rdp_binary_path, resolve_vnc_binary_path,
+    DaemonConfig,
+};
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_rpc::Status;
 use tddy_service::proto::screen_sharing::{
@@ -48,6 +51,7 @@ pub(crate) fn prepare_bridge(
     let binary = match target.protocol {
         Protocol::Vnc => resolve_vnc_binary_path(config),
         Protocol::Rdp => resolve_rdp_binary_path(config),
+        Protocol::IosSimulator => resolve_ios_simulator_binary_path(config),
         Protocol::Unspecified => {
             return Err(format!(
                 "target {} names no protocol to bridge it with",
@@ -129,6 +133,7 @@ pub(crate) fn build_bridge_spawn_config(
         height: 0,
         target_id: target.id.clone(),
         fps: DEFAULT_STREAM_FPS,
+        device: target.device.clone(),
     })
 }
 
@@ -221,6 +226,7 @@ pub(crate) fn host_target_as_bridge_target(target: &HostDesktopTarget) -> Bridge
         host: target.host.clone(),
         port: target.port,
         protocol: Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified),
+        device: target.device.clone(),
     }
 }
 
@@ -234,6 +240,7 @@ pub(crate) fn host_target_to_proto(t: &HostDesktopTarget) -> ProtoScreenSharingT
         username: t.username.clone(),
         x11_display: t.display,
         domain: String::new(),
+        device_id: t.device.clone().unwrap_or_default(),
     }
 }
 
@@ -255,4 +262,7 @@ pub(crate) struct BridgeSpawnConfig {
     pub(crate) height: u32,
     pub(crate) target_id: String,
     pub(crate) fps: u32,
+    /// The device the bridge streams (an iOS Simulator's udid); omitted for VNC and RDP.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) device: Option<String>,
 }

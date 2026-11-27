@@ -15,9 +15,9 @@ use tddy_daemon_kernel::config::{resolve_x11vnc_binary_path, DaemonConfig, Scree
 use tddy_host_service::host_desktop_targets::HostDesktopTarget;
 use tddy_rpc::{Code, Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
-    AddHostTargetRequest, AddHostTargetResponse, DesktopCredentialAnswer, ListHostTargetsRequest,
-    ListHostTargetsResponse, StartHostStreamRequest, StartStreamResponse, StopHostStreamRequest,
-    StopHostStreamResponse,
+    AddHostTargetRequest, AddHostTargetResponse, DesktopAuthMethod, DesktopCredentialAnswer,
+    ListHostTargetsRequest, ListHostTargetsResponse, Protocol, StartHostStreamRequest,
+    StartStreamResponse, StopHostStreamRequest, StopHostStreamResponse,
 };
 
 /// Whose sign-in to which host desktop a bridge start is settling in the vault.
@@ -25,6 +25,26 @@ struct SignedInDesktop<'a> {
     operator: &'a str,
     daemon_instance_id: &'a str,
     target_id: &'a str,
+}
+
+/// The device an iOS Simulator target streams, refused unless it names one on this Mac. Every
+/// other protocol carries no device.
+fn ios_simulator_device(req: &AddHostTargetRequest) -> Result<Option<String>, Status> {
+    if req.protocol != Protocol::IosSimulator as i32 {
+        return Ok(None);
+    }
+    if !matches!(req.host.as_str(), "127.0.0.1" | "::1" | "localhost") {
+        return Err(Status::invalid_argument(format!(
+            "an iOS Simulator is bridged only on the Mac that runs it, not at {}",
+            req.host
+        )));
+    }
+    if req.device_id.is_empty() {
+        return Err(Status::invalid_argument(
+            "an iOS Simulator target must name a device udid",
+        ));
+    }
+    Ok(Some(req.device_id.clone()))
 }
 
 impl ScreenSharingServiceImpl {
@@ -63,6 +83,8 @@ impl ScreenSharingServiceImpl {
             ))
         })?;
 
+        let device = ios_simulator_device(&req)?;
+
         // No password field, and none accepted: a host desktop's password is prompted when it is
         // opened, never stored beside the address of the machine it opens.
         let target_id = scope
@@ -78,6 +100,7 @@ impl ScreenSharingServiceImpl {
                     protocol: req.protocol,
                     username: req.username,
                     display: req.x11_display,
+                    device,
                 },
             )
             .map_err(Status::internal)?;
@@ -120,9 +143,19 @@ impl ScreenSharingServiceImpl {
         // Remembered, or asked for: the operator's own vault is the only place on this host a
         // desktop's credential is ever kept, and only when they said so. Otherwise it is read once
         // from the answer, handed to the bridge over its stdin, and dropped when this call returns.
-        let sign_in = self
-            .desktop_credential_for(scope, &operator, &req.daemon_instance_id, &target)
-            .await?;
+        let sign_in = if target.protocol == Protocol::IosSimulator as i32 {
+            // A simulator has no sign-in: the bridge reads a window on this Mac, so nobody is asked.
+            SignIn {
+                answer: DesktopCredentialAnswer {
+                    method: DesktopAuthMethod::None as i32,
+                    ..Default::default()
+                },
+                remembering: Remembering::Nothing,
+            }
+        } else {
+            self.desktop_credential_for(scope, &operator, &req.daemon_instance_id, &target)
+                .await?
+        };
 
         // Reported: these coordinates tell a browser to mount an overlay on a room, and a bridge that
         // never joined it leaves the operator watching nothing having already typed a secret. The

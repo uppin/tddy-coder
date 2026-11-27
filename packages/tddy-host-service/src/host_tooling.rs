@@ -128,7 +128,7 @@ pub fn classify_coder_version(exit_code: Option<i32>, output: &str) -> CoderCliS
 }
 
 /// Everything the tooling probe reports for one host.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HostTooling {
     pub git: GitIdentity,
     pub github_cli: GithubCliStatus,
@@ -140,6 +140,9 @@ pub struct HostTooling {
     pub remote_desktop: Vec<crate::remote_desktop_probe::DesktopReachability>,
     /// Added by `#remote-shell 4/7`: whether the `coder` CLI is on this host's path.
     pub coder_cli: CoderCliStatus,
+    /// One channel per booted iOS Simulator on this host ([`crate::ios_simulators`]); empty where
+    /// none can be listed.
+    pub ios_simulators: Vec<tddy_service::proto::host::HostRemoteDesktop>,
 }
 
 /// Probes a host for what it has installed and configured.
@@ -280,6 +283,16 @@ pub struct SubprocessHostToolingProbe {
     remote_desktop: Arc<dyn RemoteDesktopProbe>,
     /// Where X11 displays are listed from and how x11vnc resolves; `None` lists no X11 channels.
     x11_channels: Option<tddy_daemon_kernel::config::ScreenSharingConfig>,
+    /// Lists the booted iOS Simulators, with the bridge binary that would stream them; `None`
+    /// lists none.
+    ios_simulators: Option<IosSimulatorListing>,
+}
+
+/// Where the booted simulators are listed from, and the `tddy-ios-emulator` binary whose presence
+/// decides whether they can be bridged.
+struct IosSimulatorListing {
+    lister: Arc<dyn crate::ios_simulators::SimulatorLister>,
+    bridge: std::path::PathBuf,
 }
 
 impl Default for SubprocessHostToolingProbe {
@@ -300,8 +313,12 @@ impl SubprocessHostToolingProbe {
                 crate::remote_desktop_probe::TcpRemoteDesktopProbe::for_config(config),
             ),
             x11_channels: None,
+            ios_simulators: None,
         }
         .listing_x11_displays_for(config)
+        .listing_ios_simulators_through(
+            tddy_daemon_kernel::config::resolve_ios_simulator_binary_path(config).into(),
+        )
     }
 
     /// Fill the desktop block from `remote_desktop` instead of connecting for real.
@@ -310,6 +327,40 @@ impl SubprocessHostToolingProbe {
         Self {
             remote_desktop,
             x11_channels: None,
+            ios_simulators: None,
+        }
+    }
+
+    /// Also report one channel per booted iOS Simulator, listed by the `tddy-ios-emulator` binary
+    /// at `bridge` and bridgeable when it is present.
+    #[must_use]
+    pub fn listing_ios_simulators_through(self, bridge: std::path::PathBuf) -> Self {
+        let lister = Arc::new(crate::ios_simulators::BridgeBinarySimulatorLister::new(
+            bridge.clone(),
+        ));
+        self.listing_ios_simulators_from(lister, bridge)
+    }
+
+    /// Also report one channel per booted iOS Simulator `lister` reports, bridgeable when `bridge`
+    /// is present.
+    #[must_use]
+    pub fn listing_ios_simulators_from(
+        mut self,
+        lister: Arc<dyn crate::ios_simulators::SimulatorLister>,
+        bridge: std::path::PathBuf,
+    ) -> Self {
+        self.ios_simulators = Some(IosSimulatorListing { lister, bridge });
+        self
+    }
+
+    /// The booted simulators' channels, when this probe lists them.
+    fn ios_simulator_channels(&self) -> Vec<tddy_service::proto::host::HostRemoteDesktop> {
+        match &self.ios_simulators {
+            None => Vec::new(),
+            Some(listing) => crate::ios_simulators::ios_simulator_channels(
+                listing.lister.as_ref(),
+                crate::remote_desktop_probe::binary_is_present(&listing.bridge),
+            ),
         }
     }
 
@@ -388,6 +439,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         // TCP connects judged on whatever `git` and `gh` left of the deadline would report a host as
         // unprobeable for time they spent, which is the one thing this block must never claim.
         let remote_desktop = self.with_x11_channels(desktop_readings_of(remote_desktop, deadline));
+        let ios_simulators = self.ios_simulator_channels();
 
         let tooling = HostTooling {
             git: match (name, email) {
@@ -418,6 +470,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
                 // `coder` absent from the PATH is the finding "not installed", as for `gh`.
                 None => classify_coder_version(None, ""),
             },
+            ios_simulators,
         };
 
         warn_if_failed("git identity", os_user, &tooling.git.outcome);
@@ -454,6 +507,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
             remote_desktop: self.with_x11_channels(desktop_readings_of(remote_desktop, deadline)),
             // The path lookup is Unix-only, as the `gh` one is: nothing was probed here.
             coder_cli: CoderCliStatus::not_installed(),
+            ios_simulators: self.ios_simulator_channels(),
         };
 
         warn_if_a_desktop_probe_failed(&tooling.remote_desktop);
@@ -974,6 +1028,66 @@ mod tests {
         assert!(
             !status.authenticated,
             "a failed probe claims nothing about authentication"
+        );
+    }
+
+    struct ListingOneIphone;
+
+    impl crate::ios_simulators::SimulatorLister for ListingOneIphone {
+        fn booted(&self) -> Result<Vec<crate::ios_simulators::BootedSimulator>, String> {
+            Ok(vec![crate::ios_simulators::BootedSimulator {
+                udid: "UDID-IPHONE".into(),
+                name: "iPhone 16 Pro".into(),
+                runtime: "iOS 18.2".into(),
+            }])
+        }
+    }
+
+    /// The booted simulators arrive in the tooling report beside the desktop readings, bridgeable
+    /// only when the bridge binary the probe was given exists.
+    #[cfg(unix)]
+    #[test]
+    fn host_tooling_lists_the_booted_simulators_bridgeable_by_a_present_bridge() {
+        // Given
+        let bridge = tempfile::NamedTempFile::new().unwrap();
+        let probe =
+            SubprocessHostToolingProbe::probing_desktops_with(a_desktop_probe_reporting(vec![
+                serving_with_no_bridge(DesktopProtocol::Vnc),
+                bridgeable_with_no_desktop(DesktopProtocol::Rdp),
+            ]))
+            .listing_ios_simulators_from(Arc::new(ListingOneIphone), bridge.path().to_path_buf());
+
+        // When
+        let tooling = probe.probe(&the_current_os_user(), None);
+
+        // Then
+        assert_eq!(
+            tooling.ios_simulators,
+            crate::ios_simulators::ios_simulator_channels(&ListingOneIphone, true)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn host_tooling_marks_the_simulators_unbridgeable_when_the_bridge_is_missing() {
+        // Given
+        let probe =
+            SubprocessHostToolingProbe::probing_desktops_with(a_desktop_probe_reporting(vec![
+                serving_with_no_bridge(DesktopProtocol::Vnc),
+                bridgeable_with_no_desktop(DesktopProtocol::Rdp),
+            ]))
+            .listing_ios_simulators_from(
+                Arc::new(ListingOneIphone),
+                "/nonexistent/tddy-ios-emulator".into(),
+            );
+
+        // When
+        let tooling = probe.probe(&the_current_os_user(), None);
+
+        // Then
+        assert_eq!(
+            tooling.ios_simulators,
+            crate::ios_simulators::ios_simulator_channels(&ListingOneIphone, false)
         );
     }
 }

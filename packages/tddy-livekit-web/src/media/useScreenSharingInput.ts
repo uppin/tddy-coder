@@ -42,6 +42,7 @@ import {
 } from "tddy-client-web/gen/screen_sharing_input_pb";
 import {
   framebufferPointFor,
+  framebufferWheelDeltaFor,
   keysymFor,
   rfbButtonMaskFor,
   type Point,
@@ -109,6 +110,14 @@ export function useScreenSharingInput({
     heldButtonMask.current = landing.buttonMask;
     outboundRef.current?.enqueue(
       create(ScreenSharingInputEventSchema, { event: { case: "pointer", value: landing } }),
+    );
+  }, []);
+
+  const sendWheel = useCallback((at: Point, delta: Point) => {
+    outboundRef.current?.enqueue(
+      create(ScreenSharingInputEventSchema, {
+        event: { case: "wheel", value: { x: at.x, y: at.y, deltaX: delta.x, deltaY: delta.y } },
+      }),
     );
   }, []);
 
@@ -290,6 +299,68 @@ export function useScreenSharingInput({
       sendAfterAnyPendingMove({ ...at, buttonMask: rfbButtonMaskFor(mouseEvent.buttons) });
     };
 
+    // A scroll over the picture: summed per frame, as moves are, and sent where the pointer is. Its
+    // default — scrolling the page under the overlay — is taken over by the desktop.
+    let pendingWheel: { at: Point; delta: Point } | null = null;
+    let pendingWheelFrame = 0;
+    const flushPendingWheel = () => {
+      pendingWheelFrame = 0;
+      if (!pendingWheel) return;
+      if (pendingWheel.delta.x !== 0 || pendingWheel.delta.y !== 0) {
+        sendWheel(pendingWheel.at, pendingWheel.delta);
+      }
+      pendingWheel = null;
+    };
+    const onWheel = (wheelEvent: WheelEvent) => {
+      const box = measuredBox();
+      if (!box) return;
+      wheelEvent.preventDefault();
+      const at = framebufferPointFor(
+        { x: wheelEvent.clientX - box.left, y: wheelEvent.clientY - box.top },
+        { width: box.width, height: box.height },
+        { width: framebufferWidth, height: framebufferHeight },
+      );
+      const delta = framebufferWheelDeltaFor(
+        { x: wheelEvent.deltaX, y: wheelEvent.deltaY },
+        wheelEvent.deltaMode,
+        { width: box.width, height: box.height },
+        { width: framebufferWidth, height: framebufferHeight },
+      );
+      pendingWheel = {
+        at,
+        delta: {
+          x: (pendingWheel?.delta.x ?? 0) + delta.x,
+          y: (pendingWheel?.delta.y ?? 0) + delta.y,
+        },
+      };
+      pendingWheelFrame ||= requestAnimationFrame(flushPendingWheel);
+    };
+
+    // A finger on a touch screen is the left button: down on touch-start, moved while touching, up
+    // on its end. The page's own touch scrolling and zooming are taken over while it is on the
+    // picture.
+    const touchLanding = (touchEvent: TouchEvent, buttonMask: number): PointerLanding | null => {
+      const box = measuredBox();
+      const touch = touchEvent.changedTouches[0];
+      if (!box || !touch) return null;
+      const point = framebufferPointFor(
+        { x: touch.clientX - box.left, y: touch.clientY - box.top },
+        { width: box.width, height: box.height },
+        { width: framebufferWidth, height: framebufferHeight },
+      );
+      lastPointInPicture.current = point;
+      return { ...point, buttonMask };
+    };
+    const onTouch = (buttonMask: number) => (touchEvent: TouchEvent) => {
+      const landing = touchLanding(touchEvent, buttonMask);
+      if (!landing) return;
+      touchEvent.preventDefault();
+      sendAfterAnyPendingMove(landing);
+    };
+    const onTouchStart = onTouch(1);
+    const onTouchMove = onTouch(1);
+    const onTouchEnd = onTouch(0);
+
     const onContextMenu = (mouseEvent: MouseEvent) => {
       // The right-button press has already been forwarded and the remote desktop is opening its own
       // menu; the browser's would land on top of it, over the very thing the operator asked for.
@@ -321,6 +392,11 @@ export function useScreenSharingInput({
     element.addEventListener("mousemove", onMouseMove);
     element.addEventListener("mousedown", onMouseDown);
     element.addEventListener("contextmenu", onContextMenu);
+    element.addEventListener("wheel", onWheel, { passive: false });
+    element.addEventListener("touchstart", onTouchStart, { passive: false });
+    element.addEventListener("touchmove", onTouchMove, { passive: false });
+    element.addEventListener("touchend", onTouchEnd, { passive: false });
+    element.addEventListener("touchcancel", onTouchEnd, { passive: false });
     window.addEventListener("mouseup", onMouseUp);
     window.addEventListener("blur", onWindowBlur);
     // On the document, not the picture: a `<video>` takes no focus, so keys an operator types while
@@ -332,13 +408,19 @@ export function useScreenSharingInput({
       element.removeEventListener("mousemove", onMouseMove);
       element.removeEventListener("mousedown", onMouseDown);
       element.removeEventListener("contextmenu", onContextMenu);
+      element.removeEventListener("wheel", onWheel);
+      element.removeEventListener("touchstart", onTouchStart);
+      element.removeEventListener("touchmove", onTouchMove);
+      element.removeEventListener("touchend", onTouchEnd);
+      element.removeEventListener("touchcancel", onTouchEnd);
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("blur", onWindowBlur);
       document.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("keyup", onKeyUp);
       if (pendingFrame) cancelAnimationFrame(pendingFrame);
+      if (pendingWheelFrame) cancelAnimationFrame(pendingWheelFrame);
     };
-  }, [picture, framebufferWidth, framebufferHeight, releaseEverythingHeld, sendKey, sendPointer]);
+  }, [picture, framebufferWidth, framebufferHeight, releaseEverythingHeld, sendKey, sendPointer, sendWheel]);
 
   return { inputUnavailable };
 }

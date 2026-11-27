@@ -52,6 +52,8 @@ pub(crate) struct BridgeTarget {
     pub(crate) host: String,
     pub(crate) port: u16,
     pub(crate) protocol: Protocol,
+    /// The one device on `host` the bridge streams (an iOS Simulator's udid); `None` otherwise.
+    pub(crate) device: Option<String>,
 }
 
 impl BridgeTarget {
@@ -64,6 +66,7 @@ impl BridgeTarget {
             port: u16::try_from(target.port)
                 .map_err(|_| format!("{} is not a port a desktop can listen on", target.port))?,
             protocol: Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified),
+            device: Some(target.device_id.clone()).filter(|device| !device.is_empty()),
         })
     }
 }
@@ -363,6 +366,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             username: req.username,
             x11_display: None,
             domain: String::new(),
+            device_id: String::new(),
         };
 
         let target = store
@@ -945,6 +949,7 @@ mod tests {
                     username: "ada".to_string(),
                     x11_display: None,
                     domain: String::new(),
+                    device_id: String::new(),
                 }))
                 .await
                 .map(|attached| attached.into_inner().target_id)
@@ -1091,6 +1096,7 @@ mod tests {
                     username: "ada".to_string(),
                     x11_display: None,
                     domain: String::new(),
+                    device_id: String::new(),
                 }))
                 .await
                 .expect_err("a stranger must not attach a desktop to a host")
@@ -1765,6 +1771,7 @@ mod tests {
             host: "10.0.0.9".to_string(),
             port: 5900,
             protocol: Protocol::Vnc,
+            device: None,
         };
 
         // When a bridge's spawn configuration is assembled

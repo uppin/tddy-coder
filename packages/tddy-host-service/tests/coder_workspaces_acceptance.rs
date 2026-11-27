@@ -379,6 +379,7 @@ impl HostToolingProbe for AHostWhoseCoderCliIs {
             ssh_agent: AgentStatus::unreachable(),
             remote_desktop: Vec::new(),
             coder_cli: self.0.clone(),
+            ios_simulators: Vec::new(),
         }
     }
 }

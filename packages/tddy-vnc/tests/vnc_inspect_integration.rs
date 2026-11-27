@@ -14,7 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
-use tddy_screenshare::{AdvertisedMethod, ScreenSharingClient};
+use tddy_screenshare::{AdvertisedMethod, ConnectTarget, ScreenSharingClient};
 use tddy_vnc::vnc_client::VncClientState;
 
 // ── RFB security type numbers ─────────────────────────────────────────────────
@@ -90,7 +90,10 @@ impl AdvertisingServer {
     async fn inspected(&self) -> Vec<AdvertisedMethod> {
         tokio::time::timeout(
             AN_INSPECTION_FINISHES_WITHIN,
-            <VncClientState as ScreenSharingClient>::inspect("127.0.0.1", self.port),
+            <VncClientState as ScreenSharingClient>::inspect(&ConnectTarget::network(
+                "127.0.0.1",
+                self.port,
+            )),
         )
         .await
         .expect("inspecting the VNC server did not finish within the timeout")

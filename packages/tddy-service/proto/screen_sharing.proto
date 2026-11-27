@@ -44,6 +44,9 @@ enum Protocol {
   PROTOCOL_UNSPECIFIED = 0;
   PROTOCOL_VNC = 1;
   PROTOCOL_RDP = 2;
+  // A booted iOS Simulator on the daemon's own Mac, named by `device_id`. `host` is loopback and
+  // `port` is 0: the bridge reads the Simulator.app window, not a network desktop.
+  PROTOCOL_IOS_SIMULATOR = 3;
 }
 
 // --- Shared types ---
@@ -59,6 +62,8 @@ message ScreenSharingTarget {
   optional uint32 x11_display = 7;
   // Windows domain the RDP account belongs to (empty for local accounts and for VNC).
   string   domain   = 8;
+  // The device a PROTOCOL_IOS_SIMULATOR target streams: the simulator's udid. Empty otherwise.
+  string   device_id = 9;
 }
 
 // --- ListTargets ---
@@ -166,6 +171,9 @@ message AddHostTargetRequest {
   optional uint32 x11_display = 8;
   // Windows domain the RDP account belongs to (empty for local accounts and for VNC).
   string domain = 9;
+  // The simulator udid a PROTOCOL_IOS_SIMULATOR target streams (host.proto `HostRemoteDesktop.device_id`).
+  // Required for that protocol, and its `host` must be loopback; empty for every other protocol.
+  string device_id = 10;
 }
 message AddHostTargetResponse {
   string target_id = 1;

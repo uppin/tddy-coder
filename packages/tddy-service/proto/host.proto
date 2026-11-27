@@ -376,8 +376,10 @@ message HostRemoteDesktop {
   DesktopChannelKind kind = 8;
   // The X display number for an X11_DISPLAY channel (`:1` → 1). Zero and meaningless otherwise.
   uint32 display = 9;
-  // What the Hosts screen calls this channel, e.g. "Display :1".
+  // What the Hosts screen calls this channel, e.g. "Display :1" or "iPhone 16 Pro · iOS 18.2".
   string label = 10;
+  // The simulator udid for an IOS_SIMULATOR channel. Empty otherwise.
+  string device_id = 11;
 }
 
 // What a desktop channel is.
@@ -388,6 +390,8 @@ enum DesktopChannelKind {
   // An X11 display (`display`) the daemon serves on demand by starting x11vnc for it. `port` is
   // zero: x11vnc is given a free loopback port when the channel is opened.
   DESKTOP_CHANNEL_KIND_X11_DISPLAY = 2;
+  // A booted iOS Simulator on this Mac (`device_id`), bridged by tddy-ios-emulator. `port` is zero.
+  DESKTOP_CHANNEL_KIND_IOS_SIMULATOR = 3;
 }
 
 // Whether a host has a reachable ssh-agent, and what it is holding.

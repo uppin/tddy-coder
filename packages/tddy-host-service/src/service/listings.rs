@@ -144,6 +144,7 @@ impl HostServiceImpl {
                 .remote_desktop
                 .iter()
                 .map(crate::host_messages::host_remote_desktop_message)
+                .chain(tooling.ios_simulators.iter().cloned())
                 .collect(),
             coder_cli: Some(crate::host_messages::coder_cli_message(&tooling.coder_cli)),
         }))

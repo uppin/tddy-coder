@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { useMediaPort, type RoomHandle } from "tddy-client-web";
+import { useMediaPort, type ReceivedVideoStats, type RoomHandle } from "tddy-client-web";
 import { exitDocumentFullscreen, isTargetInActiveFullscreen, useElementFullscreen } from "tddy-terminal-web";
 import { isKeyboardLockSupported, lockKeyboard, unlockKeyboard } from "./keyboardLock";
 
@@ -65,6 +65,22 @@ function useLeaveFullscreenOnUnmount(ref: React.RefObject<HTMLElement | null>): 
   }, []);
 }
 
+/**
+ * The largest box of the desktop's aspect (`width × height`) that fits the overlay, which fills the
+ * viewport — the same box `object-fit: contain` would draw the picture in.
+ */
+function fittedPictureSize(width: number, height: number): React.CSSProperties {
+  return {
+    width: `min(100vw, calc(100vh * ${width} / ${height}))`,
+    height: `min(100vh, calc(100vw * ${height} / ${width}))`,
+  };
+}
+
+/** How the stream is arriving, in one short line: bitrate, decoded size, frame rate. */
+function receivedVideoText(stats: ReceivedVideoStats): string {
+  return `${stats.kbps} kbps · ${stats.width}×${stats.height} · ${stats.fps} fps`;
+}
+
 export function ScreenSharingOverlay({
   room,
   bridgeIdentity,
@@ -75,7 +91,8 @@ export function ScreenSharingOverlay({
 }: ScreenSharingOverlayProps): React.ReactElement {
   const overlayRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { RemoteVideo, useScreenSharingInput } = useMediaPort();
+  const { RemoteVideo, useScreenSharingInput, useReceivedVideoStats } = useMediaPort();
+  const received = useReceivedVideoStats(room, bridgeIdentity, trackName);
   const { isFullscreen, enter, exit } = useElementFullscreen(overlayRef);
 
   const keyboardLocked = useKeyboardLockWhileFullscreen(isFullscreen);
@@ -148,14 +165,27 @@ export function ScreenSharingOverlay({
             Close
           </button>
         </div>
-        <RemoteVideo
-          testId="screen-sharing-overlay-video"
-          videoRef={videoRef}
-          room={room}
-          identity={bridgeIdentity}
-          trackName={trackName}
-          className="max-w-full max-h-full"
-        />
+        {/* Sized to the desktop's own aspect, as large as fits: a small portrait stream (a phone)
+            fills the height rather than sitting at its intrinsic size, and because the box *is* the
+            picture — no letterboxing inside it — input maps through the box exactly. */}
+        <div data-testid="screen-sharing-overlay-picture" style={fittedPictureSize(width, height)}>
+          <RemoteVideo
+            testId="screen-sharing-overlay-video"
+            videoRef={videoRef}
+            room={room}
+            identity={bridgeIdentity}
+            trackName={trackName}
+            className="block w-full h-full"
+          />
+        </div>
+        {received && (
+          <div
+            data-testid="screen-sharing-overlay-stats"
+            className="absolute bottom-2 right-2 px-2 py-0.5 text-xs font-mono bg-black/60 text-white/80 rounded pointer-events-none"
+          >
+            {receivedVideoText(received)}
+          </div>
+        )}
         {inputUnavailable && (
           <div
             data-testid="screen-sharing-overlay-input-unavailable"

@@ -31,6 +31,7 @@ fn a_desktop() -> ScreenSharingTarget {
         username: "ada".to_string(),
         x11_display: None,
         domain: String::new(),
+        device_id: String::new(),
     }
 }
 
