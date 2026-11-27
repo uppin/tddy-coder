@@ -174,8 +174,9 @@ impl ConversationWorktrees {
         }
         self.clear_leftovers(&root, &branch, branch_survived)
             .await?;
-        inherit::exclude_conversation_worktrees(&inherit::common_dir(caller).await?).await?;
-        let base = inherit::base_commit(caller).await?;
+        let fs = crate::port();
+        inherit::exclude_conversation_worktrees(&fs, &inherit::common_dir(caller).await?).await?;
+        let base = inherit::base_commit(&fs, caller).await?;
         let base_ref = self.base_ref_of(conversation);
         git(
             caller,
@@ -387,6 +388,7 @@ impl ConversationWorktree {
     /// for its staging state and never written, and the pulled changes arrive unstaged.
     pub(crate) async fn apply_3way(
         &self,
+        fs: &tddy_fs::AsyncFs,
         patch: &[u8],
         touched: &[u8],
     ) -> Result<Vec<String>, WorktreeError> {
@@ -399,14 +401,14 @@ impl ConversationWorktree {
         .await?;
         let index = self.caller.join(index.trim());
         let scratch = inherit::scratch_path(&index);
-        tokio::fs::copy(&index, &scratch)
+        fs.copy(&index, &scratch)
             .await
             .map_err(|source| WorktreeError::Io {
                 context: format!("seeding the scratch index from {}", index.display()),
                 source,
             })?;
         let result = self.apply_with_index(patch, touched, &scratch).await;
-        if let Err(error) = tokio::fs::remove_file(&scratch).await {
+        if let Err(error) = fs.remove_file(&scratch).await {
             log::debug!("scratch index {} not removed: {error}", scratch.display());
         }
         result

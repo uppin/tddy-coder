@@ -32,6 +32,12 @@ mod conversation_id;
 mod diff;
 mod git;
 mod inherit;
+
+/// The filesystem port for async code: git drives the real disk on this host, so the port is
+/// `DiskFs` — a `MemFs` could never back the worktrees git itself reads and writes.
+pub(crate) fn port() -> tddy_fs::AsyncFs {
+    tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+}
 mod lineage;
 mod range_pull;
 mod reset;

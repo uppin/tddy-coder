@@ -74,9 +74,11 @@ impl ConversationWorktree {
         let _exclusive = serialise::exclusive(self.root()).await;
         // The tip itself when the worktree is clean; else its uncommitted state as a commit on top
         // of the tip that no branch points at yet.
+        let fs = crate::port();
         let ours =
-            inherit::uncommitted_state_as_commit(self.root(), OUTSIDE_A_TOOL_CALL_SUBJECT).await?;
-        let snapshot = inherit::base_commit(self.caller()).await?;
+            inherit::uncommitted_state_as_commit(&fs, self.root(), OUTSIDE_A_TOOL_CALL_SUBJECT)
+                .await?;
+        let snapshot = inherit::base_commit(&fs, self.caller()).await?;
         let taken = self.caller_state_taken_in().await?;
         // A snapshot's hash differs from call to call; its tree says whether the files did.
         if self.tree_of(&snapshot).await? == self.tree_of(&taken).await? {
