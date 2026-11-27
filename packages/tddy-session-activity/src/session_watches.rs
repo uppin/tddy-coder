@@ -132,6 +132,7 @@ pub(crate) struct ProjectWatches {
 
 /// Every project's watches on this host.
 pub struct SessionWatchStore {
+    fs: Arc<dyn tddy_fs::Fs>,
     data_dir: PathBuf,
     /// One lock per project: every operation on a project's watches holds it, which is what makes a
     /// record delivered once across concurrent calls.
@@ -153,26 +154,17 @@ impl SessionWatchStore {
     fn persist(&self, project_id: &str, state: &ProjectWatches) -> anyhow::Result<()> {
         let path = watches_file(&self.data_dir, project_id)?;
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            self.fs
+                .create_dir_all(parent)
                 .map_err(|e| anyhow::anyhow!("create {}: {e}", parent.display()))?;
         }
         let body = serde_json::to_string(state)
             .map_err(|e| anyhow::anyhow!("serialize the session watches: {e}"))?;
-        let temporary = path.with_file_name(format!("{SESSION_WATCHES_FILE}.tmp"));
-        let mut file = std::fs::File::create(&temporary)
-            .map_err(|e| anyhow::anyhow!("create {}: {e}", temporary.display()))?;
-        use std::io::Write as _;
-        file.write_all(body.as_bytes())
-            .and_then(|()| file.sync_all())
-            .map_err(|e| anyhow::anyhow!("write {}: {e}", temporary.display()))?;
-        std::fs::rename(&temporary, &path)
-            .map_err(|e| anyhow::anyhow!("replace {}: {e}", path.display()))?;
-        if let Some(parent) = path.parent() {
-            std::fs::File::open(parent)
-                .and_then(|dir| dir.sync_all())
-                .map_err(|e| anyhow::anyhow!("sync {}: {e}", parent.display()))?;
-        }
-        Ok(())
+        // The port's atomic write is the swap-then-rename this did by hand, synced before the
+        // rename, so a crash never leaves an empty or short file where the previous one stood.
+        self.fs
+            .write_atomic(&path, body.as_bytes(), None)
+            .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))
     }
 
     /// [`Self::persist`], logging a failure: the in-memory watches still stand, and the next

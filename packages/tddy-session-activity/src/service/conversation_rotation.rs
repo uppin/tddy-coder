@@ -25,19 +25,23 @@ use crate::service::ActivityServiceImpl;
 /// The marker an armed rotation leaves in its session directory.
 const ARMED_MARKER: &str = ".conversation-rotation-armed";
 
-fn rotation_state(session_dir: &Path) -> RotationState {
-    if session_dir.join(ARMED_MARKER).exists() {
+fn rotation_state(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> RotationState {
+    if fs.exists(&session_dir.join(ARMED_MARKER)) {
         RotationState::Armed
     } else {
         RotationState::Idle
     }
 }
 
-fn set_rotation_state(session_dir: &Path, state: RotationState) -> Result<(), Status> {
+fn set_rotation_state(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    state: RotationState,
+) -> Result<(), Status> {
     let marker = session_dir.join(ARMED_MARKER);
     let result = match state {
-        RotationState::Armed => std::fs::write(&marker, b""),
-        RotationState::Idle => match std::fs::remove_file(&marker) {
+        RotationState::Armed => fs.write(&marker, b""),
+        RotationState::Idle => match fs.remove_file(&marker) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             other => other,
         },
@@ -68,17 +72,21 @@ impl ActivityServiceImpl {
             .last()
             .map_or(meta.session_id.as_str(), |c| c.id.as_str());
         let step = rotation.step(
-            rotation_state(session_dir),
+            rotation_state(&*self.ports.fs, session_dir),
             current,
             &req.hook_event_name,
             &req.hook_fields,
         );
         match step {
             RotationStep::Unchanged => Ok(()),
-            RotationStep::Arm => set_rotation_state(session_dir, RotationState::Armed),
-            RotationStep::Disarm => set_rotation_state(session_dir, RotationState::Idle),
+            RotationStep::Arm => {
+                set_rotation_state(&*self.ports.fs, session_dir, RotationState::Armed)
+            }
+            RotationStep::Disarm => {
+                set_rotation_state(&*self.ports.fs, session_dir, RotationState::Idle)
+            }
             RotationStep::RotateTo(next) => {
-                set_rotation_state(session_dir, RotationState::Idle)?;
+                set_rotation_state(&*self.ports.fs, session_dir, RotationState::Idle)?;
                 record_rotation(session_dir, &meta, next)
             }
         }

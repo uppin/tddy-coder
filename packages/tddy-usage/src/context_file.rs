@@ -5,11 +5,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::gather::{account_on, gather_session_usage_on};
+use crate::registry::registered_conversations_on;
 use crate::token_accounting::ConversationRecord;
-use crate::{
-    account, gather_session_usage, registered_conversations, RegisteredConversation, UsageContext,
-    UsageSection,
-};
+use crate::{RegisteredConversation, UsageContext, UsageSection};
 
 /// The file a launch writes next to the session's `.session.yaml`.
 pub const USAGE_CONTEXT_FILE: &str = "usage-context.json";
@@ -38,18 +37,32 @@ pub struct UsageContextFile {
 /// relaunch records the context it recomputed). The file is written to a sibling and renamed, so a
 /// reader never sees a half-written one.
 pub fn write_usage_context(session_dir: &Path, context: &UsageContextFile) -> std::io::Result<()> {
+    write_usage_context_on(&tddy_fs::DiskFs, session_dir, context)
+}
+
+/// [`write_usage_context`] through the filesystem port.
+pub fn write_usage_context_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    context: &UsageContextFile,
+) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(context)?;
     let path = session_dir.join(USAGE_CONTEXT_FILE);
     let tmp = session_dir.join(format!("{USAGE_CONTEXT_FILE}.tmp"));
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, &path)
+    fs.write(&tmp, &json)?;
+    fs.rename(&tmp, &path)
 }
 
 /// The context `<session_dir>/usage-context.json` records, or `None` when the session has none
 /// (it predates the file, or its launch never got that far) or it does not parse.
 pub fn read_usage_context(session_dir: &Path) -> Option<UsageContextFile> {
+    read_usage_context_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_usage_context`] through the filesystem port.
+pub fn read_usage_context_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Option<UsageContextFile> {
     let path = session_dir.join(USAGE_CONTEXT_FILE);
-    let text = std::fs::read_to_string(&path).ok()?;
+    let text = fs.read_to_string(&path).ok()?;
     match serde_json::from_str(&text) {
         Ok(context) => Some(context),
         Err(e) => {
@@ -66,7 +79,16 @@ pub fn gather_session_usage_for(
     session_dir: &Path,
     binding_for: &dyn Fn(&str) -> Option<UsageSection>,
 ) -> Vec<ConversationRecord> {
-    let mut records = match read_usage_context(session_dir) {
+    gather_session_usage_for_on(&tddy_fs::DiskFs, session_dir, binding_for)
+}
+
+/// [`gather_session_usage_for`] through the filesystem port.
+pub fn gather_session_usage_for_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    binding_for: &dyn Fn(&str) -> Option<UsageSection>,
+) -> Vec<ConversationRecord> {
+    let mut records = match read_usage_context_on(fs, session_dir) {
         None => {
             let ctx = UsageContext {
                 agent_home: None,
@@ -76,7 +98,7 @@ pub fn gather_session_usage_for(
                 agent_label: String::new(),
                 fallback_model: String::new(),
             };
-            gather_session_usage(None, &ctx)
+            gather_session_usage_on(fs, None, &ctx)
         }
         Some(file) => {
             let section = binding_for(&file.spec_id);
@@ -88,15 +110,15 @@ pub fn gather_session_usage_for(
                 agent_label: file.spec_id,
                 fallback_model: file.model.unwrap_or_default(),
             };
-            gather_session_usage(section.as_ref(), &ctx)
+            gather_session_usage_on(fs, section.as_ref(), &ctx)
         }
     };
     let known: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
-    for conversation in registered_conversations(session_dir) {
+    for conversation in registered_conversations_on(fs, session_dir) {
         if known.contains(&conversation.conversation_id) {
             continue;
         }
-        records.extend(registered_rows(session_dir, &conversation, binding_for));
+        records.extend(registered_rows(fs, session_dir, &conversation, binding_for));
     }
     records
 }
@@ -104,6 +126,7 @@ pub fn gather_session_usage_for(
 /// The rows of one registered conversation under its own agent's binding, its top row nested under
 /// the conversation it was registered with. No binding for its spec, no rows.
 fn registered_rows(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     conversation: &RegisteredConversation,
     binding_for: &dyn Fn(&str) -> Option<UsageSection>,
@@ -119,7 +142,7 @@ fn registered_rows(
         agent_label: conversation.agent_label.clone(),
         fallback_model: String::new(),
     };
-    let mut rows = account(&section, &ctx);
+    let mut rows = account_on(fs, &section, &ctx);
     for row in &mut rows {
         if row.id == conversation.conversation_id {
             row.parent_id = Some(conversation.parent_id.clone());

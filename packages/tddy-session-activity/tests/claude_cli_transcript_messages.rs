@@ -61,6 +61,7 @@ impl AnActivityHost {
         let data_dir = tempfile::tempdir().expect("a temporary data dir");
         write_session(data_dir.path());
         let service = ActivityServiceImpl::new(ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             os_users: Arc::new(|token: &str| {
                 if token == WEB_TOKEN {
                     Ok(OS_USER.to_string())

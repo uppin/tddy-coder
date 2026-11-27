@@ -7,8 +7,6 @@
 //! owned by the session's OS user, and the pane's command sources it, deletes it and `exec`s the
 //! agent ([`PANE_SCRIPT`]). No value ever appears on an argv.
 
-use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use super::TmuxError;
@@ -57,6 +55,16 @@ pub fn write_pane_env_file(
     owner: Option<PaneEnvOwner>,
     env: &[(String, String)],
 ) -> Result<PathBuf, TmuxError> {
+    write_pane_env_file_on(&tddy_fs::DiskFs, session_dir, owner, env)
+}
+
+/// [`write_pane_env_file`] through the filesystem port.
+pub fn write_pane_env_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    owner: Option<PaneEnvOwner>,
+    env: &[(String, String)],
+) -> Result<PathBuf, TmuxError> {
     if !session_dir.is_absolute() {
         return Err(TmuxError::new(format!(
             "the pane environment needs the session's absolute directory, not {}",
@@ -65,23 +73,20 @@ pub fn write_pane_env_file(
     }
     let contents = shell_exports(env)?;
     let dir = session_dir.join(PANE_ENV_DIR);
-    std::fs::create_dir_all(&dir).map_err(|e| io_error("create", &dir, e))?;
-    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+    fs.create_dir_all(&dir)
+        .map_err(|e| io_error("create", &dir, e))?;
+    fs.set_mode(&dir, 0o700)
         .map_err(|e| io_error("restrict", &dir, e))?;
     hand_to(&dir, owner)?;
     let path = dir.join(format!("{}.env", uuid::Uuid::new_v4()));
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&path)
-        .map_err(|e| io_error("create", &path, e))?;
-    let written = file
-        .write_all(contents.as_bytes())
-        .map_err(|e| io_error("write", &path, e))
+    // Exclusive create at exactly `0600`, never wider, not even briefly: a fresh name, so an
+    // existing file is never written through.
+    let written = fs
+        .create_new_with_mode(&path, contents.as_bytes(), 0o600)
+        .map_err(|e| io_error("create", &path, e))
         .and_then(|()| hand_to(&path, owner));
     if let Err(error) = written {
-        remove_pane_env_file(&path);
+        remove_pane_env_file_on(fs, &path);
         return Err(error);
     }
     Ok(path)
@@ -91,7 +96,12 @@ pub fn write_pane_env_file(
 /// already gone is fine; any other failure is logged, since the start's own error is the one the
 /// caller reports.
 pub fn remove_pane_env_file(path: &Path) {
-    match std::fs::remove_file(path) {
+    remove_pane_env_file_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`remove_pane_env_file`] through the filesystem port.
+pub fn remove_pane_env_file_on(fs: &dyn tddy_fs::Fs, path: &Path) {
+    match fs.remove_file(path) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => log::warn!(
@@ -131,8 +141,32 @@ fn is_shell_name(key: &str) -> bool {
 fn hand_to(path: &Path, owner: Option<PaneEnvOwner>) -> Result<(), TmuxError> {
     match owner {
         None => Ok(()),
-        Some(PaneEnvOwner { uid, gid }) => std::os::unix::fs::chown(path, Some(uid), Some(gid))
-            .map_err(|e| io_error(&format!("give uid {uid}"), path, e)),
+        Some(PaneEnvOwner { uid, gid }) => {
+            // `libc::chown` directly: the port has no ownership operation, and ownership is a
+            // process-credential act, not filesystem content. Same call `std::os::unix::fs::chown`
+            // performed.
+            let c_path =
+                std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
+                    io_error(
+                        "give",
+                        path,
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidFilename,
+                            "path contains NUL",
+                        ),
+                    )
+                })?;
+            let ret = unsafe { libc::chown(c_path.as_ptr(), uid, gid) };
+            if ret == -1 {
+                Err(io_error(
+                    &format!("give uid {uid}"),
+                    path,
+                    std::io::Error::last_os_error(),
+                ))
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 
@@ -146,6 +180,7 @@ fn io_error(action: &str, path: &Path, error: std::io::Error) -> TmuxError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     const SENTINEL: &str = "sk-sentinel-it's-$HOME-`x`";
 

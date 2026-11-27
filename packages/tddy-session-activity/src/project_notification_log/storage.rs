@@ -9,8 +9,6 @@
 
 mod dto;
 
-use std::fs::OpenOptions;
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -81,24 +79,27 @@ pub(super) struct Replayed {
 /// Every project with a notification file under `data_dir`. A daemon that has never recorded one
 /// has none, and an unreadable file is an error, so a log is never started over records it could
 /// not read.
-pub(super) fn replay_all(data_dir: &Path) -> anyhow::Result<Vec<Replayed>> {
+pub(super) fn replay_all(fs: &dyn tddy_fs::Fs, data_dir: &Path) -> anyhow::Result<Vec<Replayed>> {
     let dir = projects_dir(data_dir);
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match fs.read_dir(&dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(anyhow::anyhow!("read {}: {e}", dir.display())),
     };
     let mut replayed = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|e| anyhow::anyhow!("read {}: {e}", dir.display()))?;
-        let Ok(project_id) = entry.file_name().into_string() else {
+        let Some(project_id) = entry
+            .file_name()
+            .and_then(|n| n.to_str().map(str::to_string))
+        else {
             continue;
         };
-        let path = entry.path().join(NOTIFICATIONS_FILE);
-        if !path.is_file() {
+        let path = entry.join(NOTIFICATIONS_FILE);
+        // `metadata_follow`, as before: `is_file` follows a link.
+        if !matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::File) {
             continue;
         }
-        let (records, lines) = replay_file(&path)?;
+        let (records, lines) = replay_file(fs, &path)?;
         replayed.push(Replayed {
             project_id,
             records,
@@ -108,14 +109,15 @@ pub(super) fn replay_all(data_dir: &Path) -> anyhow::Result<Vec<Replayed>> {
     Ok(replayed)
 }
 
-fn replay_file(path: &Path) -> anyhow::Result<(Vec<Held>, usize)> {
-    end_on_a_line_break(path)?;
-    let file =
-        std::fs::File::open(path).map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
+fn replay_file(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<(Vec<Held>, usize)> {
+    end_on_a_line_break(fs, path)?;
+    let text = fs
+        .read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
     let mut records = Vec::new();
     let mut lines = 0;
-    for (number, line) in BufReader::new(file).lines().enumerate() {
-        let line = line.map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+    for (number, line) in text.lines().enumerate() {
+        let line = line.to_string();
         if line.trim().is_empty() {
             continue;
         }
@@ -136,53 +138,38 @@ fn replay_file(path: &Path) -> anyhow::Result<(Vec<Held>, usize)> {
 /// A crash part-way through an append leaves a line with no line break; the next append would
 /// then run on into it and be lost with it. Ending the file on a line break first keeps the torn
 /// line alone, where the replay skips it.
-fn end_on_a_line_break(path: &Path) -> anyhow::Result<()> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut file = OpenOptions::new()
-        .read(true)
-        .append(true)
-        .open(path)
-        .map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
-    let length = file
-        .metadata()
-        .map_err(|e| anyhow::anyhow!("stat {}: {e}", path.display()))?
-        .len();
-    if length == 0 {
-        return Ok(());
-    }
-    let mut last = [0u8; 1];
-    file.seek(SeekFrom::Start(length - 1))
-        .and_then(|_| file.read_exact(&mut last))
+fn end_on_a_line_break(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<()> {
+    // The port has no seek, so the file is read whole and only its last byte decides.
+    let bytes = fs
+        .read(path)
         .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
-    if last[0] != b'\n' {
-        log::warn!(target: LOG_TARGET, "{} ends in a torn line; ending it", path.display());
-        file.write_all(b"\n")
-            .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))?;
+    match bytes.last() {
+        None | Some(b'\n') => Ok(()),
+        Some(_) => {
+            log::warn!(target: LOG_TARGET, "{} ends in a torn line; ending it", path.display());
+            fs.append(path, b"\n")
+                .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))
+        }
     }
-    Ok(())
 }
 
 /// Append `held` to the file at `path`, creating its directory and file as needed.
-pub(super) fn append(path: &Path, held: &Held) -> anyhow::Result<()> {
+pub(super) fn append(fs: &dyn tddy_fs::Fs, path: &Path, held: &Held) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        fs.create_dir_all(parent)
             .map_err(|e| anyhow::anyhow!("create {}: {e}", parent.display()))?;
     }
     let mut line = serde_json::to_string(&Line::from(held))
         .map_err(|e| anyhow::anyhow!("serialize a notification record: {e}"))?;
     line.push('\n');
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|e| anyhow::anyhow!("open {}: {e}", path.display()))?;
-    file.write_all(line.as_bytes())
+    fs.append(path, line.as_bytes())
         .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))
 }
 
 /// Replace the file at `path` with `window`'s records, written to a sibling and renamed over it so
 /// a failure part-way leaves the previous file whole.
 pub(super) fn rewrite<'a>(
+    fs: &dyn tddy_fs::Fs,
     path: &Path,
     window: impl Iterator<Item = &'a Held>,
 ) -> anyhow::Result<()> {
@@ -193,23 +180,11 @@ pub(super) fn rewrite<'a>(
         body.push_str(&line);
         body.push('\n');
     }
-    let temporary = path.with_extension("jsonl.tmp");
-    let mut file = std::fs::File::create(&temporary)
-        .map_err(|e| anyhow::anyhow!("create {}: {e}", temporary.display()))?;
-    // Flushed to disk before the rename, so a crash after it never leaves an empty or short file
-    // where the previous one stood.
-    file.write_all(body.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|e| anyhow::anyhow!("write {}: {e}", temporary.display()))?;
-    std::fs::rename(&temporary, path)
-        .map_err(|e| anyhow::anyhow!("replace {}: {e}", path.display()))?;
-    // The rename itself is durable once the directory holding it is.
-    if let Some(parent) = path.parent() {
-        std::fs::File::open(parent)
-            .and_then(|dir| dir.sync_all())
-            .map_err(|e| anyhow::anyhow!("sync {}: {e}", parent.display()))?;
-    }
-    Ok(())
+    // The port's atomic write is the swap-then-rename this did by hand, with the same
+    // durability: bytes synced to disk before the rename, so a crash never leaves an empty or
+    // short file where the previous one stood.
+    fs.write_atomic(path, body.as_bytes(), None)
+        .map_err(|e| anyhow::anyhow!("write {}: {e}", path.display()))
 }
 
 // ── the JSON form ────────────────────────────────────────────────────────────────────────────────

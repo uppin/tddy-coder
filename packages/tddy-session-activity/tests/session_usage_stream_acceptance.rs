@@ -61,6 +61,7 @@ struct ADaemon {
 fn a_daemon() -> ADaemon {
     let data_dir = tempfile::tempdir().expect("a data dir");
     let service = ActivityServiceImpl::new(ActivityPorts {
+        fs: Arc::new(tddy_fs::DiskFs),
         os_users: Arc::new(|token: &str| {
             if token == TOKEN {
                 Ok(OS_USER.to_string())

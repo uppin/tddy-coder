@@ -35,13 +35,13 @@ struct Reading {
 /// the counters are folded by `aggregate`, `model` is the last value seen on any line (the `where`
 /// filter does not hide it) and `turns` counts the kept records.
 /// An unreadable file contributes nothing.
-pub(crate) fn fold_files(files: &[PathBuf], spec: &RecordSpec) -> Folded {
+pub(crate) fn fold_files(fs: &dyn tddy_fs::Fs, files: &[PathBuf], spec: &RecordSpec) -> Folded {
     let mut records: Vec<Reading> = Vec::new();
     let mut by_key: HashMap<String, usize> = HashMap::new();
     let mut model = None;
 
     for file in files {
-        let text = match std::fs::read_to_string(file) {
+        let text = match fs.read_to_string(file) {
             Ok(text) => text,
             Err(e) => {
                 log::warn!("usage: cannot read {}: {e}", file.display());
@@ -180,7 +180,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("lines.jsonl");
         std::fs::write(&file, lines.join("\n")).unwrap();
-        let folded = fold_files(&[file], &spec(aggregate));
+        let folded = fold_files(&tddy_fs::DiskFs, &[file], &spec(aggregate));
         std::fs::remove_dir_all(&dir).unwrap();
         folded
     }

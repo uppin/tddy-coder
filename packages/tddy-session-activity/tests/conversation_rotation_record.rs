@@ -74,6 +74,7 @@ impl AnActivityHost {
         let data_dir = tempfile::tempdir().expect("a temporary data dir");
         write_session(data_dir.path(), conversations);
         let service = ActivityServiceImpl::new(ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             os_users: Arc::new(|_token: &str| {
                 Err(Status::unauthenticated(
                     "no session token is presented on the hook path",

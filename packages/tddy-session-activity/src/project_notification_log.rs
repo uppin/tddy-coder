@@ -152,6 +152,7 @@ pub struct NotificationWait {
 
 /// The project notification log of one daemon: a bus subscriber and the reader of what it kept.
 pub struct ProjectNotificationLog {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     data_dir: PathBuf,
     sessions_base_for: SessionsBaseFor,
     projects: Mutex<HashMap<String, Arc<Project>>>,
@@ -252,7 +253,20 @@ impl ProjectNotificationLog {
     ///
     /// An unreadable file is an error: a log is not started over records it could not read.
     pub fn open(data_dir: &Path, sessions_base_for: SessionsBaseFor) -> anyhow::Result<Self> {
-        let projects = storage::replay_all(data_dir)?
+        Self::open_on(
+            std::sync::Arc::new(tddy_fs::DiskFs),
+            data_dir,
+            sessions_base_for,
+        )
+    }
+
+    /// [`ProjectNotificationLog::open`] through the filesystem port.
+    pub fn open_on(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        data_dir: &Path,
+        sessions_base_for: SessionsBaseFor,
+    ) -> anyhow::Result<Self> {
+        let projects = storage::replay_all(&*fs, data_dir)?
             .into_iter()
             .map(|replayed| {
                 (
@@ -262,6 +276,7 @@ impl ProjectNotificationLog {
             })
             .collect();
         Ok(Self {
+            fs,
             data_dir: data_dir.to_path_buf(),
             sessions_base_for,
             projects: Mutex::new(projects),
@@ -411,13 +426,18 @@ impl ProjectNotificationLog {
 /// compacting the file once it has grown past twice the window. `state` is the locked project's,
 /// held across the append, so the file's lines are in `seq` order and a record is either recorded
 /// whole or not at all.
-fn append_held(path: &Path, state: &mut ProjectState, held: Held) -> anyhow::Result<()> {
-    storage::append(path, &held)?;
+fn append_held(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    state: &mut ProjectState,
+    held: Held,
+) -> anyhow::Result<()> {
+    storage::append(fs, path, &held)?;
     state.newest_seq = held.record.seq;
     state.lines_on_disk += 1;
     state.keep_in_window(held);
     if state.lines_on_disk > 2 * PROJECT_NOTIFICATION_CAPACITY {
-        match storage::rewrite(path, state.window.iter()) {
+        match storage::rewrite(fs, path, state.window.iter()) {
             Ok(()) => state.lines_on_disk = state.window.len(),
             // The record is recorded; the file keeps growing until a rewrite succeeds.
             Err(e) => log::warn!(
@@ -500,7 +520,7 @@ impl SessionNotificationSubscriber for ProjectNotificationLog {
                     },
                 )
             });
-            append_held(&path, &mut state, held)?;
+            append_held(&*self.fs, &path, &mut state, held)?;
             // Told under the project's lock, so no later record can evict it first.
             if let Some((hook, record)) = appended {
                 hook(&project_id, &record);

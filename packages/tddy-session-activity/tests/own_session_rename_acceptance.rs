@@ -53,6 +53,7 @@ impl AnActivityHost {
         )
         .unwrap();
         let service = ActivityServiceImpl::new(ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             os_users: Arc::new(|_token: &str| {
                 Err(Status::unauthenticated(
                     "no session token is presented on the hook path",

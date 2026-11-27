@@ -8,10 +8,8 @@
 use log::{Level, Log, Metadata, Record};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 const MAX_BUFFER_LINES: usize = 200;
 
@@ -382,15 +380,47 @@ static LOG_CONFIG: once_cell::sync::Lazy<Mutex<Option<LogConfig>>> =
 static LOG_BUFFER: once_cell::sync::Lazy<Mutex<Vec<String>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(Vec::with_capacity(64)));
 
+/// The filesystem the log files are written through: `DiskFs` until the composition root
+/// (the daemon, at logger init) installs another via [`set_log_fs`]. A log line is appended
+/// per write, as the `File` handles it replaces did.
+static LOG_FS: once_cell::sync::Lazy<Mutex<Arc<dyn tddy_fs::Fs>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(Arc::new(tddy_fs::DiskFs)));
+
+/// Install the filesystem log output goes through. Called once by the composition root
+/// before the logger is initialised; later calls replace the handle for files opened after.
+pub fn set_log_fs(fs: Arc<dyn tddy_fs::Fs>) {
+    if let Ok(mut guard) = LOG_FS.lock() {
+        *guard = fs;
+    }
+}
+
+fn log_fs() -> Arc<dyn tddy_fs::Fs> {
+    LOG_FS
+        .lock()
+        .map(|guard| Arc::clone(&guard))
+        .unwrap_or_else(|_| Arc::new(tddy_fs::DiskFs))
+}
+
+/// Open `path` for appending through the port, creating it if needed: the probe append of
+/// zero bytes is the open, and its error is the refusal the `OpenOptions` call reported.
+fn open_log_file(path: &Path) -> Result<Arc<dyn tddy_fs::Fs>, std::io::Error> {
+    let fs = log_fs();
+    fs.append(path, b"")?;
+    Ok(fs)
+}
+
+/// An open log file: where it is, and the port it is appended through.
+type LogFileHandle = (PathBuf, Arc<dyn tddy_fs::Fs>);
+
 static FILE_OUTPUTS: once_cell::sync::Lazy<
-    Mutex<std::collections::HashMap<PathBuf, std::fs::File>>,
+    Mutex<std::collections::HashMap<PathBuf, Arc<dyn tddy_fs::Fs>>>,
 > = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// Legacy: for backward compat during transition.
-static DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<std::fs::File>>> =
+static DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<LogFileHandle>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
-static WEBRTC_DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<std::fs::File>>> =
+static WEBRTC_DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<LogFileHandle>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
 fn format_log_line(record: &Record, format_tpl: Option<&str>) -> String {
@@ -416,10 +446,9 @@ fn write_to_output(line: &str, output: &LogOutput) {
             print!("{}", line);
         }
         LogOutput::File(path) => {
-            if let Ok(mut guard) = FILE_OUTPUTS.lock() {
-                if let Some(f) = guard.get_mut(path) {
-                    let _ = f.write_all(line.as_bytes());
-                    let _ = f.flush();
+            if let Ok(guard) = FILE_OUTPUTS.lock() {
+                if let Some(fs) = guard.get(path) {
+                    let _ = fs.append(path, line.as_bytes());
                 }
             }
         }
@@ -488,19 +517,17 @@ impl Log for TddyLogger {
         let is_webrtc = record.target() == "libwebrtc";
 
         if is_webrtc {
-            if let Ok(mut guard) = WEBRTC_DEBUG_OUTPUT_FILE.lock() {
-                if let Some(ref mut f) = *guard {
-                    let _ = f.write_all(line.as_bytes());
-                    let _ = f.flush();
+            if let Ok(guard) = WEBRTC_DEBUG_OUTPUT_FILE.lock() {
+                if let Some((path, fs)) = &*guard {
+                    let _ = fs.append(path, line.as_bytes());
                     return;
                 }
             }
         }
 
-        if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
-            if let Some(ref mut f) = *guard {
-                let _ = f.write_all(line.as_bytes());
-                let _ = f.flush();
+        if let Ok(guard) = DEBUG_OUTPUT_FILE.lock() {
+            if let Some((path, fs)) = &*guard {
+                let _ = fs.append(path, line.as_bytes());
                 return;
             }
         }
@@ -555,12 +582,12 @@ pub fn resolve_log_defaults(
 ) -> Option<std::path::PathBuf> {
     let logs = session_dir.join("logs");
     if debug_output_path.is_none() && !config_has_file_output_guard() {
-        let _ = std::fs::create_dir_all(&logs);
+        let _ = log_fs().create_dir_all(&logs);
         redirect_debug_output(&logs.join("debug.log"));
         log::set_max_level(log::LevelFilter::Debug);
     }
     if conversation_output_path.is_none() {
-        let _ = std::fs::create_dir_all(&logs);
+        let _ = log_fs().create_dir_all(&logs);
         Some(logs.join("conversation.jsonl"))
     } else {
         conversation_output_path
@@ -577,32 +604,26 @@ pub fn redirect_debug_output(path: &Path) {
             if let Some(def) = config.loggers.get_mut(&config.default.logger) {
                 def.output = LogOutput::File(path_buf.clone());
             }
-            if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+            if let Ok(fs) = open_log_file(path) {
                 let buffered = take_buffered_logs();
                 for line in &buffered {
-                    let _ = writeln!(f, "{}", line);
-                }
-                if !buffered.is_empty() {
-                    let _ = f.flush();
+                    let _ = fs.append(path, format!("{line}\n").as_bytes());
                 }
                 if let Ok(mut files) = FILE_OUTPUTS.lock() {
-                    files.insert(path_buf, f);
+                    files.insert(path_buf, fs);
                 }
             }
             return;
         }
     }
-    match OpenOptions::new().create(true).append(true).open(path) {
-        Ok(mut f) => {
+    match open_log_file(path) {
+        Ok(fs) => {
             let buffered = take_buffered_logs();
             for line in &buffered {
-                let _ = writeln!(f, "{}", line);
-            }
-            if !buffered.is_empty() {
-                let _ = f.flush();
+                let _ = fs.append(path, format!("{line}\n").as_bytes());
             }
             if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
-                *guard = Some(f);
+                *guard = Some((path.to_path_buf(), fs));
             }
         }
         Err(e) => {
@@ -644,12 +665,12 @@ pub fn init_tddy_logger(config: LogConfig) {
     let file_paths: Vec<PathBuf> = collect_file_outputs(&config);
     for path in &file_paths {
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            let _ = log_fs().create_dir_all(parent);
         }
-        match OpenOptions::new().create(true).append(true).open(path) {
-            Ok(f) => {
+        match open_log_file(path) {
+            Ok(fs) => {
                 if let Ok(mut guard) = FILE_OUTPUTS.lock() {
-                    guard.insert(path.clone(), f);
+                    guard.insert(path.clone(), fs);
                 }
             }
             Err(e) => {
@@ -729,7 +750,7 @@ fn rotate_log_files(config: &LogConfig) {
                 continue;
             }
         }
-        if !path.exists() {
+        if !log_fs().exists(&path) {
             continue;
         }
         let parent = path.parent().unwrap_or(Path::new("."));
@@ -742,12 +763,13 @@ fn rotate_log_files(config: &LogConfig) {
         let timestamp = chrono::Local::now().format("%Y-%m-%dT%H-%M-%S");
         let rotated_name = format!("{}.{}{}", stem, timestamp, ext);
         let rotated_path = parent.join(&rotated_name);
-        if std::fs::rename(&path, &rotated_path).is_err() {
+        let fs = log_fs();
+        if fs.rename(&path, &rotated_path).is_err() {
             continue;
         }
 
         let prefix = format!("{}.", stem);
-        let entries = match std::fs::read_dir(parent) {
+        let entries = match fs.read_dir(parent) {
             Ok(rd) => rd,
             Err(e) => {
                 eprintln!(
@@ -758,18 +780,18 @@ fn rotate_log_files(config: &LogConfig) {
             }
         };
         let mut rotated: Vec<_> = entries
-            .filter_map(|e| e.ok())
+            .into_iter()
             .filter(|e| {
                 let name = e.file_name();
-                let s = name.to_str().unwrap_or("");
+                let s = name.and_then(|n| n.to_str()).unwrap_or("");
                 s.starts_with(&prefix)
                     && s != path.file_name().and_then(|n| n.to_str()).unwrap_or("")
             })
             .collect();
-        rotated.sort_by_key(|e| e.path());
+        rotated.sort();
         let to_remove = rotated.len().saturating_sub(max_rotated);
         for e in rotated.into_iter().take(to_remove) {
-            let _ = std::fs::remove_file(e.path());
+            let _ = fs.remove_file(&e);
         }
     }
 }
@@ -785,10 +807,10 @@ pub fn init_tddy_logger_legacy(
     webrtc_debug_output_path: Option<&Path>,
 ) {
     if let Some(path) = debug_output_path {
-        match OpenOptions::new().create(true).append(true).open(path) {
-            Ok(f) => {
+        match open_log_file(path) {
+            Ok(fs) => {
                 if let Ok(mut guard) = DEBUG_OUTPUT_FILE.lock() {
-                    *guard = Some(f);
+                    *guard = Some((path.to_path_buf(), fs));
                 }
             }
             Err(e) => {
@@ -800,10 +822,10 @@ pub fn init_tddy_logger_legacy(
         }
     }
     if let Some(path) = webrtc_debug_output_path {
-        match OpenOptions::new().create(true).append(true).open(path) {
-            Ok(f) => {
+        match open_log_file(path) {
+            Ok(fs) => {
                 if let Ok(mut guard) = WEBRTC_DEBUG_OUTPUT_FILE.lock() {
-                    *guard = Some(f);
+                    *guard = Some((path.to_path_buf(), fs));
                 }
             }
             Err(e) => {

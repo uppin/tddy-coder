@@ -12,8 +12,12 @@ log = "0.4"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 # The acceptance tests parse the built-in specs' `usage:` sections straight from their YAML files, so
 # what they prove is the shipped binding, not a hand-built struct. Not `tddy-coding-agent-specs`:

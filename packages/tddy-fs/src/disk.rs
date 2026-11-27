@@ -34,6 +34,19 @@ impl Fs for DiskFs {
             .write_all(contents)
     }
 
+    fn create_new_with_mode(&self, path: &Path, contents: &[u8], mode: u32) -> io::Result<()> {
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(mode);
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+        options.open(path)?.write_all(contents)
+    }
+
     fn append(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         fs::OpenOptions::new()
             .create(true)

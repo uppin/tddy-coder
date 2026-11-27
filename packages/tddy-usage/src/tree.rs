@@ -1,7 +1,6 @@
 //! The conversation tree: children located from each conversation's files, to any depth.
 
 use std::collections::HashSet;
-use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use crate::jsonl::{fold_files, Folded};
@@ -26,15 +25,16 @@ pub(crate) const MAIN_VARIABLES: &[&str] =
 /// matching `main.path` merged into one row), then its children depth-first, siblings by id.
 /// `None` when the session has no conversation id to look for.
 pub(crate) fn conversation_rows(
+    fs: &dyn tddy_fs::Fs,
     source: &JsonlSource,
     ctx: &UsageContext,
 ) -> Option<Vec<ConversationRecord>> {
     if let Some(identity) = &source.identity {
-        return identified_rows(source, identity, ctx);
+        return identified_rows(fs, source, identity, ctx);
     }
     let id = ctx.conversation_id.clone()?;
     let files = main_files(source, ctx);
-    let main = row(&ctx.agent_label, &id, None, &files, source, ctx);
+    let main = row(fs, &ctx.agent_label, &id, None, &files, source, ctx);
     let mut rows = vec![main];
 
     let mut visited: HashSet<PathBuf> = files.iter().cloned().collect();
@@ -42,6 +42,7 @@ pub(crate) fn conversation_rows(
         let mut found = Vec::new();
         for file in &files {
             found.extend(children_of(
+                fs,
                 file,
                 children,
                 &id,
@@ -111,6 +112,7 @@ struct Identified {
 /// root file matching `main.match`, its children every file declaring a conversation as its parent,
 /// to any depth. `None` when no file qualifies as the main conversation.
 fn identified_rows(
+    fs: &dyn tddy_fs::Fs,
     source: &JsonlSource,
     identity: &IdentitySpec,
     ctx: &UsageContext,
@@ -122,7 +124,7 @@ fn identified_rows(
     let files: Vec<Identified> = main_files(source, ctx)
         .into_iter()
         .filter_map(|file| {
-            let header = header_values(&file);
+            let header = header_values(fs, &file);
             let id = header_string(&header, &identity.id)?;
             let parent = identity
                 .parent
@@ -143,11 +145,12 @@ fn identified_rows(
         .iter()
         .filter(|f| f.parent.is_none() && f.matches_main)
         .max_by_key(|f| {
-            let modified = std::fs::metadata(&f.file).and_then(|m| m.modified()).ok();
+            let modified = fs.metadata_follow(&f.file).ok().and_then(|m| m.modified);
             (modified, f.file.clone())
         })?;
 
     let mut rows = vec![row(
+        fs,
         &ctx.agent_label,
         &main.id,
         None,
@@ -157,13 +160,24 @@ fn identified_rows(
     )];
     let mut visited: HashSet<&str> = HashSet::from([main.id.as_str()]);
     if source.children_by.is_some() {
-        spawned_rows(&main.id, &files, 1, &mut visited, source, ctx, &mut rows);
+        spawned_rows(
+            fs,
+            &main.id,
+            &files,
+            1,
+            &mut visited,
+            source,
+            ctx,
+            &mut rows,
+        );
     }
     Some(rows)
 }
 
 /// The rows of every file declaring `parent_id` as its parent, depth-first, siblings by id.
+#[allow(clippy::too_many_arguments)]
 fn spawned_rows<'a>(
+    fs: &dyn tddy_fs::Fs,
     parent_id: &str,
     files: &'a [Identified],
     depth: usize,
@@ -185,6 +199,7 @@ fn spawned_rows<'a>(
             continue;
         }
         rows.push(row(
+            fs,
             &child.id,
             &child.id,
             Some(parent_id),
@@ -192,20 +207,20 @@ fn spawned_rows<'a>(
             source,
             ctx,
         ));
-        spawned_rows(&child.id, files, depth + 1, visited, source, ctx, rows);
+        spawned_rows(fs, &child.id, files, depth + 1, visited, source, ctx, rows);
     }
 }
 
 /// The JSON lines among the file's first [`HEADER_LINES`]; an unreadable file has none.
-fn header_values(file: &Path) -> Vec<serde_json::Value> {
-    let Ok(opened) = std::fs::File::open(file) else {
+fn header_values(fs: &dyn tddy_fs::Fs, file: &Path) -> Vec<serde_json::Value> {
+    // The port has no streaming read, so the file is read whole and only its first
+    // [`HEADER_LINES`] lines are parsed — the same lines the streaming reader reached.
+    let Ok(text) = fs.read_to_string(file) else {
         return Vec::new();
     };
-    std::io::BufReader::new(opened)
-        .lines()
+    text.lines()
         .take(HEADER_LINES)
-        .map_while(Result::ok)
-        .filter_map(|line| serde_json::from_str(&line).ok())
+        .filter_map(|line| serde_json::from_str(line).ok())
         .collect()
 }
 
@@ -217,7 +232,9 @@ fn header_string(header: &[serde_json::Value], field: &FieldPath) -> Option<Stri
 }
 
 /// The child conversations of `parent_file`, each with its own descendants, in sibling order.
+#[allow(clippy::too_many_arguments)]
 fn children_of(
+    fs: &dyn tddy_fs::Fs,
     parent_file: &Path,
     children: &ChildrenSpec,
     parent_id: &str,
@@ -240,8 +257,9 @@ fn children_of(
         let Some(id) = render_over_file(&children.id, &file, false) else {
             continue;
         };
-        let name = child_name(children, &file, &id);
+        let name = child_name(fs, children, &file, &id);
         let record = row(
+            fs,
             &name,
             &id,
             Some(parent_id),
@@ -249,7 +267,7 @@ fn children_of(
             source,
             ctx,
         );
-        let grandchildren = children_of(&file, children, &id, depth + 1, visited, source, ctx);
+        let grandchildren = children_of(fs, &file, children, &id, depth + 1, visited, source, ctx);
         found.push((record, in_sibling_order(grandchildren)));
     }
     found
@@ -268,12 +286,12 @@ fn in_sibling_order(
 
 /// The child's display name: the sidecar's field, else the spec's default; its id when the spec
 /// declares no name.
-fn child_name(children: &ChildrenSpec, file: &Path, id: &str) -> String {
+fn child_name(fs: &dyn tddy_fs::Fs, children: &ChildrenSpec, file: &Path, id: &str) -> String {
     let Some(name) = &children.name else {
         return id.to_string();
     };
     render_over_file(&name.sidecar, file, false)
-        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|path| fs.read_to_string(std::path::Path::new(&path)).ok())
         .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
         .and_then(|json| field_string(&name.field, &json))
         .unwrap_or_else(|| name.default.clone())
@@ -328,6 +346,7 @@ fn glob_files(pattern: &str) -> Vec<PathBuf> {
 
 /// One conversation's row, folded from `files` (none: a zero row on the fallback model).
 fn row(
+    fs: &dyn tddy_fs::Fs,
     agent: &str,
     id: &str,
     parent_id: Option<&str>,
@@ -335,7 +354,13 @@ fn row(
     source: &JsonlSource,
     ctx: &UsageContext,
 ) -> ConversationRecord {
-    record_of(agent, id, parent_id, fold_files(files, &source.record), ctx)
+    record_of(
+        agent,
+        id,
+        parent_id,
+        fold_files(fs, files, &source.record),
+        ctx,
+    )
 }
 
 /// The record a conversation's folded figures make; its model is the fallback when none was seen.

@@ -62,6 +62,10 @@ pub trait Fs: Send + Sync + Debug {
     /// a concurrent creator cannot slip between the existence check and the creation. The loser
     /// leaves the stored bytes untouched. Parents are not created; create them first.
     fn create_new(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
+    /// [`Fs::create_new`] with the file created at exactly `mode`, never wider, not even
+    /// briefly: the mode is given to the creation, not applied afterwards. For files whose
+    /// contents are credentials from the first byte.
+    fn create_new_with_mode(&self, path: &Path, contents: &[u8], mode: u32) -> io::Result<()>;
     fn append(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
     /// Replace `path` with `contents` so a reader sees the whole old or the whole new file.
     ///

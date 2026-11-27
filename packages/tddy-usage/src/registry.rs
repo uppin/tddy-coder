@@ -1,7 +1,6 @@
 //! The conversations a session opened besides its main one — the coding subagents the daemon ran
 //! for it — each with what its own agent's binding resolves against (`#usage-binding 3/5`).
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -32,21 +31,34 @@ pub fn register_conversation(
     session_dir: &Path,
     conversation: &RegisteredConversation,
 ) -> std::io::Result<()> {
+    register_conversation_on(&tddy_fs::DiskFs, session_dir, conversation)
+}
+
+/// [`register_conversation`] through the filesystem port.
+pub fn register_conversation_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    conversation: &RegisteredConversation,
+) -> std::io::Result<()> {
     let mut line = serde_json::to_vec(conversation)?;
     line.push(b'\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(session_dir.join(CONVERSATION_REGISTRY_FILE))?;
-    // One `write_all` of the whole line: with `O_APPEND` the kernel keeps concurrent lines whole.
-    file.write_all(&line)
+    // `append` is the port's `O_APPEND` write: the kernel keeps concurrent lines whole.
+    fs.append(&session_dir.join(CONVERSATION_REGISTRY_FILE), &line)
 }
 
 /// Every conversation registered for the session, the last registration of each id winning, in
 /// first-registration order. A missing file is no conversations.
 pub fn registered_conversations(session_dir: &Path) -> Vec<RegisteredConversation> {
+    registered_conversations_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`registered_conversations`] through the filesystem port.
+pub fn registered_conversations_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Vec<RegisteredConversation> {
     let path = session_dir.join(CONVERSATION_REGISTRY_FILE);
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(text) = fs.read_to_string(&path) else {
         return Vec::new();
     };
     let mut registered: Vec<RegisteredConversation> = Vec::new();

@@ -13,7 +13,8 @@ it.
 - writes: `write` (truncating), `append`, `write_atomic` / `write_atomic_with_mode` (below),
   `hard_link` (never replaces an existing link, so a first-boot race keeps one winner),
   `create_new` (exclusive create: fails with `AlreadyExists` when anything is already there, so
-  the check and the creation are one atomic step), `copy` (file copy, `IsADirectory` on a directory
+  the check and the creation are one atomic step), `create_new_with_mode` (the same at exactly a
+  mode, never wider, not even briefly), `copy` (file copy, `IsADirectory` on a directory
   source on both adapters)
 - directories: `create_dir_all`, `create_dir_all_with_mode` (mode rides on the creation, never
   wider, not even briefly), `remove_dir` (empty only), `remove_dir_all`, `read_dir` (full
@@ -76,3 +77,11 @@ request handlers, and backward-compat wrappers for callers outside the migrated 
 call sites go through `AsyncFs` (including the new `copy` facade); git-subprocess-bound paths
 (mirror, conversation worktrees, scratch-index seeding) inject the handle but bind `DiskFs`, since
 a `MemFs` could never back the repositories git itself reads and writes.
+
+`tddy-session-activity`, `tddy-usage`, `tddy-log` and `tddy-cli-sessions` do theirs through the
+port too: guards in each crate's `tests/fs_port.rs`, the session stores and service behind
+struct-held handles (`ActivityPorts.fs`, per-store `Arc<dyn Fs>`, the notification log and watch
+store), free functions behind `<fn>_on` seams, and the logger behind its installed `LOG_FS`
+handle (DiskFs until `set_log_fs`). What the port cannot express stays off it and is recorded in
+the changeset: glob matching and sqlite in `tddy-usage`, `chown`/`dup2` via `libc`, and the
+`/proc` zombie check.

@@ -30,12 +30,18 @@ impl SessionWatchStore {
     /// The store persisted under `data_dir`, holding what a previous run kept there. An unreadable
     /// watches file is an error.
     pub fn open(data_dir: &Path) -> anyhow::Result<Self> {
+        Self::open_on(Arc::new(tddy_fs::DiskFs), data_dir)
+    }
+
+    /// [`SessionWatchStore::open`] through the filesystem port.
+    pub fn open_on(fs: Arc<dyn tddy_fs::Fs>, data_dir: &Path) -> anyhow::Result<Self> {
         let mut projects = HashMap::new();
         let dir = data_dir.join("projects");
-        let entries = match std::fs::read_dir(&dir) {
+        let entries = match fs.read_dir(&dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self {
+                    fs,
                     data_dir: data_dir.to_path_buf(),
                     projects: Mutex::new(projects),
                     leases: Mutex::default(),
@@ -46,21 +52,26 @@ impl SessionWatchStore {
             Err(e) => return Err(anyhow::anyhow!("read {}: {e}", dir.display())),
         };
         for entry in entries {
-            let entry = entry.map_err(|e| anyhow::anyhow!("read {}: {e}", dir.display()))?;
-            let Ok(project_id) = entry.file_name().into_string() else {
+            let Some(project_id) = entry
+                .file_name()
+                .and_then(|n| n.to_str().map(str::to_string))
+            else {
                 continue;
             };
-            let path = entry.path().join(SESSION_WATCHES_FILE);
-            if !path.is_file() {
+            let path = entry.join(SESSION_WATCHES_FILE);
+            // `metadata_follow`, as before: `is_file` follows a link.
+            if !matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::File) {
                 continue;
             }
-            let body = std::fs::read_to_string(&path)
+            let body = fs
+                .read_to_string(&path)
                 .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
             let stored: ProjectWatches = serde_json::from_str(&body)
                 .map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
             projects.insert(project_id, Arc::new(tokio::sync::Mutex::new(stored)));
         }
         Ok(Self {
+            fs,
             data_dir: data_dir.to_path_buf(),
             projects: Mutex::new(projects),
             leases: Mutex::default(),

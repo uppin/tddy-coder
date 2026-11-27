@@ -12,8 +12,10 @@
 //! go through the MCP `approval_prompt` tool + PTY, not `TDDY_SOCKET`.
 
 use std::path::{Path, PathBuf};
+
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+use tddy_fs::Fs as _;
 
 use tddy_core::backend::CodingBackend;
 use tddy_core::presenter::WorkflowEvent;
@@ -49,7 +51,7 @@ impl SessionToolcallListener {
 impl Drop for SessionToolcallListener {
     fn drop(&mut self) {
         self.accept_task.abort();
-        let _ = std::fs::remove_file(&self.socket_path);
+        let _ = tddy_fs::DiskFs.remove_file(&self.socket_path);
     }
 }
 
@@ -91,7 +93,7 @@ pub fn start_session_toolcall_listener(
     github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> std::io::Result<SessionToolcallListener> {
     let socket_path = socket_dir.join(format!("tddy-wf-{session_id}.sock"));
-    let _ = std::fs::remove_file(&socket_path);
+    let _ = tddy_fs::DiskFs.remove_file(&socket_path);
     let listener = UnixListener::bind(&socket_path)?;
 
     let (tx, rx) = std::sync::mpsc::sync_channel::<ToolCallRequest>(32);

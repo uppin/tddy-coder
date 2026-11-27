@@ -5,7 +5,9 @@
 //! processes are stopped through what holds them (its terminals and process tab).
 
 use std::path::{Path, PathBuf};
+
 use std::time::Duration;
+use tddy_fs::Fs as _;
 
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -56,8 +58,10 @@ pub fn worktree_removal_applies_to(
 /// After SIGKILL the child may be a zombie until its parent reaps it; `kill(pid, 0)` still succeeds.
 #[cfg(all(unix, target_os = "linux"))]
 fn pid_is_zombie(pid: u32) -> bool {
+    // `/proc` is the host's process table, not session disk: read through the port on the real
+    // disk, as the `std::fs` call it replaces did.
     let path = format!("/proc/{pid}/stat");
-    let Ok(contents) = std::fs::read_to_string(&path) else {
+    let Ok(contents) = tddy_fs::DiskFs.read_to_string(std::path::Path::new(&path)) else {
         return true;
     };
     let Some(rparen) = contents.find(')') else {
@@ -117,14 +121,18 @@ pub fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
 ///
 /// Best-effort: a missing file, an invalid pid, or a process already gone must not fail the delete.
 #[cfg(unix)]
-fn teardown_workspace_sandbox(session_dir: &Path, metadata: &tddy_core::SessionMetadata) {
+fn teardown_workspace_sandbox(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    metadata: &tddy_core::SessionMetadata,
+) {
     if metadata.sandbox != Some(true) {
         return;
     }
     let pid_path = session_dir
         .join("sandbox")
         .join(tddy_daemon_sandbox::workspace_tool_sandbox::RUNNER_PID_FILE);
-    let Ok(contents) = std::fs::read_to_string(&pid_path) else {
+    let Ok(contents) = fs.read_to_string(&pid_path) else {
         return;
     };
     let Ok(pid) = contents.trim().parse::<u32>() else {
@@ -156,7 +164,12 @@ fn teardown_workspace_sandbox(session_dir: &Path, metadata: &tddy_core::SessionM
 }
 
 #[cfg(not(unix))]
-fn teardown_workspace_sandbox(_session_dir: &Path, _metadata: &tddy_core::SessionMetadata) {}
+fn teardown_workspace_sandbox(
+    _fs: &dyn tddy_fs::Fs,
+    _session_dir: &Path,
+    _metadata: &tddy_core::SessionMetadata,
+) {
+}
 
 /// Reap `pid` when this process is its parent. A reparented orphan returns immediately with `ECHILD`.
 #[cfg(unix)]
@@ -250,6 +263,23 @@ pub fn delete_session_directory(
     projects_dir: Option<&Path>,
     agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> Result<(), Status> {
+    delete_session_directory_on(
+        &tddy_fs::DiskFs,
+        sessions_base,
+        session_id,
+        projects_dir,
+        agents,
+    )
+}
+
+/// [`delete_session_directory`] through the filesystem port.
+pub fn delete_session_directory_on(
+    fs: &dyn tddy_fs::Fs,
+    sessions_base: &Path,
+    session_id: &str,
+    projects_dir: Option<&Path>,
+    agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
+) -> Result<(), Status> {
     let session_id = session_id.trim();
     let session_dir = resolve_session_directory_for_delete(sessions_base, session_id)?;
     log::debug!(
@@ -259,7 +289,8 @@ pub fn delete_session_directory(
         sessions_base
     );
 
-    if !session_dir.is_dir() {
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    if !matches!(fs.metadata_follow(&session_dir), Ok(m) if m.kind == tddy_fs::FsKind::Dir) {
         log::info!(
             "delete_session_directory: no session directory on this daemon (session_id={}); refusing as wrong routing / ownership",
             session_id
@@ -290,13 +321,13 @@ pub fn delete_session_directory(
         .and_then(|m| m.repo_path.clone());
 
     // For session types that own their worktree, remove the linked git worktree.
-    remove_session_worktree(projects_dir, session_id, &metadata, &session_worktree);
+    remove_session_worktree(fs, projects_dir, session_id, &metadata, &session_worktree);
 
     if let Some(ref m) = metadata {
-        teardown_workspace_sandbox(&session_dir, m);
+        teardown_workspace_sandbox(fs, &session_dir, m);
     }
 
-    std::fs::remove_dir_all(&session_dir).map_err(|e| {
+    fs.remove_dir_all(&session_dir).map_err(|e| {
         log::error!(
             "delete_session_directory: remove_dir_all failed for session_id={}: {}",
             session_id,
@@ -323,7 +354,7 @@ pub fn delete_session_directory(
     if let Some(worktree) = session_worktree
         .as_deref()
         .map(PathBuf::from)
-        .filter(|w| w.starts_with(&session_dir) && !w.exists())
+        .filter(|w| w.starts_with(&session_dir) && !fs.exists(w))
     {
         prune_worktree_registration(projects_dir, metadata.as_ref(), &worktree, session_id);
     }
@@ -331,6 +362,7 @@ pub fn delete_session_directory(
 }
 
 fn remove_session_worktree(
+    fs: &dyn tddy_fs::Fs,
     projects_dir: Option<&Path>,
     session_id: &str,
     metadata: &Option<tddy_core::SessionMetadata>,
@@ -392,7 +424,7 @@ fn remove_session_worktree(
             // against a client-supplied `repo_path` (an arbitrary local checkout) records that path
             // here verbatim; wiping it would destroy the user's working tree, so it is left intact.
             if is_daemon_managed_worktree(&worktree) {
-                let _ = std::fs::remove_dir_all(&worktree);
+                let _ = fs.remove_dir_all(&worktree);
                 log::info!(
                     "delete_session_directory: removed session worktree {:?} for {} (remove_dir_all fallback)",
                     worktree,

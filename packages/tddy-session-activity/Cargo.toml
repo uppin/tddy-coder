@@ -9,6 +9,8 @@ name = "tddy_session_activity"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: the filesystem port every disk read and write goes through.
+tddy-fs = { path = "../tddy-fs" }
 # `SessionActivityStatus::from_wire` — the statuses a reported hook may carry, and the mapping from
 # each to the notification it raises.
 tddy-core = { path = "../tddy-core" }
@@ -71,6 +73,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `#[tokio::test]` in `tests/operator_channel_subscriber_acceptance.rs` — the bus publishes async;
 # `time`: the usage stream tests wait on its poller with a deadline.
 tokio = { version = "1", features = ["macros", "rt", "time"] }
