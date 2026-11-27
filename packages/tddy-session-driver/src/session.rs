@@ -1,7 +1,7 @@
 //! The driver's one session: launched through the daemon's own launch code, then read, typed into
 //! and stopped.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,20 @@ const POLL: Duration = Duration::from_millis(200);
 const STOP_GRACE: Duration = Duration::from_secs(10);
 /// How many of the screen's last non-empty lines a failure quotes.
 const LAST_OUTPUT_LINES: usize = 12;
+
+/// Create (when missing) and canonicalize the driver's session directory,
+/// `<base>/<session_id>`: the working directory of a remote target's client on this machine.
+pub fn create_session_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    base: &Path,
+    session_id: &str,
+) -> anyhow::Result<PathBuf> {
+    let session_dir = base.join(session_id);
+    fs.create_dir_all(&session_dir).map_err(|e| {
+        anyhow::anyhow!("create the session directory {}: {e}", session_dir.display())
+    })?;
+    fs.canonicalize(&session_dir).map_err(anyhow::Error::from)
+}
 
 /// Everything a launch of the session needs, fixed by the driver's arguments.
 pub struct LaunchSpec {
