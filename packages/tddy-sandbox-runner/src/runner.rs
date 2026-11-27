@@ -27,9 +27,43 @@ use tddy_service::tonic_sandbox::sandbox_service_server::{
 };
 
 use tddy_sandbox::{
-    append_line, egress_log_path, session_id_from_env, EgressPolicy, SANDBOX_RUNNER_FAILURE,
+    append_line_on, egress_log_path, session_id_from_env, EgressPolicy, SANDBOX_RUNNER_FAILURE,
     SANDBOX_RUNNER_LOG,
 };
+
+/// The filesystem the runner reads and writes through: `DiskFs` until the composition root
+/// (this binary's `main`) installs another via [`set_runner_fs`].
+static RUNNER_FS: std::sync::OnceLock<Arc<dyn tddy_fs::Fs>> = std::sync::OnceLock::new();
+
+/// Install the filesystem runner output goes through. Called once by `main` before boot.
+pub fn set_runner_fs(fs: Arc<dyn tddy_fs::Fs>) {
+    let _ = RUNNER_FS.set(fs);
+}
+
+/// `env_logger`'s pipe into the runner log: each write is one append through the port.
+struct RunnerLogWriter {
+    fs: Arc<dyn tddy_fs::Fs>,
+    path: PathBuf,
+}
+
+impl std::io::Write for RunnerLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.fs.append(&self.path, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The filesystem the runner reads and writes through.
+pub(crate) fn runner_fs() -> Arc<dyn tddy_fs::Fs> {
+    RUNNER_FS
+        .get()
+        .map(Arc::clone)
+        .unwrap_or_else(|| Arc::new(tddy_fs::DiskFs))
+}
 // The in-jail PTY decodes the resize escape the same way every other PTY host does.
 use tddy_pty::strip_resize as strip_resize_escape;
 
@@ -170,11 +204,11 @@ fn boot_log(level: &str, message: &str) {
     let line = format!("[{level}] {message}");
     if let Some(egress) = egress_dir_from_env() {
         let path = egress_log_path(&egress, SANDBOX_RUNNER_LOG);
-        let _ = append_line(&path, &line);
+        let _ = append_line_on(&*runner_fs(), &path, &line);
     }
     if let Some(fallback_dir) = BOOT_LOG_FALLBACK.get() {
         let path = fallback_dir.join("sandbox-runner.boot.log");
-        let _ = append_line(&path, &line);
+        let _ = append_line_on(&*runner_fs(), &path, &line);
     }
 }
 
@@ -185,7 +219,7 @@ pub(crate) fn boot_log_error(step: &str, err: impl std::fmt::Display) {
 pub(crate) fn write_failure_marker(message: &str) {
     if let Some(egress) = egress_dir_from_env() {
         let path = egress_log_path(&egress, SANDBOX_RUNNER_FAILURE);
-        let _ = std::fs::write(&path, message);
+        let _ = runner_fs().write(&path, message.as_bytes());
     }
 }
 
@@ -251,17 +285,19 @@ fn init_sandbox_egress_logging() {
         return;
     };
     let log_path = egress_log_path(std::path::Path::new(&egress), SANDBOX_RUNNER_LOG);
-    let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    else {
+    // The probe append of zero bytes is the open, and its error is the refusal the
+    // `OpenOptions` call reported.
+    if runner_fs().append(&log_path, b"").is_err() {
         let _ = env_logger::try_init();
         return;
+    }
+    let writer = RunnerLogWriter {
+        fs: runner_fs(),
+        path: log_path,
     };
     let _ = env_logger::Builder::from_default_env()
         .format_timestamp_secs()
-        .target(env_logger::Target::Pipe(Box::new(file)))
+        .target(env_logger::Target::Pipe(Box::new(writer)))
         .try_init();
 }
 
@@ -1042,10 +1078,10 @@ pub fn resolve_secret_envs(
         let Some(name) = key.strip_prefix(PREFIX) else {
             continue;
         };
-        match std::fs::read_to_string(path) {
+        match runner_fs().read_to_string(Path::new(path)) {
             Ok(value) => {
                 resolved.push((name.to_string(), value));
-                let _ = std::fs::remove_file(path);
+                let _ = runner_fs().remove_file(Path::new(path));
             }
             Err(e) => {
                 boot_log("ERROR", &format!("secret {name}: read {path} failed: {e}"));
@@ -1227,7 +1263,7 @@ pub(crate) fn spawn_generic_pty(
 }
 
 async fn start_tool_ipc_server(path: PathBuf, relay: Arc<SandboxSessionRelay>) -> Result<()> {
-    let _ = std::fs::remove_file(&path);
+    let _ = runner_fs().remove_file(&path);
     let (ready_tx, ready_rx) = oneshot::channel();
     tokio::spawn(async move {
         let listener = match tokio::net::UnixListener::bind(&path) {
@@ -1667,7 +1703,8 @@ async fn serve_over_stdio(service: SandboxRunnerService, ready_marker: &Path) ->
         );
     }
     boot_log("INFO", "boot: serve sandbox SandboxService over stdio");
-    std::fs::write(ready_marker, "stdio")
+    runner_fs()
+        .write(ready_marker, b"stdio")
         .context("write ready marker")
         .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
     sandbox_log_line("INFO", "SandboxService serving over stdio");
@@ -1742,7 +1779,7 @@ async fn run_workspace_tool_runner_inner(
             worktree.display()
         ),
     );
-    let _ = std::fs::remove_file(&args.ready_marker);
+    let _ = runner_fs().remove_file(&args.ready_marker);
 
     let relay = Arc::new(SandboxSessionRelay::default());
     // Only a jail that runs the codebase's build needs egress, and then only through the host's
@@ -1963,8 +2000,8 @@ pub(crate) async fn run_sandbox_runner_inner(
     );
 
     boot_log("INFO", "boot: remove stale ipc socket and ready marker");
-    let _ = std::fs::remove_file(&args.tool_ipc_socket);
-    let _ = std::fs::remove_file(&args.ready_marker);
+    let _ = runner_fs().remove_file(&args.tool_ipc_socket);
+    let _ = runner_fs().remove_file(&args.ready_marker);
 
     let generic_pty = !args.pty_command.is_empty();
     // A jail that ends with its one process: the confined-action mode and an exec plan.
@@ -2060,11 +2097,12 @@ pub(crate) async fn run_sandbox_runner_inner(
             "INFO",
             &format!("boot: bind sandbox grpc uds={}", uds_path.display()),
         );
-        let _ = std::fs::remove_file(&uds_path);
+        let _ = runner_fs().remove_file(&uds_path);
         let listener = tokio::net::UnixListener::bind(&uds_path)
             .context("bind sandbox grpc uds")
             .inspect_err(|e| boot_log_error("bind_sandbox_grpc_uds", format!("{e:#}")))?;
-        std::fs::write(&args.ready_marker, "uds")
+        runner_fs()
+            .write(&args.ready_marker, b"uds")
             .context("write ready marker")
             .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
         boot_log(
@@ -2153,7 +2191,8 @@ async fn serve_over_loopback_grpc(
         .context("grpc local addr")
         .inspect_err(|e| boot_log_error("grpc_local_addr", format!("{e:#}")))?
         .port();
-    std::fs::write(ready_marker, port.to_string())
+    runner_fs()
+        .write(ready_marker, port.to_string().as_bytes())
         .context("write ready marker")
         .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
     boot_log(
@@ -2224,7 +2263,9 @@ pub async fn connect_sandbox_client(
         tonic::transport::Channel,
     >,
 > {
-    let port_str = std::fs::read_to_string(ready_marker).context("read ready marker")?;
+    let port_str = runner_fs()
+        .read_to_string(ready_marker)
+        .context("read ready marker")?;
     let port: u16 = port_str.trim().parse().context("parse grpc port")?;
     let endpoint = format!("http://127.0.0.1:{port}");
     // Prefer 127.0.0.1 for host-side dial; server may bind localhost (same loopback on macOS).

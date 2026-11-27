@@ -20,7 +20,7 @@ fn writes_cgroup_v2_resource_limits_to_the_scope_directory() {
     };
 
     // When
-    write_cgroup_limits(scope.path(), &limits).expect("write cgroup limits");
+    write_cgroup_limits(&tddy_fs::DiskFs, scope.path(), &limits).expect("write cgroup limits");
 
     // Then
     let read = |name: &str| std::fs::read_to_string(scope.path().join(name)).unwrap();
@@ -56,7 +56,8 @@ fn relocates_the_daemon_process_into_the_supervisor_leaf() {
     let base = tempfile::tempdir().unwrap();
 
     // When
-    relocate_self_into_leaf(base.path(), 4242, "supervisor").expect("relocate into leaf");
+    relocate_self_into_leaf(&tddy_fs::DiskFs, base.path(), 4242, "supervisor")
+        .expect("relocate into leaf");
 
     // Then
     let procs = std::fs::read_to_string(base.path().join("supervisor").join("cgroup.procs"))
@@ -73,7 +74,7 @@ fn enables_the_configured_controllers_in_subtree_control() {
     let controllers = vec!["memory".to_string(), "cpu".to_string(), "pids".to_string()];
 
     // When
-    enable_controllers(base.path(), &controllers).expect("enable controllers");
+    enable_controllers(&tddy_fs::DiskFs, base.path(), &controllers).expect("enable controllers");
 
     // Then
     let written = std::fs::read_to_string(base.path().join("cgroup.subtree_control"))
@@ -89,7 +90,7 @@ fn moves_the_child_pid_into_the_session_scope() {
     let scope = tempfile::tempdir().unwrap();
 
     // When
-    move_pid_into_scope(scope.path(), 9182).expect("move pid into scope");
+    move_pid_into_scope(&tddy_fs::DiskFs, scope.path(), 9182).expect("move pid into scope");
 
     // Then
     let procs =

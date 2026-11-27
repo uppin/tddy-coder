@@ -69,7 +69,7 @@ impl BinaryLibraries for HostBinaryLibraries {
                 continue;
             };
             push_unique(&mut dirs, parent.to_path_buf());
-            if let Some(anchor) = nearest_canonical_ancestor(parent) {
+            if let Some(anchor) = nearest_canonical_ancestor(&tddy_fs::DiskFs, parent) {
                 push_unique(&mut dirs, anchor);
             }
         }
@@ -101,10 +101,13 @@ fn linked_libraries(binary: &Path) -> Vec<PathBuf> {
 /// that path is rewritten to its canonical form, so it never authorises the walk that reaches it.
 /// Walking up to the first directory that is its own canonical form gives a path the renderer
 /// leaves alone.
-fn nearest_canonical_ancestor(dir: &Path) -> Option<PathBuf> {
+fn nearest_canonical_ancestor(fs: &dyn tddy_fs::Fs, dir: &Path) -> Option<PathBuf> {
     dir.ancestors()
         .take_while(|ancestor| *ancestor != Path::new("/"))
-        .find(|ancestor| std::fs::canonicalize(ancestor).is_ok_and(|real| real == *ancestor))
+        .find(|ancestor| {
+            fs.canonicalize(ancestor)
+                .is_ok_and(|real| real == *ancestor)
+        })
         .map(Path::to_path_buf)
 }
 
@@ -268,14 +271,25 @@ pub fn lower_files(
     home: &Path,
     paths: &JailPaths<'_>,
 ) -> std::io::Result<FileGrants> {
+    lower_files_on(&tddy_fs::DiskFs, items, home, paths)
+}
+
+/// [`lower_files`] through the filesystem port.
+pub fn lower_files_on(
+    fs: &dyn tddy_fs::Fs,
+    items: &[FileItem],
+    home: &Path,
+    paths: &JailPaths<'_>,
+) -> std::io::Result<FileGrants> {
     let mut grants = FileGrants::default();
     for item in items {
         match item {
             FileItem::SeedOnce { from_host, to } => {
-                seed_once(&paths.host_home.join(from_host), &home.join(to))?
+                seed_once(fs, &paths.host_home.join(from_host), &home.join(to))?
             }
             FileItem::Mirror { from_host, to } => {
                 mirror(
+                    fs,
                     &paths.host_home.join(from_host),
                     &home.join(to),
                     &mut grants,
@@ -336,19 +350,18 @@ pub fn lower_policy(sections: &[PolicySection]) -> PolicySpec {
 }
 
 /// Copy `host_file` to `dest` (mode `0600`) unless `dest` exists. A missing host file seeds nothing.
-fn seed_once(host_file: &Path, dest: &Path) -> std::io::Result<()> {
-    if dest.exists() || !host_file.is_file() {
+fn seed_once(fs: &dyn tddy_fs::Fs, host_file: &Path, dest: &Path) -> std::io::Result<()> {
+    // `metadata_follow`, as before: `is_file` follows a link.
+    if fs.exists(dest)
+        || !matches!(fs.metadata_follow(host_file), Ok(m) if m.kind == tddy_fs::FsKind::File)
+    {
         return Ok(());
     }
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
-    std::fs::copy(host_file, dest)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o600))?;
-    }
+    fs.copy(host_file, dest)?;
+    fs.set_mode(dest, 0o600)?;
     Ok(())
 }
 
@@ -358,17 +371,23 @@ fn seed_once(host_file: &Path, dest: &Path) -> std::io::Result<()> {
 /// A home an older launch seeded holds a real directory of links where a mirror of a directory goes
 /// (a tool's versioned install directory). One that holds nothing but links is that older mirror, and is
 /// replaced; any other directory is the tool's own, is left alone and is not mirrored over.
-fn mirror(host_path: &Path, link: &Path, grants: &mut FileGrants) -> std::io::Result<()> {
-    let Ok(target) = std::fs::canonicalize(host_path) else {
+fn mirror(
+    fs: &dyn tddy_fs::Fs,
+    host_path: &Path,
+    link: &Path,
+    grants: &mut FileGrants,
+) -> std::io::Result<()> {
+    let Ok(target) = fs.canonicalize(host_path) else {
         return Ok(());
     };
-    if is_a_real_directory(link) {
-        if !holds_only_links(link)? {
+    if is_a_real_directory(fs, link) {
+        if !holds_only_links(fs, link)? {
             return Ok(());
         }
-        std::fs::remove_dir_all(link)?;
+        fs.remove_dir_all(link)?;
     }
-    let read = if target.is_dir() {
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    let read = if matches!(fs.metadata_follow(&target), Ok(m) if m.kind == tddy_fs::FsKind::Dir) {
         ReadSpec::subpath(target.clone(), ReadReason::Custom)
     } else {
         ReadSpec::literal(target.clone(), ReadReason::Custom).executable()
@@ -382,14 +401,16 @@ fn mirror(host_path: &Path, link: &Path, grants: &mut FileGrants) -> std::io::Re
 }
 
 /// Whether `path` is a directory itself, not a link to one.
-fn is_a_real_directory(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_dir())
+fn is_a_real_directory(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    // `metadata`, as before: a link to a directory is not a real directory.
+    fs.metadata(path)
+        .is_ok_and(|meta| meta.kind == tddy_fs::FsKind::Dir)
 }
 
 /// Whether every entry of the directory `dir` is a symbolic link.
-fn holds_only_links(dir: &Path) -> std::io::Result<bool> {
-    for entry in std::fs::read_dir(dir)? {
-        if !entry?.file_type()?.is_symlink() {
+fn holds_only_links(fs: &dyn tddy_fs::Fs, dir: &Path) -> std::io::Result<bool> {
+    for entry in fs.read_dir(dir)? {
+        if fs.metadata(&entry)?.kind != tddy_fs::FsKind::Symlink {
             return Ok(false);
         }
     }

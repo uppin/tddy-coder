@@ -230,14 +230,18 @@ fn init_logging(args: &Args, cfg: &config::SandboxAppConfig) -> Result<()> {
     match log_destination(mode, &session_base) {
         LogDestination::Stderr => {}
         LogDestination::File(path) => {
-            std::fs::create_dir_all(&session_base)
+            tddy_sandbox_app::app_fs()
+                .create_dir_all(&session_base)
                 .with_context(|| format!("create session base {}", session_base.display()))?;
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
+            // The probe append of zero bytes is the open, and its error is the refusal the
+            // `OpenOptions` call reported.
+            tddy_sandbox_app::app_fs()
+                .append(&path, b"")
                 .with_context(|| format!("open app log {}", path.display()))?;
-            builder.target(env_logger::Target::Pipe(Box::new(file)));
+            builder.target(env_logger::Target::Pipe(Box::new(AppLogWriter {
+                fs: tddy_sandbox_app::app_fs(),
+                path: path.clone(),
+            })));
             eprintln!(
                 "app log: {} (this session's terminal belongs to the agent)",
                 path.display()
@@ -302,13 +306,50 @@ fn update_latest_session_symlink(session_base: &std::path::Path, session_id: &st
     #[cfg(unix)]
     {
         let sessions_dir = session_base.join(SESSIONS_SUBDIR);
-        if std::fs::create_dir_all(&sessions_dir).is_err() {
+        if tddy_sandbox_app::app_fs()
+            .create_dir_all(&sessions_dir)
+            .is_err()
+        {
             return;
         }
         let link = sessions_dir.join("latest");
-        let _ = std::fs::remove_file(&link);
-        let _ = std::os::unix::fs::symlink(session_id, &link);
+        let _ = tddy_sandbox_app::app_fs().remove_file(&link);
+        // `libc::symlink` directly: the port has no link-creation operation, and creating a
+        // link is a name-space act, not file content.
+        let _ = symlink(session_id, &link);
     }
+}
+
+/// `env_logger`'s pipe into the app log: each write is one append through the port.
+struct AppLogWriter {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    path: PathBuf,
+}
+
+impl std::io::Write for AppLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.fs.append(&self.path, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn symlink(target: &str, link: &Path) -> std::io::Result<()> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let c_target = std::ffi::CString::new(target.as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL")
+    })?;
+    let c_link = std::ffi::CString::new(link.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL")
+    })?;
+    if unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -1091,11 +1132,13 @@ mod tests {
     fn a_sandboxed_session_wires_in_a_named_specialized_agent() {
         // Given
         let agents_dir = tempfile::tempdir().expect("agents dir");
-        std::fs::write(
-            agents_dir.path().join("explorer.yaml"),
-            "name: explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n",
-        )
-        .expect("write the def");
+        tddy_sandbox_app::app_fs()
+            .write(
+                &agents_dir.path().join("explorer.yaml"),
+                "name: explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n"
+                    .as_bytes(),
+            )
+            .expect("write the def");
 
         // When
         let wired =

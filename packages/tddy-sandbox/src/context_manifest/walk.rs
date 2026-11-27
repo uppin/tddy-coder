@@ -72,12 +72,13 @@ pub(crate) struct ContextFile {
 ///
 /// A dangling link is skipped: it has no bytes to sync and never had.
 pub(crate) fn walk_context_files(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     globs: &[&str],
     guidance_files: &[std::path::PathBuf],
 ) -> anyhow::Result<Vec<ContextFile>> {
-    let root = std::fs::canonicalize(root)?;
-    Ok(context_tree(&root, globs, guidance_files)?
+    let root = fs.canonicalize(root)?;
+    Ok(context_tree(fs, &root, globs, guidance_files)?
         .files
         .into_values()
         .collect())
@@ -97,6 +98,7 @@ struct ContextTree {
 /// withholds; pull in what the surviving links reach; drop the pulled-in files git ignores or the
 /// predicate withholds.
 fn context_tree(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     globs: &[&str],
     guidance_files: &[std::path::PathBuf],
@@ -104,6 +106,7 @@ fn context_tree(
     let mut listed = BTreeMap::new();
     let mut found_links = Vec::new();
     collect_allow_listed(
+        fs,
         root,
         "",
         root,
@@ -150,7 +153,7 @@ fn context_tree(
 
     let mut pulled = BTreeMap::new();
     for (target, link) in &found_links {
-        pull_in_link_target(target, &link.target, &link.link, &mut pulled)?;
+        pull_in_link_target(fs, target, &link.target, &link.link, &mut pulled)?;
     }
     // A pulled-in file the globs also name is listed on the globs' authority, as it already is.
     pulled.retain(|rel_path, _| !listed.contains_key(rel_path));
@@ -209,8 +212,18 @@ pub fn context_reach(
     globs: &[&str],
     guidance_files: &[std::path::PathBuf],
 ) -> anyhow::Result<ContextReach> {
-    let root = std::fs::canonicalize(root)?;
-    let tree = context_tree(&root, globs, guidance_files)?;
+    context_reach_on(&tddy_fs::DiskFs, root, globs, guidance_files)
+}
+
+/// [`context_reach`] through the filesystem port.
+pub fn context_reach_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    globs: &[&str],
+    guidance_files: &[std::path::PathBuf],
+) -> anyhow::Result<ContextReach> {
+    let root = fs.canonicalize(root)?;
+    let tree = context_tree(fs, &root, globs, guidance_files)?;
     let files = tree
         .files
         .into_values()
@@ -229,7 +242,9 @@ pub fn context_reach(
 /// The allow-listed tree: ordinary files the globs name, followed preamble links, and the links
 /// whose own path is allow-listed. `links` collects each travelling link's canonical target beside
 /// the link itself.
+#[allow(clippy::too_many_arguments)]
 fn collect_allow_listed(
+    fs: &dyn tddy_fs::Fs,
     dir: &Path,
     dir_rel: &str,
     root: &Path,
@@ -238,23 +253,27 @@ fn collect_allow_listed(
     found: &mut BTreeMap<String, ContextFile>,
     links: &mut Vec<(PathBuf, ContextLink)>,
 ) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
+    for entry_path in fs.read_dir(dir)? {
         // A name no glob could ever spell cannot be allow-listed.
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+        let Some(name) = entry_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
+        let entry = entry_path.clone();
         let rel_path = if dir_rel.is_empty() {
             name
         } else {
             format!("{dir_rel}/{name}")
         };
-        // `symlink_metadata`, so a link is seen as a link rather than as whatever it points at.
-        let file_type = std::fs::symlink_metadata(entry.path())?.file_type();
-        if file_type.is_symlink() {
+        // `metadata`, so a link is seen as a link rather than as whatever it points at.
+        let file_type = fs.metadata(&entry)?.kind;
+        if file_type == tddy_fs::FsKind::Symlink {
             if is_preamble_path(&rel_path, guidance_files) {
                 if let Some(target) =
-                    resolve_preamble_link(&entry.path(), &rel_path, root, globs, guidance_files)?
+                    resolve_preamble_link(fs, &entry, &rel_path, root, globs, guidance_files)?
                 {
                     found.insert(
                         rel_path.clone(),
@@ -273,7 +292,7 @@ fn collect_allow_listed(
                 continue;
             }
             let Some((target, link)) =
-                resolve_link(&entry.path(), &rel_path, root, globs, guidance_files)?
+                resolve_link(fs, &entry, &rel_path, root, globs, guidance_files)?
             else {
                 continue;
             };
@@ -286,10 +305,11 @@ fn collect_allow_listed(
                 },
             );
             links.push((target, link));
-        } else if file_type.is_dir() {
+        } else if file_type == tddy_fs::FsKind::Dir {
             if could_contain_matches(&rel_path, globs) {
                 collect_allow_listed(
-                    &entry.path(),
+                    fs,
+                    &entry,
                     &rel_path,
                     root,
                     globs,
@@ -298,12 +318,12 @@ fn collect_allow_listed(
                     links,
                 )?;
             }
-        } else if file_type.is_file() && matches_context_globs(&rel_path, globs) {
+        } else if file_type == tddy_fs::FsKind::File && matches_context_globs(&rel_path, globs) {
             found.insert(
                 rel_path.clone(),
                 ContextFile {
                     rel_path,
-                    source: entry.path(),
+                    source: entry,
                     symlink_target: None,
                 },
             );
@@ -321,14 +341,15 @@ fn collect_allow_listed(
 /// not expose `.claude/settings.local.json`, and no symlink inside it is followed or listed (one
 /// hop). [`is_reached_through_link`] asks the receiving syncer's half of the same question.
 fn pull_in_link_target(
+    fs: &dyn tddy_fs::Fs,
     target: &Path,
     target_rel: &str,
     read_as: &str,
     found: &mut BTreeMap<String, ContextFile>,
 ) -> anyhow::Result<()> {
     // `target` is canonical, so this is the target itself and never another link.
-    let file_type = std::fs::symlink_metadata(target)?.file_type();
-    if file_type.is_file() {
+    let file_type = fs.metadata(target)?.kind;
+    if file_type == tddy_fs::FsKind::File {
         found
             .entry(target_rel.to_string())
             .or_insert_with(|| ContextFile {
@@ -336,10 +357,13 @@ fn pull_in_link_target(
                 source: target.to_path_buf(),
                 symlink_target: None,
             });
-    } else if file_type.is_dir() {
-        for entry in std::fs::read_dir(target)? {
-            let entry = entry?;
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+    } else if file_type == tddy_fs::FsKind::Dir {
+        for entry in fs.read_dir(target)? {
+            let Some(name) = entry
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
             let rel_path = format!("{target_rel}/{name}");
@@ -350,17 +374,14 @@ fn pull_in_link_target(
                 );
                 continue;
             }
-            if std::fs::symlink_metadata(entry.path())?
-                .file_type()
-                .is_symlink()
-            {
+            if fs.metadata(&entry)?.kind == tddy_fs::FsKind::Symlink {
                 log::debug!(
                     "context_manifest: {rel_path} is a link inside a pulled-in tree; links pull \
                      in one hop only, so it is not listed"
                 );
                 continue;
             }
-            pull_in_link_target(&entry.path(), &rel_path, &read_as, found)?;
+            pull_in_link_target(fs, &entry, &rel_path, &read_as, found)?;
         }
     }
     Ok(())
@@ -398,8 +419,12 @@ pub fn root_relative(path: &Path, root: &Path) -> Option<String> {
 /// propagated, because treating it as "skip" would quietly drop a link the project still ships, and
 /// a dropped manifest entry is a *delete* in the agent's context directory: a transient error would
 /// withdraw guidance with nothing anywhere saying so.
-fn resolve_within_root(entry: &Path, root: &Path) -> anyhow::Result<Option<(PathBuf, String)>> {
-    let target = match std::fs::canonicalize(entry) {
+fn resolve_within_root(
+    fs: &dyn tddy_fs::Fs,
+    entry: &Path,
+    root: &Path,
+) -> anyhow::Result<Option<(PathBuf, String)>> {
+    let target = match fs.canonicalize(entry) {
         Ok(target) => target,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             log::debug!("context_manifest: {entry:?} is a dangling symlink; skipping it");
@@ -424,13 +449,14 @@ fn resolve_within_root(entry: &Path, root: &Path) -> anyhow::Result<Option<(Path
 /// The link at `entry` (spelled `link_rel`), as `(canonical target, the link)`, or `None` when it
 /// must not travel ([`resolve_within_root`], then [`allow_listed_link`]).
 fn resolve_link(
+    fs: &dyn tddy_fs::Fs,
     entry: &Path,
     link_rel: &str,
     root: &Path,
     globs: &[&str],
     guidance_files: &[std::path::PathBuf],
 ) -> anyhow::Result<Option<(PathBuf, ContextLink)>> {
-    let Some((target, target_rel)) = resolve_within_root(entry, root)? else {
+    let Some((target, target_rel)) = resolve_within_root(fs, entry, root)? else {
         return Ok(None);
     };
     match allow_listed_link(link_rel, &target_rel, globs, guidance_files) {
@@ -448,13 +474,14 @@ fn resolve_link(
 /// may not be ([`resolve_within_root`], then [`followed_preamble_target`]) or does not lead to a
 /// file — a `CLAUDE.md` that is a directory has no bytes to put the preamble in front of.
 fn resolve_preamble_link(
+    fs: &dyn tddy_fs::Fs,
     entry: &Path,
     link_rel: &str,
     root: &Path,
     globs: &[&str],
     guidance_files: &[std::path::PathBuf],
 ) -> anyhow::Result<Option<PathBuf>> {
-    let Some((target, target_rel)) = resolve_within_root(entry, root)? else {
+    let Some((target, target_rel)) = resolve_within_root(fs, entry, root)? else {
         return Ok(None);
     };
     if followed_preamble_target(link_rel, &target_rel, globs, guidance_files).is_none() {
@@ -464,7 +491,8 @@ fn resolve_preamble_link(
         );
         return Ok(None);
     }
-    if !std::fs::metadata(&target)?.is_file() {
+    // `metadata_follow`, as before: the question stays about the file itself.
+    if !matches!(fs.metadata_follow(&target), Ok(m) if m.kind == tddy_fs::FsKind::File) {
         log::debug!("context_manifest: {link_rel} -> {target_rel} is not a file; skipping it");
         return Ok(None);
     }

@@ -1,4 +1,3 @@
-use std::fs::{File, OpenOptions};
 use std::process::{Command, Stdio};
 
 #[cfg(unix)]
@@ -32,28 +31,38 @@ pub fn sandbox_exec_argv(plan: &SandboxPlan) -> Vec<String> {
 /// Spawn a sandboxed process from an explicit [`SandboxPlan`]: render the strict SBPL profile,
 /// materialize copies/symlinks/secrets, then exec `sandbox-exec`.
 pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+    spawn_plan_on(&tddy_fs::DiskFs, plan)
+}
+
+/// [`spawn_plan`] through the filesystem port.
+pub fn spawn_plan_on(
+    fs: &dyn tddy_fs::Fs,
+    plan: SandboxPlan,
+) -> Result<SandboxHandle, SandboxError> {
     plan.spec.validate()?;
 
-    std::fs::create_dir_all(&plan.spec.project_root)
+    fs.create_dir_all(&plan.spec.project_root)
         .map_err(|e| SandboxError::Io(e.to_string()))?;
-    std::fs::create_dir_all(&plan.spec.scratch_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
-    std::fs::create_dir_all(&plan.spec.egress_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+    fs.create_dir_all(&plan.spec.scratch_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
+    fs.create_dir_all(&plan.spec.egress_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
 
-    tddy_sandbox::materialize_copies(&plan.copies).map_err(SandboxError::Io)?;
-    tddy_sandbox::materialize_symlinks(&plan.symlinks).map_err(SandboxError::Io)?;
-    tddy_sandbox::materialize_secrets(&plan.env.secrets, &plan.spec.scratch_dir)
+    tddy_sandbox::materialize_copies_on(fs, &plan.copies).map_err(SandboxError::Io)?;
+    tddy_sandbox::materialize_symlinks_on(fs, &plan.symlinks).map_err(SandboxError::Io)?;
+    tddy_sandbox::materialize_secrets_on(fs, &plan.env.secrets, &plan.spec.scratch_dir)
         .map_err(SandboxError::Io)?;
 
     let profile_text = render_plan(&plan)?;
-    std::fs::write(&plan.spec.profile_path, &profile_text)
+    fs.write(&plan.spec.profile_path, profile_text.as_bytes())
         .map_err(|e| SandboxError::Io(format!("write profile: {e}")))?;
 
     let grpc_socket_path = plan.spec.project_root.join("sandbox.grpc.sock");
     let ready_marker_path = plan.spec.project_root.join("sandbox.ready");
-    let _ = std::fs::remove_file(&grpc_socket_path);
-    let _ = std::fs::remove_file(&ready_marker_path);
+    let _ = fs.remove_file(&grpc_socket_path);
+    let _ = fs.remove_file(&ready_marker_path);
 
-    let stderr_log = open_egress_log(&plan.spec.egress_dir, SANDBOX_EXEC_STDERR_LOG)?;
+    let stderr_log = open_egress_log(fs, &plan.spec.egress_dir, SANDBOX_EXEC_STDERR_LOG)?;
 
     // `--stdio` dedicates the sandboxed process's stdin/stdout to RPC framing (see
     // `tddy_core::stdio_safety`, `tddy-stdio`) instead of the --grpc-uds/--grpc-listen-port
@@ -73,7 +82,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     if stdio_mode {
         cmd.stdout(Stdio::piped());
     } else {
-        let stdout_log = open_egress_log(&plan.spec.egress_dir, SANDBOX_EXEC_STDOUT_LOG)?;
+        let stdout_log = open_egress_log(fs, &plan.spec.egress_dir, SANDBOX_EXEC_STDOUT_LOG)?;
         cmd.stdout(Stdio::from(stdout_log));
     }
     cmd.stderr(Stdio::from(stderr_log));
@@ -108,7 +117,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     }
 
     let pid = child.id();
-    write_spawn_manifest(&plan.spec, pid, &plan.spec.profile_path)?;
+    write_spawn_manifest(fs, &plan.spec, pid, &plan.spec.profile_path)?;
     let _ = append_line(
         &egress_log_path(&plan.spec.egress_dir, SANDBOX_EXEC_STDERR_LOG),
         &format!(
@@ -131,18 +140,42 @@ pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
     plan.stdio
 }
 
-fn open_egress_log(egress_dir: &std::path::Path, name: &str) -> Result<File, SandboxError> {
-    std::fs::create_dir_all(egress_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+fn open_egress_log(
+    fs: &dyn tddy_fs::Fs,
+    egress_dir: &std::path::Path,
+    name: &str,
+) -> Result<std::os::fd::OwnedFd, SandboxError> {
+    fs.create_dir_all(egress_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
     let path = egress_log_path(egress_dir, name);
-    OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(&path)
-        .map_err(|e| SandboxError::Io(format!("open egress log {}: {e}", path.display())))
+    // The child's stderr is an fd, not file content: opened with `libc::open` and held as
+    // an `OwnedFd`, which `Stdio` takes as it took the `File`.
+    use std::os::fd::{FromRawFd as _, OwnedFd};
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
+        SandboxError::Io(format!(
+            "open egress log {}: not a C string",
+            path.display()
+        ))
+    })?;
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC,
+            0o644,
+        )
+    };
+    if fd == -1 {
+        return Err(SandboxError::Io(format!(
+            "open egress log {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
 
 fn write_spawn_manifest(
+    fs: &dyn tddy_fs::Fs,
     spec: &SandboxSpec,
     pid: u32,
     profile_path: &std::path::Path,
@@ -165,7 +198,7 @@ fn write_spawn_manifest(
     });
     let text = serde_json::to_string_pretty(&payload)
         .map_err(|e| SandboxError::Io(format!("serialize spawn manifest: {e}")))?;
-    std::fs::write(&manifest_path, text)
+    fs.write(&manifest_path, text.as_bytes())
         .map_err(|e| SandboxError::Io(format!("write spawn manifest: {e}")))?;
     Ok(())
 }

@@ -9,6 +9,8 @@ name = "tddy_sandbox_cgroups"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 anyhow = "1"
 log = "0.4"
@@ -18,4 +20,6 @@ nix = { version = "0.30", features = ["sched", "mount", "fs", "process", "user"]
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"

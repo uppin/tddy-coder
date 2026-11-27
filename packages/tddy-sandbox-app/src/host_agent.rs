@@ -209,10 +209,12 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
     )?;
     for (path, contents) in &rendered.files {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
+            crate::app_fs()
+                .create_dir_all(dir)
                 .with_context(|| format!("create MCP config dir {}", dir.display()))?;
         }
-        tddy_core::atomic_file::write_atomic(path, contents)
+        crate::app_fs()
+            .write_atomic(path, contents.as_bytes(), None)
             .with_context(|| format!("write MCP config: {}", path.display()))?;
     }
     slot_args.extend(rendered.argv_extra);

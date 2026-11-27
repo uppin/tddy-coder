@@ -262,16 +262,14 @@ fn hex_of(digest: &[u8]) -> String {
 ///
 /// The count comes back rather than being taken from a second `stat` so the two can never disagree:
 /// the size a manifest entry advertises is the size of the bytes its hash was taken over.
-fn hash_file(path: &Path) -> anyhow::Result<(String, u64)> {
-    use std::io::Read;
-
-    let file = std::fs::File::open(path)?;
-    let mut reader = std::io::BufReader::with_capacity(HASH_CHUNK_BYTES, file);
+fn hash_file(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<(String, u64)> {
+    // The port has no streaming read, so the bytes come whole and are hashed in
+    // [`HASH_CHUNK_BYTES`] chunks — the same chunking the buffered reader used.
+    let bytes = fs.read(path)?;
     let mut hasher = Sha256::new();
-    let mut buffer = vec![0u8; HASH_CHUNK_BYTES];
     let mut size_bytes: u64 = 0;
-    loop {
-        let read = reader.read(&mut buffer)?;
+    for buffer in bytes.chunks(HASH_CHUNK_BYTES) {
+        let read = buffer.len();
         if read == 0 {
             break;
         }
@@ -336,8 +334,19 @@ impl ContextManifest {
         guidance_files: &[std::path::PathBuf],
         max_bytes: u64,
     ) -> anyhow::Result<Self> {
+        Self::of_worktree_on(&tddy_fs::DiskFs, root, globs, guidance_files, max_bytes)
+    }
+
+    /// [`ContextManifest::of_worktree`] through the filesystem port.
+    pub fn of_worktree_on(
+        fs: &dyn tddy_fs::Fs,
+        root: &Path,
+        globs: &[&str],
+        guidance_files: &[std::path::PathBuf],
+        max_bytes: u64,
+    ) -> anyhow::Result<Self> {
         let mut entries = Vec::new();
-        for file in walk_context_files(root, globs, guidance_files)? {
+        for file in walk_context_files(fs, root, globs, guidance_files)? {
             if let Some(target) = file.symlink_target {
                 // A link carries no bytes; its identity is where it points, so retargeting it
                 // changes its hash and the diff fetches it although no file's bytes moved.
@@ -349,7 +358,7 @@ impl ContextManifest {
                 });
                 continue;
             }
-            let declared_size = std::fs::metadata(&file.source)?.len();
+            let declared_size = fs.metadata_follow(&file.source)?.len;
             if declared_size > max_bytes {
                 log::warn!(
                     "context_manifest: {} is {declared_size} byte(s), over the {max_bytes} byte \
@@ -358,7 +367,7 @@ impl ContextManifest {
                 );
                 continue;
             }
-            let (sha256, size_bytes) = hash_file(&file.source)?;
+            let (sha256, size_bytes) = hash_file(fs, &file.source)?;
             // Re-checked against what was actually read: a file that grew past the cap between the
             // stat and the hash would otherwise be advertised at a size the reader refuses.
             if size_bytes > max_bytes {

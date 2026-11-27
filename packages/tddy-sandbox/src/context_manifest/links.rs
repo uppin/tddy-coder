@@ -298,10 +298,32 @@ pub fn create_context_link(
     link_rel: &str,
     target_rel: &str,
 ) -> std::io::Result<()> {
+    create_context_link_on(&tddy_fs::DiskFs, link_path, link_rel, target_rel)
+}
+
+/// [`create_context_link`] through the filesystem port.
+pub fn create_context_link_on(
+    _fs: &dyn tddy_fs::Fs,
+    link_path: &Path,
+    link_rel: &str,
+    target_rel: &str,
+) -> std::io::Result<()> {
     let relative = relative_link_target(link_rel, target_rel);
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(relative, link_path)
+        // `libc::symlink` directly: the port has no link-creation operation, and creating a
+        // link is a name-space act, not file content.
+        use std::os::unix::ffi::OsStrExt as _;
+        let c_target = std::ffi::CString::new(relative.as_os_str().as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL")
+        })?;
+        let c_link = std::ffi::CString::new(link_path.as_os_str().as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL")
+        })?;
+        if unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
     }
     #[cfg(not(unix))]
     {
@@ -332,6 +354,15 @@ pub fn create_context_link(
 /// `canonical(context_dir)` joined with the logical parent — no component of it a link. Shared by
 /// the copier and both of the syncer's writers so none of them writes through a link.
 pub fn prepare_context_write(context_dir: &Path, rel_path: &str) -> std::io::Result<PathBuf> {
+    prepare_context_write_on(&tddy_fs::DiskFs, context_dir, rel_path)
+}
+
+/// [`prepare_context_write`] through the filesystem port.
+pub fn prepare_context_write_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    rel_path: &str,
+) -> std::io::Result<PathBuf> {
     use std::io::{Error, ErrorKind};
 
     let rel = normalize_context_path(rel_path).ok_or_else(|| {
@@ -340,14 +371,15 @@ pub fn prepare_context_write(context_dir: &Path, rel_path: &str) -> std::io::Res
             format!("{rel_path:?} names no path under the context dir"),
         )
     })?;
-    std::fs::create_dir_all(context_dir)?;
+    fs.create_dir_all(context_dir)?;
     let mut segments: Vec<&str> = rel.split('/').collect();
     segments.pop();
     let mut dir = context_dir.to_path_buf();
     for segment in &segments {
         dir.push(segment);
-        match std::fs::symlink_metadata(&dir) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
+        // `metadata`, so a link is seen as a link rather than as whatever it points at.
+        match fs.metadata(&dir) {
+            Ok(metadata) if metadata.kind == tddy_fs::FsKind::Symlink => {
                 log::warn!(
                     "context_manifest: refusing to write {rel:?}: {dir:?} above it is a symlink"
                 );
@@ -356,7 +388,7 @@ pub fn prepare_context_write(context_dir: &Path, rel_path: &str) -> std::io::Res
                     format!("cannot write {rel:?} into the context dir: {dir:?} is a symlink"),
                 ));
             }
-            Ok(metadata) if metadata.is_dir() => {}
+            Ok(metadata) if metadata.kind == tddy_fs::FsKind::Dir => {}
             Ok(_) => {
                 return Err(Error::new(
                     ErrorKind::AlreadyExists,
@@ -365,16 +397,16 @@ pub fn prepare_context_write(context_dir: &Path, rel_path: &str) -> std::io::Res
                     ),
                 ))
             }
-            Err(e) if e.kind() == ErrorKind::NotFound => std::fs::create_dir(&dir)?,
+            Err(e) if e.kind() == ErrorKind::NotFound => fs.create_dir_all(&dir)?,
             Err(e) => return Err(e),
         }
     }
     let expected = segments
         .iter()
-        .fold(std::fs::canonicalize(context_dir)?, |path, segment| {
+        .fold(fs.canonicalize(context_dir)?, |path, segment| {
             path.join(segment)
         });
-    let actual = std::fs::canonicalize(&dir)?;
+    let actual = fs.canonicalize(&dir)?;
     if actual != expected {
         log::warn!(
             "context_manifest: refusing to write {rel:?}: its parent resolves to {actual:?}, not \

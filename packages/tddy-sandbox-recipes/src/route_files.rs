@@ -5,8 +5,6 @@
 //! directory is the scratch's own, so it is replaced when a plan is built again for the same
 //! session (a relaunch).
 
-use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 
 use tddy_core::provider_route::HarnessRoute;
@@ -21,6 +19,7 @@ const OWNER_ONLY_FILE: u32 = 0o600;
 /// which the launch's configuration variable names (`coding_agent.route.config_env`). `None` when the route has no files, and
 /// nothing is written.
 pub(crate) fn materialise_route_files(
+    fs: &dyn tddy_fs::Fs,
     scratch_dir: &Path,
     route: &HarnessRoute,
 ) -> Result<Option<PathBuf>, SandboxError> {
@@ -32,23 +31,17 @@ pub(crate) fn materialise_route_files(
         plain_file_name(&file.name)?;
     }
     let dir = scratch_dir.join(ROUTE_FILES_DIR);
-    std::fs::create_dir_all(scratch_dir)
+    fs.create_dir_all(scratch_dir)
         .map_err(|e| io_error("create the scratch", scratch_dir, &e))?;
-    remove_stale_dir(&dir)?;
-    std::fs::DirBuilder::new()
-        .mode(OWNER_ONLY_DIR)
-        .create(&dir)
+    remove_stale_dir(fs, &dir)?;
+    // Created at exactly the owner-only mode: the port's mode-riding creation, where the
+    // `DirBuilder` this replaces put the mode.
+    fs.create_dir_all_with_mode(&dir, OWNER_ONLY_DIR)
         .map_err(|e| io_error("create the route files directory", &dir, &e))?;
     for file in &route.files {
         let path = dir.join(plain_file_name(&file.name)?);
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(OWNER_ONLY_FILE)
-            .open(&path)
+        fs.create_new_with_mode(&path, file.contents.as_bytes(), OWNER_ONLY_FILE)
             .map_err(|e| io_error("create a route file", &path, &e))?;
-        out.write_all(file.contents.as_bytes())
-            .map_err(|e| io_error("write a route file", &path, &e))?;
     }
     Ok(Some(dir.join(plain_file_name(&first.name)?)))
 }
@@ -67,9 +60,11 @@ fn plain_file_name(name: &str) -> Result<&str, SandboxError> {
 
 /// Remove a directory a previous plan for this scratch wrote. A symbolic link is removed, not
 /// followed: `remove_dir_all` does not descend through one.
-fn remove_stale_dir(dir: &Path) -> Result<(), SandboxError> {
-    match std::fs::symlink_metadata(dir) {
-        Ok(_) => std::fs::remove_dir_all(dir)
+fn remove_stale_dir(fs: &dyn tddy_fs::Fs, dir: &Path) -> Result<(), SandboxError> {
+    // `metadata`, so a link is seen as a link rather than as whatever it points at.
+    match fs.metadata(dir) {
+        Ok(_) => fs
+            .remove_dir_all(dir)
             .map_err(|e| io_error("replace the route files directory", dir, &e)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(io_error("inspect the route files directory", dir, &e)),

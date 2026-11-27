@@ -77,8 +77,13 @@ fn primary_binary_from_command(command: &[String]) -> Option<PathBuf> {
 }
 
 fn canonical_binary_path(path: &str) -> Option<PathBuf> {
+    canonical_binary_path_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`canonical_binary_path`] through the filesystem port.
+fn canonical_binary_path_on(fs: &dyn tddy_fs::Fs, path: &str) -> Option<PathBuf> {
     if path.contains('/') {
-        std::fs::canonicalize(path).ok()
+        fs.canonicalize(std::path::Path::new(path)).ok()
     } else {
         None
     }
@@ -201,7 +206,7 @@ pub fn build_runner_plan(params: RunnerPlanRequest) -> Result<SandboxPlan, Sandb
     let mut env = params.env;
     if let Some(route) = &params.route {
         env.extend(route.env.iter().cloned());
-        materialise_route_files(&params.scratch_dir, route)?;
+        materialise_route_files(&tddy_fs::DiskFs, &params.scratch_dir, route)?;
     }
 
     let mut builder = SandboxBuilder::new(

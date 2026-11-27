@@ -243,7 +243,12 @@ fn render_network(network: &NetworkSpec, ipc_socket: Option<&Path>) -> String {
 /// denied even though the project subpath was "allowed". Canonicalize best-effort and
 /// fall back to the original spelling when the path does not yet exist (e.g. unit tests).
 fn canonical_rule_path(path: &std::path::Path) -> String {
-    std::fs::canonicalize(path)
+    canonical_rule_path_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`canonical_rule_path`] through the filesystem port.
+fn canonical_rule_path_on(fs: &dyn tddy_fs::Fs, path: &std::path::Path) -> String {
+    fs.canonicalize(path)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| path.to_string_lossy().into_owned())
 }

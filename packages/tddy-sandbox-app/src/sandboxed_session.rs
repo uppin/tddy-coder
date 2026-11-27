@@ -22,7 +22,6 @@
 //!    `tddy-tools --mcp` cannot tell which end it is talking to — nor should it.
 
 use std::future::Future;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -251,7 +250,7 @@ impl SandboxedCodebaseSession {
         terminate_sandbox_process(handle.pid());
         let _ = handle.child_mut().kill();
         let _ = handle.child_mut().wait();
-        let _ = std::fs::remove_file(&self.tool_ipc_socket);
+        let _ = crate::app_fs().remove_file(&self.tool_ipc_socket);
     }
 }
 
@@ -314,7 +313,9 @@ pub async fn provision_with_interrupt(
     }
 
     let session_dir = params.session_dir.clone();
-    std::fs::create_dir_all(&session_dir).context("create session dir")?;
+    crate::app_fs()
+        .create_dir_all(&session_dir)
+        .context("create session dir")?;
 
     // The same tree `spawn_claude_sandbox` lays out, so a `sandboxed` session's artifacts are found
     // where every other session's are (PRD criterion 11).
@@ -337,20 +338,34 @@ pub async fn provision_with_interrupt(
     // `TMPDIR` stays inside the session tree. Scratch is exactly what should not outlive the
     // session, and keeping it there is what makes a finished session's directory the whole story.
     let build_home_dir = params.repo_build_home;
-    std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+    crate::app_fs()
+        .create_dir_all(sandbox_root.join(".work").join("tmp"))
         .context("mkdir sandbox scratch tmp")?;
-    std::fs::create_dir_all(&build_home_dir)
+    crate::app_fs()
+        .create_dir_all(&build_home_dir)
         .with_context(|| format!("mkdir build home {}", build_home_dir.display()))?;
-    std::fs::create_dir_all(sandbox_root.join("context")).context("mkdir sandbox context")?;
-    std::fs::create_dir_all(&egress_dir).context("mkdir sandbox egress")?;
-    std::fs::create_dir_all(&host_dir).context("mkdir the session's host-only dir")?;
+    crate::app_fs()
+        .create_dir_all(sandbox_root.join("context"))
+        .context("mkdir sandbox context")?;
+    crate::app_fs()
+        .create_dir_all(&egress_dir)
+        .context("mkdir sandbox egress")?;
+    crate::app_fs()
+        .create_dir_all(&host_dir)
+        .context("mkdir the session's host-only dir")?;
 
     // Seatbelt matches its rules against fully symlink-resolved paths (`/var` → `/private/var`), so
     // every path the profile is built from is named the way the kernel will report it.
-    let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
-    let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+    let sandbox_root = crate::app_fs()
+        .canonicalize(&sandbox_root)
+        .unwrap_or(sandbox_root);
+    let egress_dir = crate::app_fs()
+        .canonicalize(&egress_dir)
+        .unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
-    let build_home = std::fs::canonicalize(&build_home_dir).unwrap_or(build_home_dir);
+    let build_home = crate::app_fs()
+        .canonicalize(&build_home_dir)
+        .unwrap_or(build_home_dir);
     let scratch_tmp = scratch_dir.join("tmp");
     let context_dir = sandbox_root.join("context");
 
@@ -619,7 +634,9 @@ async fn finish_provisioning(
 /// the leading half is a millisecond timestamp, so two sessions started close together would
 /// otherwise pick the same path and the second would dispatch into the first one's jail.
 fn host_tool_ipc_socket_path(session_id: &str) -> PathBuf {
-    let tmp = std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let tmp = crate::app_fs()
+        .canonicalize(&std::env::temp_dir())
+        .unwrap_or_else(|_| std::env::temp_dir());
     let mut tail: Vec<char> = session_id
         .chars()
         .filter(char::is_ascii_alphanumeric)
@@ -644,14 +661,15 @@ async fn serve_host_tool_ipc(
 ) -> Result<JoinHandle<()>> {
     // A stale socket file from a previous run of this session id would make `bind` fail with
     // `EADDRINUSE`; nothing is listening on it, since the process that did is gone.
-    let _ = std::fs::remove_file(path);
+    let _ = crate::app_fs().remove_file(path);
     let listener = tokio::net::UnixListener::bind(path)
         .with_context(|| format!("bind the host tool IPC socket at {}", path.display()))?;
     // Narrowed the moment it exists, before a single `accept`: between `bind` and this the socket
     // carries the process umask, and the window is the only one in which another account on the
     // host could have dialled it. A session that cannot narrow its own socket is a session whose
     // confinement claim is not true, so this is an error rather than a warning.
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(TOOL_SOCKET_MODE))
+    crate::app_fs()
+        .set_mode(path, TOOL_SOCKET_MODE)
         .with_context(|| format!("restrict the host tool IPC socket at {}", path.display()))?;
 
     let session_dir = session_dir.to_path_buf();

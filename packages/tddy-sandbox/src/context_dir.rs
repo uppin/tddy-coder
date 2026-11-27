@@ -11,8 +11,8 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::context_manifest::links::create_context_link;
-use crate::context_manifest::links::prepare_context_write;
+use crate::context_manifest::links::create_context_link_on;
+use crate::context_manifest::links::prepare_context_write_on;
 use crate::context_manifest::walk::walk_context_files;
 
 /// Prepended to CLAUDE.md and AGENTS.md in the context dir.
@@ -175,28 +175,47 @@ pub fn without_stale_marker(content: &str) -> String {
 /// trust what it is reading. Files the context dir does not have are left alone: the marker belongs
 /// to the guidance that is there, not to a file the backend never asked for.
 pub fn mark_context_stale(context_dir: &Path, guidance_files: &[PathBuf]) -> anyhow::Result<()> {
-    rewrite_preamble_files(context_dir, guidance_files, with_stale_marker)
+    mark_context_stale_on(&tddy_fs::DiskFs, context_dir, guidance_files)
+}
+
+/// [`mark_context_stale`] through the filesystem port.
+pub fn mark_context_stale_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    guidance_files: &[PathBuf],
+) -> anyhow::Result<()> {
+    rewrite_preamble_files(fs, context_dir, guidance_files, with_stale_marker)
 }
 
 /// Withdraws the staleness line after a re-sync succeeds.
 pub fn clear_context_stale(context_dir: &Path, guidance_files: &[PathBuf]) -> anyhow::Result<()> {
-    rewrite_preamble_files(context_dir, guidance_files, without_stale_marker)
+    clear_context_stale_on(&tddy_fs::DiskFs, context_dir, guidance_files)
+}
+
+/// [`clear_context_stale`] through the filesystem port.
+pub fn clear_context_stale_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    guidance_files: &[PathBuf],
+) -> anyhow::Result<()> {
+    rewrite_preamble_files(fs, context_dir, guidance_files, without_stale_marker)
 }
 
 fn rewrite_preamble_files(
+    fs: &dyn tddy_fs::Fs,
     context_dir: &Path,
     guidance_files: &[PathBuf],
     rewrite: impl Fn(&str) -> String,
 ) -> anyhow::Result<()> {
     for filename in guidance_files {
         let path = context_dir.join(filename);
-        if !path.exists() {
+        if !fs.exists(&path) {
             continue;
         }
-        let content = std::fs::read_to_string(&path)?;
+        let content = fs.read_to_string(&path)?;
         let rewritten = rewrite(&content);
         if rewritten != content {
-            std::fs::write(&path, rewritten)?;
+            fs.write(&path, rewritten.as_bytes())?;
         }
     }
     Ok(())
@@ -218,7 +237,7 @@ impl SandboxContextDir {
         globs: &[&str],
         guidance_files: &[PathBuf],
     ) -> anyhow::Result<Self> {
-        Self::create_with_subagent(source_dir, &[], globs, guidance_files)
+        Self::create_with_subagent_on(&tddy_fs::DiskFs, source_dir, &[], globs, guidance_files)
     }
 
     /// Like [`Self::create`], but the preamble names each entry in `replacements` next to the exec
@@ -229,18 +248,36 @@ impl SandboxContextDir {
         globs: &[&str],
         guidance_files: &[PathBuf],
     ) -> anyhow::Result<Self> {
+        Self::create_with_subagent_on(
+            &tddy_fs::DiskFs,
+            source_dir,
+            replacements,
+            globs,
+            guidance_files,
+        )
+    }
+
+    /// [`SandboxContextDir::create_with_subagent`] through the filesystem port.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_with_subagent_on(
+        fs: &dyn tddy_fs::Fs,
+        source_dir: &Path,
+        replacements: &[SubagentReplacement<'_>],
+        globs: &[&str],
+        guidance_files: &[PathBuf],
+    ) -> anyhow::Result<Self> {
         let dir = tempfile::tempdir()?;
-        copy_context_from_repo(source_dir, dir.path(), globs, guidance_files)?;
+        copy_context_from_repo_on(fs, source_dir, dir.path(), globs, guidance_files)?;
 
         let preamble = managed_codebase_preamble(replacements, guidance_files);
         for filename in guidance_files {
             let dest = dir.path().join(filename);
-            let body = if dest.exists() {
-                std::fs::read_to_string(&dest)?
+            let body = if fs.exists(&dest) {
+                fs.read_to_string(&dest)?
             } else {
                 String::new()
             };
-            std::fs::write(&dest, prepend_preamble(&preamble, &body))?;
+            fs.write(&dest, prepend_preamble(&preamble, &body).as_bytes())?;
         }
 
         Ok(Self { dir })
@@ -262,50 +299,54 @@ pub fn copy_context_from_repo(
     globs: &[&str],
     guidance_files: &[PathBuf],
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dest)?;
-    for file in walk_context_files(source, globs, guidance_files)? {
+    copy_context_from_repo_on(&tddy_fs::DiskFs, source, dest, globs, guidance_files)
+}
+
+/// [`copy_context_from_repo`] through the filesystem port.
+pub fn copy_context_from_repo_on(
+    fs: &dyn tddy_fs::Fs,
+    source: &Path,
+    dest: &Path,
+    globs: &[&str],
+    guidance_files: &[PathBuf],
+) -> anyhow::Result<()> {
+    fs.create_dir_all(dest)?;
+    for file in walk_context_files(fs, source, globs, guidance_files)? {
         // Never through a link this loop already recreated ([`prepare_context_write`]).
-        let target = prepare_context_write(dest, &file.rel_path)?;
+        let target = prepare_context_write_on(fs, dest, &file.rel_path)?;
         // A link is recreated rather than copied through, as the syncer does, so the directory a
         // co-located agent reads has the same shape as the one a split agent reads. Its target is
         // listed as entries of its own and arrives in this same loop.
         if let Some(link_target) = &file.symlink_target {
-            create_context_link(&target, &file.rel_path, link_target)?;
+            create_context_link_on(fs, &target, &file.rel_path, link_target)?;
             continue;
         }
-        std::fs::copy(&file.source, &target)?;
-        ensure_owner_writable(&target)?;
+        fs.copy(&file.source, &target)?;
+        ensure_owner_writable(fs, &target)?;
     }
     Ok(())
 }
 
 /// `fs::copy` carries the source mode across, so a target repo that keeps its `CLAUDE.md` read-only
 /// would hand the syncer a copy it cannot update on the next tick.
-#[cfg(unix)]
-fn ensure_owner_writable(path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    let mode = permissions.mode();
+fn ensure_owner_writable(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<()> {
+    // Unix: add the owner-write bit when it is missing. Off Unix the port reports no mode,
+    // and there is no read-only bit to clear through it — the `set_mode` is the whole of it.
+    let mode = fs.metadata_follow(path)?.mode.unwrap_or(0);
     if mode & 0o200 == 0 {
-        permissions.set_mode(mode | 0o200);
-        std::fs::set_permissions(path, permissions)?;
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn ensure_owner_writable(path: &Path) -> anyhow::Result<()> {
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    if permissions.readonly() {
-        permissions.set_readonly(false);
-        std::fs::set_permissions(path, permissions)?;
+        fs.set_mode(path, mode | 0o200)?;
     }
     Ok(())
 }
 
 /// Recursively copy a file or directory tree, following symlinks with cycle detection.
 pub fn copy_tree(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    copy_tree_inner(src, dst, None, &mut HashSet::new())
+    copy_tree_on(&tddy_fs::DiskFs, src, dst)
+}
+
+/// [`copy_tree`] through the filesystem port.
+pub fn copy_tree_on(fs: &dyn tddy_fs::Fs, src: &Path, dst: &Path) -> anyhow::Result<()> {
+    copy_tree_inner(fs, src, dst, None, &mut HashSet::new())
 }
 
 /// Like [`copy_tree`] but skips symlinks that resolve outside `root` (prevents copying `node_modules` via `.claude` links).
@@ -315,19 +356,56 @@ pub fn copy_tree_within_root(
     root: &Path,
     visited: &mut HashSet<PathBuf>,
 ) -> anyhow::Result<()> {
-    let root = std::fs::canonicalize(root)?;
-    copy_tree_inner(src, dst, Some(&root), visited)
+    copy_tree_within_root_on(&tddy_fs::DiskFs, src, dst, root, visited)
+}
+
+/// [`copy_tree_within_root`] through the filesystem port.
+pub fn copy_tree_within_root_on(
+    fs: &dyn tddy_fs::Fs,
+    src: &Path,
+    dst: &Path,
+    root: &Path,
+    visited: &mut HashSet<PathBuf>,
+) -> anyhow::Result<()> {
+    let root = fs.canonicalize(root)?;
+    copy_tree_inner(fs, src, dst, Some(&root), visited)
+}
+
+#[cfg(unix)]
+fn read_link(path: &Path) -> anyhow::Result<PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| anyhow::anyhow!("path contains NUL: {}", path.display()))?;
+    let mut buffer = vec![0u8; 4096];
+    let length =
+        unsafe { libc::readlink(c_path.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
+    if length < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    buffer.truncate(length as usize);
+    Ok(PathBuf::from(
+        <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(buffer),
+    ))
+}
+
+#[cfg(not(unix))]
+fn read_link(path: &Path) -> anyhow::Result<PathBuf> {
+    anyhow::bail!("symlinks unsupported on this platform: {}", path.display())
 }
 
 fn copy_tree_inner(
+    fs: &dyn tddy_fs::Fs,
     src: &Path,
     dst: &Path,
     root: Option<&Path>,
     visited: &mut HashSet<PathBuf>,
 ) -> anyhow::Result<()> {
-    let meta = std::fs::symlink_metadata(src)?;
-    if meta.file_type().is_symlink() {
-        let target = std::fs::read_link(src)?;
+    // `metadata`, so a link is seen as a link rather than as whatever it points at.
+    let meta = fs.metadata(src)?;
+    if meta.kind == tddy_fs::FsKind::Symlink {
+        // `libc::readlink` directly: the port has no link-reading operation, and reading a
+        // link's spelling is a name-space act, not file content.
+        let target = read_link(src)?;
         let resolved = if target.is_absolute() {
             target
         } else {
@@ -335,7 +413,7 @@ fn copy_tree_inner(
                 .ok_or_else(|| anyhow::anyhow!("symlink without parent: {}", src.display()))?
                 .join(target)
         };
-        let canonical = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+        let canonical = fs.canonicalize(&resolved).unwrap_or(resolved);
         if let Some(root) = root {
             if !canonical.starts_with(root) {
                 return Ok(());
@@ -344,20 +422,23 @@ fn copy_tree_inner(
         if !visited.insert(canonical.clone()) {
             return Ok(());
         }
-        return copy_tree_inner(&canonical, dst, root, visited);
+        return copy_tree_inner(fs, &canonical, dst, root, visited);
     }
-    if meta.is_dir() {
-        std::fs::create_dir_all(dst)?;
-        for entry in std::fs::read_dir(src)? {
-            let entry = entry?;
-            copy_tree_inner(&entry.path(), &dst.join(entry.file_name()), root, visited)?;
+    if meta.kind == tddy_fs::FsKind::Dir {
+        fs.create_dir_all(dst)?;
+        for entry in fs.read_dir(src)? {
+            let name = entry
+                .file_name()
+                .map(|n| n.to_os_string())
+                .unwrap_or_default();
+            copy_tree_inner(fs, &entry, &dst.join(name), root, visited)?;
         }
         Ok(())
-    } else if meta.is_file() {
+    } else if meta.kind == tddy_fs::FsKind::File {
         if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs.create_dir_all(parent)?;
         }
-        std::fs::copy(src, dst)?;
+        fs.copy(src, dst)?;
         Ok(())
     } else {
         Ok(())

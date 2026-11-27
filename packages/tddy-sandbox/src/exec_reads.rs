@@ -13,8 +13,13 @@ use crate::builder::{ReadReason, ReadSpec};
 /// A `(subpath "/Users/foo/bar")` grant does not permit `lstat("/Users")` — each directory on the
 /// path from `/` must be readable for `realpath` and Node module resolution.
 pub fn path_traversal_reads(path: &Path) -> Vec<ReadSpec> {
+    path_traversal_reads_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`path_traversal_reads`] through the filesystem port.
+pub fn path_traversal_reads_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Vec<ReadSpec> {
     let resolved = if path.is_absolute() {
-        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
     } else {
         path.to_path_buf()
     };
