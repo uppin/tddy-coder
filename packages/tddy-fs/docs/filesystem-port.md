@@ -97,3 +97,9 @@ and is recorded in the changeset: process spawning and socket binding.
 `tests/fs_port.rs`, the supervisor and cgroup broker behind held handles, spawner entry points
 behind `<fn>_on` seams. Descriptor-bound operations (socket-directory `fstat`/`fchown`,
 child stdio, pipe ends) stay on `libc`/`OwnedFd` and are recorded in the changeset.
+
+`tddy-sandbox`, `tddy-sandbox-app`, `tddy-sandbox-recipes`, `tddy-sandbox-runner`,
+`tddy-sandbox-cgroups` and `tddy-sandbox-darwin` do theirs through the port too: guards in
+each crate's `tests/fs_port.rs`, materialize/walk/context behind `<fn>_on` seams, the runner
+and the app behind installed handle statics. Link creation/reading, ownership and fd acts
+stay on `libc` and are recorded in the changeset.
