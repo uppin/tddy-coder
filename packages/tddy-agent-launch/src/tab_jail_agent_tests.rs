@@ -2,6 +2,11 @@
 //! session main's jail is for the same agent, with every file and tool link its own, its exec plan
 //! in the tab's conversation, and none of the session's records written.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tddy_test_hosts::a_tool_host;

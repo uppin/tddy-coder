@@ -666,6 +666,7 @@ impl ADaemon {
         tmux: bool,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
+            &tddy_fs::DiskFs,
             &the_acme_agent(program),
             &TemplateParams::new().with("model", MODEL),
             slots,

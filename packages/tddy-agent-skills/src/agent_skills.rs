@@ -2,7 +2,6 @@
 //!
 //! Discovery, YAML frontmatter parsing, slash menu entries, and prompt composition.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -156,16 +155,21 @@ pub fn folder_name_matches_frontmatter_name(folder_name: &str, name: &str) -> Op
 
 /// Hint for cache invalidation: filesystem metadata token for `.agents/skills` (mtime or missing).
 pub fn agents_skills_scan_cache_token(project_root: &Path) -> Option<u64> {
+    agents_skills_scan_cache_token_on(&tddy_fs::DiskFs, project_root)
+}
+
+/// [`agents_skills_scan_cache_token`] through the filesystem port.
+pub fn agents_skills_scan_cache_token_on(fs: &dyn tddy_fs::Fs, project_root: &Path) -> Option<u64> {
     let skills_root = project_root.join(AGENTS_SKILLS_DIR);
-    let meta = fs::metadata(&skills_root).ok()?;
-    if !meta.is_dir() {
+    let meta = fs.metadata(&skills_root).ok()?;
+    if meta.kind != tddy_fs::FsKind::Dir {
         log::debug!(
             "agents_skills_scan_cache_token: path exists but not a dir {}",
             skills_root.display()
         );
         return None;
     }
-    let modified = meta.modified().ok()?;
+    let modified = meta.modified?;
     let secs = modified
         .duration_since(std::time::UNIX_EPOCH)
         .ok()?
@@ -177,17 +181,23 @@ pub fn agents_skills_scan_cache_token(project_root: &Path) -> Option<u64> {
     Some(secs)
 }
 
-fn scan_one_skill_dir(skills_root: &Path, folder_name: String, report: &mut SkillScanReport) {
+fn scan_one_skill_dir(
+    fs: &dyn tddy_fs::Fs,
+    skills_root: &Path,
+    folder_name: String,
+    report: &mut SkillScanReport,
+) {
     let skill_dir = skills_root.join(&folder_name);
     let skill_md_path = skill_dir.join("SKILL.md");
-    if !skill_md_path.is_file() {
+    // `metadata_follow`, as before: `is_file` follows a link.
+    if !matches!(fs.metadata_follow(&skill_md_path), Ok(m) if m.kind == tddy_fs::FsKind::File) {
         log::debug!(
             "scan_one_skill_dir: skip {} (no SKILL.md)",
             skill_dir.display()
         );
         return;
     }
-    let raw = match fs::read_to_string(&skill_md_path) {
+    let raw = match fs.read_to_string(&skill_md_path) {
         Ok(s) => s,
         Err(e) => {
             log::info!(
@@ -256,6 +266,14 @@ fn scan_one_skill_dir(skills_root: &Path, folder_name: String, report: &mut Skil
 
 /// Scan `.agents/skills/<name>/SKILL.md` under `project_root` and classify valid vs invalid skills.
 pub fn scan_skills_at_project_root(project_root: &Path) -> SkillScanReport {
+    scan_skills_at_project_root_on(&tddy_fs::DiskFs, project_root)
+}
+
+/// [`scan_skills_at_project_root`] through the filesystem port.
+pub fn scan_skills_at_project_root_on(
+    fs: &dyn tddy_fs::Fs,
+    project_root: &Path,
+) -> SkillScanReport {
     let skills_root = project_root.join(AGENTS_SKILLS_DIR);
     log::debug!(
         "scan_skills_at_project_root: root={} skills_dir={}",
@@ -263,7 +281,7 @@ pub fn scan_skills_at_project_root(project_root: &Path) -> SkillScanReport {
         skills_root.display()
     );
     let mut report = SkillScanReport::default();
-    let entries = match fs::read_dir(&skills_root) {
+    let entries = match fs.read_dir(&skills_root) {
         Ok(e) => e,
         Err(e) => {
             log::info!(
@@ -273,15 +291,16 @@ pub fn scan_skills_at_project_root(project_root: &Path) -> SkillScanReport {
             return report;
         }
     };
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if !file_type.is_dir() {
+    for entry in entries {
+        // `metadata`, as before: the walk does not follow a link, and a link holds no skill.
+        if !matches!(fs.metadata(&entry), Ok(m) if m.kind == tddy_fs::FsKind::Dir) {
             continue;
         }
-        let folder_name = entry.file_name().to_string_lossy().into_owned();
-        scan_one_skill_dir(&skills_root, folder_name, &mut report);
+        let folder_name = entry
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        scan_one_skill_dir(fs, &skills_root, folder_name, &mut report);
     }
     report.valid.sort_by(|a, b| a.name.cmp(&b.name));
     log::info!(
@@ -294,11 +313,16 @@ pub fn scan_skills_at_project_root(project_root: &Path) -> SkillScanReport {
 
 /// Entries shown when the user types `/` in the feature prompt: built-ins plus valid skills.
 pub fn slash_menu_entries(project_root: &Path) -> Vec<SlashMenuEntry> {
+    slash_menu_entries_on(&tddy_fs::DiskFs, project_root)
+}
+
+/// [`slash_menu_entries`] through the filesystem port.
+pub fn slash_menu_entries_on(fs: &dyn tddy_fs::Fs, project_root: &Path) -> Vec<SlashMenuEntry> {
     log::debug!(
         "slash_menu_entries: project_root={}",
         project_root.display()
     );
-    let scan = scan_skills_at_project_root(project_root);
+    let scan = scan_skills_at_project_root_on(fs, project_root);
     let start_labels = crate::feature_start_slash::feature_slash_menu_start_command_labels();
     let mut items = Vec::with_capacity(2 + start_labels.len() + scan.valid.len());
     items.push(SlashMenuEntry::BuiltinRecipe);
@@ -320,7 +344,12 @@ pub fn slash_menu_entries(project_root: &Path) -> Vec<SlashMenuEntry> {
 
 /// Same ordering as [`slash_menu_entries`], as [`SlashMenuItem`] (for tests and callers that only need ids).
 pub fn slash_menu_items(project_root: &Path) -> Vec<SlashMenuItem> {
-    slash_menu_entries(project_root)
+    slash_menu_items_on(&tddy_fs::DiskFs, project_root)
+}
+
+/// [`slash_menu_items`] through the filesystem port.
+pub fn slash_menu_items_on(fs: &dyn tddy_fs::Fs, project_root: &Path) -> Vec<SlashMenuItem> {
+    slash_menu_entries_on(fs, project_root)
         .into_iter()
         .map(|e| match e {
             SlashMenuEntry::BuiltinRecipe => SlashMenuItem::BuiltinRecipe,
@@ -335,11 +364,22 @@ pub fn read_skill_markdown_body_for_compose(
     project_root: &Path,
     skill_name: &str,
 ) -> Result<String, String> {
+    read_skill_markdown_body_for_compose_on(&tddy_fs::DiskFs, project_root, skill_name)
+}
+
+/// [`read_skill_markdown_body_for_compose`] through the filesystem port.
+pub fn read_skill_markdown_body_for_compose_on(
+    fs: &dyn tddy_fs::Fs,
+    project_root: &Path,
+    skill_name: &str,
+) -> Result<String, String> {
     let path = project_root
         .join(AGENTS_SKILLS_DIR)
         .join(skill_name)
         .join("SKILL.md");
-    let raw = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let raw = fs
+        .read_to_string(&path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
     let (_yaml, body) = split_skill_frontmatter_blocks(&raw).map_err(|e| format!("{e:?}"))?;
     Ok(body.to_string())
 }

@@ -199,8 +199,8 @@ impl LaunchSessions {
         let ready_marker = session.dirs.sandbox_root.join("sandbox.ready");
         let ipc_socket = tool_ipc_socket(session_id);
         // A stale socket or marker of an earlier jail of this session would be read as this one's.
-        let _ = std::fs::remove_file(&ipc_socket);
-        let _ = std::fs::remove_file(&ready_marker);
+        let _ = self.fs.remove_file(&ipc_socket);
+        let _ = self.fs.remove_file(&ready_marker);
         let runner_argv = runner_argv(RunnerArgv {
             session_id,
             dirs: session.dirs,

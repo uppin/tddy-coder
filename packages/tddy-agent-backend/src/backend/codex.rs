@@ -42,7 +42,16 @@ pub fn spawn_codex_oauth_login(
     binary: &Path,
     session_dir: &Path,
 ) -> Result<std::process::Child, BackendError> {
-    std::fs::create_dir_all(session_dir).map_err(|e| {
+    spawn_codex_oauth_login_on(std::sync::Arc::new(tddy_fs::DiskFs), binary, session_dir)
+}
+
+/// [`spawn_codex_oauth_login`] through the filesystem port.
+pub fn spawn_codex_oauth_login_on(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    binary: &Path,
+    session_dir: &Path,
+) -> Result<std::process::Child, BackendError> {
+    fs.create_dir_all(session_dir).map_err(|e| {
         BackendError::InvocationFailed(format!(
             "codex login: could not create session_dir {}: {}",
             session_dir.display(),
@@ -88,7 +97,7 @@ pub fn spawn_codex_oauth_login(
         let reader = std::io::BufReader::new(out);
         for line in reader.lines().map_while(Result::ok) {
             if let Some(url) = scrape_codex_oauth_authorize_url_from_text(&line) {
-                if let Err(e) = std::fs::write(&oauth_clone, &url) {
+                if let Err(e) = fs.write(&oauth_clone, url.as_bytes()) {
                     log::warn!(
                         "[tddy-codex] codex login: could not write authorize URL to {}: {}",
                         oauth_clone.display(),
@@ -114,8 +123,16 @@ pub fn spawn_codex_oauth_login(
 
 /// Merge system prompt / path with user prompt (the system text in front, a blank line between) for the ACP codex backends.
 pub(crate) fn merge_codex_prompt(request: &InvokeRequest) -> Result<String, BackendError> {
+    merge_codex_prompt_on(&tddy_fs::DiskFs, request)
+}
+
+/// [`merge_codex_prompt`] through the filesystem port.
+pub(crate) fn merge_codex_prompt_on(
+    fs: &dyn tddy_fs::Fs,
+    request: &InvokeRequest,
+) -> Result<String, BackendError> {
     let system_content: Option<String> = if let Some(ref path) = request.system_prompt_path {
-        Some(std::fs::read_to_string(path).map_err(|e| {
+        Some(fs.read_to_string(path).map_err(|e| {
             BackendError::InvocationFailed(format!(
                 "failed to read system_prompt_path {}: {}",
                 path.display(),

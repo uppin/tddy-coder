@@ -79,6 +79,7 @@ pub async fn launch_agent_tab_on_target(
         session_dir: tab.session_dir,
     };
     let plan = write_rendered_session_files(
+        &tddy_fs::DiskFs,
         &place,
         Vec::new(),
         HostPtyPlan {

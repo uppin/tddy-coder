@@ -301,6 +301,7 @@ impl ADaemon {
         startup_window: Duration,
     ) -> Result<RemoteLaunched, RemoteLaunchError> {
         launch_on_target(
+            &tddy_fs::DiskFs,
             &the_acme_agent(&agent.program()),
             &TemplateParams::new().with("model", MODEL),
             slots,

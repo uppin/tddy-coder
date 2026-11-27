@@ -85,7 +85,7 @@ impl TabJailSpawn for LaunchSessions {
             launch.login_shell,
             launch.os_user
         );
-        let dirs = prepare_tab_dirs(launch)?;
+        let dirs = prepare_tab_dirs(&*self.fs, launch)?;
         let route = tab_route(
             &self.host.subject_account_access(&launch.subject),
             &session_agent,
@@ -118,7 +118,7 @@ impl TabJailSpawn for LaunchSessions {
         agent: &TabJailAgent,
     ) -> Result<Arc<SandboxSessionState>, Status> {
         let tab_agent = self.tab_agent_of(agent)?;
-        let dirs = prepare_tab_dirs(launch)?;
+        let dirs = prepare_tab_dirs(&*self.fs, launch)?;
         let route = tab_route(
             &self.host.subject_account_access(&launch.subject),
             &tab_agent,
@@ -219,7 +219,7 @@ fn closure_ids(closure: &[tddy_actions::tool::ResolvedTool]) -> Vec<String> {
 
 /// The directories a tab jail's runner is given, created and resolved to their canonical paths
 /// (the profile and the socket bind are evaluated against resolved paths, as the main's are).
-fn prepare_tab_dirs(launch: &TabJailLaunch) -> Result<JailDirs, Status> {
+fn prepare_tab_dirs(fs: &dyn tddy_fs::Fs, launch: &TabJailLaunch) -> Result<JailDirs, Status> {
     let paths = &launch.paths;
     let context_dir = launch.session_dir.join("sandbox").join("context");
     for dir in [
@@ -228,10 +228,10 @@ fn prepare_tab_dirs(launch: &TabJailLaunch) -> Result<JailDirs, Status> {
         paths.egress_dir.clone(),
         context_dir.clone(),
     ] {
-        std::fs::create_dir_all(&dir)
+        fs.create_dir_all(&dir)
             .map_err(|e| Status::internal(format!("mkdir {}: {e}", dir.display())))?;
     }
-    let canonical = |dir: &Path| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+    let canonical = |dir: &Path| fs.canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
     let sandbox_root = canonical(&paths.root);
     let scratch_dir = sandbox_root.join(".work");
     Ok(JailDirs {
@@ -332,8 +332,8 @@ impl LaunchSessions {
         let exec_plan_path = exec_plan_path_of(launch, dirs);
         let shim_port = pick_egress_shim_port(&grants.egress)?;
         let egress_guard = EgressGuard::new(grants.egress.clone(), session_id, tool_ids.to_vec());
-        let _ = std::fs::remove_file(&paths.ipc_socket);
-        let _ = std::fs::remove_file(&ready_marker);
+        let _ = self.fs.remove_file(&paths.ipc_socket);
+        let _ = self.fs.remove_file(&ready_marker);
         let mut runner_argv = runner_argv(RunnerArgv {
             session_id,
             dirs,

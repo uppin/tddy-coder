@@ -281,6 +281,16 @@ pub fn plan_host_pty(
     params: &TemplateParams,
     slots: &RenderedSlots,
 ) -> Result<HostPtyPlan, SpecLaunchError> {
+    plan_host_pty_on(&tddy_fs::DiskFs, agent, params, slots)
+}
+
+/// [`plan_host_pty`] through the filesystem port.
+pub fn plan_host_pty_on(
+    fs: &dyn tddy_fs::Fs,
+    agent: &HostAgent,
+    params: &TemplateParams,
+    slots: &RenderedSlots,
+) -> Result<HostPtyPlan, SpecLaunchError> {
     if agent.spec.run.transport != Transport::Pty {
         return Err(SpecLaunchError::TransportNotPty {
             spec: agent.spec.id.clone(),
@@ -288,7 +298,7 @@ pub fn plan_host_pty(
         });
     }
     for (path, bytes) in &slots.files {
-        write_slot_file(path, bytes)?;
+        write_slot_file(fs, path, bytes)?;
     }
     let params = params.clone().with_list("slots", slots.argv_extra.clone());
     let argv = render_argv(&agent.spec.run, &agent.tool, &params).map_err(SpecLaunchError::Tool)?;
@@ -393,13 +403,14 @@ pub(crate) fn in_a_pane_with_only_the_agent_env(
     .collect()
 }
 
-fn write_slot_file(path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
+fn write_slot_file(fs: &dyn tddy_fs::Fs, path: &Path, bytes: &[u8]) -> Result<(), SpecLaunchError> {
     let slot_file = |message: String| SpecLaunchError::SlotFile {
         path: path.to_path_buf(),
         message,
     };
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| slot_file(e.to_string()))?;
+        fs.create_dir_all(parent)
+            .map_err(|e| slot_file(e.to_string()))?;
     }
     tddy_core::atomic_file::write_atomic(path, bytes).map_err(|e| slot_file(e.to_string()))
 }

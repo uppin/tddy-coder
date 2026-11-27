@@ -13,10 +13,20 @@ pub fn render_instruction_files(
     workdir: &Path,
     preamble: &str,
 ) -> Result<Vec<(PathBuf, Vec<u8>)>, SlotError> {
+    render_instruction_files_on(&tddy_fs::DiskFs, slot, workdir, preamble)
+}
+
+/// [`render_instruction_files`] through the filesystem port.
+pub fn render_instruction_files_on(
+    fs: &dyn tddy_fs::Fs,
+    slot: &InstructionsSlot,
+    workdir: &Path,
+    preamble: &str,
+) -> Result<Vec<(PathBuf, Vec<u8>)>, SlotError> {
     let mut files = Vec::new();
     for relative in &slot.files {
         let path = workdir.join(relative);
-        let body = match std::fs::read_to_string(&path) {
+        let body = match fs.read_to_string(&path) {
             Ok(body) => body,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {

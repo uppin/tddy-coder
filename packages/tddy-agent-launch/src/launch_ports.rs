@@ -195,6 +195,9 @@ pub struct LaunchSessions {
     /// built from. `None` on a host the composition root installed none on — and on every test
     /// host, which asserts outcomes, not counters.
     pub metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
+    /// The filesystem launches read and write through — `DiskFs` in production, `MemFs` in a
+    /// test that drives a launch without touching disk.
+    pub fs: Arc<dyn tddy_fs::Fs>,
 }
 
 /// The closes running on this host (docs/ft/daemon/session-liveness.md § Closing a session), as the

@@ -1,5 +1,10 @@
 //! Unit tests: what a claude-cli start launches its agent with, beyond the managed workflow's own.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use crate::project_home_launch::{project_home_wiring, spec_role_launch, ProjectHomeLaunch};
 use crate::spec_launch::McpRegistration;

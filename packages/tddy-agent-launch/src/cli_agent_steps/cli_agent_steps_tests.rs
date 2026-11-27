@@ -1,6 +1,11 @@
 //! The generic launch's claude/cursor steps (`#agent-tools 14/19`), each against the built-in spec
 //! that declares the slot or capability it reads.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 
@@ -546,6 +551,7 @@ fn wired_as_a_child_of(
         orchestrator_agent: None,
     };
     crate::cli_agent_steps::wire_session_agent(crate::cli_agent_steps::SessionWiringInputs {
+        fs: &tddy_fs::DiskFs,
         spec,
         tddy_tools_path: "/usr/bin/tddy-tools",
         config: &tddy_daemon_kernel::config::DaemonConfig::default(),

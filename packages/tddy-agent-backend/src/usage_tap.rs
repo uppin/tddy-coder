@@ -4,7 +4,6 @@
 //!
 //! Feature: docs/ft/coder/session-token-accounting.md (`#usage-binding 3/5`)
 
-use std::io::Write;
 use std::path::PathBuf;
 
 use tddy_usage::FieldEq;
@@ -42,6 +41,7 @@ impl UsageTapSpec {
 /// never fails the turn.
 #[derive(Debug)]
 pub struct UsageTap {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     spec: UsageTapSpec,
     disabled: bool,
 }
@@ -49,7 +49,13 @@ pub struct UsageTap {
 impl UsageTap {
     /// A tap writing to `spec.path`, created (with its directory) on the first matching event.
     pub fn open(spec: UsageTapSpec) -> Self {
+        Self::open_on(std::sync::Arc::new(tddy_fs::DiskFs), spec)
+    }
+
+    /// [`UsageTap::open`] through the filesystem port.
+    pub fn open_on(fs: std::sync::Arc<dyn tddy_fs::Fs>, spec: UsageTapSpec) -> Self {
         UsageTap {
+            fs,
             spec,
             disabled: false,
         }
@@ -103,12 +109,9 @@ impl UsageTap {
 
     fn write_line(&self, line: &str) -> std::io::Result<()> {
         if let Some(dir) = self.spec.path.parent() {
-            std::fs::create_dir_all(dir)?;
+            self.fs.create_dir_all(dir)?;
         }
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.spec.path)?;
-        file.write_all(format!("{line}\n").as_bytes())
+        self.fs
+            .append(&self.spec.path, format!("{line}\n").as_bytes())
     }
 }

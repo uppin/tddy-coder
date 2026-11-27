@@ -41,6 +41,7 @@ pub fn forwarded_start_request(
 /// Record the GitHub source a start named in the new session's directory, so its resumes act the
 /// same way; a start that named none records nothing, and its resumes read this host's row again.
 pub(crate) fn record_requested_github_source(
+    fs: &dyn tddy_fs::Fs,
     req: &StartSessionRequest,
     session_dir: &Path,
 ) -> Result<(), Status> {
@@ -49,7 +50,7 @@ pub(crate) fn record_requested_github_source(
         GithubSource::Vault => SessionGithubSource::Vault,
         GithubSource::LocalGh => SessionGithubSource::LocalGh,
     };
-    std::fs::create_dir_all(session_dir)
+    fs.create_dir_all(session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
     write_session_github_source(session_dir, source)
         .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))

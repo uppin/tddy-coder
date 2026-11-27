@@ -23,14 +23,54 @@ pub fn write_executable(path: &Path, script: &str) {
         }
         None => script.to_string(),
     };
-    std::fs::write(path, script).expect("the script is written");
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+    // Written to a sibling temp file, synced and closed, then renamed into place: `path`
+    // itself is never held open for writing. A child forked by a parallel test while a
+    // direct write was in flight inherits that write fd, and executing the script then
+    // fails `ETXTBSY` until the child exits — the rename makes the executable appear whole.
+    static NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let unique = NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp = path.with_extension(format!("tmp-{}-{unique}", std::process::id()));
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // `O_CLOEXEC` explicitly: a child forked by a parallel test must never inherit this
+        // write fd, even in its fork-to-exec window.
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(&temp)
+            .expect("the script temp file is created");
+        file.write_all(script.as_bytes())
+            .expect("the script is written");
+        file.sync_all().expect("the script is synced");
+    }
+    std::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o755))
         .expect("the script is made executable");
-    let warmed = std::process::Command::new(path)
-        .env("TDDY_FIXTURE_WARMUP", "1")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("the freshly written script warms up");
+    std::fs::rename(&temp, path).expect("the script is moved into place");
+    // Even closed-and-renamed, the exec can still meet `ETXTBSY` for the brief window in
+    // which a parallel test's forked child has not yet exec'd (and so not yet dropped the
+    // fds it inherited at fork). That window is milliseconds; retry inside it rather than
+    // fail a test for another thread's fork.
+    let warmed = {
+        let mut attempt = 0;
+        loop {
+            match std::process::Command::new(path)
+                .env("TDDY_FIXTURE_WARMUP", "1")
+                .stdin(std::process::Stdio::null())
+                .output()
+            {
+                Ok(output) => break output,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 40 =>
+                {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(error) => panic!("the freshly written script warms up: {error}"),
+            }
+        }
+    };
     assert!(
         warmed.status.success(),
         "the warm-up of {} exited {}: {}",

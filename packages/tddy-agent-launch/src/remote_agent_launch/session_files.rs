@@ -76,6 +76,7 @@ impl<'a> SessionFilesPlace<'a> {
 /// slot file is left alone, since the slot files were already written at the paths the agent is
 /// told. Only the argv is mapped; an environment value naming a session file is not.
 pub(super) async fn write_rendered_session_files(
+    fs: &dyn tddy_fs::Fs,
     place: &SessionFilesPlace<'_>,
     slot_files: Vec<(std::path::PathBuf, Vec<u8>)>,
     mut plan: crate::spec_launch::HostPtyPlan,
@@ -86,10 +87,13 @@ pub(super) async fn write_rendered_session_files(
         let Ok(relative) = path.strip_prefix(place.session_dir) else {
             continue;
         };
-        if !path.is_file() || slot_files.iter().any(|(written, _)| written == path) {
+        // `metadata_follow`, as before: `is_file` follows a link.
+        if !matches!(fs.metadata_follow(path), Ok(m) if m.kind == tddy_fs::FsKind::File)
+            || slot_files.iter().any(|(written, _)| written == path)
+        {
             continue;
         }
-        let bytes = std::fs::read(path).map_err(|error| {
+        let bytes = fs.read(path).map_err(|error| {
             RemoteLaunchError::Plan(SpecLaunchError::SlotFile {
                 path: path.to_path_buf(),
                 message: error.to_string(),

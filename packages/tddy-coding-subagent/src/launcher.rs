@@ -43,8 +43,20 @@ pub fn claim_headless_conversation_dir(
     dir: &Path,
     daemon_instance_id: &str,
 ) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    std::fs::write(dir.join(HEADLESS_OWNER_FILE), daemon_instance_id)
+    claim_headless_conversation_dir_on(&tddy_fs::DiskFs, dir, daemon_instance_id)
+}
+
+/// [`claim_headless_conversation_dir`] through the filesystem port.
+pub fn claim_headless_conversation_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &Path,
+    daemon_instance_id: &str,
+) -> std::io::Result<()> {
+    fs.create_dir_all(dir)?;
+    fs.write(
+        &dir.join(HEADLESS_OWNER_FILE),
+        daemon_instance_id.as_bytes(),
+    )
 }
 
 /// The file in a headless conversation's directory listing, one absolute path per line, every file
@@ -57,23 +69,31 @@ pub const HEADLESS_WRITTEN_FILES: &str = "written-files";
 /// after what an earlier plan of the conversation recorded. Written before the files themselves,
 /// so a plan that fails part-way leaves nothing the record does not name.
 pub fn record_written_files(dir: &Path, files: &[PathBuf]) -> std::io::Result<()> {
-    use std::io::Write;
+    record_written_files_on(&tddy_fs::DiskFs, dir, files)
+}
 
-    let mut record = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join(HEADLESS_WRITTEN_FILES))?;
+/// [`record_written_files`] through the filesystem port.
+pub fn record_written_files_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &Path,
+    files: &[PathBuf],
+) -> std::io::Result<()> {
     let lines: String = files
         .iter()
         .map(|file| format!("{}\n", file.display()))
         .collect();
-    record.write_all(lines.as_bytes())
+    fs.append(&dir.join(HEADLESS_WRITTEN_FILES), lines.as_bytes())
 }
 
 /// Remove every file `dir`'s [`HEADLESS_WRITTEN_FILES`] records. A recorded file already gone is
 /// not an error; a missing record removes nothing. Returns the files removed, in recorded order.
 pub fn remove_recorded_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let record = match std::fs::read_to_string(dir.join(HEADLESS_WRITTEN_FILES)) {
+    remove_recorded_files_on(&tddy_fs::DiskFs, dir)
+}
+
+/// [`remove_recorded_files`] through the filesystem port.
+pub fn remove_recorded_files_on(fs: &dyn tddy_fs::Fs, dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let record = match fs.read_to_string(&dir.join(HEADLESS_WRITTEN_FILES)) {
         Ok(record) => record,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
@@ -84,7 +104,7 @@ pub fn remove_recorded_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
         .filter(|line| !line.is_empty())
         .map(PathBuf::from)
     {
-        match std::fs::remove_file(&file) {
+        match fs.remove_file(&file) {
             Ok(()) => removed.push(file),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
@@ -101,9 +121,18 @@ pub fn close_headless_conversation(
     tddy_data_dir: &Path,
     conversation_id: &str,
 ) -> std::io::Result<Vec<PathBuf>> {
+    close_headless_conversation_on(&tddy_fs::DiskFs, tddy_data_dir, conversation_id)
+}
+
+/// [`close_headless_conversation`] through the filesystem port.
+pub fn close_headless_conversation_on(
+    fs: &dyn tddy_fs::Fs,
+    tddy_data_dir: &Path,
+    conversation_id: &str,
+) -> std::io::Result<Vec<PathBuf>> {
     let dir = headless_conversation_dir(tddy_data_dir, conversation_id);
-    let removed = remove_recorded_files(&dir)?;
-    match std::fs::remove_dir_all(&dir) {
+    let removed = remove_recorded_files_on(fs, &dir)?;
+    match fs.remove_dir_all(&dir) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(e),
@@ -121,15 +150,23 @@ pub fn sweep_headless_dirs(
     tddy_data_dir: &Path,
     daemon_instance_id: &str,
 ) -> std::io::Result<Vec<String>> {
-    let entries = match std::fs::read_dir(tddy_data_dir.join(HEADLESS_DIR)) {
+    sweep_headless_dirs_on(&tddy_fs::DiskFs, tddy_data_dir, daemon_instance_id)
+}
+
+/// [`sweep_headless_dirs`] through the filesystem port.
+pub fn sweep_headless_dirs_on(
+    fs: &dyn tddy_fs::Fs,
+    tddy_data_dir: &Path,
+    daemon_instance_id: &str,
+) -> std::io::Result<Vec<String>> {
+    let entries = match fs.read_dir(&tddy_data_dir.join(HEADLESS_DIR)) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
     let mut swept = Vec::new();
-    for entry in entries {
-        let dir = entry?.path();
-        let owner = match std::fs::read_to_string(dir.join(HEADLESS_OWNER_FILE)) {
+    for dir in entries {
+        let owner = match fs.read_to_string(&dir.join(HEADLESS_OWNER_FILE)) {
             Ok(owner) => owner,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
@@ -137,8 +174,8 @@ pub fn sweep_headless_dirs(
         if owner.trim() != daemon_instance_id {
             continue;
         }
-        remove_recorded_files(&dir)?;
-        std::fs::remove_dir_all(&dir)?;
+        remove_recorded_files_on(fs, &dir)?;
+        fs.remove_dir_all(&dir)?;
         if let Some(conversation) = dir.file_name().and_then(|name| name.to_str()) {
             swept.push(conversation.to_string());
         }

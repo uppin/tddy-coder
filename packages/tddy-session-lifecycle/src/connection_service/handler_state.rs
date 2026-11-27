@@ -272,6 +272,7 @@ impl DaemonSessionHost {
             session_tabs: Arc::new(self.clone()),
             session_closes: Arc::clone(&self.session_closes) as _,
             metrics: self.metrics(),
+            fs: Arc::new(tddy_fs::DiskFs),
         }
     }
 }

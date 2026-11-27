@@ -145,6 +145,7 @@ async fn a_coder_found_only_on_the_daemons_path_carries_the_agents_terminal() {
     let session_dir = tempfile::tempdir().expect("a session directory");
     let manager = Arc::new(CliSessionManager::new());
     let launched = launch_on_target(
+        &tddy_fs::DiskFs,
         &the_acme_agent(&agent),
         &TemplateParams::new(),
         &RenderedSlots::default(),

@@ -12,16 +12,19 @@ use crate::svc_start_sandboxed_claude_cli_session::JailDirs;
 
 use std::path::Path;
 
-pub(super) fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status> {
+pub(super) fn prepare_jail_dirs(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<JailDirs, Status> {
     let sandbox_root = session_dir.join("sandbox");
     let egress_dir = session_dir.join("egress");
-    std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
+    fs.create_dir_all(&sandbox_root.join(".work").join("home"))
         .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
-    std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+    fs.create_dir_all(&sandbox_root.join(".work").join("tmp"))
         .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
-    std::fs::create_dir_all(sandbox_root.join("context"))
+    fs.create_dir_all(&sandbox_root.join("context"))
         .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
-    std::fs::create_dir_all(&egress_dir)
+    fs.create_dir_all(&egress_dir)
         .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
 
     // Resolve to the real (symlink-free) paths now that the dirs exist. Seatbelt
@@ -30,8 +33,8 @@ pub(super) fn prepare_jail_dirs(session_dir: &Path) -> Result<JailDirs, Status> 
     // canonical paths baked into the SBPL profile. Session dirs live under TMPDIR,
     // which on macOS is reached via the /tmp -> /private/tmp symlink; without this
     // the tool-IPC socket bind fails with "Operation not permitted".
-    let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
-    let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+    let sandbox_root = fs.canonicalize(&sandbox_root).unwrap_or(sandbox_root);
+    let egress_dir = fs.canonicalize(&egress_dir).unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
     // scratch_home (jail $HOME) is the persistent daemon-wide claude home, resolved and mounted
     // below — not a per-session dir — so auth/history persist across sessions.

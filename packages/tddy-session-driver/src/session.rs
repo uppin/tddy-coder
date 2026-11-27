@@ -200,6 +200,7 @@ impl DriverSession {
         let handle = match &spec.shell {
             Some(shell) => {
                 let launched = launch_on_target(
+                    &tddy_fs::DiskFs,
                     &spec.agent,
                     &spec.params,
                     &slots,

@@ -259,11 +259,23 @@ pub fn sandboxed_start_route(
     model: &str,
     session_dir: &Path,
 ) -> Result<Option<HarnessRoute>, Status> {
+    sandboxed_start_route_on(&tddy_fs::DiskFs, access, agent, sources, model, session_dir)
+}
+
+/// [`sandboxed_start_route`] through the filesystem port.
+pub fn sandboxed_start_route_on(
+    fs: &dyn tddy_fs::Fs,
+    access: &SessionAccountAccess,
+    agent: RouteAgent<'_>,
+    sources: &RouteSources,
+    model: &str,
+    session_dir: &Path,
+) -> Result<Option<HarnessRoute>, Status> {
     let Some(account_id) = choose_route(sources) else {
         return Ok(None);
     };
     let route = route_on_account(access, &agent.resolve()?, &account_id, model)?;
-    std::fs::create_dir_all(session_dir)
+    fs.create_dir_all(session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
     write_session_provider_account(
         session_dir,

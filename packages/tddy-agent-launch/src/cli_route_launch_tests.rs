@@ -4,6 +4,11 @@
 //! Feature: docs/ft/daemon/opencode-cli-session.md
 //! Feature: docs/ft/daemon/muse-cli-session.md
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::os::unix::fs::PermissionsExt;
 
 use tddy_coding_agent_specs::{load_agent_registry, CodingAgentSpec};

@@ -15,7 +15,7 @@ use tddy_service::proto::session::StartSessionResponse;
 use crate::cli_agent_steps::host_launch_slots::write_slot_files_on_target;
 use crate::cli_agent_steps::host_launch_slots::write_slot_files_through_shell;
 use crate::cli_session_pointer::{place_session_pointer, PointerHost};
-use crate::cursor_from_spec::node_launcher_of;
+use crate::cursor_from_spec::node_launcher_of_on;
 
 pub(super) fn log_hooks_on_the_target(
     target: &Option<tddy_core::SessionTarget>,
@@ -33,6 +33,7 @@ pub(super) fn log_hooks_on_the_target(
 /// alias, or the target's shell — once the worktree is ready for the session's own hooks file.
 /// Shared by the start and the resume.
 pub(super) async fn place_slot_files_and_pointer(
+    fs: &dyn tddy_fs::Fs,
     spec: &tddy_coding_agent_specs::CodingAgentSpec,
     worktree_path: &std::path::Path,
     target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
@@ -47,6 +48,7 @@ pub(super) async fn place_slot_files_and_pointer(
         None => PointerHost::of(remote_host),
     };
     crate::session_hooks_worktree::prepare_worktree_for_session_hooks(
+        fs,
         spec,
         worktree_path,
         slots,
@@ -57,16 +59,17 @@ pub(super) async fn place_slot_files_and_pointer(
         Some(shell) => write_slot_files_through_shell(slots, shell.as_ref()).await?,
         None => write_slot_files_on_target(slots, remote_host).await?,
     }
-    place_session_pointer(session_pointer, worktree_path, &host).await
+    place_session_pointer(fs, session_pointer, worktree_path, &host).await
 }
 
 pub(super) fn node_launcher_for(
+    fs: &dyn tddy_fs::Fs,
     agent: &crate::spec_launch::HostAgent,
     target_shell: &Option<Arc<dyn tddy_remote_shell::RemoteShell>>,
 ) -> Option<crate::cursor_from_spec::NodeLauncher> {
     match target_shell {
         Some(_) => None,
-        None => node_launcher_of(&agent.tool.binary),
+        None => node_launcher_of_on(fs, &agent.tool.binary),
     }
 }
 

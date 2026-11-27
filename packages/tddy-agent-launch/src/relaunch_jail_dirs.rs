@@ -7,20 +7,21 @@ use std::path::PathBuf;
 use std::path::Path;
 
 pub(super) fn prepare_relaunch_dirs(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
 ) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf, PathBuf), Status> {
     let sandbox_root = session_dir.join("sandbox");
     let egress_dir = session_dir.join("egress");
-    std::fs::create_dir_all(sandbox_root.join(".work").join("home"))
+    fs.create_dir_all(&sandbox_root.join(".work").join("home"))
         .map_err(|e| Status::internal(format!("mkdir sandbox scratch: {e}")))?;
-    std::fs::create_dir_all(sandbox_root.join(".work").join("tmp"))
+    fs.create_dir_all(&sandbox_root.join(".work").join("tmp"))
         .map_err(|e| Status::internal(format!("mkdir sandbox tmp: {e}")))?;
-    std::fs::create_dir_all(sandbox_root.join("context"))
+    fs.create_dir_all(&sandbox_root.join("context"))
         .map_err(|e| Status::internal(format!("mkdir sandbox context: {e}")))?;
-    std::fs::create_dir_all(&egress_dir)
+    fs.create_dir_all(&egress_dir)
         .map_err(|e| Status::internal(format!("mkdir sandbox egress: {e}")))?;
-    let sandbox_root = std::fs::canonicalize(&sandbox_root).unwrap_or(sandbox_root);
-    let egress_dir = std::fs::canonicalize(&egress_dir).unwrap_or(egress_dir);
+    let sandbox_root = fs.canonicalize(&sandbox_root).unwrap_or(sandbox_root);
+    let egress_dir = fs.canonicalize(&egress_dir).unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
     // scratch_home (jail $HOME) is the persistent daemon-wide claude home, resolved and mounted
     // below — not a per-session dir — so auth/history persist across sessions.
@@ -36,9 +37,10 @@ pub(super) fn prepare_relaunch_dirs(
 }
 
 pub(super) fn refresh_relaunch_context_dir(
+    fs: &dyn tddy_fs::Fs,
     worktree_path: &Path,
     agents: &[tddy_core::SessionAgentRecord],
-    context_dir: &PathBuf,
+    context_dir: &Path,
     // The context-file allow-list the jail is served: its agent's spec `context_globs`,
     // resolved by the caller from the session's agent.
     globs: &[String],
@@ -66,11 +68,11 @@ pub(super) fn refresh_relaunch_context_dir(
         guidance_files,
     )
     .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
-    if context_dir.exists() {
-        std::fs::remove_dir_all(context_dir)
+    if fs.exists(context_dir) {
+        fs.remove_dir_all(context_dir)
             .map_err(|e| Status::internal(format!("clear context dir: {e}")))?;
     }
-    std::fs::create_dir_all(context_dir)
+    fs.create_dir_all(context_dir)
         .map_err(|e| Status::internal(format!("mkdir context dir: {e}")))?;
     tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), context_dir)
         .map_err(|e| Status::internal(format!("copy context dir: {e}")))?;

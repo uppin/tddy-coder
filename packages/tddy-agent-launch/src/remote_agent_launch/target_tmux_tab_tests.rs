@@ -2,6 +2,11 @@
 //! shell for tmux, then for its sessions, and what each answer means; the tab command runs
 //! `new-session -A` in the worktree through the login shell.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;

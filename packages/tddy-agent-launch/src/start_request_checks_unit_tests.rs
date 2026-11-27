@@ -126,7 +126,7 @@ fn a_start_that_carried_a_source_records_it_in_the_sessions_github_source_file()
     let req = a_start_naming(GithubSource::LocalGh);
 
     // When the start's source is recorded
-    record_requested_github_source(&req, &session_dir).unwrap();
+    record_requested_github_source(&tddy_fs::DiskFs, &req, &session_dir).unwrap();
 
     // Then the sidecar file exists and reads back as Local gh
     assert!(session_dir.join("github-source.yaml").is_file());
@@ -143,7 +143,7 @@ fn a_start_that_named_no_source_writes_no_github_source_file() {
     let req = a_start_naming(GithubSource::Unspecified);
 
     // When the start's source is recorded
-    record_requested_github_source(&req, scratch.path()).unwrap();
+    record_requested_github_source(&tddy_fs::DiskFs, &req, scratch.path()).unwrap();
 
     // Then nothing is written: resumes read this host's row again
     assert!(!scratch.path().join("github-source.yaml").exists());

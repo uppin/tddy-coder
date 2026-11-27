@@ -85,3 +85,10 @@ store), free functions behind `<fn>_on` seams, and the logger behind its install
 handle (DiskFs until `set_log_fs`). What the port cannot express stays off it and is recorded in
 the changeset: glob matching and sqlite in `tddy-usage`, `chown`/`dup2` via `libc`, and the
 `/proc` zombie check.
+
+`tddy-agent-launch`, `tddy-agent-backend`, `tddy-coding-subagent`, `tddy-agent-skills` and
+`tddy-coding-agent-specs` do theirs through the port too: guards in each crate's
+`tests/fs_port.rs`, launches behind `LaunchSessions.fs` and threaded `<fn>_on` seams, backends
+behind held handles (`TurnFiles`, `UsageTap`, `SpecHeadlessBackend::with_fs`), and the
+conversation log appended per line through the port. What the port cannot express stays off it
+and is recorded in the changeset: process spawning and socket binding.

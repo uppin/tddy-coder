@@ -226,6 +226,7 @@ impl JailToolset {
 /// How a managed workflow's prompt reaches an agent: by the spec's append-system-prompt flag, or,
 /// for a spec that names a rules file instead, as that file's whole content.
 fn managed_prompt(
+    fs: &dyn tddy_fs::Fs,
     spec: &CodingAgentSpec,
     prompt_file: Option<&Path>,
 ) -> Result<(Option<PathBuf>, Option<String>), Status> {
@@ -238,7 +239,7 @@ fn managed_prompt(
     if spec.agent.instructions.rules_file.is_none() {
         return Ok((None, None));
     }
-    let rules = std::fs::read_to_string(file).map_err(|e| {
+    let rules = fs.read_to_string(file).map_err(|e| {
         Status::internal(format!(
             "failed to read the managed workflow's prompt {}: {e}",
             file.display()
@@ -282,7 +283,7 @@ impl LaunchSessions {
             None
         };
         let (system_prompt_file, preamble) =
-            managed_prompt(&agent.spec, wiring.system_prompt_file.as_deref())?;
+            managed_prompt(&*self.fs, &agent.spec, wiring.system_prompt_file.as_deref())?;
         let mut slots = slots::render(
             &jailed(&agent.spec),
             &SlotInputs {
@@ -394,8 +395,13 @@ pub(crate) fn jail_route_config_env(
 /// `path` made absolute where it names a file, as the sandbox profile needs it. A bare name is left
 /// to the `PATH` the jail resolves it on.
 pub(crate) fn canonical_exec_path(path: &str) -> String {
+    canonical_exec_path_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`canonical_exec_path`] through the filesystem port.
+pub(crate) fn canonical_exec_path_on(fs: &dyn tddy_fs::Fs, path: &str) -> String {
     if path.contains('/') {
-        std::fs::canonicalize(path)
+        fs.canonicalize(std::path::Path::new(path))
             .map(|canonical| canonical.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string())
     } else {

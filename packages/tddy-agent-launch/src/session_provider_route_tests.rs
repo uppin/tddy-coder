@@ -7,6 +7,11 @@
 //!
 //! Feature: docs/ft/daemon/claude-cli-session.md (Running on a provider account)
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::sync::Arc;
 
 use tddy_accounts::{endpoints_for, preset, ProviderAccount};

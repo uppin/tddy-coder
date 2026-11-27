@@ -126,6 +126,7 @@ impl crate::launch_ports::LaunchSessions {
                 os_user,
                 wiring,
                 tddy_data_dir: &self.tddy_data_dir,
+                fs: std::sync::Arc::clone(&self.fs),
                 startup_window: self.config.spawn_startup_grace_period(),
                 start_timeout: self.config.remote_agent_start_timeout(),
                 hook_delivery: self.hook_report_delivery.clone(),
@@ -240,6 +241,8 @@ struct ResumedSession<'a> {
     wiring: ResumedWiring,
     /// Where the main terminal's recording is kept.
     tddy_data_dir: &'a Path,
+    /// The filesystem the resume reads and writes through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     /// How long a target session's resumed agent must stay up to count as started.
     startup_window: std::time::Duration,
     /// How long a target session's resumed agent may take to be started there.
@@ -291,6 +294,7 @@ async fn resume_cli_harness_session(
         startup_window,
         start_timeout,
         hook_delivery,
+        fs,
         hook_followers,
         target_shell,
         tmux_location,
@@ -344,6 +348,7 @@ async fn resume_cli_harness_session(
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     let pointer = super::start_steps::place_slot_files_and_pointer(
+        &*fs,
         spec,
         &worktree_path,
         &target_shell,
@@ -352,7 +357,12 @@ async fn resume_cli_harness_session(
         &mut slots,
     )
     .await?;
-    let on_exit = removing_session_pointer_on_exit(on_exit, pointer, meta.tmux_session.is_some());
+    let on_exit = removing_session_pointer_on_exit(
+        std::sync::Arc::clone(&fs),
+        on_exit,
+        pointer,
+        meta.tmux_session.is_some(),
+    );
     let mut env = git_environment;
     env.extend(split_env);
     env.extend(wiring.env);
@@ -378,6 +388,7 @@ async fn resume_cli_harness_session(
         &conversation,
     )?;
     let launched = launch(
+        &*fs,
         cli_manager,
         HarnessSession::new(session_id, &worktree_path, session_dir, os_user),
         HarnessSpecLaunch {

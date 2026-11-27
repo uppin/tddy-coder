@@ -12,6 +12,8 @@ path = "src/lib.rs"
 # `tddy-agent-backend` for the ACP driver. New subagent code does not go into `tddy-discovery`
 # (docs/dev/todo/2026-10-08-drain-tddy-discovery-into-purpose-named-crates-and-remove-it.md).
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 log = "0.4"
 serde_json = "1"
@@ -24,6 +26,8 @@ tddy-discovery = { path = "../tddy-discovery" }
 tddy-usage = { path = "../tddy-usage" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 # `spec_confinement_unit.rs` reads the built-in ACP specs straight from their embedded YAML.
 serde_yaml = "0.9"

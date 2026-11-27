@@ -26,12 +26,13 @@ impl SplitSessionPointers for HostSplitSessionPointers {
         context_dir: &Path,
         on_exit: Option<ExitHook>,
     ) -> Result<Option<ExitHook>, Status> {
-        let path = place_session_pointer_locally(pointer, context_dir)?;
+        let path = place_session_pointer_locally(&tddy_fs::DiskFs, pointer, context_dir)?;
         let placed = PlacedSessionPointer {
             path,
             host: PointerHost::Local,
         };
         Ok(removing_session_pointer_on_exit(
+            std::sync::Arc::new(tddy_fs::DiskFs),
             on_exit,
             Some(placed),
             false,
@@ -39,7 +40,7 @@ impl SplitSessionPointers for HostSplitSessionPointers {
     }
 
     fn remove(&self, context_dir: &Path) {
-        remove_pointer_file(&session_pointer_path(context_dir));
+        remove_pointer_file(&tddy_fs::DiskFs, &session_pointer_path(context_dir));
     }
 }
 

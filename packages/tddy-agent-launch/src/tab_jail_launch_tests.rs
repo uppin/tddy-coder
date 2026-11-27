@@ -5,6 +5,11 @@
 //! The vault is the real sealed one of `session_provider_route_tests`. The kernel sandbox the jail is
 //! then spawned in is not exercised here: `sandbox_shell_tab_jail_linux` covers it.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

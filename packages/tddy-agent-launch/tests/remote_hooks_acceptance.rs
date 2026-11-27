@@ -343,6 +343,7 @@ impl ADaemon {
         hooks: &InstalledHooks,
     ) -> ARunningSession {
         let launched = launch_on_target(
+            &tddy_fs::DiskFs,
             &the_acme_agent(&agent.program()),
             &TemplateParams::new().with("model", MODEL),
             &hooks.slots,
