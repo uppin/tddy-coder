@@ -96,8 +96,13 @@ impl DaemonSessionHost {
 
 /// The ids of the sessions whose directory lies under `tddy_data_dir`.
 fn session_ids_under(tddy_data_dir: &Path) -> Vec<String> {
+    session_ids_under_on(&tddy_fs::DiskFs, tddy_data_dir)
+}
+
+/// [`session_ids_under`] through the filesystem port.
+fn session_ids_under_on(fs: &dyn tddy_fs::Fs, tddy_data_dir: &Path) -> Vec<String> {
     let dir = tddy_data_dir.join(SESSIONS_SUBDIR);
-    let entries = match std::fs::read_dir(&dir) {
+    let entries = match fs.read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(error) => {
@@ -109,9 +114,17 @@ fn session_ids_under(tddy_data_dir: &Path) -> Vec<String> {
         }
     };
     let mut ids: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().into_string().ok())
+        .into_iter()
+        .filter(|path| {
+            // `is_dir`, as before: what a session's directory is, following a link to one.
+            fs.metadata_follow(path)
+                .is_ok_and(|meta| meta.kind == tddy_fs::FsKind::Dir)
+        })
+        .filter_map(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
         .filter(|id| validate_session_id_segment(id).is_ok())
         .collect();
     ids.sort();

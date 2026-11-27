@@ -2,6 +2,11 @@
 //!
 //! PRD: docs/ft/web/1-WIP/PRD-2026-10-24-coagents-conversation-bubble.md
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use futures_util::StreamExt;
 use std::time::Duration;

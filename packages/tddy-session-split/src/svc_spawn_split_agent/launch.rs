@@ -138,6 +138,16 @@ impl SplitSessions {
         context_dir: &std::path::Path,
         hook_params: tddy_core::HookCommandParams<'_>,
     ) -> Result<(), Status> {
+        self.render_and_write_split_hooks_on(&tddy_fs::DiskFs, session_id, context_dir, hook_params)
+    }
+
+    fn render_and_write_split_hooks_on(
+        &self,
+        fs: &dyn tddy_fs::Fs,
+        session_id: &str,
+        context_dir: &std::path::Path,
+        hook_params: tddy_core::HookCommandParams<'_>,
+    ) -> Result<(), Status> {
         match tddy_coding_agent_specs::slots::render(
             &crate::agent_argv::split_agent_spec(&self.coding_agents)?,
             &tddy_coding_agent_specs::slots::SlotInputs {
@@ -159,9 +169,9 @@ impl SplitSessions {
                 let path = crate::agent_argv::split_hooks_file_in(context_dir);
                 if let Some((_, bytes)) = rendered.files.first() {
                     if let Some(parent) = path.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+                        let _ = fs.create_dir_all(parent);
                     }
-                    if let Err(e) = std::fs::write(&path, bytes) {
+                    if let Err(e) = fs.write(&path, bytes) {
                         log::warn!(
                             "session {session_id}: failed to write {} — hooks will not fire: {e}",
                             path.display()

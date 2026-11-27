@@ -66,6 +66,28 @@ impl SessionCatalog {
         session_id: &str,
         build_provider: Option<Arc<dyn BuildCatalogProvider>>,
     ) -> Result<Arc<SessionCatalog>, CatalogError> {
+        Self::open_and_populate_on(
+            &tddy_fs::DiskFs,
+            session_dir,
+            repo_root,
+            tddy_data_dir,
+            registry,
+            session_id,
+            build_provider,
+        )
+        .await
+    }
+
+    /// [`Self::open_and_populate`] through the filesystem port.
+    pub async fn open_and_populate_on(
+        fs: &dyn tddy_fs::Fs,
+        session_dir: &Path,
+        repo_root: Option<&Path>,
+        tddy_data_dir: &Path,
+        registry: &TaskRegistry,
+        session_id: &str,
+        build_provider: Option<Arc<dyn BuildCatalogProvider>>,
+    ) -> Result<Arc<SessionCatalog>, CatalogError> {
         let db = catalog_db_path(session_dir);
         let pool = store::open_pool(&db).await?;
 
@@ -85,8 +107,7 @@ impl SessionCatalog {
             populate: Mutex::new(Some(handle)),
         });
 
-        let key = std::fs::canonicalize(session_dir).unwrap_or_else(|_| session_dir.to_path_buf());
-        CATALOG.insert(key, Arc::clone(&catalog));
+        CATALOG.insert(catalog_key_on(fs, session_dir), Arc::clone(&catalog));
 
         Ok(catalog)
     }
@@ -145,6 +166,19 @@ impl SessionCatalog {
 /// Canonicalizes `session_dir` so the lookup key matches the canonical key used at insertion
 /// (`open_and_populate`), regardless of symlinks / relative form / trailing slash.
 pub fn session_catalog(session_dir: &Path) -> Option<Arc<SessionCatalog>> {
-    let key = std::fs::canonicalize(session_dir).unwrap_or_else(|_| session_dir.to_path_buf());
-    CATALOG.get(&key).map(|entry| Arc::clone(entry.value()))
+    session_catalog_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`session_catalog`] through the filesystem port.
+pub fn session_catalog_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Option<Arc<SessionCatalog>> {
+    CATALOG
+        .get(&catalog_key_on(fs, session_dir))
+        .map(|entry| Arc::clone(entry.value()))
+}
+
+/// The registry key for `session_dir`: its canonical form, or the path as given when it has none
+/// (a session directory that does not exist yet is keyed by what it will be called).
+pub fn catalog_key_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> PathBuf {
+    fs.canonicalize(session_dir)
+        .unwrap_or_else(|_| session_dir.to_path_buf())
 }

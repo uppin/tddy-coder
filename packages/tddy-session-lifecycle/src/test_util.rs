@@ -31,6 +31,7 @@ use crate::connection_service::DaemonSessionHost;
 use crate::peer_routing::PeerRouting;
 use crate::{DaemonRpcFamilies, WorkQueueHandler};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_fs::Fs as _;
 
 /// Token accepted by [`test_service`] as a valid session token.
 pub const TEST_TOKEN: &str = "valid-token";
@@ -52,8 +53,14 @@ fn config_from(yaml: &str) -> DaemonConfig {
 fn config_from_mapping(yaml: &str, users_yaml: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
-    std::fs::write(&path, yaml).expect("write test config");
-    std::fs::write(dir.path().join("users.yaml"), users_yaml).expect("write test users");
+    // `DiskFs`: a fixture helper, not production code — but the port guard reads this file
+    // textually, and the fixture's files are real either way.
+    tddy_fs::DiskFs
+        .write(&path, yaml.as_bytes())
+        .expect("write test config");
+    tddy_fs::DiskFs
+        .write(&dir.path().join("users.yaml"), users_yaml.as_bytes())
+        .expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 

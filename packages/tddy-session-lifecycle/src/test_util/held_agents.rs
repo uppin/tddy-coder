@@ -1,5 +1,6 @@
 use crate::test_util::TestDaemon;
 use std::path::PathBuf;
+use tddy_fs::Fs as _;
 
 impl TestDaemon {
     /// Make `session_id` live as the daemon defines it: hold a main agent terminal for it. The
@@ -11,20 +12,21 @@ impl TestDaemon {
         let record = dir.path().join("signal-received");
         let ready = dir.path().join("ready");
         let script = dir.path().join("agent.sh");
-        std::fs::write(
+        // `DiskFs`: a fixture helper, not production code — but the port guard reads this file
+        // textually, and the stub script must be a real executable file either way.
+        tddy_fs::DiskFs.write(
             &script,
             format!(
                 "#!/bin/sh\ntrap 'echo TERM > \"{r}\"; exit 0' TERM\ntrap 'echo INT > \"{r}\"; exit 0' INT\ntouch \"{ready}\"\nwhile :; do sleep 0.05; done\n",
                 r = record.display(),
                 ready = ready.display()
-            ),
+            )
+            .as_bytes(),
         )
         .expect("write the stub agent");
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
-                .expect("make the stub agent executable");
-        }
+        tddy_fs::DiskFs
+            .set_mode(&script, 0o755)
+            .expect("make the stub agent executable");
         let pid = self
             .inner
             .terminal_manager()
@@ -86,7 +88,7 @@ impl HeldMain {
     pub async fn signal_received(&self) -> Option<String> {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
-            if let Ok(text) = std::fs::read_to_string(&self.record) {
+            if let Ok(text) = tddy_fs::DiskFs.read_to_string(&self.record) {
                 return Some(text.trim().to_string());
             }
             if std::time::Instant::now() >= deadline {

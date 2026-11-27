@@ -139,8 +139,27 @@ pub fn build_split_context_dir(
     globs: &[&str],
     source: &dyn tddy_session_files::context_sync::ContextSource,
 ) -> Result<PathBuf, Status> {
+    build_split_context_dir_on(
+        &tddy_fs::DiskFs,
+        spec,
+        session_dir,
+        withdrawals,
+        globs,
+        source,
+    )
+}
+
+/// [`build_split_context_dir`] through the filesystem port.
+pub fn build_split_context_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    spec: &tddy_coding_agent_specs::CodingAgentSpec,
+    session_dir: &Path,
+    withdrawals: &[(String, Vec<String>)],
+    globs: &[&str],
+    source: &dyn tddy_session_files::context_sync::ContextSource,
+) -> Result<PathBuf, Status> {
     let context_dir = split_context_dir(session_dir);
-    std::fs::create_dir_all(&context_dir)
+    fs.create_dir_all(&context_dir)
         .map_err(|e| Status::internal(format!("failed to create split context dir: {e}")))?;
     let borrowed = agent_argv::borrowed_withdrawals(withdrawals);
     let replacements = agent_argv::subagent_replacements(withdrawals, &borrowed);
@@ -163,7 +182,7 @@ pub fn build_split_context_dir(
     // the project's text.
     for filename in &guidance_files {
         let path = context_dir.join(filename);
-        let body = match std::fs::read_to_string(&path) {
+        let body = match fs.read_to_string(&path) {
             Ok(body) => body,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => {
@@ -173,7 +192,11 @@ pub fn build_split_context_dir(
                 )))
             }
         };
-        std::fs::write(&path, tddy_sandbox::prepend_preamble(&preamble, &body)).map_err(|e| {
+        fs.write(
+            &path,
+            tddy_sandbox::prepend_preamble(&preamble, &body).as_bytes(),
+        )
+        .map_err(|e| {
             Status::internal(format!(
                 "failed to write split context {}: {e}",
                 filename.display()

@@ -501,8 +501,14 @@ mod clone_host_precheck_tests;
 /// Whether `session_dir` holds a session's record (`.session.yaml`). Only "no such file" is none: a
 /// record that cannot be looked at is the error.
 fn records_a_session(session_dir: &Path) -> Result<bool, Status> {
+    records_a_session_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`records_a_session`] through the filesystem port.
+pub fn records_a_session_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Result<bool, Status> {
     let record = session_dir.join(tddy_core::SESSION_METADATA_FILENAME);
-    match std::fs::symlink_metadata(&record) {
+    // `metadata`, not `metadata_follow`: what matters is the record itself, as before.
+    match fs.metadata(&record) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(Status::internal(format!(

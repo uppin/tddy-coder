@@ -12,6 +12,11 @@
 //! In-crate rather than under `tests/`: the handlers are built from
 //! `DaemonSessionHost::launch_sessions`, which is `pub(crate)`.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::os::unix::fs::PermissionsExt as _;
 use tddy_test_hosts::a_tool_host;
 

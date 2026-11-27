@@ -128,12 +128,11 @@ fn session_spec(mut args: Args) -> anyhow::Result<(LaunchSpec, bool)> {
         permission_mode: args.permission_mode.as_deref(),
         ..HarnessLaunch::default()
     });
-    let session_dir = std::env::temp_dir()
-        .join("tddy-session-driver")
-        .join(&session_id);
-    std::fs::create_dir_all(&session_dir)
-        .with_context(|| format!("create the session directory {}", session_dir.display()))?;
-    let session_dir = std::fs::canonicalize(&session_dir)?;
+    let session_dir = tddy_session_driver::session::create_session_dir_on(
+        &tddy_fs::DiskFs,
+        &std::env::temp_dir().join("tddy-session-driver"),
+        &session_id,
+    )?;
     Ok((
         LaunchSpec {
             agent,

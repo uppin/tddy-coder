@@ -8,6 +8,11 @@
 //! the placement (`daemon_instance_id`) and the withdrawal (`replaces`) into the spawn, so a
 //! reference that cannot be turned into one has to fail the start rather than be dropped.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 

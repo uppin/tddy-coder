@@ -10,6 +10,11 @@
 //! `sandboxed_claude_cli_acceptance.rs` for that heavier end-to-end harness. This module
 //! isolates the new, platform-independent resolution logic this changeset adds.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 

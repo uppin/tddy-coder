@@ -26,6 +26,7 @@ use std::time::Duration;
 use prost::Message as _;
 use tddy_daemon_extensions::RoomTokenMinter;
 use tddy_daemon_kernel::peer_forwarding::{daemon_rpc_identity, session_room_name, CommonRoom};
+use tddy_fs::Fs as _;
 use tddy_room_client::{RoomConnector, RoomSession};
 
 use crate::room_access::clone_room_join;
@@ -852,17 +853,20 @@ impl CloneMirror {
         let marker_path = spec
             .worktree_path
             .join(tddy_session_sync::mirror::MARKER_FILENAME);
-        std::fs::write(
-            &marker_path,
-            serde_json::to_vec_pretty(&marker)
-                .map_err(|e| Status::internal(format!("serialize the mirror marker: {e}")))?,
-        )
-        .map_err(|e| {
-            Status::internal(format!(
-                "claim {} as a mirror: {e}",
-                spec.worktree_path.display()
-            ))
-        })?;
+        // `DiskFs`, not a port parameter: the mirror below is opened on the real disk by
+        // `tddy-session-sync`, so the marker must land on the same filesystem it reads.
+        tddy_fs::DiskFs
+            .write(
+                &marker_path,
+                &serde_json::to_vec_pretty(&marker)
+                    .map_err(|e| Status::internal(format!("serialize the mirror marker: {e}")))?,
+            )
+            .map_err(|e| {
+                Status::internal(format!(
+                    "claim {} as a mirror: {e}",
+                    spec.worktree_path.display()
+                ))
+            })?;
         let mirror = Mirror::open_or_create(&spec.worktree_path, marker)
             .map_err(|e| Status::internal(e.to_string()))?;
         // The transport-shim env var, only when this checkout was provisioned from the facilitating

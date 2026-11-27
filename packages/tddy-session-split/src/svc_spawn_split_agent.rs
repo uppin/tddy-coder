@@ -474,8 +474,16 @@ fn create_split_session_dir(
     sessions_base: &Path,
     session_id: &str,
 ) -> Result<std::path::PathBuf, Status> {
+    create_split_session_dir_on(&tddy_fs::DiskFs, sessions_base, session_id)
+}
+
+fn create_split_session_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    sessions_base: &Path,
+    session_id: &str,
+) -> Result<std::path::PathBuf, Status> {
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    std::fs::create_dir_all(&session_dir)
+    fs.create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
     Ok(session_dir)
 }

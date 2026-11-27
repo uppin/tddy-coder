@@ -11,7 +11,6 @@
 //! the launch's environment, which passes whole but for a loader variable.
 
 use std::collections::BTreeMap;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -19,6 +18,7 @@ use std::time::Duration;
 
 use tddy_core::AcpAgentCommand;
 use tddy_discovery::subagent::SubagentError;
+use tddy_fs::Fs as _;
 use tddy_supervisor::{SpawnRelayedRequest, SpawnedProcess, SupervisorError};
 
 /// How long the supervisor gets to connect to the daemon's socket once it accepted the request.
@@ -133,16 +133,19 @@ struct PrivateSocket {
 
 impl Drop for PrivateSocket {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        // `DiskFs`: the socket is bound on the real disk by `tokio` below, so its removal lands
+        // on the same filesystem it was bound on — never a memory one.
+        let _ = tddy_fs::DiskFs.remove_file(&self.path);
     }
 }
 
 fn bind_private_socket(dir: &Path) -> Result<PrivateSocket, SubagentError> {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    std::fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)
+    // `DiskFs`, not a port parameter: the relay socket is bound on the real disk by `tokio`
+    // below, so its directory is created on the same filesystem — routing the creation through
+    // a memory filesystem while the bind stays real would split one operation across two.
+    tddy_fs::DiskFs
+        .create_dir_all_with_mode(dir, 0o700)
         .map_err(|e| SubagentError::from(format!("creating {}: {e}", dir.display())))?;
     make_owner_only(dir)?;
     let path = dir.join(format!(
@@ -166,19 +169,22 @@ fn bind_private_socket(dir: &Path) -> Result<PrivateSocket, SubagentError> {
 /// for the agent, so it must be this daemon's own (and not a symlink to somewhere else), and it is
 /// narrowed to owner-only.
 fn make_owner_only(dir: &Path) -> Result<(), SubagentError> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let metadata = std::fs::symlink_metadata(dir)
+    // `DiskFs` (see `bind_private_socket`): the socket bound below lives on the real disk.
+    let metadata = tddy_fs::DiskFs
+        .metadata(dir)
         .map_err(|e| SubagentError::from(format!("inspecting {}: {e}", dir.display())))?;
     // SAFETY: `geteuid` reads this process's effective uid; it has no preconditions.
     let this_uid = unsafe { libc::geteuid() };
-    if !metadata.is_dir() || metadata.uid() != this_uid {
+    // Unknown owner or mode refuses like a wrong one: the check is meaningless without them.
+    if metadata.kind != tddy_fs::FsKind::Dir || metadata.uid.unwrap_or(u32::MAX) != this_uid {
         return Err(SubagentError::from(format!(
             "the relay socket directory {} is not a directory this daemon owns",
             dir.display()
         )));
     }
-    if metadata.mode() & 0o077 != 0 {
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    if metadata.mode.unwrap_or(0o777) & 0o077 != 0 {
+        tddy_fs::DiskFs
+            .set_mode(dir, 0o700)
             .map_err(|e| SubagentError::from(format!("narrowing {}: {e}", dir.display())))?;
     }
     Ok(())

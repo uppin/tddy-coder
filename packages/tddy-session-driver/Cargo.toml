@@ -33,12 +33,16 @@ tddy-credentials = { path = "../tddy-credentials" }
 tddy-remote-shell = { path = "../tddy-remote-shell" }
 # The two hook reports (`ReportSessionStatusRequest`, `ReportAgentActivityRequest`) a hook becomes.
 tddy-service = { path = "../tddy-service" }
+# `#fs-port`: the session directory is created through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-task = { path = "../tddy-task" }
 # `encode_keys` and the screen answer: what `SendSessionKeys` types and `ReadSessionTerminal`
 # answers, so the driver's tools mean what the orchestrator's do.
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 tempfile = "3"
 tddy-testing-commons = { path = "../tddy-testing-commons" }

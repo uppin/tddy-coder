@@ -53,10 +53,20 @@ pub fn invoke_action_in_session_dir(
     action_id: &str,
     data_json: &str,
 ) -> Result<serde_json::Value, SessionActionsError> {
+    invoke_action_in_session_dir_on(&tddy_fs::DiskFs, session_dir, action_id, data_json)
+}
+
+/// [`invoke_action_in_session_dir`] through the filesystem port.
+pub fn invoke_action_in_session_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    action_id: &str,
+    data_json: &str,
+) -> Result<serde_json::Value, SessionActionsError> {
     let repo_root = load_repo_root(session_dir)?;
     let tddy_data_dir = resolve_tddy_data_dir();
     let store_root = repo_root.as_ref().map(|r| {
-        let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
+        let canon = fs.canonicalize(r).unwrap_or_else(|_| r.clone());
         let key = derive_repo_key(&canon);
         repo_actions_root(&tddy_data_dir, &key)
     });

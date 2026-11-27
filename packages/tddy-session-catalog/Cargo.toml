@@ -19,9 +19,13 @@ serde_json = "1"
 # (json1 + generated columns). Owned here so crates that never open a catalog do not compile it.
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "sqlite"] }
 thiserror = "2"
+# `#fs-port`: production disk I/O goes through the port; the guard and `MemFs` (below) test it.
+tddy-fs = { path = "../tddy-fs" }
 tddy-session-store = { path = "../tddy-session-store" }
 tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

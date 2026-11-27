@@ -24,6 +24,8 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
+# `#fs-port`: session-record checks and the clone mirror marker go through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 # `RegisteredConversation`: a conversation this daemon opens is registered where the session's usage
 # stream finds it (`#usage-binding 3/5`).
@@ -71,6 +73,8 @@ tddy-projects = { path = "../tddy-projects" }
 tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 # `session_agent_roster`'s tests persist a roster into a real session directory.
