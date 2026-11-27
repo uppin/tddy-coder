@@ -193,6 +193,11 @@ pub struct DaemonRuntime {
     /// The RPC roster, ready to hand to `MultiRpcService` — over HTTP, over LiveKit, or over a
     /// webview IPC bridge.
     pub entries: Vec<tddy_rpc::ServiceEntry>,
+    /// The daemon's Prometheus metrics, built from `metrics:` when the section is present.
+    /// `None` binds no `/metrics` listener and records no RPC: the handle travels with the
+    /// runtime so the binary (which starts the listener) and the serving path (which records)
+    /// share the one registry, and a future session or LiveKit updater needs no new plumbing.
+    pub metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
     /// The configuration this runtime was built from, after environment overrides.
     pub config: DaemonConfig,
     /// The claude-cli sessions this daemon owns. The host kills them when it is shutting down —

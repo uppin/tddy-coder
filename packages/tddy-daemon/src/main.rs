@@ -81,6 +81,13 @@ fn main() -> anyhow::Result<()> {
     // rather than after the roster is built. Neither field is environment-overridable, so what the
     // runtime resolves them to is what is checked here.
     let (port, bundle_path_opt) = tddy_daemon::startup::startup_config_check(&config, args.relay)?;
+    // The private /metrics listener must never sit on the public web port: refuse the config
+    // naming both settings rather than serving operator internals on the public listener.
+    if let Err(refusal) =
+        tddy_daemon::config::check_metrics_listen(&config.listen, config.metrics.as_ref())
+    {
+        anyhow::bail!("invalid metrics section: {refusal}");
+    }
     // In relay mode bundle_path is None; in non-relay mode startup_config_check already
     // guaranteed it is Some (returning Err otherwise). Unwrap is safe for non-relay path.
     let bundle_path = bundle_path_opt.unwrap_or_else(|| PathBuf::from(""));
@@ -151,6 +158,22 @@ fn main() -> anyhow::Result<()> {
         // runtime below.
         let children = daemon.children();
 
+        // The private Prometheus listener, on its own port: absent without `metrics:`. Bound
+        // before the web listener so a held metrics port fails startup instead of a half-running
+        // daemon, and stopped with it below — dropping the sender resolves the serve future.
+        let (metrics_stop_tx, metrics_stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let metrics_task = match (daemon.config.metrics.as_ref(), daemon.metrics.clone()) {
+            (Some(metrics_config), Some(metrics)) => {
+                let server =
+                    tddy_metrics::MetricsServer::bind(metrics_config.listen, metrics).await?;
+                log::info!("tddy-daemon serving /metrics on {}", metrics_config.listen);
+                Some(tokio::spawn(server.serve(async move {
+                    let _ = metrics_stop_rx.await;
+                })))
+            }
+            _ => None,
+        };
+
         // Start what the runtime assembled but left to its host: the local socket, the common-room
         // participant, peer discovery, the Telegram dispatcher and the background loops.
         let tasks = daemon.tasks.spawn();
@@ -196,9 +219,19 @@ fn main() -> anyhow::Result<()> {
             allowed_agents,
             debug: web_debug,
             lifecycle_telegram: daemon.lifecycle_telegram,
+            // The serving path wraps the roster in the instrumented service, so every web RPC
+            // is counted on the same registry the private listener scrapes.
+            metrics: daemon.metrics.clone(),
             shutdown_rx: daemon.relay_shutdown, // Some(rx) in relay mode; None otherwise
         })
         .await;
+
+        // Stop the private listener with the web one: the sender's drop resolves the serve
+        // future, and the task is awaited so a scrape in flight finishes before exit.
+        drop(metrics_stop_tx);
+        if let Some(task) = metrics_task {
+            let _ = task.await;
+        }
 
         // The same reap after the server finishes: a graceful ctrl-c never delivered the SIGTERM
         // above, and a session — or a jail — started while the first pass ran would otherwise be

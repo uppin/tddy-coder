@@ -125,6 +125,27 @@ It governs the **common room only**:
   `#/livekit` rooms panel read the same block for their own purposes and are not governed by the
   flag.
 
+## Prometheus metrics
+
+```yaml
+metrics:
+  listen: "127.0.0.1:9464"   # absent ⇒ no metrics listener at all
+```
+
+`GET http://<listen>/metrics` serves the OpenMetrics text exposition (`text/plain; version=0.0.4`);
+every other path on that listener 404s, and the web listener serves no `/metrics`. There is no
+auth on the listener — the private bind is the control, so bind loopback or a firewalled interface.
+
+A `metrics.listen` whose port equals `listen.web_port` refuses startup, naming both settings.
+The section applies at startup only: changing it needs a restart. Settings saves leave it
+untouched — an update patches only the LiveKit and `listen` fields it renders, carrying the rest
+of the file (this section included) through unchanged.
+
+Initial families: `tddy_build_info{version}`, `process_open_fds` (sampled at scrape time),
+`tddy_sessions_active{kind}`, `tddy_session_starts_total{result}` (`started` / `failed`),
+`tddy_rpc_requests_total{service,method,code}`, `tddy_rpc_request_duration_seconds` (histogram),
+`tddy_livekit_rooms_connected`.
+
 ## Runtime reconfiguration
 
 Only the LiveKit block applies live. A supervisor owns the running common-room connection and, when

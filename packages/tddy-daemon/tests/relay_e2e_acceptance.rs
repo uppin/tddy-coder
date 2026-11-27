@@ -97,6 +97,7 @@ fn a_relay_server_stopped_by(
         allowed_agents: vec![],
         debug: None,
         lifecycle_telegram: None,
+        metrics: None,
         shutdown_rx: Some(shutdown),
     }
 }

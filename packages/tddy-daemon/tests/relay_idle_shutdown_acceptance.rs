@@ -30,6 +30,7 @@ fn relay_server_options(
         allowed_agents: vec![],
         debug: None,
         lifecycle_telegram: None,
+        metrics: None,
         shutdown_rx,
     }
 }

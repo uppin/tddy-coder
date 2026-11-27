@@ -64,6 +64,7 @@ fn options_serving(bundle: &Path, port: u16) -> RunServerOptions {
         }],
         debug: Some("tddy:term:*".to_string()),
         lifecycle_telegram: None,
+        metrics: None,
         shutdown_rx: None,
     }
 }

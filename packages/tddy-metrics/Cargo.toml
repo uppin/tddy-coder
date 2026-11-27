@@ -1,0 +1,15 @@
+[package]
+name = "tddy-metrics"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's Prometheus metrics: a per-instance registry and the private /metrics listener."
+
+[dependencies]
+# The official Prometheus Rust client (OpenMetrics text encoding, typed families, no global
+# registry) — approved as a new external dependency for #fs-port 2/13 on 2026-11-26.
+prometheus-client = "0.23"
+axum = "0.8"
+tokio = { version = "1", features = ["rt", "net", "sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "time"] }

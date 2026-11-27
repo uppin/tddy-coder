@@ -122,6 +122,8 @@ impl DaemonSessionHost {
             project_notification_log: None,
             session_watches: None,
             trunk_watching: None,
+            // No metrics until the composition root installs them with `with_metrics`.
+            metrics: None,
             sandbox_rpc_bridge: Arc::new(std::sync::OnceLock::new()),
             // Installed by the composition root once the handlers above this crate are built
             // from this host (`with_rpc_families`).

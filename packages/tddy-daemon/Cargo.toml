@@ -60,6 +60,9 @@ tddy-github = { path = "../tddy-github" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-rpc = { path = "../tddy-rpc" }
+# The daemon's Prometheus metrics: built here, recorded through the RPC seam in
+# `server.rs`, served on the private listener `main.rs` starts.
+tddy-metrics = { path = "../tddy-metrics" }
 # The agent-facing tool socket wraps a UnixStream as a tddy-rpc endpoint (`StdioEndpoint::from_duplex`).
 tddy-service = { path = "../tddy-service" }
 tddy-actions = { path = "../tddy-actions" }

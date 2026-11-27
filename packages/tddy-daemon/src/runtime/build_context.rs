@@ -54,6 +54,9 @@ pub(super) struct BuildContext {
     /// placed as this host is: per OS user on the binary, the one runtime socket when embedded. The
     /// finished roster is installed on it by [`Self::serve_common_room`].
     pub(super) agent_tool_sockets: Arc<tddy_daemon_kernel::agent_tool_sockets::AgentToolSockets>,
+    /// The daemon's Prometheus metrics — one registry for this runtime, `None` when no `metrics:`
+    /// section asked for a listener. Built here so the serving path and the session host share it.
+    pub(super) metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
     pub(super) tasks: RuntimeTasks,
 }
 
@@ -94,6 +97,13 @@ impl BuildContext {
             credential_sync_publish_watch: None,
         };
         let agent_tool_sockets = agent_tool_sockets_for_host(&options);
+        // One metrics registry per runtime (never global), built exactly when the config asks
+        // for the private listener that serves it. `tddy_build_info` carries this binary's
+        // version, so a scrape tells which daemon it came from.
+        let metrics = config
+            .metrics
+            .as_ref()
+            .map(|_| Arc::new(tddy_metrics::DaemonMetrics::new(env!("CARGO_PKG_VERSION"))));
         Self {
             config,
             options,
@@ -111,6 +121,7 @@ impl BuildContext {
             index_supports,
             session_host: None,
             agent_tool_sockets,
+            metrics,
             tasks,
         }
     }
@@ -171,6 +182,7 @@ impl BuildContext {
     pub(super) fn into_runtime(self) -> DaemonRuntime {
         DaemonRuntime {
             entries: self.identity.rpc_entries,
+            metrics: self.metrics,
             config: self.config,
             cli_sessions: self.registries.shared_cli_manager,
             session_host: self.session_host,
