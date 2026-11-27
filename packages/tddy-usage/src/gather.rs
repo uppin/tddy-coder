@@ -29,12 +29,17 @@ pub struct UsageContext {
 /// first (a zero row carrying `ctx.fallback_model` when it has no files yet), each followed by its
 /// children, recursively, every child's `parent_id` naming its parent.
 pub fn account(section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRecord> {
+    account_on(&tddy_fs::DiskFs, section, ctx)
+}
+
+/// [`account`] through the filesystem port.
+pub fn account_on(fs: &dyn tddy_fs::Fs, section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRecord> {
     merge_sources(
         section
             .sources
             .iter()
             .filter_map(|source| match source {
-                UsageSource::Jsonl(jsonl) => conversation_rows(jsonl, ctx),
+                UsageSource::Jsonl(jsonl) => conversation_rows(fs, jsonl, ctx),
                 UsageSource::Sqlite(sqlite) => crate::sqlite::conversation_rows(sqlite, ctx),
             })
             .collect(),
@@ -78,21 +83,26 @@ pub fn gather_session_usage(
     section: Option<&UsageSection>,
     ctx: &UsageContext,
 ) -> Vec<ConversationRecord> {
-    let mut records = section.map(|s| account(s, ctx)).unwrap_or_default();
-    records.extend(accounting_file_rows(&ctx.session_dir));
+    gather_session_usage_on(&tddy_fs::DiskFs, section, ctx)
+}
+
+/// [`gather_session_usage`] through the filesystem port.
+pub fn gather_session_usage_on(fs: &dyn tddy_fs::Fs, section: Option<&UsageSection>, ctx: &UsageContext) -> Vec<ConversationRecord> {
+    let mut records = section.map(|s| account_on(fs, s, ctx)).unwrap_or_default();
+    records.extend(accounting_file_rows(fs, &ctx.session_dir));
     records
 }
 
 /// The conversations in `<session_dir>/egress/accounting.json`; none when it is missing or
 /// unreadable.
-fn accounting_file_rows(session_dir: &Path) -> Vec<ConversationRecord> {
+fn accounting_file_rows(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Vec<ConversationRecord> {
     #[derive(Deserialize)]
     struct AccountingFile {
         #[serde(default)]
         conversations: Vec<ConversationRecord>,
     }
     let path = session_dir.join("egress").join("accounting.json");
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Ok(text) = fs.read_to_string(&path) else {
         return Vec::new();
     };
     match serde_json::from_str::<AccountingFile>(&text) {
