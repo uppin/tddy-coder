@@ -9,6 +9,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 log = { version = "0.4", features = ["serde"] }
 once_cell = "1"
 serde = { version = "1", features = ["derive"] }
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
