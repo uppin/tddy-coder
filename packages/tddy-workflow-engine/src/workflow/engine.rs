@@ -47,8 +47,26 @@ impl WorkflowEngine {
         storage_dir: PathBuf,
         hooks: Option<Arc<dyn RunnerHooks>>,
     ) -> Self {
+        Self::with_fs(
+            recipe,
+            backend,
+            storage_dir,
+            hooks,
+            Arc::new(tddy_fs::DiskFs),
+        )
+    }
+
+    /// [`WorkflowEngine::new`] with the filesystem port the graph's tasks run against.
+    pub fn with_fs(
+        recipe: Arc<dyn WorkflowRecipe>,
+        backend: SharedBackend,
+        storage_dir: PathBuf,
+        hooks: Option<Arc<dyn RunnerHooks>>,
+        fs: Arc<dyn tddy_fs::Fs>,
+    ) -> Self {
         let backend_arc = backend.as_arc();
-        let graph = Arc::new(recipe.build_graph(backend_arc));
+        let fs = fs;
+        let graph = Arc::new(recipe.build_graph(backend_arc, fs.clone()));
         let storage = Arc::new(crate::workflow::session::FileSessionStorage::new(
             storage_dir,
         ));

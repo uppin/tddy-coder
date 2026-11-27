@@ -65,7 +65,7 @@ impl WorkflowRecipe for EmptyPresenterTestRecipe {
         "empty_presenter_test"
     }
 
-    fn build_graph(&self, _backend: Arc<dyn CodingBackend>) -> crate::workflow::graph::Graph {
+    fn build_graph(&self, _backend: Arc<dyn CodingBackend>, _fs: Arc<dyn tddy_fs::Fs>) -> crate::workflow::graph::Graph {
         GraphBuilder::new("empty_presenter_test").build()
     }
 

@@ -32,6 +32,7 @@ pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 
 [dev-dependencies]
+tddy-fs = { path = "../tddy-fs" }
 # `work_queue_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 # Test fixtures are built from the agents' YAML specs (their routed-agent shape, their binary

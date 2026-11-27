@@ -210,7 +210,7 @@ fn build_managed_workflow(
     // The controller only reads the graph's topology (`successors`); tasks are never executed, so a
     // stub backend is sufficient for graph construction.
     let backend: Arc<dyn CodingBackend> = Arc::new(StubBackend::new());
-    let graph = Arc::new(recipe.build_graph(backend));
+    let graph = Arc::new(recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs)));
 
     let (event_tx, event_rx) = std::sync::mpsc::channel::<WorkflowEvent>();
     let controller = Arc::new(WorkflowController::new_at(

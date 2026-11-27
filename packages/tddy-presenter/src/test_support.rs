@@ -23,7 +23,7 @@ impl WorkflowRecipe for LinearTestRecipe {
         "linear_test"
     }
 
-    fn build_graph(&self, _backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, _backend: Arc<dyn CodingBackend>, _fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         GraphBuilder::new("linear_test")
             .add_task(Arc::new(EndTask::new("a")))
             .add_task(Arc::new(EndTask::new("b")))

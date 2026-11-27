@@ -12,7 +12,6 @@ use crate::workflow::session::workflow_engine_storage_dir;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -154,6 +153,7 @@ fn entry_storage_bucket_key(action_key: &str, fingerprint_digest: &str) -> Strin
 /// Load every JSON object entry under `.entries`; return the **`output`** string when **`action_key`**
 /// and **`fingerprint`** match.
 pub fn lookup_cached_completed_submit(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     action_key: &str,
     fingerprint_digest: &str,
@@ -168,7 +168,7 @@ pub fn lookup_cached_completed_submit(
         return None;
     }
 
-    let raw = fs::read_to_string(&path).ok()?;
+    let raw = fs.read_to_string(&path).ok()?;
     let doc: ActionCacheDocument = serde_json::from_str(&raw).ok()?;
 
     for (bucket, entry_val) in &doc.entries {
@@ -208,6 +208,7 @@ fn normalize_cache_output_payload(token: &Value) -> Option<String> {
 
 /// Upsert persisted cache after **`tddy-tools submit`** ingestion (successful submit path only).
 pub fn persist_successful_submit_to_action_cache(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     goal_id_for_record: &str,
     action_key: &str,
@@ -232,7 +233,7 @@ pub fn persist_successful_submit_to_action_cache(
         bucket
     );
 
-    let mut doc = load_or_default_action_cache_document(&path)?;
+    let mut doc = load_or_default_action_cache_document(fs, &path)?;
     merge_action_cache_entry_stub(
         &mut doc,
         &bucket,
@@ -241,7 +242,7 @@ pub fn persist_successful_submit_to_action_cache(
         goal_id_for_record,
         output_submit_json,
     );
-    flush_action_cache_document_atomic(&path, &doc)?;
+    flush_action_cache_document_atomic(fs, &path, &doc)?;
 
     log::info!(
         target: "tddy_core::workflow::action_cache",
@@ -253,15 +254,18 @@ pub fn persist_successful_submit_to_action_cache(
     Ok(())
 }
 
-fn load_or_default_action_cache_document(path: &Path) -> io::Result<ActionCacheDocument> {
-    if !path.exists() {
+fn load_or_default_action_cache_document(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+) -> io::Result<ActionCacheDocument> {
+    if !fs.exists(path) {
         return Ok(ActionCacheDocument {
             schema_version: ACTION_CACHE_SCHEMA_VERSION,
             entries: Default::default(),
         });
     }
 
-    match fs::read_to_string(path) {
+    match fs.read_to_string(path) {
         Ok(raw) => match serde_json::from_str::<ActionCacheDocument>(&raw) {
             Ok(mut doc) => {
                 doc.schema_version = doc.schema_version.max(ACTION_CACHE_SCHEMA_VERSION).max(1);
@@ -289,7 +293,11 @@ fn load_or_default_action_cache_document(path: &Path) -> io::Result<ActionCacheD
     }
 }
 
-fn flush_action_cache_document_atomic(path: &Path, doc: &ActionCacheDocument) -> io::Result<()> {
+fn flush_action_cache_document_atomic(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    doc: &ActionCacheDocument,
+) -> io::Result<()> {
     log::trace!(
         target: "tddy_core::workflow::action_cache",
         "flush_action_cache final={:?}",
@@ -297,7 +305,7 @@ fn flush_action_cache_document_atomic(path: &Path, doc: &ActionCacheDocument) ->
     );
 
     let serialized = serde_json::to_vec_pretty(doc).map_err(|e| io::Error::other(e.to_string()))?;
-    crate::atomic_file::write_atomic(path, serialized)
+    fs.write_atomic(path, &serialized, None)
 }
 
 /// Upsert (**merge**) a serialized cache entry keyed by **`storage_key`** without removing siblings.
@@ -492,7 +500,7 @@ mod tests {
         fs::write(&path, serde_json::to_string_pretty(&doc_on_disk).unwrap()).unwrap();
 
         // When
-        let got = lookup_cached_completed_submit(&dir, &action_key_full, fingerprint);
+        let got = lookup_cached_completed_submit(&tddy_fs::DiskFs, &dir, &action_key_full, fingerprint);
 
         // Then
         assert_eq!(
@@ -533,6 +541,7 @@ mod tests {
 
         // When
         persist_successful_submit_to_action_cache(
+            &tddy_fs::DiskFs,
             &dir,
             "acceptance-tests",
             "ak-stable",

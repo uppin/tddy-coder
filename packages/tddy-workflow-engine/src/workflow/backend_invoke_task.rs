@@ -28,6 +28,7 @@ pub struct BackendInvokeTask {
     backend: Arc<dyn CodingBackend>,
     recipe: Arc<dyn WorkflowRecipe>,
     goal_requires_tddy_tools_submit: bool,
+    fs: Arc<dyn tddy_fs::Fs>,
 }
 
 impl BackendInvokeTask {
@@ -39,6 +40,7 @@ impl BackendInvokeTask {
         backend: Arc<dyn CodingBackend>,
         recipe: Arc<dyn WorkflowRecipe>,
         goal_requires_tddy_tools_submit: bool,
+        fs: Arc<dyn tddy_fs::Fs>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -48,6 +50,7 @@ impl BackendInvokeTask {
             backend,
             recipe,
             goal_requires_tddy_tools_submit,
+            fs,
         }
     }
 
@@ -57,6 +60,7 @@ impl BackendInvokeTask {
         goal_id: GoalId,
         recipe: Arc<dyn WorkflowRecipe>,
         backend: Arc<dyn CodingBackend>,
+        fs: Arc<dyn tddy_fs::Fs>,
     ) -> Self {
         let hints = recipe.goal_hints(&goal_id).unwrap_or_else(|| {
             panic!(
@@ -75,6 +79,7 @@ impl BackendInvokeTask {
             backend,
             recipe,
             goal_requires_tddy_tools_submit,
+            fs,
         )
     }
 }
@@ -170,8 +175,12 @@ impl Task for BackendInvokeTask {
                         action_key,
                         digest.len()
                     );
-                    if let Some(cached_output) =
-                        lookup_cached_completed_submit(sd.as_path(), &action_key, digest)
+                    if let Some(cached_output) = lookup_cached_completed_submit(
+                        &*self.fs,
+                        sd.as_path(),
+                        &action_key,
+                        digest,
+                    )
                     {
                         log::info!(
                             target: "tddy_core::workflow::backend_invoke_task",
@@ -279,6 +288,7 @@ impl Task for BackendInvokeTask {
                             self.goal_id.as_str(),
                         );
                         match persist_successful_submit_to_action_cache(
+                            &*self.fs,
                             sd.as_path(),
                             self.goal_id.as_str(),
                             &action_key,

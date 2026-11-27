@@ -225,7 +225,7 @@ mod tests {
         fn name(&self) -> &str {
             "controller_test"
         }
-        fn build_graph(&self, _backend: Arc<dyn CodingBackend>) -> Graph {
+        fn build_graph(&self, _backend: Arc<dyn CodingBackend>, _fs: Arc<dyn tddy_fs::Fs>) -> Graph {
             GraphBuilder::new("controller_test")
                 .add_task(Arc::new(EndTask::new("a")))
                 .add_task(Arc::new(EndTask::new("b")))
@@ -282,7 +282,7 @@ mod tests {
     fn controller(event_tx: Option<Sender<WorkflowEvent>>) -> WorkflowController {
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TestRecipe);
         let backend: Arc<dyn CodingBackend> = Arc::new(crate::backend::StubBackend::new());
-        let graph = Arc::new(recipe.build_graph(backend));
+        let graph = Arc::new(recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs)));
         WorkflowController::new(recipe, graph, None, event_tx)
     }
 
@@ -297,7 +297,7 @@ mod tests {
         // Given a graph where `b` has a conditional edge (c|d) plus a static edge to c
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TestRecipe);
         let backend: Arc<dyn CodingBackend> = Arc::new(crate::backend::StubBackend::new());
-        let graph = recipe.build_graph(backend);
+        let graph = recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
 
         // When listing successors of `b`
         let mut s = graph.successors("b");

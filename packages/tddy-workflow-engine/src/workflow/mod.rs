@@ -132,16 +132,17 @@ pub fn find_git_root(dir: &Path) -> PathBuf {
 
 /// Recursively copy `src` directory to `dst`. Used for cross-device moves (R4).
 #[allow(dead_code)] // Used by relocate_session_dir; will be used when PlanTask implements plan_dir_suggestion
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+fn copy_dir_recursive(fs: &dyn tddy_fs::Fs, src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs.create_dir_all(dst)?;
+    for src_path in fs.read_dir(src)? {
+        let file_name = src_path
+            .file_name()
+            .ok_or_else(|| std::io::Error::other("read_dir entry without a file name"))?;
+        let dst_path = dst.join(file_name);
+        if fs.metadata_follow(&src_path)?.kind == tddy_fs::FsKind::Dir {
+            copy_dir_recursive(fs, &src_path, &dst_path)?;
         } else {
-            std::fs::copy(&src_path, &dst_path)?;
+            fs.copy(&src_path, &dst_path)?;
         }
     }
     Ok(())
@@ -159,6 +160,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
 /// and returns `Ok(staging.to_path_buf())` — it never returns `Err` for validation failures.
 #[allow(dead_code)] // Used by relocation_tests; will be used when PlanTask implements plan_dir_suggestion
 fn relocate_session_dir(
+    fs: &dyn tddy_fs::Fs,
     staging: &Path,
     suggestion: &str,
     dir_name: &str,
@@ -210,7 +212,7 @@ fn relocate_session_dir(
     }
 
     // R3: If target already exists → error with a clear message
-    if target.exists() {
+    if fs.exists(&target) {
         return Err(WorkflowError::WriteFailed(format!(
             "relocate_session_dir: target directory already exists: {}",
             target.display()
@@ -219,18 +221,18 @@ fn relocate_session_dir(
 
     // Create parent directories for the target
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)
+        fs.create_dir_all(parent)
             .map_err(|e| WorkflowError::WriteFailed(format!("create target parent dirs: {}", e)))?;
     }
 
     // R4: Try a fast rename first; on cross-device failure fall back to copy+delete
-    if std::fs::rename(staging, &target).is_err() {
+    if fs.rename(staging, &target).is_err() {
         log::debug!(
             "[relocate_session_dir] rename failed (cross-device?), falling back to copy+delete"
         );
-        copy_dir_recursive(staging, &target)
+        copy_dir_recursive(fs, staging, &target)
             .map_err(|e| WorkflowError::WriteFailed(format!("copy staging dir: {}", e)))?;
-        std::fs::remove_dir_all(staging).map_err(|e| {
+        fs.remove_dir_all(staging).map_err(|e| {
             WorkflowError::WriteFailed(format!("remove staging dir after copy: {}", e))
         })?;
     }
@@ -253,10 +255,19 @@ pub fn build_context_header(
     repo_dir: Option<&Path>,
     artifact_basenames: &[&str],
 ) -> String {
+    build_context_header_on(&tddy_fs::DiskFs, session_dir, repo_dir, artifact_basenames)
+}
+
+pub fn build_context_header_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: Option<&Path>,
+    repo_dir: Option<&Path>,
+    artifact_basenames: &[&str],
+) -> String {
     let mut lines: Vec<String> = Vec::new();
 
     if let Some(rd) = repo_dir {
-        let canonical = std::fs::canonicalize(rd).unwrap_or_else(|_| rd.to_path_buf());
+        let canonical = fs.canonicalize(rd).unwrap_or_else(|_| rd.to_path_buf());
         lines.push(format!("repo_dir: {}", canonical.display()));
     }
 
@@ -265,13 +276,13 @@ pub fn build_context_header(
         for artifact in artifact_basenames {
             let under_artifacts = dir.join("artifacts").join(artifact);
             let at_root = dir.join(artifact);
-            let path = if under_artifacts.exists() {
+            let path = if fs.exists(&under_artifacts) {
                 log::debug!(
                     "[build_context_header] using {:?} (under session artifacts/)",
                     under_artifacts
                 );
                 under_artifacts
-            } else if at_root.exists() {
+            } else if fs.exists(&at_root) {
                 log::debug!(
                     "[build_context_header] using {:?} (legacy session root)",
                     at_root
@@ -280,7 +291,7 @@ pub fn build_context_header(
             } else {
                 continue;
             };
-            let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+            let canonical = fs.canonicalize(&path).unwrap_or(path);
             log::debug!(
                 "[build_context_header] found artifact: {}",
                 canonical.display()
@@ -346,7 +357,7 @@ mod relocation_tests {
         fs::write(staging.join("SessionDoc.md"), "# Doc").unwrap();
 
         // When
-        let result = relocate_session_dir(&staging, "docs/plans/", dir_name, &output_dir)
+        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "docs/plans/", dir_name, &output_dir)
             .expect("valid suggestion should succeed");
 
         // Then
@@ -376,7 +387,7 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&staging, "/tmp/evil", dir_name, &output_dir)
+        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "/tmp/evil", dir_name, &output_dir)
             .expect("absolute path should fall back, not error");
 
         // Then
@@ -397,7 +408,7 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&staging, "../../outside", dir_name, &output_dir)
+        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "../../outside", dir_name, &output_dir)
             .expect("dotdot path should fall back, not error");
 
         // Then
@@ -418,7 +429,7 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&staging, "   ", dir_name, &output_dir)
+        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "   ", dir_name, &output_dir)
             .expect("whitespace suggestion should fall back, not error");
 
         // Then
@@ -443,7 +454,7 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&staging, "output/", dir_name, &output_dir)
+        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "output/", dir_name, &output_dir)
             .expect("same-path suggestion should be a noop, not error");
 
         // Then

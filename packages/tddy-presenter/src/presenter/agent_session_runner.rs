@@ -71,7 +71,7 @@ pub async fn run_agent_session(config: AgentSessionConfig) {
         start_goal,
     } = config;
 
-    let graph = Arc::new(recipe.build_graph(backend.as_arc()));
+    let graph = Arc::new(recipe.build_graph(backend.as_arc(), std::sync::Arc::new(tddy_fs::DiskFs)));
     let start = start_goal.unwrap_or_else(|| recipe.start_goal());
 
     let controller = Arc::new(WorkflowController::new_at(
