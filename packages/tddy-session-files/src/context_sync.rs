@@ -121,6 +121,7 @@ impl ContextSyncer {
 
     fn synchronize(&self, source: &dyn ContextSource) -> Result<(), Status> {
         synchronize_directory(
+            &tddy_fs::DiskFs,
             &self.context_dir,
             &self.globs,
             &self.guidance_files,
@@ -146,7 +147,14 @@ impl ContextSyncer {
         guidance_files: &[PathBuf],
         source: &dyn ContextSource,
     ) -> Result<(), Status> {
-        synchronize_directory(context_dir, globs, guidance_files, Some(preamble), source)
+        synchronize_directory(
+            &tddy_fs::DiskFs,
+            context_dir,
+            globs,
+            guidance_files,
+            Some(preamble),
+            source,
+        )
     }
 }
 
@@ -167,6 +175,7 @@ impl ContextSyncer {
 /// syncer only ever knows the one the last write recorded. `None` means "keep using the recorded
 /// one", which is a tick.
 fn synchronize_directory(
+    fs: &dyn tddy_fs::Fs,
     context_dir: &Path,
     globs: &[String],
     guidance_files: &[PathBuf],
@@ -175,12 +184,12 @@ fn synchronize_directory(
 ) -> Result<(), Status> {
     let glob_refs: Vec<&str> = globs.iter().map(String::as_str).collect();
     let globs: &[&str] = &glob_refs;
-    let state = SyncState::read(context_dir)?;
+    let state = SyncState::read(fs, context_dir)?;
     let preamble = preamble_override.unwrap_or(&state.preamble).to_string();
     let served = source.manifest()?;
     let served_links = refuse_unlisted_paths(&served, globs, guidance_files)?;
     let held_links = state.links(globs, guidance_files);
-    let held = state.held_manifest(context_dir, globs, guidance_files, &held_links);
+    let held = state.held_manifest(fs, context_dir, globs, guidance_files, &held_links);
     let diff = diff_manifests(&held, &served);
 
     // The recorded preamble is as much a part of what the directory holds as the hashes are: the
@@ -215,6 +224,7 @@ fn synchronize_directory(
         .collect();
     for rel_path in &diff.delete {
         remove_context_file(
+            fs,
             context_dir,
             rel_path,
             globs,
@@ -234,10 +244,11 @@ fn synchronize_directory(
             .and_then(|entry| entry.symlink_target.as_deref());
         match link_target {
             // `refuse_unlisted_paths` has vetted it; a link is recreated, never read.
-            Some(target) => write_context_link(context_dir, rel_path.as_str(), target)?,
+            Some(target) => write_context_link(fs, context_dir, rel_path.as_str(), target)?,
             None => {
                 let bytes = source.read(rel_path.as_str())?;
                 write_context_file(
+                    fs,
                     context_dir,
                     rel_path.as_str(),
                     &bytes,
@@ -253,7 +264,7 @@ fn synchronize_directory(
         diff.delete.len()
     );
 
-    SyncState::from_entries(preamble, served.entries()).write(context_dir)
+    SyncState::from_entries(preamble, served.entries()).write(fs, context_dir)
 }
 
 /// Basename of the per-directory record of what a context directory holds.
@@ -295,9 +306,9 @@ struct SyncStateEntry {
 }
 
 impl SyncState {
-    fn read(context_dir: &Path) -> Result<Self, Status> {
+    fn read(fs: &dyn tddy_fs::Fs, context_dir: &Path) -> Result<Self, Status> {
         let path = context_dir.join(SYNC_STATE_BASENAME);
-        let raw = match std::fs::read_to_string(&path) {
+        let raw = match fs.read_to_string(&path) {
             Ok(raw) => raw,
             // A directory with no record holds nothing this syncer put there, so the first tick
             // transfers the whole allow-list. Correct, merely not cheap — and it is the state a
@@ -330,11 +341,11 @@ impl SyncState {
         }
     }
 
-    fn write(&self, context_dir: &Path) -> Result<(), Status> {
+    fn write(&self, fs: &dyn tddy_fs::Fs, context_dir: &Path) -> Result<(), Status> {
         let raw = serde_json::to_string_pretty(self).map_err(|e| {
             Status::internal(format!("failed to render the context sync record: {e}"))
         })?;
-        std::fs::write(context_dir.join(SYNC_STATE_BASENAME), raw)
+        fs.write(&context_dir.join(SYNC_STATE_BASENAME), raw.as_bytes())
             .map_err(|e| Status::internal(format!("failed to write the context sync record: {e}")))
     }
 
@@ -363,6 +374,7 @@ impl SyncState {
     /// `links`, the recorded links that pulled it in ([`Self::links`]).
     fn held_manifest(
         &self,
+        fs: &dyn tddy_fs::Fs,
         context_dir: &Path,
         globs: &[&str],
         guidance_files: &[PathBuf],
@@ -376,12 +388,17 @@ impl SyncState {
                         validate_rel_path_shape(&entry.rel_path).is_ok()
                             && allow_listed_link(&entry.rel_path, target, globs, guidance_files)
                                 .is_some()
-                            && std::fs::symlink_metadata(context_dir.join(&entry.rel_path))
-                                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+                            // `metadata`, as before: the question stays about the name itself,
+                            // because `exists()` follows the link and would call a link to a
+                            // target not yet written absent.
+                            && matches!(
+                                fs.metadata(&context_dir.join(&entry.rel_path)),
+                                Ok(m) if m.kind == tddy_fs::FsKind::Symlink
+                            )
                     }
                     None => {
                         is_syncable_rel_path(&entry.rel_path, globs, links)
-                            && context_dir.join(&entry.rel_path).exists()
+                            && fs.exists(&context_dir.join(&entry.rel_path))
                     }
                 })
                 .map(|entry| ContextEntry {

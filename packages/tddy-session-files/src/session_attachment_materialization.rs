@@ -1,9 +1,9 @@
 use crate::svc_materialize_staged_attachment::AttachmentState;
 use tddy_service::proto::session::session_attachment::Source as AttachmentSource;
 
-use crate::attachment_progress::cleanup_materialized_attachments;
+use crate::attachment_progress::cleanup_materialized_attachments_on;
 
-use crate::attachment_progress::attachment_size_bytes;
+use crate::attachment_progress::attachment_size_bytes_on;
 
 use crate::attachment_progress::AttachmentProgressReporter;
 
@@ -30,7 +30,8 @@ impl AttachmentState<'_> {
             return Ok(Vec::new());
         }
         let session_dir = ctx.session_dir();
-        std::fs::create_dir_all(&session_dir)
+        self.fs
+            .create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
         self.materialize_session_attachments(ctx).await
     }
@@ -102,7 +103,7 @@ impl AttachmentState<'_> {
                 Ok(()) => {
                     // The attachment is on disk now, so its final size is the honest byte count to
                     // report — and it is the only report a source that copies in one step makes.
-                    let bytes = attachment_size_bytes(&session_dir, &basename);
+                    let bytes = attachment_size_bytes_on(self.fs, &session_dir, &basename);
                     reporter.report(bytes, bytes);
                     // Under the basename it was written as, not the one that was requested — the
                     // two differ whenever validation trimmed it.
@@ -112,7 +113,7 @@ impl AttachmentState<'_> {
                     });
                 }
                 Err(e) => {
-                    cleanup_materialized_attachments(&session_dir, &written);
+                    cleanup_materialized_attachments_on(self.fs, &session_dir, &written);
                     return Err(e);
                 }
             }

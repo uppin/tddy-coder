@@ -12,8 +12,6 @@
 //! [`crate::session_workflow_files`]) then confirms the per-drop directory resolves inside the
 //! session's trusted `uploads` root before any bytes are written.
 
-use std::fs::OpenOptions;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -41,6 +39,27 @@ pub fn write_upload_chunk(
     data: &[u8],
     last: bool,
 ) -> Result<Option<PathBuf>, Status> {
+    write_upload_chunk_on(
+        &tddy_fs::DiskFs,
+        sessions_base,
+        session_id,
+        upload_id,
+        file_name,
+        data,
+        last,
+    )
+}
+
+/// [`write_upload_chunk`] through the filesystem port.
+pub fn write_upload_chunk_on(
+    fs: &dyn tddy_fs::Fs,
+    sessions_base: &Path,
+    session_id: &str,
+    upload_id: &str,
+    file_name: &str,
+    data: &[u8],
+    last: bool,
+) -> Result<Option<PathBuf>, Status> {
     // Both untrusted segments must be plain basenames — neither may introduce a separator or `..`
     // that would climb out of the session's uploads directory.
     let safe_upload = validate_segment(upload_id)?;
@@ -50,7 +69,7 @@ pub fn write_upload_chunk(
     // directory must stay within.
     let uploads_root = unified_session_dir_path(sessions_base, session_id).join("uploads");
     let dir = uploads_root.join(safe_upload);
-    std::fs::create_dir_all(&dir).map_err(|e| {
+    fs.create_dir_all(&dir).map_err(|e| {
         log::error!("write_upload_chunk: create_dir_all {:?} failed: {}", dir, e);
         Status::internal(format!("failed to create uploads dir: {}", e))
     })?;
@@ -59,19 +78,11 @@ pub fn write_upload_chunk(
     // inside the former — defends against a symlink escape even though the validated segments
     // already cannot traverse. Rooting at `uploads_root` (not `dir`) makes this a real check rather
     // than a tautology.
-    let canonical_dir = contained_canonical_dir(&uploads_root, &dir)?;
+    let canonical_dir = contained_canonical_dir_on(fs, &uploads_root, &dir)?;
 
     let target = canonical_dir.join(safe_name);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&target)
-        .map_err(|e| {
-            log::error!("write_upload_chunk: open {:?} failed: {}", target, e);
-            Status::internal(format!("failed to open upload target: {}", e))
-        })?;
-    file.write_all(data).map_err(|e| {
-        log::error!("write_upload_chunk: write {:?} failed: {}", target, e);
+    fs.append(&target, data).map_err(|e| {
+        log::error!("write_upload_chunk: append {:?} failed: {}", target, e);
         Status::internal(format!("failed to write upload chunk: {}", e))
     })?;
 
@@ -115,12 +126,18 @@ pub fn validate_segment(value: &str) -> Result<&str, Status> {
 /// `uploads_root` (which holds no untrusted component) rather than `dir` makes it a real guard
 /// against a symlink escape, not a tautology. Shared by the upload writer and the delete path so a
 /// delete is never a weaker gate than a write. Both paths must already exist on disk.
-pub fn contained_canonical_dir(uploads_root: &Path, dir: &Path) -> Result<PathBuf, Status> {
-    let canonical_root = uploads_root.canonicalize().map_err(|e| {
+///
+/// Through the filesystem port.
+pub fn contained_canonical_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    uploads_root: &Path,
+    dir: &Path,
+) -> Result<PathBuf, Status> {
+    let canonical_root = fs.canonicalize(uploads_root).map_err(|e| {
         log::error!("session uploads: canonicalize {uploads_root:?} failed: {e}");
         Status::internal(format!("failed to resolve uploads dir: {e}"))
     })?;
-    let canonical_dir = dir.canonicalize().map_err(|e| {
+    let canonical_dir = fs.canonicalize(dir).map_err(|e| {
         log::error!("session uploads: canonicalize {dir:?} failed: {e}");
         Status::internal(format!("failed to resolve uploads dir: {e}"))
     })?;

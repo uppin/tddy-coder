@@ -83,15 +83,25 @@ fn manifest_for_recipe(recipe_name: &str) -> Option<Arc<dyn SessionArtifactManif
 /// basenames and a stack has N nodes. Only the two authored basenames are surfaced: a node
 /// directory is somewhere an agent can write, so listing whatever turns up there would let an
 /// editor backup or a scratch note present itself as a recipe-authored document.
-fn per_pr_context_docs(artifacts_root: &Path) -> Vec<ContextDoc> {
-    let Ok(entries) = std::fs::read_dir(artifacts_root.join(NODE_DOCS_SUBDIR)) else {
+fn per_pr_context_docs(fs: &dyn tddy_fs::Fs, artifacts_root: &Path) -> Vec<ContextDoc> {
+    let Ok(entries) = fs.read_dir(&artifacts_root.join(NODE_DOCS_SUBDIR)) else {
         // No docs pass has run (or this recipe writes no per-PR documents at all).
         return Vec::new();
     };
     let mut node_ids: Vec<String> = entries
-        .flatten()
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().into_string().ok())
+        .iter()
+        // `metadata_follow`, as before: `is_dir` follows a link.
+        .filter(|path| {
+            matches!(
+                fs.metadata_follow(path),
+                Ok(m) if m.kind == tddy_fs::FsKind::Dir
+            )
+        })
+        .filter_map(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+        })
         .collect();
     node_ids.sort();
 
@@ -112,7 +122,12 @@ fn per_pr_context_docs(artifacts_root: &Path) -> Vec<ContextDoc> {
         for (basename, description) in authored {
             let relative_path = format!("{NODE_DOCS_SUBDIR}/{node_id}/{basename}");
             let path = artifacts_root.join(&relative_path);
-            let Some(file_metadata) = std::fs::metadata(&path).ok().filter(|m| m.is_file()) else {
+            // `metadata_follow`, as before: the question stays about the file itself.
+            let Some(file_metadata) = fs
+                .metadata_follow(&path)
+                .ok()
+                .filter(|m| m.kind == tddy_fs::FsKind::File)
+            else {
                 continue;
             };
             docs.push(ContextDoc {
@@ -125,7 +140,7 @@ fn per_pr_context_docs(artifacts_root: &Path) -> Vec<ContextDoc> {
                 description,
                 exists: true,
                 kind: ContextDocKind::Manifest,
-                size_bytes: file_metadata.len(),
+                size_bytes: file_metadata.len,
             });
         }
     }
@@ -140,6 +155,15 @@ fn per_pr_context_docs(artifacts_root: &Path) -> Vec<ContextDoc> {
 /// The manifest half is empty for a blank or unknown recipe (manifest docs are surfaced only when
 /// the recipe is known); attachments are listed either way.
 pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<ContextDoc> {
+    context_docs_for_session_on(&tddy_fs::DiskFs, recipe_name, session_dir)
+}
+
+/// [`context_docs_for_session`] through the filesystem port.
+pub fn context_docs_for_session_on(
+    fs: &dyn tddy_fs::Fs,
+    recipe_name: &str,
+    session_dir: &Path,
+) -> Vec<ContextDoc> {
     let mut docs: Vec<ContextDoc> = Vec::new();
 
     if let Some(manifest) = manifest_for_recipe(recipe_name) {
@@ -149,7 +173,11 @@ pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<Co
         docs.extend(manifest.known_artifacts().iter().map(|(key, basename)| {
             let path = artifacts_root.join(basename);
             // One stat call answers both "is it there" and "how big is it".
-            let file_metadata = std::fs::metadata(&path).ok().filter(|m| m.is_file());
+            // `metadata_follow`, as before: the question stays about the file itself.
+            let file_metadata = fs
+                .metadata_follow(&path)
+                .ok()
+                .filter(|m| m.kind == tddy_fs::FsKind::File);
             ContextDoc {
                 key: (*key).to_string(),
                 basename: (*basename).to_string(),
@@ -159,13 +187,13 @@ pub fn context_docs_for_session(recipe_name: &str, session_dir: &Path) -> Vec<Co
                 description: descriptions.get(key).copied().unwrap_or("").to_string(),
                 exists: file_metadata.is_some(),
                 kind: ContextDocKind::Manifest,
-                size_bytes: file_metadata.map_or(0, |m| m.len()),
+                size_bytes: file_metadata.map_or(0, |m| m.len),
             }
         }));
 
         // Not gated on the recipe name: a recipe that authors no per-PR documents has no `prs/`
         // directory, so the scan finds nothing rather than needing to be told not to look.
-        docs.extend(per_pr_context_docs(&artifacts_root));
+        docs.extend(per_pr_context_docs(fs, &artifacts_root));
     }
 
     let manifest_doc_count = docs.len();
@@ -212,6 +240,16 @@ pub fn read_session_context_doc_utf8(
     session_dir: &Path,
     basename: &str,
 ) -> Result<String, Status> {
+    read_session_context_doc_utf8_on(&tddy_fs::DiskFs, recipe_name, session_dir, basename)
+}
+
+/// [`read_session_context_doc_utf8`] through the filesystem port.
+pub fn read_session_context_doc_utf8_on(
+    fs: &dyn tddy_fs::Fs,
+    recipe_name: &str,
+    session_dir: &Path,
+    basename: &str,
+) -> Result<String, Status> {
     log::debug!(
         "read_session_context_doc_utf8: recipe={recipe_name:?} session_dir={} basename={basename:?}",
         session_dir.display()
@@ -242,13 +280,13 @@ pub fn read_session_context_doc_utf8(
     }
 
     let artifacts_root = session_artifacts_root(session_dir);
-    let canonical_root = artifacts_root.canonicalize().map_err(|e| {
+    let canonical_root = fs.canonicalize(&artifacts_root).map_err(|e| {
         log::debug!("read_session_context_doc_utf8: canonicalize artifacts root failed: {e}");
         Status::failed_precondition("session artifacts directory is not accessible")
     })?;
 
     let joined = artifacts_root.join(basename);
-    let canonical_file = joined.canonicalize().map_err(|e| {
+    let canonical_file = fs.canonicalize(&joined).map_err(|e| {
         log::debug!("read_session_context_doc_utf8: canonicalize {joined:?} failed: {e}");
         Status::not_found("context doc not found")
     })?;
@@ -262,15 +300,16 @@ pub fn read_session_context_doc_utf8(
         ));
     }
 
-    let meta = std::fs::metadata(&canonical_file).map_err(|e| {
+    // `metadata_follow`, as before: the question stays about the file itself.
+    let meta = fs.metadata_follow(&canonical_file).map_err(|e| {
         log::debug!("read_session_context_doc_utf8: metadata failed: {e}");
         Status::not_found("context doc not found")
     })?;
-    if !meta.is_file() {
+    if meta.kind != tddy_fs::FsKind::File {
         return Err(Status::failed_precondition("not a regular file"));
     }
 
-    let content = std::fs::read_to_string(&canonical_file).map_err(|e| {
+    let content = fs.read_to_string(&canonical_file).map_err(|e| {
         log::error!("read_session_context_doc_utf8: read_to_string {canonical_file:?} failed: {e}");
         Status::internal(format!("failed to read context doc: {e}"))
     })?;

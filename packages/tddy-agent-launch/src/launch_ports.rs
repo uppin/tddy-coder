@@ -234,6 +234,7 @@ impl LaunchSessions {
             tddy_data_dir: &self.tddy_data_dir,
             staging_base_dir: &self.staging_base_dir,
             peer_routing: &self.peer_routing,
+            fs: &tddy_fs::DiskFs,
         }
     }
 

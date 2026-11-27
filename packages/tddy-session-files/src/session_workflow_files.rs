@@ -44,18 +44,30 @@ fn validate_workflow_basename(basename: &str) -> Result<(), Status> {
 /// Only regular files (or symlinks to files) whose canonical path stays under the canonical session
 /// directory are returned. Sensitive files such as `.env` are never allowlisted.
 pub fn list_allowlisted_workflow_basenames(session_dir: &Path) -> Result<Vec<String>, Status> {
+    list_allowlisted_workflow_basenames_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`list_allowlisted_workflow_basenames`] through the filesystem port.
+pub fn list_allowlisted_workflow_basenames_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<Vec<String>, Status> {
     log::debug!(
         "list_allowlisted_workflow_basenames: session_dir={:?}",
         session_dir
     );
-    if !session_dir.is_dir() {
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    if !matches!(
+        fs.metadata_follow(session_dir),
+        Ok(m) if m.kind == tddy_fs::FsKind::Dir
+    ) {
         log::debug!("list_allowlisted_workflow_basenames: session_dir is not a directory");
         return Err(Status::failed_precondition(
             "session directory does not exist or is not a directory",
         ));
     }
 
-    let session_root = session_dir.canonicalize().map_err(|e| {
+    let session_root = fs.canonicalize(session_dir).map_err(|e| {
         log::debug!(
             "list_allowlisted_workflow_basenames: canonicalize session_dir failed: {}",
             e
@@ -66,10 +78,10 @@ pub fn list_allowlisted_workflow_basenames(session_dir: &Path) -> Result<Vec<Str
     let mut out = Vec::new();
     for name in WORKFLOW_FILE_ALLOWLIST {
         let path = session_dir.join(name);
-        if !path.exists() {
+        if !fs.exists(&path) {
             continue;
         }
-        let canonical = match path.canonicalize() {
+        let canonical = match fs.canonicalize(&path) {
             Ok(p) => p,
             Err(e) => {
                 log::debug!(
@@ -88,7 +100,7 @@ pub fn list_allowlisted_workflow_basenames(session_dir: &Path) -> Result<Vec<Str
             );
             continue;
         }
-        let meta = match std::fs::metadata(&canonical) {
+        let meta = match fs.metadata_follow(&canonical) {
             Ok(m) => m,
             Err(e) => {
                 log::debug!(
@@ -99,7 +111,7 @@ pub fn list_allowlisted_workflow_basenames(session_dir: &Path) -> Result<Vec<Str
                 continue;
             }
         };
-        if meta.is_file() {
+        if meta.kind == tddy_fs::FsKind::File {
             out.push((*name).to_string());
         }
     }
@@ -118,6 +130,15 @@ pub fn read_allowlisted_workflow_file_utf8(
     session_dir: &Path,
     basename: &str,
 ) -> Result<String, Status> {
+    read_allowlisted_workflow_file_utf8_on(&tddy_fs::DiskFs, session_dir, basename)
+}
+
+/// [`read_allowlisted_workflow_file_utf8`] through the filesystem port.
+pub fn read_allowlisted_workflow_file_utf8_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Result<String, Status> {
     log::debug!(
         "read_allowlisted_workflow_file_utf8: session_dir={:?} basename={:?}",
         session_dir.display(),
@@ -125,13 +146,17 @@ pub fn read_allowlisted_workflow_file_utf8(
     );
     validate_workflow_basename(basename)?;
 
-    if !session_dir.is_dir() {
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    if !matches!(
+        fs.metadata_follow(session_dir),
+        Ok(m) if m.kind == tddy_fs::FsKind::Dir
+    ) {
         return Err(Status::failed_precondition(
             "session directory does not exist or is not a directory",
         ));
     }
 
-    let session_root = session_dir.canonicalize().map_err(|e| {
+    let session_root = fs.canonicalize(session_dir).map_err(|e| {
         log::debug!(
             "read_allowlisted_workflow_file_utf8: canonicalize session_dir failed: {}",
             e
@@ -140,7 +165,7 @@ pub fn read_allowlisted_workflow_file_utf8(
     })?;
 
     let joined = session_dir.join(basename);
-    let canonical_file = joined.canonicalize().map_err(|e| {
+    let canonical_file = fs.canonicalize(&joined).map_err(|e| {
         log::debug!(
             "read_allowlisted_workflow_file_utf8: canonicalize {:?} failed: {}",
             joined,
@@ -160,18 +185,18 @@ pub fn read_allowlisted_workflow_file_utf8(
         ));
     }
 
-    let meta = std::fs::metadata(&canonical_file).map_err(|e| {
+    let meta = fs.metadata_follow(&canonical_file).map_err(|e| {
         log::debug!(
             "read_allowlisted_workflow_file_utf8: metadata failed: {}",
             e
         );
         Status::not_found("workflow file not found")
     })?;
-    if !meta.is_file() {
+    if meta.kind != tddy_fs::FsKind::File {
         return Err(Status::failed_precondition("not a regular file"));
     }
 
-    let content = std::fs::read_to_string(&canonical_file).map_err(|e| {
+    let content = fs.read_to_string(&canonical_file).map_err(|e| {
         log::error!(
             "read_allowlisted_workflow_file_utf8: read_to_string {:?} failed: {}",
             canonical_file,

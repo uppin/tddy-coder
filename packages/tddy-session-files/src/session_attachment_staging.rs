@@ -18,14 +18,12 @@
 //! Product contract: `docs/ft/coder/session-attachments.md` + the amendment
 //! `docs/ft/coder/session-attachments.md` § Start-session materialization.
 
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use tddy_rpc::Status;
 
-use crate::session_file_upload::{contained_canonical_dir, validate_segment};
+use crate::session_file_upload::{contained_canonical_dir_on, validate_segment};
 
 /// Suffix marking a staged file as fully uploaded (no further chunks, no re-upload).
 const STAGED_COMPLETE_SUFFIX: &str = ".staged-complete";
@@ -60,10 +58,9 @@ pub struct StagedAttachmentFile {
     pub staged_at_ms: i64,
 }
 
-fn mtime_ms(metadata: &fs::Metadata) -> i64 {
+fn mtime_ms(metadata: &tddy_fs::FsMetadata) -> i64 {
     metadata
-        .modified()
-        .ok()
+        .modified
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
@@ -73,14 +70,17 @@ pub fn staged_complete_marker(canonical_dir: &Path, file_name: &str) -> PathBuf 
     canonical_dir.join(format!("{file_name}{STAGED_COMPLETE_SUFFIX}"))
 }
 
-/// The staged-at timestamp of one file already on disk, in unix milliseconds.
+/// The staged-at timestamp of one file already on disk, in unix milliseconds, through the
+/// filesystem port.
 ///
-/// Shares [`mtime_ms`] with [`list_staged_attachments`] so an entry answered on the upload's final
-/// chunk carries the same timestamp a later listing reports for it. Two derivations would be two
-/// answers to "when was this staged", and the form would sort by one and display the other.
+/// Shares [`mtime_ms`] with [`list_staged_attachments_on`] so an entry answered on the upload's
+/// final chunk carries the same timestamp a later listing reports for it. Two derivations would be
+/// two answers to "when was this staged", and the form would sort by one and display the other.
 #[must_use]
-pub fn staged_at_ms(host_path: &Path) -> i64 {
-    fs::metadata(host_path).map(|m| mtime_ms(&m)).unwrap_or(0)
+pub fn staged_at_ms_on(fs: &dyn tddy_fs::Fs, host_path: &Path) -> i64 {
+    fs.metadata_follow(host_path)
+        .map(|m| mtime_ms(&m))
+        .unwrap_or(0)
 }
 
 fn is_staged_complete_marker_name(name: &str) -> bool {
@@ -97,10 +97,29 @@ pub fn write_staged_chunk(
     data: &[u8],
     last: bool,
 ) -> Result<Option<PathBuf>, Status> {
+    write_staged_chunk_on(
+        &tddy_fs::DiskFs,
+        staging_root,
+        staging_id,
+        file_name,
+        data,
+        last,
+    )
+}
+
+/// [`write_staged_chunk`] through the filesystem port.
+pub fn write_staged_chunk_on(
+    fs: &dyn tddy_fs::Fs,
+    staging_root: &Path,
+    staging_id: &str,
+    file_name: &str,
+    data: &[u8],
+    last: bool,
+) -> Result<Option<PathBuf>, Status> {
     let safe_staging = validate_segment(staging_id)?;
     let safe_name = validate_segment(file_name)?;
 
-    std::fs::create_dir_all(staging_root).map_err(|e| {
+    fs.create_dir_all(staging_root).map_err(|e| {
         log::error!(
             "write_staged_chunk: create_dir_all {:?} failed: {}",
             staging_root,
@@ -110,15 +129,15 @@ pub fn write_staged_chunk(
     })?;
 
     let dir = staging_root.join(safe_staging);
-    std::fs::create_dir_all(&dir).map_err(|e| {
+    fs.create_dir_all(&dir).map_err(|e| {
         log::error!("write_staged_chunk: create_dir_all {:?} failed: {}", dir, e);
         Status::internal(format!("failed to create staging batch dir: {}", e))
     })?;
 
-    let canonical_dir = contained_canonical_dir(staging_root, &dir)?;
+    let canonical_dir = contained_canonical_dir_on(fs, staging_root, &dir)?;
 
     let complete_marker = staged_complete_marker(&canonical_dir, safe_name);
-    if complete_marker.exists() {
+    if fs.exists(&complete_marker) {
         log::warn!(
             "write_staged_chunk: refusing to overwrite completed staged file {:?}",
             safe_name
@@ -129,21 +148,13 @@ pub fn write_staged_chunk(
     }
 
     let target = canonical_dir.join(safe_name);
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&target)
-        .map_err(|e| {
-            log::error!("write_staged_chunk: open {:?} failed: {}", target, e);
-            Status::internal(format!("failed to open staged file target: {}", e))
-        })?;
-    file.write_all(data).map_err(|e| {
-        log::error!("write_staged_chunk: write {:?} failed: {}", target, e);
+    fs.append(&target, data).map_err(|e| {
+        log::error!("write_staged_chunk: append {:?} failed: {}", target, e);
         Status::internal(format!("failed to write staged chunk: {}", e))
     })?;
 
     if last {
-        std::fs::write(&complete_marker, b"").map_err(|e| {
+        fs.write(&complete_marker, b"").map_err(|e| {
             log::error!(
                 "write_staged_chunk: write complete marker {:?} failed: {}",
                 complete_marker,
@@ -163,39 +174,38 @@ pub fn write_staged_chunk(
 }
 
 fn collect_batch_files(
+    fs: &dyn tddy_fs::Fs,
     staging_id: &str,
     batch_path: &Path,
     out: &mut Vec<StagedAttachmentFile>,
 ) -> Result<(), Status> {
-    let files = fs::read_dir(batch_path).map_err(|e| {
+    let files = fs.read_dir(batch_path).map_err(|e| {
         log::error!("list_staged_attachments: read_dir {batch_path:?} failed: {e}");
         Status::internal(format!("failed to read staging batch dir: {e}"))
     })?;
-    for file in files {
-        let file = file.map_err(|e| {
-            log::error!("list_staged_attachments: read_dir entry in {batch_path:?} failed: {e}");
-            Status::internal(format!("failed to read staging batch dir: {e}"))
-        })?;
-        let name = file.file_name().to_string_lossy().into_owned();
+    for path in files {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         if is_staged_complete_marker_name(&name) {
             continue;
         }
-        let metadata = match file.metadata() {
-            Ok(m) if m.is_file() => m,
+        // `metadata_follow`, as before: the walk follows a link, and a link to nothing holds
+        // nothing.
+        let metadata = match fs.metadata_follow(&path) {
+            Ok(m) if m.kind == tddy_fs::FsKind::File => m,
             Ok(_) => continue,
             Err(e) => {
-                log::warn!(
-                    "list_staged_attachments: metadata {:?} failed: {e}",
-                    file.path()
-                );
+                log::warn!("list_staged_attachments: metadata {path:?} failed: {e}");
                 continue;
             }
         };
         out.push(StagedAttachmentFile {
             staging_id: staging_id.to_string(),
             file_name: name,
-            host_path: file.path(),
-            size_bytes: metadata.len(),
+            host_path: path,
+            size_bytes: metadata.len,
             staged_at_ms: mtime_ms(&metadata),
         });
     }
@@ -208,7 +218,16 @@ pub fn list_staged_attachments(
     staging_root: &Path,
     staging_id: &str,
 ) -> Result<Vec<StagedAttachmentFile>, Status> {
-    let root_entries = match fs::read_dir(staging_root) {
+    list_staged_attachments_on(&tddy_fs::DiskFs, staging_root, staging_id)
+}
+
+/// [`list_staged_attachments`] through the filesystem port.
+pub fn list_staged_attachments_on(
+    fs: &dyn tddy_fs::Fs,
+    staging_root: &Path,
+    staging_id: &str,
+) -> Result<Vec<StagedAttachmentFile>, Status> {
+    let root_entries = match fs.read_dir(staging_root) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => {
@@ -224,28 +243,32 @@ pub fn list_staged_attachments(
     if !staging_id.is_empty() {
         let safe_staging = validate_segment(staging_id)?;
         let batch_path = staging_root.join(safe_staging);
-        if batch_path.is_dir() {
-            let canonical_dir = contained_canonical_dir(staging_root, &batch_path)?;
-            collect_batch_files(safe_staging, &canonical_dir, &mut files)?;
+        // `metadata_follow`, as before: `is_dir` follows a link.
+        if matches!(
+            fs.metadata_follow(&batch_path),
+            Ok(m) if m.kind == tddy_fs::FsKind::Dir
+        ) {
+            let canonical_dir = contained_canonical_dir_on(fs, staging_root, &batch_path)?;
+            collect_batch_files(fs, safe_staging, &canonical_dir, &mut files)?;
         }
     } else {
-        for batch_dir in root_entries {
-            let batch_dir = batch_dir.map_err(|e| {
-                log::error!(
-                    "list_staged_attachments: read_dir entry in {staging_root:?} failed: {e}"
-                );
-                Status::internal(format!("failed to read staging root: {e}"))
-            })?;
-            if !batch_dir.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        for batch_path in root_entries {
+            // `metadata`, as before: the walk does not follow a link, and a link holds no batch.
+            if !matches!(
+                fs.metadata(&batch_path),
+                Ok(m) if m.kind == tddy_fs::FsKind::Dir
+            ) {
                 continue;
             }
-            let batch_staging_id = batch_dir.file_name().to_string_lossy().into_owned();
-            let batch_path = batch_dir.path();
-            let canonical_dir = match contained_canonical_dir(staging_root, &batch_path) {
+            let batch_staging_id = batch_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let canonical_dir = match contained_canonical_dir_on(fs, staging_root, &batch_path) {
                 Ok(d) => d,
                 Err(_) => continue,
             };
-            collect_batch_files(&batch_staging_id, &canonical_dir, &mut files)?;
+            collect_batch_files(fs, &batch_staging_id, &canonical_dir, &mut files)?;
         }
     }
 
@@ -260,28 +283,42 @@ pub fn delete_staged_attachment(
     staging_id: &str,
     file_name: &str,
 ) -> Result<(), Status> {
+    delete_staged_attachment_on(&tddy_fs::DiskFs, staging_root, staging_id, file_name)
+}
+
+/// [`delete_staged_attachment`] through the filesystem port.
+pub fn delete_staged_attachment_on(
+    fs: &dyn tddy_fs::Fs,
+    staging_root: &Path,
+    staging_id: &str,
+    file_name: &str,
+) -> Result<(), Status> {
     let safe_staging = validate_segment(staging_id)?;
     let safe_name = validate_segment(file_name)?;
 
     let dir = staging_root.join(safe_staging);
-    if !dir.exists() {
+    if !fs.exists(&dir) {
         return Err(Status::not_found("staged file not found"));
     }
 
-    let canonical_dir = contained_canonical_dir(staging_root, &dir)?;
+    let canonical_dir = contained_canonical_dir_on(fs, staging_root, &dir)?;
     let target = canonical_dir.join(safe_name);
-    if !target.is_file() {
+    // `metadata_follow`, as before: `is_file` follows a link.
+    if !matches!(
+        fs.metadata_follow(&target),
+        Ok(m) if m.kind == tddy_fs::FsKind::File
+    ) {
         return Err(Status::not_found("staged file not found"));
     }
 
-    fs::remove_file(&target).map_err(|e| {
+    fs.remove_file(&target).map_err(|e| {
         log::error!("delete_staged_attachment: remove_file {target:?} failed: {e}");
         Status::internal(format!("failed to delete staged file: {e}"))
     })?;
 
     let marker = staged_complete_marker(&canonical_dir, safe_name);
-    if marker.exists() {
-        if let Err(e) = fs::remove_file(&marker) {
+    if fs.exists(&marker) {
+        if let Err(e) = fs.remove_file(&marker) {
             log::warn!("delete_staged_attachment: remove marker {marker:?} failed: {e}");
         }
     }
@@ -290,142 +327,5 @@ pub fn delete_staged_attachment(
 }
 
 #[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use tddy_rpc::Code;
-
-    const SESSION_FILE: &str = "report.pdf";
-    const STAGING_ID: &str = "11111111-1111-7111-8111-111111111111";
-
-    fn a_staging_root() -> (tempfile::TempDir, PathBuf) {
-        let os_user = std::env::var("USER").expect("USER");
-        let data = tempfile::tempdir().unwrap();
-        let root = staging_root_for(&os_user, data.path());
-        std::fs::create_dir_all(&root).unwrap();
-        (data, root)
-    }
-
-    /// AC(staging-1) — ordered chunks reassemble into one file; only the final chunk returns a path.
-    #[test]
-    fn write_staged_chunk_appends_ordered_chunks_and_returns_the_path_on_the_final_chunk() {
-        // Given — an empty staging root
-        let (_data, root) = a_staging_root();
-
-        // When — a file arrives as two ordered chunks, the second marked final
-        let first = write_staged_chunk(&root, STAGING_ID, SESSION_FILE, b"Hel", false).unwrap();
-        let last = write_staged_chunk(&root, STAGING_ID, SESSION_FILE, b"lo!", true).unwrap();
-
-        // Then — no path until the final chunk, then the absolute path, holding the reassembled bytes
-        assert_eq!(first, None, "non-final chunk returns no path");
-        let host_path = last.expect("final chunk returns the absolute host path");
-        assert!(host_path.is_absolute());
-        assert_eq!(std::fs::read(&host_path).unwrap(), b"Hello!");
-    }
-
-    /// AC(staging-2) — an unsafe `staging_id` or `file_name` is rejected with INVALID_ARGUMENT and
-    /// writes nothing.
-    #[test]
-    fn write_staged_chunk_rejects_an_unsafe_staging_id_or_file_name_as_invalid_argument() {
-        // Given
-        let (_data, root) = a_staging_root();
-
-        // When / Then — a traversal staging_id, a nested file_name, and an empty file_name are all refused
-        let trav = write_staged_chunk(&root, "../escape", SESSION_FILE, b"x", true).unwrap_err();
-        assert_eq!(trav.code, Code::InvalidArgument);
-        let nested = write_staged_chunk(&root, STAGING_ID, "sub/evil.txt", b"x", true).unwrap_err();
-        assert_eq!(nested.code, Code::InvalidArgument);
-        let empty = write_staged_chunk(&root, STAGING_ID, "", b"x", true).unwrap_err();
-        assert_eq!(empty.code, Code::InvalidArgument);
-        assert!(
-            !root.join(STAGING_ID).exists(),
-            "nothing written for a rejected segment"
-        );
-    }
-
-    /// AC(staging-3) — re-uploading the same file_name within one batch is refused (no silent overwrite).
-    #[test]
-    fn write_staged_chunk_refuses_to_overwrite_an_existing_file_name_within_a_batch() {
-        // Given — a batch already holding "report.pdf"
-        let (_data, root) = a_staging_root();
-        write_staged_chunk(&root, STAGING_ID, SESSION_FILE, b"first", true).unwrap();
-
-        // When / Then — a second upload of the same name into the same batch is rejected
-        let err = write_staged_chunk(&root, STAGING_ID, SESSION_FILE, b"second", true).unwrap_err();
-        assert_eq!(err.code, Code::InvalidArgument);
-        assert_eq!(
-            std::fs::read(root.join(STAGING_ID).join(SESSION_FILE)).unwrap(),
-            b"first",
-            "the original file must remain untouched"
-        );
-    }
-
-    /// AC(staging-4) — `list_staged_attachments` with a `staging_id` returns that batch's files,
-    /// newest-first by modification time.
-    #[test]
-    fn list_staged_attachments_returns_one_batch_newest_first_when_staging_id_is_set() {
-        // Given — one batch with two files written at slightly different mtimes
-        let (_data, root) = a_staging_root();
-        write_staged_chunk(&root, STAGING_ID, "a.txt", b"a", true).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        write_staged_chunk(&root, STAGING_ID, "b.txt", b"b", true).unwrap();
-
-        // When
-        let files = list_staged_attachments(&root, STAGING_ID).unwrap();
-
-        // Then — newest first (b before a), both under the requested batch
-        assert_eq!(files.len(), 2);
-        assert_eq!(files[0].file_name, "b.txt");
-        assert_eq!(files[1].file_name, "a.txt");
-        assert_eq!(files[0].staging_id, STAGING_ID);
-    }
-
-    /// AC(staging-5) — an empty `staging_id` lists every batch for the caller, newest-first.
-    #[test]
-    fn list_staged_attachments_returns_every_batch_for_the_caller_when_staging_id_is_empty() {
-        // Given — two batches, the second written later
-        let (_data, root) = a_staging_root();
-        let older = "22222222-2222-7222-8222-222222222222";
-        write_staged_chunk(&root, older, "old.txt", b"o", true).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        write_staged_chunk(&root, STAGING_ID, "new.txt", b"n", true).unwrap();
-
-        // When
-        let files = list_staged_attachments(&root, "").unwrap();
-
-        // Then — the newer batch's file sorts first
-        assert_eq!(files.len(), 2);
-        assert_eq!(files[0].staging_id, STAGING_ID);
-        assert_eq!(files[1].staging_id, older);
-    }
-
-    /// AC(staging-6) — delete removes one file and rejects an unsafe segment.
-    #[test]
-    fn delete_staged_attachment_removes_one_file_and_rejects_an_unsafe_segment() {
-        // Given — a batch with one file
-        let (_data, root) = a_staging_root();
-        write_staged_chunk(&root, STAGING_ID, SESSION_FILE, b"x", true).unwrap();
-
-        // When
-        delete_staged_attachment(&root, STAGING_ID, SESSION_FILE).unwrap();
-
-        // Then — the file is gone
-        assert!(!root.join(STAGING_ID).join(SESSION_FILE).exists());
-
-        // When / Then — a traversal delete is refused (no weaker gate than the writer)
-        let err = delete_staged_attachment(&root, "../escape", SESSION_FILE).unwrap_err();
-        assert_eq!(err.code, Code::InvalidArgument);
-    }
-
-    /// AC(staging-7) — a per-batch directory that is a symlink escaping the staging root is refused.
-    #[test]
-    fn a_staging_directory_symlinked_outside_the_staging_root_is_refused() {
-        // Given — a symlink {staging_root}/evil -> an outside dir
-        let (_data, root) = a_staging_root();
-        let outside = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(outside.path(), root.join("evil")).unwrap();
-
-        // When / Then — writing through the symlinked batch dir is refused
-        let err = write_staged_chunk(&root, "evil", SESSION_FILE, b"x", true).unwrap_err();
-        assert_eq!(err.code, Code::InvalidArgument);
-    }
-}
+#[path = "session_attachment_staging_tests.rs"]
+mod session_attachment_staging_tests;

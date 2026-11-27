@@ -109,6 +109,9 @@ pub struct SessionFilesPorts {
     /// the same budget the daemon gives its other filesystem work, so a context read and a worktree
     /// build on one host cannot disagree about how long that host is allowed to take.
     pub context_read_deadline: Duration,
+    /// The filesystem this host reads and writes through — `DiskFs` in production, `MemFs` in a
+    /// test that drives the service without touching disk.
+    pub fs: Arc<dyn tddy_fs::Fs>,
 }
 
 /// The `session_files.SessionFilesService` implementation.
@@ -166,14 +169,17 @@ impl SessionFilesServiceImpl {
         file_name: String,
         host_path: &Path,
     ) -> StagedAttachmentEntry {
-        let metadata = std::fs::metadata(host_path).ok();
+        let metadata = self.ports.fs.metadata_follow(host_path).ok();
         StagedAttachmentEntry {
             daemon_instance_id: self.ports.daemon_instance_id.clone(),
             staging_id,
             file_name,
             host_path: host_path.to_string_lossy().into_owned(),
-            size_bytes: metadata.as_ref().map(std::fs::Metadata::len).unwrap_or(0),
-            staged_at_ms: crate::session_attachment_staging::staged_at_ms(host_path),
+            size_bytes: metadata.as_ref().map(|m| m.len).unwrap_or(0),
+            staged_at_ms: crate::session_attachment_staging::staged_at_ms_on(
+                &*self.ports.fs,
+                host_path,
+            ),
         }
     }
 
@@ -189,7 +195,8 @@ impl SessionFilesServiceImpl {
         // as if that were what was asked for.
         let scope =
             HostDocumentScope::try_from(req.scope).unwrap_or(HostDocumentScope::Unspecified);
-        crate::host_documents::resolve_host_document(
+        crate::host_documents::resolve_host_document_on(
+            &*self.ports.fs,
             &os_user,
             &self.ports.tddy_data_dir,
             &self.ports.staging_base_dir,
@@ -259,7 +266,10 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
         let basenames =
-            crate::session_workflow_files::list_allowlisted_workflow_basenames(&session_dir)?;
+            crate::session_workflow_files::list_allowlisted_workflow_basenames_on(
+                &*self.ports.fs,
+                &session_dir,
+            )?;
         Ok(Response::new(ListSessionWorkflowFilesResponse {
             files: basenames
                 .into_iter()
@@ -274,10 +284,12 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
     ) -> Result<Response<ReadSessionWorkflowFileResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
-        let content_utf8 = crate::session_workflow_files::read_allowlisted_workflow_file_utf8(
-            &session_dir,
-            &req.basename,
-        )?;
+        let content_utf8 =
+            crate::session_workflow_files::read_allowlisted_workflow_file_utf8_on(
+                &*self.ports.fs,
+                &session_dir,
+                &req.basename,
+            )?;
         Ok(Response::new(ReadSessionWorkflowFileResponse {
             content_utf8,
         }))
@@ -327,11 +339,13 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 .scope_for(&req.session_token, &req.session_id, &req.agent)?;
         let max_bytes = self.ports.max_attachment_bytes;
         let rel_path = req.rel_path;
+        let fs = Arc::clone(&self.ports.fs);
         let bytes = read_within_deadline(
             "StreamReadContextFile",
             self.ports.context_read_deadline,
             move || {
-                crate::context_files::read_context_file_bytes(
+                crate::context_files::read_context_file_bytes_on(
+                    &*fs,
                     &scope.worktree_root,
                     &rel_path,
                     &scope.globs.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -362,11 +376,13 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
                 .scope_for(&req.session_token, &req.session_id, &req.agent)?;
         let max_bytes = self.ports.max_attachment_bytes;
         let rel_paths = req.rel_paths;
+        let fs = Arc::clone(&self.ports.fs);
         let files = read_within_deadline(
             "StreamReadContextFileBatch",
             self.ports.context_read_deadline,
             move || {
-                crate::context_files::read_context_files_bytes(
+                crate::context_files::read_context_files_bytes_on(
+                    &*fs,
                     &scope.worktree_root,
                     &rel_paths,
                     &scope.globs.iter().map(String::as_str).collect::<Vec<_>>(),
@@ -390,7 +406,8 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
         let sessions_base = self.sessions_base(&req.session_token)?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
-        let host_path = crate::session_file_upload::write_upload_chunk(
+        let host_path = crate::session_file_upload::write_upload_chunk_on(
+            &*self.ports.fs,
             &sessions_base,
             &req.session_id,
             &req.upload_id,
@@ -413,7 +430,11 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
         let sessions_base = self.sessions_base(&req.session_token)?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
-        let uploads = crate::session_uploads::list_uploads(&sessions_base, &req.session_id)?;
+        let uploads = crate::session_uploads::list_uploads_on(
+            &*self.ports.fs,
+            &sessions_base,
+            &req.session_id,
+        )?;
         Ok(Response::new(ListSessionUploadsResponse {
             uploads: uploads
                 .into_iter()
@@ -436,7 +457,8 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
         let sessions_base = self.sessions_base(&req.session_token)?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
-        crate::session_uploads::delete_upload(
+        crate::session_uploads::delete_upload_on(
+            &*self.ports.fs,
             &sessions_base,
             &req.session_id,
             &req.upload_id,
@@ -511,7 +533,8 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
         let os_user = self.os_user(&req.session_token)?;
         let scope =
             HostDocumentScope::try_from(req.scope).unwrap_or(HostDocumentScope::Unspecified);
-        let doc = crate::host_documents::read_host_document_bytes(
+        let doc = crate::host_documents::read_host_document_bytes_on(
+            &*self.ports.fs,
             &os_user,
             &self.ports.tddy_data_dir,
             &self.ports.staging_base_dir,
@@ -546,8 +569,10 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
         }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<HostDocumentChunk, Status>>();
+        let fs = Arc::clone(&self.ports.fs);
         tokio::task::spawn_blocking(move || {
-            crate::host_documents::stream_document_frames(
+            crate::host_documents::stream_document_frames_on(
+                &*fs,
                 &resolved.path,
                 resolved.byte_size,
                 |data, total_byte_size| HostDocumentChunk {
