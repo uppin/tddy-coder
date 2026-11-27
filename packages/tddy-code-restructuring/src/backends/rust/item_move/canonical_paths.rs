@@ -228,7 +228,7 @@ fn crate_directory(
         return Ok(Some(origin.dir.clone()));
     }
     Ok(origin
-        .path_dependency(workspace.root, head)?
+        .path_dependency(workspace.fs, workspace.root, head)?
         .map(|destination| destination.dir))
 }
 

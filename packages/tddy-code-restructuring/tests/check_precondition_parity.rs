@@ -85,6 +85,7 @@ fn unrunnable_in(root: &Path, ops: &[RefactorOp]) -> Vec<String> {
     let workspace = Workspace {
         root,
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     unrunnable_moves(&workspace, ops).expect("the preconditions read the workspace")
 }

@@ -27,7 +27,7 @@ use tddy_code_restructuring::plan_store::{FlushPolicy, PlanStore};
 use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_code_restructuring::SupportRegistry;
 use tddy_lsp::client::LspClient;
-use tddy_lsp::registry::{workspace_root_for, LspKey};
+use tddy_lsp::registry::LspKey;
 use tddy_lsp::{LanguageId, LspRegistry};
 use tddy_rpc::Status;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -571,7 +571,10 @@ mod tests {
             .expect("the worktree's .git file");
 
         // When the worktree is named as a request's root
-        let root = WorkspaceIndex::workspace_root_of(&tddy_fs::DiskFs, worktree.to_str().expect("a UTF-8 path"));
+        let root = WorkspaceIndex::workspace_root_of(
+            &tddy_fs::DiskFs,
+            worktree.to_str().expect("a UTF-8 path"),
+        );
 
         // Then the worktree is served, not the checkout around it
         assert_eq!(root.expect("the worktree is a root"), worktree);

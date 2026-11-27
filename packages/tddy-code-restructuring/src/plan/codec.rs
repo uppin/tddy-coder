@@ -100,10 +100,19 @@ impl Plan {
     /// wrote the plan against, and [`Plan::verify_snapshot`] refuses the run when one of them has
     /// moved since. What this produces is that statement, restated about the tree as it stands.
     pub fn rehashed_header(&self, root: &std::path::Path) -> Result<String> {
+        self.rehashed_header_on(&tddy_fs::DiskFs, root)
+    }
+
+    /// [`Plan::rehashed_header`] through the filesystem port.
+    pub fn rehashed_header_on(
+        &self,
+        fs: &dyn tddy_fs::Fs,
+        root: &std::path::Path,
+    ) -> Result<String> {
         if self.version == HINTED_SCHEMA_VERSION {
             let mut files = BTreeMap::new();
             for path in self.files.keys() {
-                files.insert(path.clone(), hint_of(&root.join(path))?);
+                files.insert(path.clone(), hint_of_on(fs, &root.join(path))?);
             }
             return serde_json::to_string(&HintedHeader {
                 v: self.version,
@@ -114,7 +123,10 @@ impl Plan {
 
         let mut snapshot = BTreeMap::new();
         for path in self.snapshot.keys() {
-            snapshot.insert(path.clone(), crate::apply::hash_file(&root.join(path))?);
+            snapshot.insert(
+                path.clone(),
+                crate::apply::hash_file_on(fs, &root.join(path))?,
+            );
         }
 
         serde_json::to_string(&SnapshotHeader {
@@ -134,12 +146,20 @@ impl Plan {
     /// the plainest case of "older tree" — so it is reported, never an error. (`hash_file` alone
     /// would read a missing file as empty, and so miss one whose hint was of an empty file.)
     pub fn drifted_hints(&self, root: &std::path::Path) -> Vec<String> {
+        self.drifted_hints_on(&tddy_fs::DiskFs, root)
+    }
+
+    /// [`Plan::drifted_hints`] through the filesystem port.
+    pub fn drifted_hints_on(&self, fs: &dyn tddy_fs::Fs, root: &std::path::Path) -> Vec<String> {
         self.files
             .iter()
             .filter(|(path, hint)| {
                 let file = root.join(path);
-                !file.is_file()
-                    || crate::apply::hash_file(&file).map_or(true, |hash| hash != hint.sha256)
+                fs.metadata_follow(&file)
+                    .map(|m| m.kind != tddy_fs::FsKind::File)
+                    .unwrap_or(true)
+                    || crate::apply::hash_file_on(fs, &file)
+                        .map_or(true, |hash| hash != hint.sha256)
             })
             .map(|(path, _)| path.clone())
             .collect()
@@ -207,8 +227,13 @@ impl Plan {
 
     /// Verify every snapshot hash still matches the working tree. Fails loudly on drift.
     pub fn verify_snapshot(&self, root: &std::path::Path) -> Result<()> {
+        self.verify_snapshot_on(&tddy_fs::DiskFs, root)
+    }
+
+    /// [`Plan::verify_snapshot`] through the filesystem port.
+    pub fn verify_snapshot_on(&self, fs: &dyn tddy_fs::Fs, root: &std::path::Path) -> Result<()> {
         for (path, expected) in &self.snapshot {
-            let actual = crate::apply::hash_file(&root.join(path))?;
+            let actual = crate::apply::hash_file_on(fs, &root.join(path))?;
             if &actual != expected {
                 return Err(crate::RestructureError::SnapshotMismatch {
                     path: path.clone(),
@@ -221,7 +246,7 @@ impl Plan {
     }
 }
 
-pub(crate) use crate::plan::codec::file_hint::hint_of;
+pub(crate) use crate::plan::codec::file_hint::{hint_of, hint_of_on};
 use crate::plan::codec::groups::refuse_split_groups;
 
 /// The `v` a header line declares, read before the header's shape is known.

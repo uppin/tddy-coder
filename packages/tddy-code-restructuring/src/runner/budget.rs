@@ -82,11 +82,15 @@ pub fn production_lines_of_file(path: &str, text: &str) -> usize {
 }
 
 /// How many production lines each named file has, read from the tree the check is running against.
-pub(super) fn measured(root: &Path, paths: &[String]) -> Result<Vec<FileSize>> {
+pub(super) fn measured(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    paths: &[String],
+) -> Result<Vec<FileSize>> {
     paths
         .iter()
         .map(|path| {
-            let text = std::fs::read_to_string(root.join(path)).map_err(|error| {
+            let text = fs.read_to_string(&root.join(path)).map_err(|error| {
                 RestructureError::MalformedPlan(format!(
                     "`{path}` cannot be measured against the budget: {error}"
                 ))
@@ -361,7 +365,8 @@ mod tests {
         .expect("the fixture is written");
 
         // When it is measured
-        let sizes = measured(dir.path(), &["widget.ts".to_string()]).expect("measured");
+        let sizes =
+            measured(&tddy_fs::DiskFs, dir.path(), &["widget.ts".to_string()]).expect("measured");
 
         // Then every line counts
         assert_eq!(sizes, [a_file_of("widget.ts", 3)]);
@@ -379,7 +384,8 @@ mod tests {
         .expect("the fixture is written");
 
         // When it is measured
-        let sizes = measured(dir.path(), &["big.rs".to_string()]).expect("measured");
+        let sizes =
+            measured(&tddy_fs::DiskFs, dir.path(), &["big.rs".to_string()]).expect("measured");
 
         // Then
         assert_eq!(sizes, [a_file_of("big.rs", 3)]);
@@ -542,7 +548,8 @@ mod tests {
         std::fs::write(dir.path().join("tidy.rs"), text).expect("the fixture is written");
 
         // When it is measured
-        let sizes = measured(dir.path(), &["tidy.rs".to_string()]).expect("measured");
+        let sizes =
+            measured(&tddy_fs::DiskFs, dir.path(), &["tidy.rs".to_string()]).expect("measured");
 
         // Then the two `mod` lines and the 40 production lines count
         assert_eq!(sizes, [a_file_of("tidy.rs", 42)]);

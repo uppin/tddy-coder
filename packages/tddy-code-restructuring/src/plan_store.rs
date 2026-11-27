@@ -97,6 +97,7 @@ pub struct OpStaleness {
 #[derive(Debug)]
 pub struct PlanStore {
     root: PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     policy: FlushPolicy,
     plans: BTreeMap<PlanKey, LoadedPlan>,
     /// When each dirty plan first became dirty — what the debounce is measured from. Kept beside
@@ -109,8 +110,18 @@ pub struct PlanStore {
 
 impl PlanStore {
     pub fn new(root: &Path, policy: FlushPolicy) -> PlanStore {
+        Self::with_fs(root, policy, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`PlanStore::new`] with the filesystem port the plans are read and written through.
+    pub fn with_fs(
+        root: &Path,
+        policy: FlushPolicy,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> PlanStore {
         PlanStore {
             root: root.to_path_buf(),
+            fs,
             policy,
             plans: BTreeMap::new(),
             dirty_since: BTreeMap::new(),
@@ -341,7 +352,7 @@ impl PlanStore {
 
     /// Read a plan's file into a store entry: ids assigned, a repeated id refused.
     fn read(&self, key: &PlanKey) -> Result<LoadedPlan> {
-        let bytes = std::fs::read(self.path_of(key))?;
+        let bytes = self.fs.read(&self.path_of(key))?;
         let text = std::str::from_utf8(&bytes).map_err(|_| {
             RestructureError::MalformedPlan(format!("{key}: the plan is not UTF-8 text"))
         })?;
@@ -400,7 +411,9 @@ impl PlanStore {
         }
 
         let path = self.path_of(key);
-        let unchanged = std::fs::read(&path)
+        let unchanged = self
+            .fs
+            .read(&path)
             .map(|bytes| hash_of(&bytes) == held.on_disk)
             .unwrap_or(false);
         if !unchanged {
@@ -410,14 +423,9 @@ impl PlanStore {
         }
 
         let text = held.plan.to_jsonl();
-        let mut staged = path.clone().into_os_string();
-        staged.push(format!(".{}.tmp", std::process::id()));
-        let staged = PathBuf::from(staged);
-        std::fs::write(&staged, &text)?;
-        if let Err(failure) = std::fs::rename(&staged, &path) {
-            let _ = std::fs::remove_file(&staged);
-            return Err(failure.into());
-        }
+        // The port's atomic write is the same write-then-rename beside the plan this
+        // store used to stage by hand under a pid-named temp file.
+        self.fs.write_atomic(&path, text.as_bytes(), None)?;
 
         if let Some(held) = self.plans.get_mut(key) {
             held.dirty = false;

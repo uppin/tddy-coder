@@ -1,6 +1,7 @@
 use super::super::budget::files_named_by;
 
 use super::super::budget::measured;
+use super::read_plan_on;
 
 use super::super::budget::budget_report;
 
@@ -40,7 +41,6 @@ use super::super::refuse_repo_scoped_state;
 
 use super::super::StatePaths;
 
-use super::read_plan;
 
 use super::super::PlanProgress;
 
@@ -72,12 +72,12 @@ use std::path::Path;
 /// report, and a line there would be narration about an index that was never consulted.
 pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
     let path = options.plan()?;
-    let text = std::fs::read_to_string(&path)?;
+    let text = options.fs.read_to_string(&path)?;
     if Plan::starts_with_an_operation(&text) {
-        return insert_a_header(root, path, &text);
+        return insert_a_header(&*options.fs, root, path, &text);
     }
     let plan = Plan::parse(&text)?;
-    let header = plan.rehashed_header(root)?;
+    let header = plan.rehashed_header_on(&*options.fs, root)?;
 
     // The header is the first line that is *not blank*, which is where `Plan::parse` reads it from.
     // Taking "everything before the first newline" instead would rewrite a leading blank line and
@@ -94,7 +94,7 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
 
     let rewritten = produced != text;
     if rewritten {
-        std::fs::write(&path, &produced)?;
+        options.fs.write(&path, produced.as_bytes())?;
     }
 
     Ok(SnapshotRewrite {
@@ -107,16 +107,21 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
 
 /// [`snapshot`] of a plan whose first line is an operation: the header is computed from the files
 /// its anchors name and inserted above the first non-blank line, every other byte as it arrived.
-fn insert_a_header(root: &Path, path: std::path::PathBuf, text: &str) -> Result<SnapshotRewrite> {
+fn insert_a_header(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    path: std::path::PathBuf,
+    text: &str,
+) -> Result<SnapshotRewrite> {
     let plan = Plan::parse_headerless(text)?;
-    let header = plan.header_for_anchored_files(root)?;
+    let header = plan.header_for_anchored_files_on(fs, root)?;
     let blank: usize = text
         .split_inclusive('\n')
         .take_while(|line| line.trim().is_empty())
         .map(str::len)
         .sum();
     let produced = format!("{}{header}\n{}", &text[..blank], &text[blank..]);
-    std::fs::write(&path, &produced)?;
+    fs.write(&path, produced.as_bytes())?;
     Ok(SnapshotRewrite {
         plan: path.to_string_lossy().to_string(),
         paths: plan.anchored_files().len(),
@@ -165,7 +170,7 @@ pub fn snapshot_resolving(
 /// each — and `pending` is what the plan still has left.
 pub fn status(root: &Path, options: Options) -> Result<PlanProgress> {
     let plan_path = options.plan()?;
-    let plan = read_plan(&plan_path)?;
+    let plan = read_plan_on(&*options.fs, &plan_path)?;
     status_of_plan(root, &plan_path, &plan)
 }
 
@@ -207,7 +212,7 @@ pub fn check(
     client: Option<Arc<LspClient>>,
     cancel: CancellationToken,
 ) -> Result<Vec<Finding>> {
-    let plan = read_plan(&options.plan()?)?;
+    let plan = read_plan_on(&*options.fs, &options.plan()?)?;
     check_plan(root, plan, options, client, cancel)
 }
 
@@ -220,7 +225,7 @@ pub fn check_plan(
     client: Option<Arc<LspClient>>,
     cancel: CancellationToken,
 ) -> Result<Vec<Finding>> {
-    plan.verify_snapshot(root)?;
+    plan.verify_snapshot_on(&*options.fs, root)?;
     report_drifted_hints(&plan, root, &options.progress);
 
     let mut registry = if options.deep {
@@ -271,6 +276,7 @@ pub fn check_plan(
                 &Workspace {
                     root,
                     overlay: &Overlay::new(),
+                    fs: &tddy_fs::DiskFs,
                 },
             )?;
         let statically_sound = statics.is_empty();
@@ -302,7 +308,10 @@ pub fn check_plan(
     let findings = one_finding_per_refused_group(&plan, findings);
 
     if let Some(budget) = options.budget {
-        for line in budget_report(&measured(root, &files_named_by(&plan))?, budget) {
+        for line in budget_report(
+            &measured(&*options.fs, root, &files_named_by(&plan))?,
+            budget,
+        ) {
             (options.account)(&line);
         }
     }
@@ -343,6 +352,7 @@ fn static_move_findings(
     let workspace = Workspace {
         root,
         overlay: &Overlay::new(),
+        fs: &tddy_fs::DiskFs,
     };
     // Every member of a cluster operation, not only the module its anchor names — otherwise
     // `check` passes a set one of whose members `apply` then refuses, which is the parity this

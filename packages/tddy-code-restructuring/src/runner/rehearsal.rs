@@ -92,6 +92,7 @@ impl Rehearsal {
         let workspace = Workspace {
             root,
             overlay: &self.overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let resolved = backend.resolve(at, &workspace)?;
         super::preflight_moves(
@@ -137,6 +138,7 @@ impl Rehearsal {
         let workspace = Workspace {
             root,
             overlay: &self.overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let backend = registry.backend_for(Path::new(op.anchor.file()), op.op)?;
         let Some(engine) = backend.module_references() else {

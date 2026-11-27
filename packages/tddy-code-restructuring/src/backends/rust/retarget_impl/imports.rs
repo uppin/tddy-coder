@@ -11,7 +11,7 @@ use super::super::item_move::use_path::{resolved, UsePath};
 use super::super::seam_refusal;
 use super::preflight::ToType;
 use crate::crate_move::source_scan::items_of_module;
-use crate::item_anchor::module_path_of;
+use crate::item_anchor::module_path_of_on;
 use crate::registry::Workspace;
 use crate::Result;
 
@@ -30,7 +30,7 @@ pub(super) fn the_use(
     // The file that declares the new type needs no import of it.
     let mut declaring = vec![package.crate_name.clone()];
     declaring.extend(named.module.iter().cloned());
-    let here = module_path_of(workspace.root, file)?;
+    let here = module_path_of_on(workspace.fs, workspace.root, file)?;
     if here == declaring {
         return Ok(None);
     }

@@ -29,8 +29,13 @@ impl Destination {
     /// which does not exist is a plan defect, unless its line carries `name`, which is what
     /// creates a crate (see [`NewCrate`](crate::NewCrate)).
     pub fn read(root: &Path, dir: &str) -> Result<Destination> {
+        Self::read_on(&tddy_fs::DiskFs, root, dir)
+    }
+
+    /// [`Destination::read`] through the filesystem port.
+    pub fn read_on(fs: &dyn tddy_fs::Fs, root: &Path, dir: &str) -> Result<Destination> {
         let manifest = root.join(dir).join("Cargo.toml");
-        let text = std::fs::read_to_string(&manifest);
+        let text = fs.read_to_string(&manifest);
         Destination::from_manifest(dir, &manifest.display().to_string(), text)
     }
 
@@ -81,11 +86,12 @@ impl Destination {
     /// dependency line has to be carried across verbatim rather than authored.
     pub(crate) fn path_dependency(
         &self,
+        fs: &dyn tddy_fs::Fs,
         root: &Path,
         extern_name: &str,
     ) -> Result<Option<Destination>> {
         let manifest = root.join(&self.dir).join("Cargo.toml");
-        let text = std::fs::read_to_string(&manifest).map_err(|error| {
+        let text = fs.read_to_string(&manifest).map_err(|error| {
             RestructureError::MalformedPlan(format!(
                 "{} could not be read ({error})",
                 manifest.display()

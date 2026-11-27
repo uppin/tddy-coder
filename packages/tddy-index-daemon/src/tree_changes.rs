@@ -55,11 +55,7 @@ impl TreeSnapshot {
     /// A file or directory that vanishes while it is read is simply absent: the next snapshot says
     /// what it became. Any other failure to read the tree is returned, because a server told nothing
     /// about a directory this could not read would be served a tree nobody can vouch for.
-    pub(crate) fn read(root: &Path) -> io::Result<Self> {
-        Self::read_on(&tddy_fs::DiskFs, root)
-    }
-
-    /// [`TreeSnapshot::read`] through the filesystem port.
+    /// Read every source file under `root`, through the filesystem port.
     pub(crate) fn read_on(fs: &dyn tddy_fs::Fs, root: &Path) -> io::Result<Self> {
         let mut files = BTreeMap::new();
         let mut pending = vec![root.to_path_buf()];
@@ -90,7 +86,13 @@ impl TreeSnapshot {
                                 "filesystem port reports no modification time",
                             )
                         })?;
-                        files.insert(path, Stamp { modified, len: metadata.len });
+                        files.insert(
+                            path,
+                            Stamp {
+                                modified,
+                                len: metadata.len,
+                            },
+                        );
                     }
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                     Err(error) => return Err(error),

@@ -170,6 +170,7 @@ mod tests {
         let workspace = Workspace {
             root: root.path(),
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         files_of(&workspace, file)
     }

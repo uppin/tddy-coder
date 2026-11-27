@@ -55,7 +55,12 @@ pub trait ItemResolver {
 /// crate root, and `a/mod.rs` and `a.rs` are both module `a`. A file outside `src/` belongs to no
 /// module path this can name and is refused.
 pub fn module_path_of(root: &Path, file: &str) -> Result<Vec<String>> {
-    let (package_dir, package) = owning_package(root, file)?;
+    module_path_of_on(&tddy_fs::DiskFs, root, file)
+}
+
+/// [`module_path_of`] through the filesystem port.
+pub fn module_path_of_on(fs: &dyn tddy_fs::Fs, root: &Path, file: &str) -> Result<Vec<String>> {
+    let (package_dir, package) = package_lookup::owning_package_on(fs, root, file)?;
     let source_dir = package_dir.join("src");
     // TODO(restructure-engine): a test crate (`tests/*.rs`) or any other file outside `src/`
     // cannot be moved. See
@@ -202,7 +207,12 @@ pub fn has_item_anchors(plan: &Plan) -> bool {
 /// Whether the plan file at `path` holds item anchors. A plan that cannot be read or parsed has
 /// none to resolve, and says why when the command that named it reads it.
 pub fn plan_file_has_item_anchors(path: &Path) -> bool {
-    std::fs::read_to_string(path)
+    plan_file_has_item_anchors_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`plan_file_has_item_anchors`] through the filesystem port.
+pub fn plan_file_has_item_anchors_on(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    fs.read_to_string(path)
         .ok()
         .and_then(|text| Plan::parse(&text).ok())
         .is_some_and(|plan| has_item_anchors(&plan))
@@ -240,7 +250,7 @@ fn lower(anchor: &Anchor, root: &Path, resolver: &mut dyn ItemResolver) -> Resul
                 refuse_if_changed(item, file, fingerprint, &resolved)?;
                 found.push(resolved);
             }
-            let range = covering_run(root, file, items, &found)?;
+            let range = covering_run(&tddy_fs::DiskFs, root, file, items, &found)?;
             Ok(Anchor::Range {
                 file: file.clone(),
                 start: range.start,
@@ -273,6 +283,7 @@ fn refuse_if_changed(
 /// everything in between — silently, and with nothing in the plan to show it. Only blank lines may
 /// separate two items; the trivia that belongs to an item is already inside its own range.
 fn covering_run(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     file: &str,
     items: &[ItemPath],
@@ -282,7 +293,7 @@ fn covering_run(
         return Err(malformed("an `items` anchor names no items"));
     };
 
-    let text = std::fs::read_to_string(root.join(file))?;
+    let text = fs.read_to_string(&root.join(file))?;
     let lines: Vec<&str> = text.split('\n').collect();
     for (pair, names) in found.windows(2).zip(items.windows(2)) {
         let (before, after) = (&pair[0].range, &pair[1].range);
@@ -370,7 +381,7 @@ pub fn items_anchor(
         .iter()
         .map(|item| resolver.resolve_item(file, item))
         .collect::<Result<Vec<_>>>()?;
-    covering_run(root, file, &items, &found)?;
+    covering_run(&tddy_fs::DiskFs, root, file, &items, &found)?;
 
     Ok(Anchor::Items {
         file: file.to_string(),
@@ -766,7 +777,7 @@ mod tests {
         let found = [a_resolved_item(1, 2), a_resolved_item(5, 6)];
 
         // When they are asked to be covered as one run
-        let refused = covering_run(root.path(), "src/lib.rs", &items, &found);
+        let refused = covering_run(&tddy_fs::DiskFs, root.path(), "src/lib.rs", &items, &found);
 
         // Then the gap is named
         assert!(refused
@@ -785,7 +796,7 @@ mod tests {
         ];
         let found = [a_resolved_item(1, 1), a_resolved_item(4, 4)];
 
-        let run = covering_run(root.path(), "src/lib.rs", &items, &found);
+        let run = covering_run(&tddy_fs::DiskFs, root.path(), "src/lib.rs", &items, &found);
 
         assert_eq!(
             run.ok(),
@@ -885,7 +896,7 @@ fn describe(a: &A) {}
             a_resolved_item(7, 7),
         ];
 
-        let run = covering_run(root.path(), "src/lib.rs", &items, &found);
+        let run = covering_run(&tddy_fs::DiskFs, root.path(), "src/lib.rs", &items, &found);
 
         assert_eq!(
             run.ok(),

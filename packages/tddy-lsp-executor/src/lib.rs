@@ -47,7 +47,12 @@ pub struct TddyLspExecutor {
 impl TddyLspExecutor {
     /// Build an executor over `allow`, spawning servers on `task_registry`.
     pub fn new(allow: LspAllowList, task_registry: TaskRegistry, idle_timeout: Duration) -> Self {
-        Self::with_fs(allow, task_registry, idle_timeout, std::sync::Arc::new(tddy_fs::DiskFs))
+        Self::with_fs(
+            allow,
+            task_registry,
+            idle_timeout,
+            std::sync::Arc::new(tddy_fs::DiskFs),
+        )
     }
 
     /// [`TddyLspExecutor::new`] with the filesystem port document reads run through.

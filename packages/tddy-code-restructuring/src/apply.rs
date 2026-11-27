@@ -20,22 +20,34 @@ pub fn apply_workspace_edit(
     edit: &WorkspaceEdit,
     spawns: &SpawnRecorder,
 ) -> Result<()> {
+    apply_workspace_edit_on(&tddy_fs::DiskFs, root, edit, spawns)
+}
+
+/// [`apply_workspace_edit`] through the filesystem port. Renames and file creation
+/// still register with git (`git mv`, `git add -N`); the file bytes move through `fs`.
+pub fn apply_workspace_edit_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    edit: &WorkspaceEdit,
+    spawns: &SpawnRecorder,
+) -> Result<()> {
     for change in &edit.changes {
         if let FileEdit::Create { path } = change {
-            create_tracked_file(root, path, spawns)?;
+            create_tracked_file(fs, root, path, spawns)?;
         }
     }
     for change in &edit.changes {
         if let FileEdit::Change { path, edits } = change {
-            apply_text_edits(&root.join(path), edits)?;
+            apply_text_edits(fs, &root.join(path), edits)?;
         }
     }
     for change in &edit.changes {
         if let FileEdit::Rename { from, to } = change {
-            git_move(root, from, to, spawns)?;
+            git_move(fs, root, from, to, spawns)?;
         }
     }
     remove_emptied_directories(
+        fs,
         root,
         edit.changes.iter().filter_map(|change| match change {
             FileEdit::Rename { from, .. } => Some(from.as_str()),
@@ -151,9 +163,18 @@ pub fn ensure_git_worktree(root: &Path, spawns: &SpawnRecorder) -> Result<()> {
 
 /// SHA-256 of every path the edit touches, for the journal's pre/post records.
 pub fn hash_touched_files(root: &Path, edit: &WorkspaceEdit) -> Result<BTreeMap<String, String>> {
+    hash_touched_files_on(&tddy_fs::DiskFs, root, edit)
+}
+
+/// [`hash_touched_files`] through the filesystem port.
+pub fn hash_touched_files_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    edit: &WorkspaceEdit,
+) -> Result<BTreeMap<String, String>> {
     let mut hashes = BTreeMap::new();
     for path in touched_paths(edit) {
-        hashes.insert(path.clone(), hash_file(&root.join(&path))?);
+        hashes.insert(path.clone(), hash_file_on(fs, &root.join(&path))?);
     }
     Ok(hashes)
 }
@@ -161,12 +182,7 @@ pub fn hash_touched_files(root: &Path, edit: &WorkspaceEdit) -> Result<BTreeMap<
 /// SHA-256 of one file. A file that does not exist hashes as empty, so a creation's pre-state and
 /// a deletion's post-state are both expressible.
 pub fn hash_file(path: &Path) -> Result<String> {
-    let contents = match std::fs::read(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(error.into()),
-    };
-    Ok(format!("sha256:{:x}", Sha256::digest(&contents)))
+    hash_file_on(&tddy_fs::DiskFs, path)
 }
 
 /// Every path an edit reads or writes, deduplicated and ordered.
@@ -185,13 +201,13 @@ pub fn touched_paths(edit: &WorkspaceEdit) -> Vec<String> {
 }
 
 /// Replace the given ranges in one file.
-fn apply_text_edits(path: &Path, edits: &[TextEdit]) -> Result<()> {
+fn apply_text_edits(fs: &dyn tddy_fs::Fs, path: &Path, edits: &[TextEdit]) -> Result<()> {
     if edits.is_empty() {
         return Ok(());
     }
 
-    let contents = std::fs::read_to_string(path)?;
-    std::fs::write(path, edited(contents, edits)?)?;
+    let contents = fs.read_to_string(path)?;
+    fs.write(path, edited(contents, edits)?.as_bytes())?;
     Ok(())
 }
 
@@ -253,6 +269,7 @@ pub(crate) fn byte_offset(contents: &str, line: u32, col: u32) -> Result<usize> 
 /// `.DS_Store` — is left as it is, and so is `root` itself. Whatever writes into a removed directory
 /// later creates it again (`git_move`, a rollback's restore).
 pub(crate) fn remove_emptied_directories<'a>(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     vacated: impl IntoIterator<Item = &'a str>,
 ) -> Result<()> {
@@ -261,9 +278,9 @@ pub(crate) fn remove_emptied_directories<'a>(
             if directory.as_os_str().is_empty() {
                 break;
             }
-            match std::fs::read_dir(root.join(directory)) {
-                Ok(mut entries) => {
-                    if entries.next().is_some() {
+            match fs.read_dir(&root.join(directory)) {
+                Ok(entries) => {
+                    if !entries.is_empty() {
                         break;
                     }
                 }
@@ -271,29 +288,40 @@ pub(crate) fn remove_emptied_directories<'a>(
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error.into()),
             }
-            std::fs::remove_dir(root.join(directory))?;
+            fs.remove_dir(&root.join(directory))?;
         }
     }
     Ok(())
 }
 
 /// Move a file with `git mv`, creating the destination directory first. Preserves history.
-fn git_move(root: &Path, from: &str, to: &str, spawns: &SpawnRecorder) -> Result<()> {
+fn git_move(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    from: &str,
+    to: &str,
+    spawns: &SpawnRecorder,
+) -> Result<()> {
     if let Some(parent) = Path::new(to).parent() {
-        std::fs::create_dir_all(root.join(parent))?;
+        fs.create_dir_all(&root.join(parent))?;
     }
     run_git(root, &["mv", from, to], spawns)
 }
 
 /// Materialise a file the engine invented and register it with git, so its text edits are staged
 /// as part of the restructure rather than left as an untracked stray.
-fn create_tracked_file(root: &Path, path: &str, spawns: &SpawnRecorder) -> Result<()> {
+fn create_tracked_file(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    path: &str,
+    spawns: &SpawnRecorder,
+) -> Result<()> {
     let absolute = root.join(path);
     if let Some(parent) = absolute.parent() {
-        std::fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
-    if !absolute.exists() {
-        std::fs::write(&absolute, "")?;
+    if !fs.exists(&absolute) {
+        fs.write(&absolute, b"")?;
     }
     run_git(root, &["add", "-N", path], spawns)
 }
@@ -332,9 +360,13 @@ fn run_git(root: &Path, args: &[&str], spawns: &SpawnRecorder) -> Result<()> {
 }
 
 /// [`hash_file`] through the filesystem port.
-pub fn hash_file_on(_fs: &dyn tddy_fs::Fs, _path: &Path) -> Result<String> {
-    // TODO(code-tools-fs): implement
-    Err(std::io::Error::other("TODO(code-tools-fs): implement").into())
+pub fn hash_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<String> {
+    let contents = match fs.read(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error.into()),
+    };
+    Ok(format!("sha256:{:x}", Sha256::digest(&contents)))
 }
 
 #[cfg(test)]
@@ -645,7 +677,12 @@ mod tests {
         std::fs::remove_file(workspace.path().join("src/host/attachments/staging.rs")).unwrap();
 
         // When the directories the vacated file left are swept
-        remove_emptied_directories(workspace.path(), ["src/host/attachments/staging.rs"]).unwrap();
+        remove_emptied_directories(
+            &tddy_fs::DiskFs,
+            workspace.path(),
+            ["src/host/attachments/staging.rs"],
+        )
+        .unwrap();
 
         // Then the directory holding the data file is kept
         assert!(workspace
@@ -662,7 +699,12 @@ mod tests {
         std::fs::remove_file(workspace.path().join("src/host/attachments.rs")).unwrap();
 
         // When the directories the vacated file left are swept
-        remove_emptied_directories(workspace.path(), ["src/host/attachments.rs"]).unwrap();
+        remove_emptied_directories(
+            &tddy_fs::DiskFs,
+            workspace.path(),
+            ["src/host/attachments.rs"],
+        )
+        .unwrap();
 
         // Then the vacated directory is gone and the unrelated empty one is not
         assert!(!workspace.path().join("src/host").exists());

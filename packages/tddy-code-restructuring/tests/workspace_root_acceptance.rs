@@ -190,6 +190,7 @@ async fn a_cancelled_wait(
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let _ = backend.resolve(&an_extraction_of_the_function_body(), &workspace);
     });

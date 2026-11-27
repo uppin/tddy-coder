@@ -216,6 +216,7 @@ pub async fn resolving_through(
                 &Workspace {
                     root: &root,
                     overlay: &overlay,
+                    fs: &tddy_fs::DiskFs,
                 },
             )
             .map_err(|error| error.to_string())
@@ -239,6 +240,7 @@ pub async fn statically_checking(
                 &Workspace {
                     root: &root,
                     overlay: &Overlay::new(),
+                    fs: &tddy_fs::DiskFs,
                 },
             )
             .map_err(|error| error.to_string())

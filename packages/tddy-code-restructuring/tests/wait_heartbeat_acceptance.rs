@@ -145,6 +145,7 @@ fn the_rename_of_foo(
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         backend.resolve(&a_rename_of_foo_at_its_declaration(), &workspace)
     })

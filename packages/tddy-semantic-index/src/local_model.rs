@@ -113,10 +113,9 @@ mod inference {
                 .get("model.safetensors")
                 .with_context(|| format!("fetch {MODEL_REPO}/model.safetensors"))?;
 
-            let config: Config = serde_json::from_slice(
-                &fs.read(&config_path).context("read model config.json")?,
-            )
-            .context("parse model config.json")?;
+            let config: Config =
+                serde_json::from_slice(&fs.read(&config_path).context("read model config.json")?)
+                    .context("parse model config.json")?;
             let tokenizer = Tokenizer::from_file(&tokenizer_path)
                 .map_err(|e| anyhow::anyhow!("load tokenizer.json: {e}"))?;
 

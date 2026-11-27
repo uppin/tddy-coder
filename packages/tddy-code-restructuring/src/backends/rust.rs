@@ -458,6 +458,8 @@ pub struct RustBackend {
     environment: String,
     /// What the server has said while this client was waiting on an answer.
     chatter: ServerChatter,
+    /// The filesystem port file reads run through.
+    pub(crate) fs: std::sync::Arc<dyn tddy_fs::Fs>,
     /// How a wait learns that its caller has stopped waiting.
     ///
     /// This is the only thing that ends a wait other than the server becoming ready. There is no
@@ -565,6 +567,7 @@ impl RustBackend {
             next_id: 0,
             environment: String::from("<server not started>"),
             chatter: ServerChatter::default(),
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
             cancel: CancellationToken::new(),
             progress: discard(),
             trace: discard_line,
@@ -677,6 +680,7 @@ impl RustBackend {
             next_id: 0,
             environment: String::from("external tddy-lsp client"),
             chatter: ServerChatter::default(),
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
             cancel: cancel.unwrap_or_default(),
             progress,
             trace: discard_line,
@@ -817,8 +821,8 @@ impl RustBackend {
         // rust-toolchain.toml — non-empty `components`/`targets`, so the proxy channel-syncs
         // over the network. That is a candidate for the 600s stall at `discovering sysroot`
         // (Falcon e34fef02), and it fails silently, which is worse than failing.
-        let toolchain =
-            server_process::default_toolchain_name(&self.rustup_home).ok_or_else(|| {
+        let toolchain = server_process::default_toolchain_name_on(&*self.fs, &self.rustup_home)
+            .ok_or_else(|| {
                 failure(format!(
                     "could not read default_toolchain from {}/settings.toml — refusing to start \
                  rust-analyzer unpinned, because the rustup proxy would channel-sync the repo \

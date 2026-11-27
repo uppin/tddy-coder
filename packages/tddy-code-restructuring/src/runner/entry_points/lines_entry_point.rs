@@ -25,9 +25,12 @@ pub fn lines(root: &Path, options: &Options) -> Result<Vec<FileLines>> {
                     file.display()
                 ))
             })?;
-            let text = std::fs::read_to_string(root.join(file)).map_err(|error| {
-                RestructureError::MalformedPlan(format!("`{path}` cannot be measured: {error}"))
-            })?;
+            let text = options
+                .fs
+                .read_to_string(&root.join(file))
+                .map_err(|error| {
+                    RestructureError::MalformedPlan(format!("`{path}` cannot be measured: {error}"))
+                })?;
             Ok(FileLines {
                 path: path.to_string(),
                 lines: production_lines_of_file(path, &text),

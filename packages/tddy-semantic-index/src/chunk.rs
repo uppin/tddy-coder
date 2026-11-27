@@ -2,7 +2,6 @@
 
 use std::path::Path;
 
-
 /// Skip files larger than this — oversized/generated files aren't useful index material and bloat
 /// the store. One whole-file chunk per text file is the v1 chunking strategy.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;

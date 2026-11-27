@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::complexity_cache::{cached_file_complexity, ComplexityCache};
 use crate::coverage::TestMeta;
 use crate::crap::{join_rust_function_metrics, FunctionMetric, JoinResult};
-use crate::duplicate_tests::{analyze_coverage_dir, DuplicateAnalysis};
+use crate::duplicate_tests::DuplicateAnalysis;
 use crate::error::Result;
 
 /// `coverage/report.html` with a Highest CRAP leaderboard, and the join it was built from.
@@ -47,7 +47,9 @@ pub fn generate_report_on(
                         continue;
                     }
                     let text = fs.read_to_string(&path)?;
-                    let abs = fs.canonicalize(&path).unwrap_or_else(|_| path.to_path_buf());
+                    let abs = fs
+                        .canonicalize(&path)
+                        .unwrap_or_else(|_| path.to_path_buf());
                     let measured = cached_file_complexity(cache, &text)?;
                     complexity_by_file.insert(abs.display().to_string(), measured);
                 }
@@ -142,7 +144,10 @@ pub fn generate_duplicate_tests_report_on(
     )?;
 
     let identical_html = render_duplicate_html("Identical test signatures", &analysis.identical);
-    fs.write(&out_dir.join("duplicate-tests.html"), identical_html.as_bytes())?;
+    fs.write(
+        &out_dir.join("duplicate-tests.html"),
+        identical_html.as_bytes(),
+    )?;
 
     let subset_html = render_subset_html(&analysis.subsets);
     fs.write(&out_dir.join("subset-tests.html"), subset_html.as_bytes())?;

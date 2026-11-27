@@ -2,9 +2,8 @@
 //! process exists and an `end` line when it was waited on, never truncated.
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,7 +17,10 @@ use super::redact::redacted;
 /// A [`SpawnObserver`] that appends what it is told to a file, applying the redaction policy
 /// before a byte is written.
 pub struct JsonlSpawnRecord {
-    file: Mutex<File>,
+    /// Where the lines go and through what port: re-appended per line (the file is opened,
+    /// written and closed by each append) rather than held open, which reads the same from
+    /// outside — lines in order, never truncated.
+    sink: Mutex<(std::sync::Arc<dyn tddy_fs::Fs>, PathBuf)>,
     /// Cleared once a write has failed, so a record that cannot be written stops being attempted
     /// rather than failing the run it is observing.
     recording: AtomicBool,
@@ -29,8 +31,16 @@ impl JsonlSpawnRecord {
     /// Open `path` for appending, creating it when it is absent. Existing lines are never
     /// touched, so a second run appends after the first.
     pub fn open(path: &Path) -> io::Result<Self> {
+        Self::open_on(path, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`JsonlSpawnRecord::open`] through the filesystem port.
+    pub fn open_on(path: &Path, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> io::Result<Self> {
+        // Opening is what proves the file can be appended to, so the failure a caller sees
+        // is the open's rather than the first line's.
+        fs.append(path, b"")?;
         Ok(Self {
-            file: Mutex::new(open_for_appending(path)?),
+            sink: Mutex::new((fs, path.to_path_buf())),
             recording: AtomicBool::new(true),
             book: RecordBook::new(),
         })
@@ -41,10 +51,10 @@ impl JsonlSpawnRecord {
         if !self.recording.load(Ordering::Relaxed) {
             return;
         }
-        let Ok(mut file) = self.file.lock() else {
+        let Ok(sink) = self.sink.lock() else {
             return;
         };
-        if let Err(error) = file.write_all(line.as_bytes()) {
+        if let Err(error) = sink.0.append(&sink.1, line.as_bytes()) {
             log::warn!("the spawn record could not be written; recording stops: {error}");
             self.recording.store(false, Ordering::Relaxed);
         }
@@ -63,11 +73,6 @@ impl SpawnObserver for JsonlSpawnRecord {
             self.write_line(&line);
         }
     }
-}
-
-/// Open `path` with `O_APPEND` and `O_CREAT`, so a line is added and existing lines are kept.
-pub(super) fn open_for_appending(path: &Path) -> io::Result<File> {
-    OpenOptions::new().create(true).append(true).open(path)
 }
 
 /// The `end` line's `outcome` object, matching the outcome the process ended with.

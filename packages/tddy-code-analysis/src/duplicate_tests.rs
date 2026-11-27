@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::coverage::{load_per_test_meta, PerTestRustFile, RustRegion};
+use crate::coverage::{PerTestRustFile, RustRegion};
 use crate::error::{AnalysisError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

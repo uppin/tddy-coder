@@ -81,6 +81,7 @@ fn an_operation_that_waits_for_the_index(
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         backend.resolve(&an_extraction_of_the_function_body(), &workspace)
     })
@@ -225,6 +226,7 @@ async fn a_server_that_will_not_settle_is_refused_as_unsettled_not_as_a_malforme
         let space = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         backend.resolve(&an_extraction_of_the_function_body(), &space)
     })

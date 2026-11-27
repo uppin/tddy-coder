@@ -111,6 +111,7 @@ fn stranded_by(root: &Path, ops: &[RefactorOp]) -> Vec<String> {
     let workspace = Workspace {
         root,
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     siblings_left_behind(&workspace, ops).expect("the check reads the workspace")
 }

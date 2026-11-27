@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! The tidy over the facade groups a real split left: the pre-tidy `rust.rs` statements and the
 //! `unused_imports` diagnostics rustc gave for them, trimmed from the failing run of #539.
 
@@ -46,7 +48,7 @@ impl TheSplitTree {
     /// The tree after the first round's removals, as the tidy applies them.
     fn after_removing_what_the_compiler_says(&self) -> Result<String> {
         let reconciled = gating::reconcile(&self.unused, &self.before);
-        apply_fixes(self.directory.path(), &reconciled.fixes)?;
+        apply_fixes(&tddy_fs::DiskFs, self.directory.path(), &reconciled.fixes)?;
         Ok(self.read())
     }
 
@@ -55,7 +57,8 @@ impl TheSplitTree {
         let quoted: BTreeSet<String> = names.iter().map(|name| name.to_string()).collect();
         let matched = named_by_errors(&self.unused.primaries, &self.before, &quoted);
         let placement = place(&self.unused, &self.before, &matched);
-        apply_fixes(self.directory.path(), &placement.fixes).expect("the placement applies");
+        apply_fixes(&tddy_fs::DiskFs, self.directory.path(), &placement.fixes)
+            .expect("the placement applies");
         self.read()
     }
 }
@@ -154,7 +157,7 @@ fn refuses_two_different_edits_over_the_same_text_instead_of_skipping_one() {
     )]);
 
     // When they are applied
-    let applied = apply_fixes(directory.path(), &fixes);
+    let applied = apply_fixes(&tddy_fs::DiskFs, directory.path(), &fixes);
 
     // Then the application fails, and the file is as it was
     assert!(

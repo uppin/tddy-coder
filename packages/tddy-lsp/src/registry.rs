@@ -316,10 +316,7 @@ pub fn workspace_root_for(target_dir: &Path) -> Result<PathBuf, LspError> {
 }
 
 /// [`workspace_root_for`] through the filesystem port.
-pub fn workspace_root_for_on(
-    fs: &dyn tddy_fs::Fs,
-    target_dir: &Path,
-) -> Result<PathBuf, LspError> {
+pub fn workspace_root_for_on(fs: &dyn tddy_fs::Fs, target_dir: &Path) -> Result<PathBuf, LspError> {
     nearest_workspace_root(fs, target_dir, None)
 }
 
@@ -367,7 +364,8 @@ fn nearest_workspace_root(
             .map(|m| m.kind == tddy_fs::FsKind::File)
             .unwrap_or(false)
         {
-            let text = fs.read_to_string(&manifest)
+            let text = fs
+                .read_to_string(&manifest)
                 .map_err(|err| LspError::Io(format!("{}: {err}", manifest.display())))?;
             if declares_workspace(&text) {
                 return Ok(ancestor.to_path_buf());
@@ -415,7 +413,8 @@ pub fn srcs_to_document_sources_on(
     let mut sources = Vec::with_capacity(srcs.len());
     for pattern in srcs {
         let path = repo_dir.join(root).join(pattern);
-        let text = fs.read_to_string(&path)
+        let text = fs
+            .read_to_string(&path)
             .map_err(|err| LspError::Io(format!("{}: {err}", path.display())))?;
         sources.push(DocumentSource {
             uri: format!("file://{}", path.display()),

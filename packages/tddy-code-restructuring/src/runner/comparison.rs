@@ -29,7 +29,7 @@ pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison
     let against = against_in_worktree(root, &options)?.to_string();
 
     let before = sources_at(root, &against, &options.spawns)?;
-    let after = sources_now(root, &options.spawns)?;
+    let after = sources_now(&*options.fs, root, &options.spawns)?;
     let declared =
         crate::verify::Declared::from_declarations(&options.retargets, &options.repoints)
             .and_then(|declared| declared.with_rebinds(&options.rebinds))
@@ -96,7 +96,7 @@ pub fn verify_sources(
     }
     let against = against_in_worktree(root, options)?;
     let in_ref = files_in_ref(root, against, &options.spawns)?;
-    let confined = root.canonicalize()?;
+    let confined = options.fs.canonicalize(root)?;
     let mut findings = Vec::new();
     for path in changed {
         let Some(verify) = options
@@ -106,7 +106,15 @@ pub fn verify_sources(
         else {
             continue;
         };
-        let change = source_change(root, &confined, against, &in_ref, path, &options.spawns)?;
+        let change = source_change(
+            &*options.fs,
+            root,
+            &confined,
+            against,
+            &in_ref,
+            path,
+            &options.spawns,
+        )?;
         findings.extend(verify.verify(root, &change)?);
     }
     Ok(findings)
@@ -138,6 +146,7 @@ fn files_in_ref(root: &Path, git_ref: &str, spawns: &SpawnRecorder) -> Result<BT
 /// `path` as `git_ref` has it — empty when `in_ref` lacks it — and as the tree under `confined` has
 /// it — empty when it is gone or is not a regular file inside the root.
 fn source_change(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     confined: &Path,
     git_ref: &str,
@@ -151,7 +160,7 @@ fn source_change(
         String::new()
     };
     let after = match confined_regular_file(confined, path) {
-        Some(absolute) => std::fs::read_to_string(absolute)?,
+        Some(absolute) => fs.read_to_string(&absolute)?,
         None => String::new(),
     };
     Ok(crate::verify::SourceChange {
@@ -213,18 +222,22 @@ fn sources_at(
     Ok(sources)
 }
 
-fn sources_now(root: &Path, spawns: &SpawnRecorder) -> Result<BTreeMap<String, String>> {
+fn sources_now(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    spawns: &SpawnRecorder,
+) -> Result<BTreeMap<String, String>> {
     let listing = git_output(
         root,
         &["ls-files", "--cached", "--others", "--exclude-standard"],
         spawns,
     )?;
-    let confined = root.canonicalize()?;
+    let confined = fs.canonicalize(root)?;
     let mut sources = BTreeMap::new();
 
     for path in listing.lines().filter(|path| is_comparable(path)) {
         if let Some(absolute) = confined_regular_file(&confined, path) {
-            sources.insert(path.to_string(), std::fs::read_to_string(absolute)?);
+            sources.insert(path.to_string(), fs.read_to_string(&absolute)?);
         }
     }
     Ok(sources)

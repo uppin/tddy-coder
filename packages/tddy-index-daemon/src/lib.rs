@@ -139,7 +139,10 @@ fn holds_a_file_a_server_serves_on(
             };
             let kind = metadata.kind;
             if kind == tddy_fs::FsKind::Dir {
-                if !NOT_WALKED.iter().any(|name| path.file_name() == Some(std::ffi::OsStr::new(name))) {
+                if !NOT_WALKED
+                    .iter()
+                    .any(|name| path.file_name() == Some(std::ffi::OsStr::new(name)))
+                {
                     pending.push(path);
                 }
             } else if kind == tddy_fs::FsKind::File && served(&path) {

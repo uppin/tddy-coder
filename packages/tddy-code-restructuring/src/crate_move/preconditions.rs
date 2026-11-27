@@ -63,6 +63,7 @@ pub(crate) fn unrunnable(
         let workspace = &Workspace {
             root: workspace.root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let mut refused = false;
         for anchor in op.anchors() {

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! The destination's manifest gains every crate the moved code names: one imported under its own
 //! name (`use async_trait::async_trait;`), and one its origin declares only for a target
 //! (`[target.'cfg(unix)'.dependencies]`), which lands in the same target table.
@@ -72,6 +74,7 @@ impl AWorkspace {
         Workspace {
             root: self.directory.path(),
             overlay: &self.overlay,
+            fs: &tddy_fs::DiskFs,
         }
     }
 

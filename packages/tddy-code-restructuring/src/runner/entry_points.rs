@@ -258,8 +258,8 @@ pub use anchor_entry_points::{item_anchors, open_run_resolving_anchors};
 
 mod lines_entry_point;
 
-fn read_plan(path: &Path) -> Result<Plan> {
-    Plan::parse(&std::fs::read_to_string(path)?)
+pub(super) fn read_plan_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<Plan> {
+    Plan::parse(&fs.read_to_string(path)?)
 }
 
 const TRACE_VARIABLE: &str = "RESTRUCTURE_TRACE";

@@ -104,6 +104,7 @@ fn refuses_an_anchor_that_is_not_a_test_binary() {
     let workspace = Workspace {
         root: directory.path(),
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     let op = tddy_code_restructuring::RefactorOp {
         id: None,
@@ -155,6 +156,7 @@ fn leaves_a_module_the_moved_test_declares_itself_out_of_the_destination() {
     let workspace = Workspace {
         root: directory.path(),
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     let moving = read_test_binary_move(&workspace, &a_move_of(MOVED_TEST, DESTINATION))
         .expect("the anchor is a test binary");
@@ -616,6 +618,7 @@ fn refuses_a_grouped_declaration_reaching_several_modules_of_the_origin() {
     let workspace = Workspace {
         root: directory.path(),
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     let moving = read_test_binary_move(&workspace, &a_move_of(MOVED_TEST, DESTINATION))
         .expect("the anchor is a test binary");
@@ -738,6 +741,7 @@ fn the_resolved_move_in(directory: &tempfile::TempDir) -> WorkspaceEdit {
     let workspace = Workspace {
         root: directory.path(),
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     let moving = read_test_binary_move(&workspace, &a_move_of(MOVED_TEST, DESTINATION))
         .expect("the anchor is a test binary");
@@ -752,6 +756,7 @@ fn the_moved_test_after_resolving(directory: &tempfile::TempDir) -> String {
     let workspace = Workspace {
         root: directory.path(),
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     let edit = the_resolved_move_in(directory);
     let before = workspace.read(MOVED_TEST).expect("the moved test reads");

@@ -106,11 +106,17 @@ pub fn open_run_resolving_anchors(
     baseline_gate: impl FnOnce() -> Result<()>,
 ) -> Result<(Journal, Plan)> {
     let (journal, resolved) = open_run_gated(plan, root, paths, options, || {
-        let mut found = Journal::load(&paths.journal)?;
+        let mut found = Journal::load_on(&*options.fs, &paths.journal)?;
         // A group the interrupted run left open is undone first: the plan's anchors describe the
         // tree as it was before the group, and item anchors are resolved against the tree as it is.
         if options.continues_a_journal() && !options.dry_run {
-            group_gate::roll_back_an_open_group(root, paths, &mut found, &options.progress)?;
+            group_gate::roll_back_an_open_group(
+                &*options.fs,
+                root,
+                paths,
+                &mut found,
+                &options.progress,
+            )?;
         }
         resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &found)?;
         let start = resume::start_of(plan, options, &found)?;

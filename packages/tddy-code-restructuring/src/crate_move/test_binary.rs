@@ -856,7 +856,7 @@ fn crate_past_the_facades(
         if next == current.extern_name || !visited.insert(next.clone()) {
             break;
         }
-        let Some(further) = current.path_dependency(workspace.root, &next)? else {
+        let Some(further) = current.path_dependency(workspace.fs, workspace.root, &next)? else {
             return Ok(Defining {
                 extern_name: next,
                 home: None,

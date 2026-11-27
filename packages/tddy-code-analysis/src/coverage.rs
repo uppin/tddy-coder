@@ -136,7 +136,13 @@ pub fn capture_coverage(
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(CaptureProgress<'_>),
 ) -> Result<()> {
-    capture_coverage_on(&tddy_fs::DiskFs, crate_path, coverage_dir, cancelled, progress)
+    capture_coverage_on(
+        &tddy_fs::DiskFs,
+        crate_path,
+        coverage_dir,
+        cancelled,
+        progress,
+    )
 }
 
 /// [`capture_coverage`] through the filesystem port.
@@ -256,12 +262,10 @@ fn capture_one_test(
         lang: "rust".to_string(),
     };
 
-    context
-        .fs
-        .write(
-            &context.per_test.join(format!("{id}.meta.json")),
-            serde_json::to_string_pretty(&meta)?.as_bytes(),
-        )?;
+    context.fs.write(
+        &context.per_test.join(format!("{id}.meta.json")),
+        serde_json::to_string_pretty(&meta)?.as_bytes(),
+    )?;
     context.fs.write(
         &context.per_test.join(format!("{id}.rust.json")),
         serde_json::to_string_pretty(&executed)?.as_bytes(),
@@ -459,10 +463,7 @@ fn test_harnesses_from_cargo_json(stdout: &str) -> Vec<TestHarness> {
         .collect()
 }
 
-fn build_instrumented_tests(
-    fs: &dyn tddy_fs::Fs,
-    manifest_dir: &Path,
-) -> Result<Vec<TestHarness>> {
+fn build_instrumented_tests(fs: &dyn tddy_fs::Fs, manifest_dir: &Path) -> Result<Vec<TestHarness>> {
     let crate_name = crate_name_for(manifest_dir);
     let build_dir = instrumented_build_dir(&crate_name);
     fs.create_dir_all(&build_dir)?;
@@ -765,10 +766,7 @@ pub fn load_per_test_meta(coverage_dir: &Path) -> Result<Vec<TestMeta>> {
 }
 
 /// [`load_per_test_meta`] through the filesystem port.
-pub fn load_per_test_meta_on(
-    fs: &dyn tddy_fs::Fs,
-    coverage_dir: &Path,
-) -> Result<Vec<TestMeta>> {
+pub fn load_per_test_meta_on(fs: &dyn tddy_fs::Fs, coverage_dir: &Path) -> Result<Vec<TestMeta>> {
     let per_test = coverage_dir.join("per-test");
     if fs
         .metadata_follow(&per_test)
@@ -807,7 +805,8 @@ mod tests {
     /// arguments it was handed, so these assert real shell behaviour.
     fn wrapper_output(crate_name: &str, args: &[&str]) -> String {
         let dir = tempfile::tempdir().expect("tempdir");
-        let wrapper = ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), crate_name).expect("wrapper");
+        let wrapper =
+            ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), crate_name).expect("wrapper");
         let fake_rustc = dir.path().join("fake-rustc");
         std::fs::write(
             &fake_rustc,
@@ -906,11 +905,13 @@ mod tests {
     #[test]
     fn rewriting_an_unchanged_wrapper_keeps_its_mtime_so_cargo_does_not_rebuild() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let first = ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), "tddy_daemon").expect("first");
+        let first =
+            ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), "tddy_daemon").expect("first");
         let stamp = std::fs::metadata(&first)
             .and_then(|m| m.modified())
             .expect("mtime");
-        let second = ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), "tddy_daemon").expect("second");
+        let second =
+            ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), "tddy_daemon").expect("second");
         assert_eq!(first, second);
         assert_eq!(
             std::fs::metadata(&second)

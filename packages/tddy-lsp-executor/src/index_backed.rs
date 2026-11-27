@@ -250,7 +250,12 @@ impl IndexLspExecutor {
         query: &LspQuery,
     ) -> Result<PositionRequest, String> {
         let file = bind_to_session_worktree(repo_dir, &query.file)?;
-        let column = byte_column_on(&*self.fs, &repo_dir.join(&file), query.line, query.character)?;
+        let column = byte_column_on(
+            &*self.fs,
+            &repo_dir.join(&file),
+            query.line,
+            query.character,
+        )?;
         Ok(PositionRequest {
             workspace_root: repo_dir.display().to_string(),
             file,
@@ -356,13 +361,10 @@ fn severity_of(severity: u32) -> Result<u8, String> {
 }
 
 /// The text of one line of `path`, without its terminator.
-fn line_of(path: &Path, line: u32) -> Result<String, String> {
-    line_of_on(&tddy_fs::DiskFs, path, line)
-}
-
-/// [`line_of`] through the filesystem port.
+/// The text of one line of `path`, through the filesystem port.
 fn line_of_on(fs: &dyn tddy_fs::Fs, path: &Path, line: u32) -> Result<String, String> {
-    let text = fs.read_to_string(path)
+    let text = fs
+        .read_to_string(path)
         .map_err(|err| format!("{} cannot be read: {err}", path.display()))?;
     text.split('\n')
         .nth(line as usize)
@@ -372,11 +374,7 @@ fn line_of_on(fs: &dyn tddy_fs::Fs, path: &Path, line: u32) -> Result<String, St
 
 /// The zero-based byte offset in line `line` of `path` that the zero-based UTF-16 column `column`
 /// names — the tools speak LSP's UTF-16 columns, the index bytes.
-fn byte_column(path: &Path, line: u32, column: u32) -> Result<u32, String> {
-    byte_column_on(&tddy_fs::DiskFs, path, line, column)
-}
-
-/// [`byte_column`] through the filesystem port.
+/// The byte offset a UTF-16 column names, through the filesystem port.
 fn byte_column_on(
     fs: &dyn tddy_fs::Fs,
     path: &Path,
@@ -449,7 +447,8 @@ impl<'a> Columns<'a> {
         let line = position.line - 1;
         let key = (path.to_path_buf(), line);
         if !self.lines.contains_key(&key) {
-            self.lines.insert(key.clone(), line_of_on(self.fs, path, line)?);
+            self.lines
+                .insert(key.clone(), line_of_on(self.fs, path, line)?);
         }
         let text = &self.lines[&key];
         let prefix = text.get(..(position.column - 1) as usize).ok_or_else(|| {
