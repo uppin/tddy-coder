@@ -44,9 +44,26 @@ pub fn ensure_home_worktree(
     project_id: &str,
     main_branch_ref: &str,
 ) -> Result<PathBuf, HomeWorktreeError> {
+    ensure_home_worktree_on(
+        &tddy_fs::DiskFs,
+        main_repo,
+        worktrees_root,
+        project_id,
+        main_branch_ref,
+    )
+}
+
+/// [`ensure_home_worktree`] through the filesystem port.
+pub fn ensure_home_worktree_on(
+    fs: &dyn tddy_fs::Fs,
+    main_repo: &Path,
+    worktrees_root: &Path,
+    project_id: &str,
+    main_branch_ref: &str,
+) -> Result<PathBuf, HomeWorktreeError> {
     let home = home_worktree_path(worktrees_root, project_id);
-    if home.exists() {
-        return if is_linked_worktree_of(main_repo, &home)? {
+    if fs.exists(&home) {
+        return if is_linked_worktree_of(fs, main_repo, &home)? {
             Ok(home)
         } else {
             Err(HomeWorktreeError::PathTaken(home))
@@ -55,7 +72,8 @@ pub fn ensure_home_worktree(
     fetch_ref(main_repo, main_branch_ref)?;
     resolve_ref(main_repo, main_branch_ref)?;
     if let Some(parent) = home.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| HomeWorktreeError::Git(e.to_string()))?;
+        fs.create_dir_all(parent)
+            .map_err(|e| HomeWorktreeError::Git(e.to_string()))?;
     }
     let home_arg = home.to_string_lossy().into_owned();
     git(
@@ -77,14 +95,20 @@ pub fn fast_forward_home_worktree(
 }
 
 /// Whether `path` is one of `main_repo`'s linked worktrees.
-fn is_linked_worktree_of(main_repo: &Path, path: &Path) -> Result<bool, HomeWorktreeError> {
+fn is_linked_worktree_of(
+    fs: &dyn tddy_fs::Fs,
+    main_repo: &Path,
+    path: &Path,
+) -> Result<bool, HomeWorktreeError> {
     let listing = git(main_repo, &["worktree", "list", "--porcelain"])?;
-    let wanted = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let wanted = fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     Ok(listing
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
         .any(|listed| {
-            std::fs::canonicalize(listed).unwrap_or_else(|_| PathBuf::from(listed)) == wanted
+            fs.canonicalize(Path::new(listed))
+                .unwrap_or_else(|_| PathBuf::from(listed))
+                == wanted
         }))
 }
 

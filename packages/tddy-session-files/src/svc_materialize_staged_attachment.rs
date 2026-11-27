@@ -7,7 +7,7 @@ use tddy_service::proto::types::HostDocumentScope;
 
 use tddy_service::proto::session_files::ReadHostDocumentRequest;
 
-use crate::session_file_upload::contained_canonical_dir;
+use crate::session_file_upload::contained_canonical_dir_on;
 
 use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 
@@ -31,6 +31,8 @@ pub struct AttachmentState<'a> {
     pub tddy_data_dir: &'a Path,
     pub staging_base_dir: &'a Path,
     pub peer_routing: &'a tddy_host_service::peer_routing::PeerRouting,
+    /// The filesystem attachments materialize through — `DiskFs` in production.
+    pub fs: &'a dyn tddy_fs::Fs,
 }
 
 impl AttachmentState<'_> {
@@ -60,7 +62,7 @@ impl AttachmentState<'_> {
             .peer_routing
             .classify_daemon_route(&staged.daemon_instance_id)?
         {
-            PeerRoute::Local => Self::copy_local_staged_attachment(
+            PeerRoute::Local => self.copy_local_staged_attachment(
                 staging_root,
                 session_dir,
                 safe_staging,
@@ -83,32 +85,40 @@ impl AttachmentState<'_> {
 
     /// Copies a staged file that already lives on this host into the session's attachments.
     pub(crate) fn copy_local_staged_attachment(
+        &self,
         staging_root: &Path,
         session_dir: &Path,
         safe_staging: &str,
         safe_name: &str,
         basename: &str,
     ) -> Result<(), Status> {
+        let fs = self.fs;
         let batch_dir = staging_root.join(safe_staging);
-        if !batch_dir.exists() {
+        if !fs.exists(&batch_dir) {
             return Err(Status::invalid_argument("staged attachment file not found"));
         }
-        let canonical_dir = contained_canonical_dir(staging_root, &batch_dir)?;
+        let canonical_dir = contained_canonical_dir_on(fs, staging_root, &batch_dir)?;
         let staged_path = canonical_dir.join(safe_name);
-        if !staged_path.is_file() {
+        // `metadata_follow`, as before: `is_file` follows a link.
+        if !matches!(
+            fs.metadata_follow(&staged_path),
+            Ok(m) if m.kind == tddy_fs::FsKind::File
+        ) {
             return Err(Status::invalid_argument("staged attachment file not found"));
         }
         // The writer only marks a staged file complete on its final chunk; refuse an
         // in-progress or aborted upload so the agent never sees truncated bytes.
-        if !crate::session_attachment_staging::staged_complete_marker(&canonical_dir, safe_name)
-            .exists()
-        {
+        if !fs.exists(&crate::session_attachment_staging::staged_complete_marker(
+            &canonical_dir,
+            safe_name,
+        )) {
             return Err(Status::failed_precondition(
                 "staged attachment upload is not complete",
             ));
         }
 
-        crate::session_attachments::copy_attachment_into_session(
+        crate::session_attachments::copy_attachment_into_session_on(
+            fs,
             session_dir,
             &staged_path,
             basename,
@@ -176,7 +186,12 @@ impl AttachmentState<'_> {
             progress.report(data.len() as u64, frame.total_byte_size);
         }
 
-        crate::session_attachments::write_attachment_bytes(session_dir, basename, &data)?;
+        crate::session_attachments::write_attachment_bytes_on(
+            self.fs,
+            session_dir,
+            basename,
+            &data,
+        )?;
         Ok(())
     }
 
@@ -194,7 +209,8 @@ impl AttachmentState<'_> {
         let ref_daemon = host_doc.daemon_instance_id.trim();
 
         let bytes = if ref_daemon.is_empty() || ref_daemon == local_instance_id {
-            crate::host_documents::read_host_document_bytes(
+            crate::host_documents::read_host_document_bytes_on(
+                self.fs,
                 os_user,
                 self.tddy_data_dir,
                 self.staging_base_dir,
@@ -206,7 +222,8 @@ impl AttachmentState<'_> {
         } else {
             let route = self.peer_routing.classify_daemon_route(ref_daemon)?;
             match route {
-                PeerRoute::Local => crate::host_documents::read_host_document_bytes(
+                PeerRoute::Local => crate::host_documents::read_host_document_bytes_on(
+                    self.fs,
                     os_user,
                     self.tddy_data_dir,
                     self.staging_base_dir,
@@ -250,7 +267,12 @@ impl AttachmentState<'_> {
             )));
         }
 
-        crate::session_attachments::write_attachment_bytes(session_dir, basename, &bytes.data)?;
+        crate::session_attachments::write_attachment_bytes_on(
+            self.fs,
+            session_dir,
+            basename,
+            &bytes.data,
+        )?;
         Ok(())
     }
 }

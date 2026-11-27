@@ -92,7 +92,7 @@ fn a_delta_at(seq: u64, base_commit: &str, patch: Vec<u8>) -> Delta {
 
 /// The error an operation produced, for a test that is about the refusal rather than the result.
 fn refused(dest: &Path, marker: MirrorMarker) -> MirrorError {
-    match Mirror::open_or_create(dest, marker) {
+    match Mirror::open_or_create(&tddy_fs::DiskFs, dest, marker) {
         Err(e) => e,
         Ok(_) => panic!("expected {} to be refused", dest.display()),
     }
@@ -108,7 +108,8 @@ fn adopts_an_empty_destination() {
     let dest = tempfile::tempdir().expect("tempdir");
 
     // When
-    let mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must adopt");
+    let mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must adopt");
 
     // Then
     assert_eq!(mirror.marker().session_id, "1780828020298-abc");
@@ -141,7 +142,8 @@ fn refuses_a_destination_marked_for_another_session() {
         session_id: "1780828020298-zzz".to_string(),
         ..a_marker()
     };
-    Mirror::open_or_create(dest.path(), other).expect("must adopt for the other session");
+    Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), other)
+        .expect("must adopt for the other session");
 
     // When it is opened for ours
     let error = refused(dest.path(), a_marker());
@@ -166,10 +168,11 @@ fn reopens_a_destination_it_already_owns() {
         last_head_commit: "c0ffee".to_string(),
         ..a_marker()
     };
-    Mirror::open_or_create(dest.path(), marker).expect("must adopt");
+    Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), marker).expect("must adopt");
 
     // When it is opened again
-    let mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must reopen");
+    let mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must reopen");
 
     // Then the persisted progress is what it resumes from, not the freshly built marker —
     // re-deriving it from the room would re-apply every delta since the session began.
@@ -186,16 +189,23 @@ fn applies_a_delta_that_follows_the_last_one() {
     // Given a mirror at seq 0
     let dest = tempfile::tempdir().expect("tempdir");
     let head = a_mirror_this_syncer_owns(dest.path(), a_marker());
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
 
     // When
     let outcome = mirror
-        .apply(&a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")))
+        .apply(
+            &tddy_fs::DiskFs,
+            &a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")),
+        )
         .expect("must apply");
 
     // Then
     assert_eq!(outcome, ApplyOutcome::Applied);
-    assert_eq!(mirror.read("new.txt").expect("must read"), b"hello\n");
+    assert_eq!(
+        mirror.read(&tddy_fs::DiskFs, "new.txt").expect("must read"),
+        b"hello\n"
+    );
     assert_eq!(mirror.marker().last_seq, 1);
 }
 
@@ -204,13 +214,18 @@ fn applies_one_delta_once_when_several_calls_share_a_tick() {
     // Given a mirror that has applied tick 1
     let dest = tempfile::tempdir().expect("tempdir");
     let head = a_mirror_this_syncer_owns(dest.path(), a_marker());
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
     let delta = a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n"));
-    mirror.apply(&delta).expect("must apply the first time");
+    mirror
+        .apply(&tddy_fs::DiskFs, &delta)
+        .expect("must apply the first time");
 
     // When the same tick arrives again — which it does whenever two tool calls landed in one
     // poll window, because each names the same delta
-    let outcome = mirror.apply(&delta).expect("must not fail");
+    let outcome = mirror
+        .apply(&tddy_fs::DiskFs, &delta)
+        .expect("must not fail");
 
     // Then it is recognised as already applied rather than applied twice.
     assert_eq!(outcome, ApplyOutcome::AlreadyApplied);
@@ -228,11 +243,15 @@ fn reconciles_when_a_sequence_number_is_missing() {
             ..a_marker()
         },
     );
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
 
     // When tick 3 arrives, so tick 2 was lost in transit
     let outcome = mirror
-        .apply(&a_delta_at(3, &head, a_patch_adding("new.txt", "hello\n")))
+        .apply(
+            &tddy_fs::DiskFs,
+            &a_delta_at(3, &head, a_patch_adding("new.txt", "hello\n")),
+        )
         .expect("must not fail");
 
     // Then it is not applied out of order and not skipped over — the intervening tick's changes
@@ -251,15 +270,19 @@ fn reconciles_when_a_delta_was_cut_from_another_commit() {
     // Given a mirror on one commit
     let dest = tempfile::tempdir().expect("tempdir");
     let head = a_mirror_this_syncer_owns(dest.path(), a_marker());
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
 
     // When a delta cut from a different commit arrives
     let outcome = mirror
-        .apply(&a_delta_at(
-            1,
-            "1111111111111111111111111111111111111111",
-            a_patch_adding("new.txt", "hello\n"),
-        ))
+        .apply(
+            &tddy_fs::DiskFs,
+            &a_delta_at(
+                1,
+                "1111111111111111111111111111111111111111",
+                a_patch_adding("new.txt", "hello\n"),
+            ),
+        )
         .expect("must not fail");
 
     // Then
@@ -278,11 +301,15 @@ fn reconciles_when_a_patch_does_not_apply() {
     let dest = tempfile::tempdir().expect("tempdir");
     let head = a_mirror_this_syncer_owns(dest.path(), a_marker());
     std::fs::write(dest.path().join("new.txt"), "something else entirely\n").expect("drift");
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
 
     // When a patch that creates that same file arrives
     let outcome = mirror
-        .apply(&a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")))
+        .apply(
+            &tddy_fs::DiskFs,
+            &a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")),
+        )
         .expect("must not fail");
 
     // Then a reconcile is asked for rather than a partial apply.
@@ -301,17 +328,21 @@ fn leaves_the_mirror_untouched_when_a_patch_is_rejected() {
     let dest = tempfile::tempdir().expect("tempdir");
     let head = a_mirror_this_syncer_owns(dest.path(), a_marker());
     std::fs::write(dest.path().join("new.txt"), "something else entirely\n").expect("drift");
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
 
     // When the patch is rejected
     mirror
-        .apply(&a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")))
+        .apply(
+            &tddy_fs::DiskFs,
+            &a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")),
+        )
         .expect("must not fail");
 
     // Then nothing was written and the sequence did not advance, so the reconcile that follows
     // starts from a state the syncer can describe rather than a half-applied one.
     assert_eq!(
-        mirror.read("new.txt").expect("must read"),
+        mirror.read(&tddy_fs::DiskFs, "new.txt").expect("must read"),
         b"something else entirely\n"
     );
     assert_eq!(mirror.marker().last_seq, 0);
@@ -358,9 +389,13 @@ fn records_progress_in_the_marker_so_a_restart_resumes_rather_than_replays() {
     // Given a mirror that has applied a delta
     let dest = tempfile::tempdir().expect("tempdir");
     let head = a_mirror_this_syncer_owns(dest.path(), a_marker());
-    let mut mirror = Mirror::open_or_create(dest.path(), a_marker()).expect("must open");
+    let mut mirror =
+        Mirror::open_or_create(&tddy_fs::DiskFs, dest.path(), a_marker()).expect("must open");
     mirror
-        .apply(&a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")))
+        .apply(
+            &tddy_fs::DiskFs,
+            &a_delta_at(1, &head, a_patch_adding("new.txt", "hello\n")),
+        )
         .expect("must apply");
 
     // When the marker is read back off disk

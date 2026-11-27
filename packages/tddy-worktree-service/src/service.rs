@@ -67,6 +67,9 @@ pub struct WorktreeServiceImpl {
     config: DaemonConfig,
     tddy_data_dir: PathBuf,
     user_resolver: SessionUserResolver,
+    /// The filesystem the readers, listings and measurements go through — `DiskFs` in
+    /// production, injected at the composition root below so tests can substitute `MemFs`.
+    fs: Arc<dyn tddy_fs::Fs>,
     /// The eager per-project stats walk behind `ListWorktreesForProject`.
     worktree_stats_cache: Arc<WorktreeStatsCache>,
     /// The lazy, semaphore-bounded per-worktree disk-size calculator behind `StreamWorktreeStats`
@@ -367,8 +370,10 @@ impl WorktreeService for WorktreeServiceImpl {
             self.resolve_listed_worktree(&req.session_token, &req.project_id, &req.worktree_path)?;
 
         let rel_path = req.rel_path.clone();
+        let fs = Arc::clone(&self.fs);
         let entries = blocking_within(self.request_timeout(), "ListWorktreeDirectory", move || {
-            Ok(crate::worktree_files::list_worktree_directory_entries(
+            Ok(crate::worktree_files::list_worktree_directory_entries_on(
+                &*fs,
                 &worktree_root,
                 &rel_path,
             ))
@@ -395,8 +400,10 @@ impl WorktreeService for WorktreeServiceImpl {
             self.resolve_listed_worktree(&req.session_token, &req.project_id, &req.worktree_path)?;
 
         let rel_path = req.rel_path.clone();
+        let fs = Arc::clone(&self.fs);
         let content = blocking_within(self.request_timeout(), "ReadWorktreeFile", move || {
-            Ok(crate::worktree_files::read_worktree_file_utf8(
+            Ok(crate::worktree_files::read_worktree_file_utf8_on(
+                &*fs,
                 &worktree_root,
                 &rel_path,
             ))
@@ -428,6 +435,7 @@ impl WorktreeService for WorktreeServiceImpl {
 
         let rel_path = req.rel_path.clone();
         let max_bytes = self.config.max_attachment_bytes;
+        let fs = Arc::clone(&self.fs);
         // The size refusal and the read are filesystem and git work, so they run off the async
         // runtime exactly as the unary read's do. Both can fail the call outright, which is why they
         // happen here rather than inside the stream: a refusal that arrived as a stream item would
@@ -436,7 +444,8 @@ impl WorktreeService for WorktreeServiceImpl {
             self.request_timeout(),
             "StreamReadWorktreeFile",
             move || {
-                Ok(crate::worktree_files::read_worktree_file_bytes(
+                Ok(crate::worktree_files::read_worktree_file_bytes_on(
+                    &*fs,
                     &worktree_root,
                     &rel_path,
                     max_bytes,
@@ -529,7 +538,9 @@ impl WorktreeService for WorktreeServiceImpl {
             &req.session_token,
             project_id,
             self.sessions_dir_of(&os_user).map_or_else(Vec::new, |dir| {
-                crate::target_worktree_stats::target_sessions_of_project(&dir, project_id)
+                crate::target_worktree_stats::target_sessions_of_project(
+                    &*self.fs, &dir, project_id,
+                )
             }),
             &mut snapshot,
             &tx,

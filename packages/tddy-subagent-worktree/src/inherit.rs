@@ -19,14 +19,17 @@ pub(crate) async fn common_dir(caller: &Path) -> Result<PathBuf, WorktreeError> 
 }
 
 /// Add `/tmp/subagent-worktrees/` to `<common dir>/info/exclude` unless it is already there.
-pub(crate) async fn exclude_conversation_worktrees(common: &Path) -> Result<(), WorktreeError> {
+pub(crate) async fn exclude_conversation_worktrees(
+    fs: &tddy_fs::AsyncFs,
+    common: &Path,
+) -> Result<(), WorktreeError> {
     let entry = format!("/{SUBAGENT_WORKTREES_DIR}/");
     let file = common.join("info").join("exclude");
     let io = |context: &str| {
         let context = format!("{context} {}", file.display());
         move |source| WorktreeError::Io { context, source }
     };
-    let existing = match tokio::fs::read_to_string(&file).await {
+    let existing = match fs.read_to_string(&file).await {
         Ok(text) => text,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(source) => return Err(io("reading")(source)),
@@ -40,10 +43,10 @@ pub(crate) async fn exclude_conversation_worktrees(common: &Path) -> Result<(), 
     }
     updated.push_str(&entry);
     updated.push('\n');
-    tokio::fs::create_dir_all(common.join("info"))
+    fs.create_dir_all(common.join("info"))
         .await
         .map_err(io("creating the directory of"))?;
-    tokio::fs::write(&file, updated)
+    fs.write(&file, updated.into_bytes())
         .await
         .map_err(io("writing"))
 }
@@ -51,8 +54,11 @@ pub(crate) async fn exclude_conversation_worktrees(common: &Path) -> Result<(), 
 /// The commit a conversation starts from: the caller's `HEAD` when the caller is clean, else a commit
 /// on top of `HEAD` holding the caller's uncommitted state — staged, unstaged and untracked, not
 /// ignored. The caller's index, branch and files are never touched.
-pub(crate) async fn base_commit(caller: &Path) -> Result<String, WorktreeError> {
-    uncommitted_state_as_commit(caller, "Uncommitted changes inherited from the caller").await
+pub(crate) async fn base_commit(
+    fs: &tddy_fs::AsyncFs,
+    caller: &Path,
+) -> Result<String, WorktreeError> {
+    uncommitted_state_as_commit(fs, caller, "Uncommitted changes inherited from the caller").await
 }
 
 /// `dir`'s `HEAD` when `dir` is clean, else a commit on top of `HEAD`, with `subject`, holding its
@@ -60,6 +66,7 @@ pub(crate) async fn base_commit(caller: &Path) -> Result<String, WorktreeError> 
 /// Built through a scratch index seeded from `dir`'s own, so `dir`'s index, branch and files are
 /// never touched.
 pub(crate) async fn uncommitted_state_as_commit(
+    fs: &tddy_fs::AsyncFs,
     dir: &Path,
     subject: &str,
 ) -> Result<String, WorktreeError> {
@@ -70,22 +77,23 @@ pub(crate) async fn uncommitted_state_as_commit(
     let index = git(dir, ["rev-parse", "--git-path", "index"], &[], None).await?;
     let index = dir.join(index.trim());
     let scratch = scratch_path(&index);
-    let result = snapshot_tree(dir, &index, &scratch, &head, subject).await;
+    let result = snapshot_tree(fs, dir, &index, &scratch, &head, subject).await;
     // Best effort: a scratch file left behind is harmless, and must not mask the snapshot's result.
-    if let Err(error) = tokio::fs::remove_file(&scratch).await {
+    if let Err(error) = fs.remove_file(&scratch).await {
         log::debug!("scratch index {} not removed: {error}", scratch.display());
     }
     result
 }
 
 async fn snapshot_tree(
+    fs: &tddy_fs::AsyncFs,
     dir: &Path,
     index: &Path,
     scratch: &Path,
     head: &str,
     subject: &str,
 ) -> Result<String, WorktreeError> {
-    tokio::fs::copy(index, scratch)
+    fs.copy(index, scratch)
         .await
         .map_err(|source| WorktreeError::Io {
             context: format!("seeding the scratch index from {}", index.display()),

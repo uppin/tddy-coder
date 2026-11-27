@@ -867,7 +867,7 @@ impl CloneMirror {
                     spec.worktree_path.display()
                 ))
             })?;
-        let mirror = Mirror::open_or_create(&spec.worktree_path, marker)
+        let mirror = Mirror::open_or_create(&tddy_fs::DiskFs, &spec.worktree_path, marker)
             .map_err(|e| Status::internal(e.to_string()))?;
         // The transport-shim env var, only when this checkout was provisioned from the facilitating
         // daemon. `tddy-remote-git-repo` takes its daemon URL and session token as `--long` flags on
@@ -964,7 +964,7 @@ impl CloneMirror {
         // that was — so the applied sequence stays where it is. Claiming a tick this restore did not
         // demonstrably include would skip the next delta and drift with nothing reporting it.
         self.mirror
-            .record_restored(applied)
+            .record_restored(&tddy_fs::DiskFs, applied)
             .map_err(|e| e.to_string())?;
         self.restored_at_seq = applied;
         Ok(())
@@ -1027,7 +1027,11 @@ impl CloneMirror {
         };
 
         let delta = self.fetch_delta(link, &call_id).await?;
-        match self.mirror.apply(&delta).map_err(|e| e.to_string())? {
+        match self
+            .mirror
+            .apply(&tddy_fs::DiskFs, &delta)
+            .map_err(|e| e.to_string())?
+        {
             ApplyOutcome::Applied => {
                 log::debug!(
                     target: "tddy_daemon::session_agent_clone",

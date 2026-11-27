@@ -207,11 +207,31 @@ pub fn read_context_file_bytes(
     guidance_files: &[PathBuf],
     max_bytes: u64,
 ) -> Result<Vec<u8>, Status> {
+    read_context_file_bytes_on(
+        &tddy_fs::DiskFs,
+        worktree_root,
+        rel_path,
+        globs,
+        guidance_files,
+        max_bytes,
+    )
+}
+
+/// [`read_context_file_bytes`] through the filesystem port.
+pub fn read_context_file_bytes_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+    globs: &[&str],
+    guidance_files: &[PathBuf],
+    max_bytes: u64,
+) -> Result<Vec<u8>, Status> {
     log::debug!(
         "read_context_file_bytes: worktree_root={worktree_root:?} rel_path={rel_path:?} \
          max_bytes={max_bytes}"
     );
     read_one_context_file(
+        fs,
         worktree_root,
         rel_path,
         globs,
@@ -232,7 +252,30 @@ pub fn read_context_file_bytes_within(
     max_bytes: u64,
     reach: &ContextReach,
 ) -> Result<Vec<u8>, Status> {
+    read_context_file_bytes_within_on(
+        &tddy_fs::DiskFs,
+        worktree_root,
+        rel_path,
+        globs,
+        guidance_files,
+        max_bytes,
+        reach,
+    )
+}
+
+/// [`read_context_file_bytes_within`] through the filesystem port.
+#[allow(clippy::too_many_arguments)]
+pub fn read_context_file_bytes_within_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+    globs: &[&str],
+    guidance_files: &[PathBuf],
+    max_bytes: u64,
+    reach: &ContextReach,
+) -> Result<Vec<u8>, Status> {
     read_one_context_file(
+        fs,
         worktree_root,
         rel_path,
         globs,
@@ -242,16 +285,18 @@ pub fn read_context_file_bytes_within(
 }
 
 fn read_one_context_file(
+    fs: &dyn tddy_fs::Fs,
     worktree_root: &Path,
     rel_path: &str,
     globs: &[&str],
     max_bytes: u64,
     reach: &mut WorktreeReach<'_>,
 ) -> Result<Vec<u8>, Status> {
-    let canonical_file = resolve_allow_listed_context_file(worktree_root, rel_path, globs, reach)?;
-    sized_context_file(&canonical_file, rel_path, max_bytes)?;
+    let canonical_file =
+        resolve_allow_listed_context_file(fs, worktree_root, rel_path, globs, reach)?;
+    sized_context_file(fs, &canonical_file, rel_path, max_bytes)?;
 
-    let bytes = std::fs::read(&canonical_file).map_err(|e| {
+    let bytes = fs.read(&canonical_file).map_err(|e| {
         log::error!("read_context_file_bytes: read {canonical_file:?} failed: {e}");
         Status::internal(format!("failed to read context file: {e}"))
     })?;
@@ -292,6 +337,25 @@ pub fn read_context_files_bytes(
     guidance_files: &[PathBuf],
     max_bytes: u64,
 ) -> Result<Vec<(String, Vec<u8>)>, Status> {
+    read_context_files_bytes_on(
+        &tddy_fs::DiskFs,
+        worktree_root,
+        rel_paths,
+        globs,
+        guidance_files,
+        max_bytes,
+    )
+}
+
+/// [`read_context_files_bytes`] through the filesystem port.
+pub fn read_context_files_bytes_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_paths: &[String],
+    globs: &[&str],
+    guidance_files: &[PathBuf],
+    max_bytes: u64,
+) -> Result<Vec<(String, Vec<u8>)>, Status> {
     log::debug!(
         "read_context_files_bytes: worktree_root={worktree_root:?} paths={} max_bytes={max_bytes}",
         rel_paths.len()
@@ -321,8 +385,8 @@ pub fn read_context_files_bytes(
     let mut reach = WorktreeReach::of(worktree_root, globs, guidance_files);
     for rel_path in rel_paths {
         let canonical_file =
-            resolve_allow_listed_context_file(worktree_root, rel_path, globs, &mut reach)?;
-        let byte_size = sized_context_file(&canonical_file, rel_path, max_bytes)?;
+            resolve_allow_listed_context_file(fs, worktree_root, rel_path, globs, &mut reach)?;
+        let byte_size = sized_context_file(fs, &canonical_file, rel_path, max_bytes)?;
         total_bytes = total_bytes.saturating_add(byte_size);
         if total_bytes > max_bytes {
             log::warn!(
@@ -341,7 +405,7 @@ pub fn read_context_files_bytes(
     let mut files: Vec<(String, Vec<u8>)> = Vec::with_capacity(resolved.len());
     let mut read_bytes: u64 = 0;
     for (rel_path, canonical_file) in resolved {
-        let bytes = std::fs::read(&canonical_file).map_err(|e| {
+        let bytes = fs.read(&canonical_file).map_err(|e| {
             log::error!("read_context_files_bytes: read {canonical_file:?} failed: {e}");
             Status::internal(format!("failed to read context file {rel_path}: {e}"))
         })?;
@@ -372,25 +436,27 @@ pub fn read_context_files_bytes(
 /// Shared by the single read and the batch so the two cannot drift: same "not a regular file"
 /// refusal, same cap, same statuses, and the cap measured with a `stat` before any bytes are held.
 fn sized_context_file(
+    fs: &dyn tddy_fs::Fs,
     canonical_file: &Path,
     rel_path: &str,
     max_bytes: u64,
 ) -> Result<u64, Status> {
-    let metadata = std::fs::metadata(canonical_file).map_err(|e| {
+    // `metadata_follow`, as before: the walk follows a link.
+    let metadata = fs.metadata_follow(canonical_file).map_err(|e| {
         log::error!("sized_context_file: metadata {canonical_file:?} failed: {e}");
         Status::internal(format!("failed to size context file: {e}"))
     })?;
     // `.claude` is itself named by `.claude/**`-adjacent spellings and a directory can be reached
     // by a glob like `.agents/*`, so "allow-listed and inside the root" does not imply "a file".
-    // Asked for one, `std::fs::read` fails with `Is a directory`, which would surface as an
+    // Asked for one, a read fails with `Is a directory`, which would surface as an
     // INTERNAL — a request the caller got wrong reported as a fault on this host.
-    if !metadata.is_file() {
+    if metadata.kind != tddy_fs::FsKind::File {
         log::warn!("sized_context_file: refused {rel_path:?}: not a regular file");
         return Err(Status::invalid_argument(format!(
             "{rel_path} is not a regular file"
         )));
     }
-    let byte_size = metadata.len();
+    let byte_size = metadata.len;
     if byte_size > max_bytes {
         log::warn!(
             "sized_context_file: refused {rel_path:?} at {byte_size} byte(s), over the {max_bytes} \

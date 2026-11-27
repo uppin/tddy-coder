@@ -14,22 +14,42 @@ pub const WORKTREE_REMOVED_MARKER: &str = "worktree-removed";
 
 /// Record in `session_dir` that its session's worktrees were removed, now.
 pub fn record_worktree_removed(session_dir: &Path) -> io::Result<()> {
-    std::fs::write(
-        session_dir.join(WORKTREE_REMOVED_MARKER),
-        format!("{}\n", chrono::Utc::now().to_rfc3339()),
+    record_worktree_removed_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`record_worktree_removed`] through the filesystem port.
+pub fn record_worktree_removed_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> io::Result<()> {
+    fs.write(
+        &session_dir.join(WORKTREE_REMOVED_MARKER),
+        format!("{}\n", chrono::Utc::now().to_rfc3339()).as_bytes(),
     )
 }
 
 /// Whether `session_dir` records that its session's worktrees were removed.
 #[must_use]
 pub fn worktree_removal_recorded(session_dir: &Path) -> bool {
-    session_dir.join(WORKTREE_REMOVED_MARKER).is_file()
+    worktree_removal_recorded_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`worktree_removal_recorded`] through the filesystem port.
+#[must_use]
+pub fn worktree_removal_recorded_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> bool {
+    // `metadata_follow`, as before: `is_file` follows a link.
+    matches!(
+        fs.metadata_follow(&session_dir.join(WORKTREE_REMOVED_MARKER)),
+        Ok(m) if m.kind == tddy_fs::FsKind::File
+    )
 }
 
 /// Forget that `session_dir`'s worktrees were removed — the worktree is back. A session that
 /// records no removal has nothing to forget.
 pub fn clear_worktree_removed(session_dir: &Path) -> io::Result<()> {
-    match std::fs::remove_file(session_dir.join(WORKTREE_REMOVED_MARKER)) {
+    clear_worktree_removed_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`clear_worktree_removed`] through the filesystem port.
+pub fn clear_worktree_removed_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> io::Result<()> {
+    match fs.remove_file(&session_dir.join(WORKTREE_REMOVED_MARKER)) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         other => other,
     }

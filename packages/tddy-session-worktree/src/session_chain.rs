@@ -25,6 +25,21 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
     parent_session_id: &str,
     child_project_repo: &Path,
 ) -> Result<String, WorkflowError> {
+    resolve_chain_integration_base_ref_from_parent_session_on(
+        &tddy_fs::DiskFs,
+        sessions_root,
+        parent_session_id,
+        child_project_repo,
+    )
+}
+
+/// [`resolve_chain_integration_base_ref_from_parent_session`] through the filesystem port.
+pub fn resolve_chain_integration_base_ref_from_parent_session_on(
+    fs: &dyn tddy_fs::Fs,
+    sessions_root: &Path,
+    parent_session_id: &str,
+    child_project_repo: &Path,
+) -> Result<String, WorkflowError> {
     log::info!(
         "resolve_chain_integration_base_ref_from_parent_session: sessions_root={} parent_session_id={} child_repo={}",
         sessions_root.display(),
@@ -32,7 +47,11 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
         child_project_repo.display()
     );
     let parent_dir = unified_session_dir_path(sessions_root, parent_session_id);
-    if !parent_dir.is_dir() {
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    if !matches!(
+        fs.metadata_follow(&parent_dir),
+        Ok(m) if m.kind == tddy_fs::FsKind::Dir
+    ) {
         log::debug!(
             "resolve_chain_integration_base_ref_from_parent_session: parent_dir missing {}",
             parent_dir.display()
@@ -86,9 +105,11 @@ pub fn resolve_chain_integration_base_ref_from_parent_session(
 
     if let Some(ref parent_repo) = cs.repo_path {
         let parent_path = Path::new(parent_repo);
-        let parent_canon =
-            std::fs::canonicalize(parent_path).unwrap_or_else(|_| parent_path.to_path_buf());
-        let child_canon = std::fs::canonicalize(child_project_repo)
+        let parent_canon = fs
+            .canonicalize(parent_path)
+            .unwrap_or_else(|_| parent_path.to_path_buf());
+        let child_canon = fs
+            .canonicalize(child_project_repo)
             .unwrap_or_else(|_| child_project_repo.to_path_buf());
         if parent_canon != child_canon {
             log::info!(

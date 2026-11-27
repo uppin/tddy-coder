@@ -26,6 +26,14 @@ impl Fs for DiskFs {
         fs::write(path, contents)
     }
 
+    fn create_new(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?
+            .write_all(contents)
+    }
+
     fn append(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         fs::OpenOptions::new()
             .create(true)
@@ -48,6 +56,18 @@ impl Fs for DiskFs {
 
     fn hard_link(&self, original: &Path, link: &Path) -> io::Result<()> {
         fs::hard_link(original, link)
+    }
+
+    fn copy(&self, from: &Path, to: &Path) -> io::Result<()> {
+        // `fs::copy` on a directory fails with a platform-shaped error (`EINVAL` here, `EISDIR`
+        // elsewhere); refuse it up front so both adapters report `IsADirectory`.
+        if fs::metadata(from).is_ok_and(|m| m.is_dir()) {
+            return Err(io::Error::new(
+                io::ErrorKind::IsADirectory,
+                format!("{}: is a directory", from.display()),
+            ));
+        }
+        fs::copy(from, to).map(|_| ())
     }
 
     fn remove_file(&self, path: &Path) -> io::Result<()> {

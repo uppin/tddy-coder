@@ -9,6 +9,8 @@ name = "tddy_session_files"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: the filesystem port every disk read and write goes through.
+tddy-fs = { path = "../tddy-fs" }
 # `HOST_DOCUMENT_FRAME_BYTES` and `user_paths::sessions_base_for_user` — node 1's kernel.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `Status` and `ServiceEntry`: every method here answers an RPC, so `Status` is the error type
@@ -53,6 +55,8 @@ serde_json = "1"
 tddy-host-service = { path = "../tddy-host-service" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `chunking::MAX_CHUNK_FRAME_BYTES`: the frame size is pinned against the transport budget it has to
 # stay beneath rather than against a bare number (`context_file_frames_unit.rs`).
 tddy-livekit = { path = "../tddy-livekit" }

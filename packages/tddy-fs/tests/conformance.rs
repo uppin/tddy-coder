@@ -75,6 +75,58 @@ fn append_adds_to_the_end_and_creates_an_absent_file() {
 }
 
 #[test]
+fn create_new_writes_once_then_refuses() {
+    each_adapter(|s| {
+        let path = s.at("n/only-once");
+        s.fs.create_dir_all(path.parent().unwrap()).unwrap();
+        s.fs.create_new(&path, b"first").unwrap();
+        assert_eq!(s.fs.read(&path).unwrap(), b"first");
+        // The loser leaves the stored bytes untouched.
+        let err = s.fs.create_new(&path, b"second").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(s.fs.read(&path).unwrap(), b"first");
+    });
+}
+
+#[test]
+fn create_new_refuses_an_existing_directory() {
+    each_adapter(|s| {
+        let dir = s.at("n/dir");
+        s.fs.create_dir_all(&dir).unwrap();
+        let err = s.fs.create_new(&dir, b"bytes").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+    });
+}
+
+#[test]
+fn copy_duplicates_bytes_and_replaces() {
+    each_adapter(|s| {
+        let from = written(s, "c/original", "bytes");
+        let to = s.at("c/duplicate");
+        s.fs.copy(&from, &to).unwrap();
+        assert_eq!(s.fs.read(&to).unwrap(), b"bytes");
+        // Still the source's bytes after the source moves on.
+        s.fs.write(&from, b"changed").unwrap();
+        assert_eq!(s.fs.read(&to).unwrap(), b"bytes");
+        // Replacing is the caller's choice, not a refusal.
+        s.fs.copy(&from, &to).unwrap();
+        assert_eq!(s.fs.read(&to).unwrap(), b"changed");
+    });
+}
+
+#[test]
+fn copy_needs_a_file_source() {
+    each_adapter(|s| {
+        let err = s.fs.copy(&s.at("missing"), &s.at("to")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        let dir = s.at("c/dir");
+        s.fs.create_dir_all(&dir).unwrap();
+        let err = s.fs.copy(&dir, &s.at("to")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::IsADirectory);
+    });
+}
+
+#[test]
 fn rename_replaces_an_existing_target() {
     each_adapter(|s| {
         let from = written(s, "from", "new");

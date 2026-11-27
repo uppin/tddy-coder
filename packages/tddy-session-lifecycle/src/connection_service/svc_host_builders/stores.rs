@@ -60,6 +60,7 @@ pub(super) fn build_host_stores(
         tddy_worktree_service::worktrees::WorktreeSizeCalculator::new(
             tddy_worktree_service::worktrees::projects_stats_cache_root(tddy_data_dir),
             tddy_worktree_service::worktrees::DAEMON_SIZE_WALK_PERMITS,
+            Arc::new(tddy_fs::DiskFs),
         ),
     );
     HostStores {

@@ -16,23 +16,35 @@ use tddy_service::proto::session::SessionAttachment;
 
 use std::path::Path;
 
-pub fn cleanup_materialized_attachments(session_dir: &Path, written: &[SessionAttachment]) {
+/// Best-effort removal of partial attachment files after a failed materialization, through the
+/// filesystem port.
+pub fn cleanup_materialized_attachments_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    written: &[SessionAttachment],
+) {
     let attachments_dir = tddy_workflow::session_attachments_root(session_dir);
     for basename in written.iter().map(|a| &a.basename) {
         let path = attachments_dir.join(basename);
-        if path.is_file() {
-            if let Err(e) = std::fs::remove_file(&path) {
-                log::warn!("cleanup_materialized_attachments: remove {path:?} failed: {e}");
-            }
+        // `metadata_follow`, as before: `is_file` follows a link.
+        if !matches!(
+            fs.metadata_follow(&path),
+            Ok(m) if m.kind == tddy_fs::FsKind::File
+        ) {
+            continue;
+        }
+        if let Err(e) = fs.remove_file(&path) {
+            log::warn!("cleanup_materialized_attachments: remove {path:?} failed: {e}");
         }
     }
 }
 
-/// On-disk size of a just-materialized attachment. An unreadable entry reports 0 rather than
-/// failing the start — the bytes are already written, and this value only feeds a progress event.
-pub fn attachment_size_bytes(session_dir: &Path, basename: &str) -> u64 {
-    std::fs::metadata(tddy_workflow::session_attachments_root(session_dir).join(basename))
-        .map(|m| m.len())
+/// On-disk size of a just-materialized attachment, through the filesystem port. An unreadable
+/// entry reports 0 rather than failing the start — the bytes are already written, and this value
+/// only feeds a progress event.
+pub fn attachment_size_bytes_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, basename: &str) -> u64 {
+    fs.metadata_follow(&tddy_workflow::session_attachments_root(session_dir).join(basename))
+        .map(|m| m.len)
         .unwrap_or(0)
 }
 

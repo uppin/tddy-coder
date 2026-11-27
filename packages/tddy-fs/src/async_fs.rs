@@ -99,6 +99,15 @@ impl AsyncFs {
             .map_err(join_failed)?
     }
 
+    pub async fn copy(&self, from: impl Into<PathBuf>, to: impl Into<PathBuf>) -> io::Result<()> {
+        let fs = self.fs.clone();
+        let from = from.into();
+        let to = to.into();
+        tokio::task::spawn_blocking(move || fs.copy(&from, &to))
+            .await
+            .map_err(join_failed)?
+    }
+
     pub async fn metadata(&self, path: impl Into<PathBuf>) -> io::Result<FsMetadata> {
         let fs = self.fs.clone();
         let path = path.into();

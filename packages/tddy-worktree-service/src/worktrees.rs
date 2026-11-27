@@ -328,17 +328,24 @@ pub fn force_remove_worktree_under_repo(
     let wt_str = worktree_path
         .to_str()
         .ok_or_else(|| RemoveWorktreeError::Io("worktree path is not valid UTF-8".to_string()))?;
-    if path_is_present(worktree_path)? {
+    if path_is_present_on(&tddy_fs::DiskFs, worktree_path)? {
         run_worktree_command(repo_root, &["worktree", "remove", "--force", wt_str])?;
     }
     run_worktree_command(repo_root, &["worktree", "prune"])?;
-    worktree_is_gone_from(repo_root, worktree_path)
+    worktree_is_gone_from(&tddy_fs::DiskFs, repo_root, worktree_path)
 }
 
 /// Whether `path` is on disk. Only "no such file" is absence: a path that cannot be looked at (a
 /// parent that cannot be searched) is the error, never read as gone.
 pub fn path_is_present(path: &Path) -> Result<bool, RemoveWorktreeError> {
-    match std::fs::symlink_metadata(path) {
+    path_is_present_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`path_is_present`] through the filesystem port.
+pub fn path_is_present_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<bool, RemoveWorktreeError> {
+    // `metadata`, as before: the question stays about the name itself, so a dangling link
+    // counts as present and is removed as a link rather than reported missing.
+    match fs.metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(RemoveWorktreeError::Io(format!(
@@ -351,10 +358,11 @@ pub fn path_is_present(path: &Path) -> Result<bool, RemoveWorktreeError> {
 /// The post-condition of a removal: `worktree_path` is neither on disk nor among `repo_root`'s
 /// worktrees.
 fn worktree_is_gone_from(
+    fs: &dyn tddy_fs::Fs,
     repo_root: &Path,
     worktree_path: &Path,
 ) -> Result<(), RemoveWorktreeError> {
-    if path_is_present(worktree_path)? {
+    if path_is_present_on(fs, worktree_path)? {
         return Err(RemoveWorktreeError::Io(format!(
             "{} is still there after its removal",
             worktree_path.display()
@@ -507,7 +515,7 @@ mod tests {
         let main_own_bytes: u64 = 100 + 200; // README.md + src/lib.rs
         let wt_bytes: u64 = 100 + 500; // wt1/README.md + wt1/feature.rs
 
-        let reported = directory_size_bytes_best_effort(&main_repo);
+        let reported = directory_size_bytes_best_effort(&tddy_fs::DiskFs, &main_repo);
 
         // BUG: currently reports main_own_bytes + wt_bytes (900) instead of main_own_bytes (300).
         assert_eq!(

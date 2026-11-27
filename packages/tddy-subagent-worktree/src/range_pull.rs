@@ -133,8 +133,9 @@ impl ConversationWorktree {
             None,
         )
         .await?;
+        let fs = crate::port();
         let conflicts = self
-            .apply_3way(patch.as_bytes(), touched.as_bytes())
+            .apply_3way(&fs, patch.as_bytes(), touched.as_bytes())
             .await?;
         outcome.files.created += files.created;
         outcome.files.updated += files.updated;

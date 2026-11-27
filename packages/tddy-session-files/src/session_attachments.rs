@@ -9,15 +9,13 @@
 //! inside the canonical `artifacts/` root, and create the target exclusively so an existing
 //! attachment is never truncated. Product contract: `docs/ft/coder/session-attachments.md`.
 
-use std::fs::{File, OpenOptions};
 use std::io;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use tddy_rpc::Status;
 use tddy_workflow::{session_artifacts_root, session_attachments_root};
 
-use crate::session_file_upload::{contained_canonical_dir, validate_segment};
+use crate::session_file_upload::{contained_canonical_dir_on, validate_segment};
 
 /// The attachment listing, derived in [`tddy_workflow::artifact_paths`].
 ///
@@ -38,16 +36,16 @@ pub fn validate_attachment_basename(basename: &str) -> Result<&str, Status> {
         .map_err(|_| Status::invalid_argument("attachment basename must be a single path segment"))
 }
 
-/// Confirms `source` is an existing regular file.
-fn validate_attachment_source(source: &Path) -> Result<(), Status> {
-    let source_metadata = std::fs::metadata(source).map_err(|e| {
+/// Confirms `source` is an existing regular file, through the filesystem port.
+fn validate_attachment_source_on(fs: &dyn tddy_fs::Fs, source: &Path) -> Result<(), Status> {
+    let source_metadata = fs.metadata_follow(source).map_err(|e| {
         log::warn!(
             "copy_attachment_into_session: source {} is not accessible: {e}",
             source.display()
         );
         Status::invalid_argument("attachment source file does not exist")
     })?;
-    if !source_metadata.is_file() {
+    if source_metadata.kind != tddy_fs::FsKind::File {
         log::warn!(
             "copy_attachment_into_session: source {} is not a regular file",
             source.display()
@@ -60,10 +58,13 @@ fn validate_attachment_source(source: &Path) -> Result<(), Status> {
 }
 
 /// Creates the attachments directory on demand and confirms it resolves inside the canonical
-/// `artifacts/` root.
-fn ensure_contained_attachments_dir(session_dir: &Path) -> Result<PathBuf, Status> {
+/// `artifacts/` root, through the filesystem port.
+fn ensure_contained_attachments_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<PathBuf, Status> {
     let attachments_dir = session_attachments_root(session_dir);
-    std::fs::create_dir_all(&attachments_dir).map_err(|e| {
+    fs.create_dir_all(&attachments_dir).map_err(|e| {
         log::error!(
             "copy_attachment_into_session: create_dir_all {} failed: {e}",
             attachments_dir.display()
@@ -75,7 +76,8 @@ fn ensure_contained_attachments_dir(session_dir: &Path) -> Result<PathBuf, Statu
     // directory must stay within — this catches an `attachments` symlink pointing outside the
     // session tree.
     let artifacts_root = session_artifacts_root(session_dir);
-    let canonical_attachments_dir = contained_canonical_dir(&artifacts_root, &attachments_dir)?;
+    let canonical_attachments_dir =
+        contained_canonical_dir_on(fs, &artifacts_root, &attachments_dir)?;
     log::debug!(
         "copy_attachment_into_session: attachments dir {} is contained in {}",
         canonical_attachments_dir.display(),
@@ -84,9 +86,10 @@ fn ensure_contained_attachments_dir(session_dir: &Path) -> Result<PathBuf, Statu
     Ok(canonical_attachments_dir)
 }
 
-/// Best-effort removal of a partial attachment file after a failed exclusive create or write.
-fn remove_partial_attachment(target: &Path) {
-    if let Err(e) = std::fs::remove_file(target) {
+/// Best-effort removal of a partial attachment file after a failed write, so a retry is not
+/// blocked by bytes a failed [`tddy_fs::Fs::create_new`] left behind.
+fn remove_partial_attachment_on(fs: &dyn tddy_fs::Fs, target: &Path) {
+    if let Err(e) = fs.remove_file(target) {
         log::warn!(
             "session_attachments: failed to remove partial attachment {}: {e}",
             target.display()
@@ -94,80 +97,66 @@ fn remove_partial_attachment(target: &Path) {
     }
 }
 
-/// Exclusively creates `canonical_dir/<safe_basename>`, returning the open file and its path.
+/// Exclusively creates `canonical_dir/<safe_basename>` holding `data`, returning its path.
 ///
-/// `create_new` makes the existence check and the creation a single atomic step, so a concurrent
-/// writer cannot slip in between them. An existing target — a regular file or a symlink planted in
-/// the attachments directory — is refused with [`Status::failed_precondition`] rather than followed
-/// or truncated. Shared by both write entry points so neither is a weaker gate than the other.
-fn create_attachment_file_exclusively(
+/// [`tddy_fs::Fs::create_new`] makes the existence check and the creation a single atomic step,
+/// so a concurrent writer cannot slip in between them. An existing target — a regular file or a
+/// symlink planted in the attachments directory — is refused with [`Status::failed_precondition`]
+/// rather than followed or truncated, and the stored bytes stay untouched. Shared by both write
+/// entry points so neither is a weaker gate than the other.
+fn store_bytes_exclusively_on(
+    fs: &dyn tddy_fs::Fs,
     canonical_dir: &Path,
     safe_basename: &str,
-) -> Result<(File, PathBuf), Status> {
+    data: &[u8],
+) -> Result<PathBuf, Status> {
     let target = canonical_dir.join(safe_basename);
 
-    let dest = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&target)
-        .map_err(|e| {
-            if e.kind() == io::ErrorKind::AlreadyExists {
-                log::warn!(
-                    "session_attachments: refusing to overwrite existing attachment {}",
-                    target.display()
-                );
-                Status::failed_precondition("an attachment with this name already exists")
-            } else {
-                log::error!(
-                    "session_attachments: create {} failed: {e}",
-                    target.display()
-                );
-                Status::internal(format!("failed to store attachment: {e}"))
-            }
-        })?;
+    if let Err(e) = fs.create_new(&target, data) {
+        if e.kind() == io::ErrorKind::AlreadyExists {
+            log::warn!(
+                "session_attachments: refusing to overwrite existing attachment {}",
+                target.display()
+            );
+            return Err(Status::failed_precondition(
+                "an attachment with this name already exists",
+            ));
+        }
+        log::error!(
+            "session_attachments: create {} failed: {e}",
+            target.display()
+        );
+        remove_partial_attachment_on(fs, &target);
+        return Err(Status::internal(format!("failed to store attachment: {e}")));
+    }
 
-    Ok((dest, target))
+    Ok(target)
 }
 
-/// Atomically creates `canonical_dir/<safe_basename>` and streams `source` into it.
+/// Reads `source` through the port and stores it as `canonical_dir/<safe_basename>`.
 ///
-/// On failure opening the source or during `io::copy`, the partial target is removed so a retry is
-/// not blocked by an empty file left behind by `create_new`.
-fn store_attachment_bytes_exclusively(
+/// The source is read before anything is created, so a failure opening or reading it writes
+/// nothing — there is no partial target for a retry to trip over.
+fn store_attachment_bytes_exclusively_on(
+    fs: &dyn tddy_fs::Fs,
     canonical_dir: &Path,
     safe_basename: &str,
     source: &Path,
 ) -> Result<PathBuf, Status> {
-    let (mut dest, target) = create_attachment_file_exclusively(canonical_dir, safe_basename)?;
+    let data = fs.read(source).map_err(|e| {
+        log::error!(
+            "copy_attachment_into_session: read source {} failed: {e}",
+            source.display()
+        );
+        Status::internal(format!("failed to store attachment: {e}"))
+    })?;
 
-    let mut source_file = match File::open(source) {
-        Ok(file) => file,
-        Err(e) => {
-            log::error!(
-                "copy_attachment_into_session: open source {} failed: {e}",
-                source.display()
-            );
-            remove_partial_attachment(&target);
-            return Err(Status::internal(format!("failed to store attachment: {e}")));
-        }
-    };
-
-    let bytes_copied = match io::copy(&mut source_file, &mut dest) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            log::error!(
-                "copy_attachment_into_session: copy {} -> {} failed: {e}",
-                source.display(),
-                target.display()
-            );
-            remove_partial_attachment(&target);
-            return Err(Status::internal(format!("failed to store attachment: {e}")));
-        }
-    };
+    let target = store_bytes_exclusively_on(fs, canonical_dir, safe_basename, &data)?;
 
     log::info!(
-        "copy_attachment_into_session: stored {} ({bytes_copied} byte(s))",
-        target.display()
+        "copy_attachment_into_session: stored {} ({} byte(s))",
+        target.display(),
+        data.len()
     );
     Ok(target)
 }
@@ -192,50 +181,46 @@ pub fn copy_attachment_into_session(
         source.display()
     );
 
+    copy_attachment_into_session_on(&tddy_fs::DiskFs, session_dir, source, basename)
+}
+
+/// [`copy_attachment_into_session`] through the filesystem port.
+pub fn copy_attachment_into_session_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    source: &Path,
+    basename: &str,
+) -> Result<PathBuf, Status> {
     // Untrusted basename: it must not introduce a separator or `..` that would climb out of the
     // attachments directory.
     let safe_basename = validate_attachment_basename(basename)?;
 
-    validate_attachment_source(source)?;
-    let canonical_attachments_dir = ensure_contained_attachments_dir(session_dir)?;
-    store_attachment_bytes_exclusively(&canonical_attachments_dir, safe_basename, source)
+    validate_attachment_source_on(fs, source)?;
+    let canonical_attachments_dir = ensure_contained_attachments_dir_on(fs, session_dir)?;
+    store_attachment_bytes_exclusively_on(fs, &canonical_attachments_dir, safe_basename, source)
 }
 
-/// Writes `data` into `artifacts/attachments/<basename>`, returning the written path.
+/// Writes `data` into `artifacts/attachments/<basename>`, returning the written path, through the
+/// filesystem port.
 ///
-/// The in-memory counterpart of [`copy_attachment_into_session`], for bytes that have no local file
-/// to copy from — a `HostDocumentRef` fetched from a peer daemon arrives as a byte buffer. Every
-/// guarantee of the copy path holds here: the basename must be a single safe segment, the
+/// The in-memory counterpart of [`copy_attachment_into_session_on`], for bytes that have no local
+/// file to copy from — a `HostDocumentRef` fetched from a peer daemon arrives as a byte buffer.
+/// Every guarantee of the copy path holds here: the basename must be a single safe segment, the
 /// attachments directory must resolve inside the canonical `artifacts/` root, the target is created
 /// exclusively so an existing attachment is refused with [`Status::failed_precondition`] rather than
 /// truncated, and a failed write removes the partial file so a retry is not blocked.
-pub fn write_attachment_bytes(
+pub fn write_attachment_bytes_on(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     basename: &str,
     data: &[u8],
 ) -> Result<PathBuf, Status> {
-    log::debug!(
-        "write_attachment_bytes: session_dir={} basename={basename:?} bytes={}",
-        session_dir.display(),
-        data.len()
-    );
-
     // Untrusted basename: it must not introduce a separator or `..` that would climb out of the
     // attachments directory.
     let safe_basename = validate_attachment_basename(basename)?;
 
-    let canonical_attachments_dir = ensure_contained_attachments_dir(session_dir)?;
-    let (mut dest, target) =
-        create_attachment_file_exclusively(&canonical_attachments_dir, safe_basename)?;
-
-    if let Err(e) = dest.write_all(data) {
-        log::error!(
-            "write_attachment_bytes: write {} failed: {e}",
-            target.display()
-        );
-        remove_partial_attachment(&target);
-        return Err(Status::internal(format!("failed to store attachment: {e}")));
-    }
+    let canonical_attachments_dir = ensure_contained_attachments_dir_on(fs, session_dir)?;
+    let target = store_bytes_exclusively_on(fs, &canonical_attachments_dir, safe_basename, data)?;
 
     log::info!(
         "write_attachment_bytes: stored {} ({} byte(s))",

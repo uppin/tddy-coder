@@ -78,6 +78,7 @@ fn a_context_host_allowing_a_read_to_take(budget: Duration) -> AContextHost {
         daemon_instance_id: "the-codebase-host".to_string(),
         context_scopes: Arc::new(TheCheckoutAt(worktree_root)),
         context_read_deadline: budget,
+        fs: Arc::new(tddy_fs::DiskFs),
     };
     AContextHost {
         _root: root,

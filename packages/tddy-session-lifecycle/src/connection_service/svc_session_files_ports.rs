@@ -129,6 +129,7 @@ impl DaemonSessionHost {
             // worktree build on this host cannot disagree about how long it may take — and the
             // budget an operator already tunes rather than a second key to discover.
             context_read_deadline: self.config.spawn_worker_request_timeout(),
+            fs: Arc::new(tddy_fs::DiskFs),
         }
     }
 }

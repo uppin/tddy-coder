@@ -157,6 +157,7 @@ async fn a_never_calculated_worktree_reports_none_status() {
         tmp.path().to_path_buf(),
         2,
         InstrumentedSizer::new().into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
     );
 
     // When the status of an untouched worktree is read
@@ -175,7 +176,12 @@ async fn calculating_a_worktree_transitions_none_to_calculating_to_cached() {
     let sizer = InstrumentedSizer::new();
     let path = wt("feat-a");
     sizer.set_size(&path, 4096);
-    let calc = WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.into_sizer());
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer.into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
+    );
     let mut updates = calc.subscribe(PROJECT);
     assert_eq!(calc.state(PROJECT, &path).status, WorktreeSizeStatus::None);
 
@@ -217,7 +223,12 @@ async fn the_semaphore_limits_concurrent_size_calculations_to_two() {
             4096
         })
     };
-    let calc = WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer);
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer,
+        Arc::new(tddy_fs::DiskFs),
+    );
 
     let paths = [wt("feat-a"), wt("feat-b"), wt("feat-c"), wt("feat-d")];
 
@@ -258,15 +269,23 @@ async fn a_cached_size_is_served_after_reload_without_recomputing() {
     let sizer = InstrumentedSizer::new();
     let path = wt("feat-a");
     sizer.set_size(&path, 4096);
-    let calc =
-        WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.clone().into_sizer());
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer.clone().into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
+    );
     calc.enqueue(PROJECT, &path).await;
     await_cached_size(&calc, &path, 4096).await;
     assert_eq!(sizer.calls_for(&path), 1);
 
     // When a fresh calculator is opened over the same persistence root
-    let reloaded =
-        WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.clone().into_sizer());
+    let reloaded = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer.clone().into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
+    );
 
     // Then the worktree reads back as Cached with its size, and the sizer is not invoked again
     let state = reloaded.state(PROJECT, &path);
@@ -288,8 +307,12 @@ async fn recalculating_one_worktree_leaves_the_others_untouched() {
     let b = wt("feat-b");
     sizer.set_size(&a, 4096);
     sizer.set_size(&b, 4096);
-    let calc =
-        WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.clone().into_sizer());
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer.clone().into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
+    );
     calc.enqueue(PROJECT, &a).await;
     calc.enqueue(PROJECT, &b).await;
     await_all_cached(&calc, &[a.clone(), b.clone()]).await;
@@ -328,7 +351,12 @@ async fn enqueuing_an_already_calculating_worktree_does_not_start_a_second_walk(
             4096
         })
     };
-    let calc = WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer);
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer,
+        Arc::new(tddy_fs::DiskFs),
+    );
     let path = wt("feat-a");
 
     // When the same worktree is enqueued a second time while its first walk is still Calculating
@@ -358,7 +386,12 @@ async fn the_project_snapshot_reports_every_known_worktree_state() {
     let b = wt("feat-b");
     sizer.set_size(&a, 4096);
     sizer.set_size(&b, 8192);
-    let calc = WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.into_sizer());
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer.into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
+    );
     calc.enqueue(PROJECT, &a).await;
     calc.enqueue(PROJECT, &b).await;
     await_all_cached(&calc, &[a.clone(), b.clone()]).await;
@@ -385,8 +418,12 @@ async fn a_published_cached_size_is_already_persisted_for_a_reload() {
     // Given a calculator whose updates are being watched
     let tmp = tempfile::tempdir().unwrap();
     let sizer = InstrumentedSizer::new();
-    let calc =
-        WorktreeSizeCalculator::with_sizer(tmp.path().to_path_buf(), 2, sizer.clone().into_sizer());
+    let calc = WorktreeSizeCalculator::with_sizer(
+        tmp.path().to_path_buf(),
+        2,
+        sizer.clone().into_sizer(),
+        Arc::new(tddy_fs::DiskFs),
+    );
     let mut updates = calc.subscribe(PROJECT);
 
     for i in 0..40u64 {
@@ -407,6 +444,7 @@ async fn a_published_cached_size_is_already_persisted_for_a_reload() {
             tmp.path().to_path_buf(),
             2,
             sizer.clone().into_sizer(),
+            Arc::new(tddy_fs::DiskFs),
         );
         let state = reloaded.state(PROJECT, &path);
         assert_eq!(

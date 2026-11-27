@@ -2,7 +2,6 @@ use crate::worktrees::paths_equal;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -88,14 +87,16 @@ pub struct WorktreeSizeCalculator {
     inner: Arc<Mutex<WorktreeSizeInner>>,
     /// Serializes read-modify-write of each project's persisted sizes file.
     persist_lock: Arc<Mutex<()>>,
+    fs: Arc<dyn tddy_fs::Fs>,
 }
 
 impl WorktreeSizeCalculator {
     /// Production constructor: uses the real best-effort directory walk as the sizer.
-    pub fn new(root: PathBuf, permits: usize) -> Self {
+    pub fn new(root: PathBuf, permits: usize, fs: Arc<dyn tddy_fs::Fs>) -> Self {
+        let walk_fs = Arc::clone(&fs);
         let sizer: Arc<dyn Fn(&Path) -> u64 + Send + Sync> =
-            Arc::new(directory_size_bytes_best_effort);
-        Self::with_sizer(root, permits, sizer)
+            Arc::new(move |path| directory_size_bytes_best_effort(&*walk_fs, path));
+        Self::with_sizer(root, permits, sizer, fs)
     }
 
     /// Constructor with an injectable sizer (used by tests to observe concurrency and gate walks).
@@ -103,6 +104,7 @@ impl WorktreeSizeCalculator {
         root: PathBuf,
         permits: usize,
         sizer: Arc<dyn Fn(&Path) -> u64 + Send + Sync>,
+        fs: Arc<dyn tddy_fs::Fs>,
     ) -> Self {
         info!(
             "WorktreeSizeCalculator::with_sizer root={:?} permits={}",
@@ -114,6 +116,7 @@ impl WorktreeSizeCalculator {
             semaphore: Arc::new(Semaphore::new(permits)),
             inner: Arc::new(Mutex::new(WorktreeSizeInner::default())),
             persist_lock: Arc::new(Mutex::new(())),
+            fs,
         }
     }
 
@@ -188,6 +191,7 @@ impl WorktreeSizeCalculator {
         let semaphore = Arc::clone(&self.semaphore);
         let inner = Arc::clone(&self.inner);
         let persist_lock = Arc::clone(&self.persist_lock);
+        let fs = Arc::clone(&self.fs);
         let root = self.root.clone();
         let project_id = project_id.to_string();
         let path = path.to_path_buf();
@@ -217,6 +221,7 @@ impl WorktreeSizeCalculator {
             // Persist before publishing `Cached`: a reader that sees the update and opens a fresh
             // calculator over the same root must find the size on disk.
             persist_worktree_size(
+                &*fs,
                 &root,
                 &persist_lock,
                 &project_id,
@@ -257,7 +262,8 @@ impl WorktreeSizeCalculator {
     pub fn snapshot(&self, project_id: &str) -> Vec<WorktreeSizeUpdate> {
         let mut merged: HashMap<PathBuf, WorktreeSizeState> = HashMap::new();
 
-        let cache = read_worktree_sizes_file(&project_sizes_file(&self.root, project_id));
+        let cache =
+            read_worktree_sizes_file(&*self.fs, &project_sizes_file(&self.root, project_id));
         for (path, persisted) in cache.sizes {
             merged.insert(
                 PathBuf::from(path),
@@ -300,7 +306,7 @@ impl WorktreeSizeCalculator {
 
     fn load_persisted_entry(&self, project_id: &str, path: &Path) -> Option<PersistedWorktreeSize> {
         let file = project_sizes_file(&self.root, project_id);
-        let cache = read_worktree_sizes_file(&file);
+        let cache = read_worktree_sizes_file(&*self.fs, &file);
         cache.sizes.get(&worktree_size_key(path)).cloned()
     }
 }
@@ -317,8 +323,11 @@ pub(crate) fn worktree_size_key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-pub(crate) fn read_worktree_sizes_file(file: &Path) -> WorktreeSizesCacheFile {
-    match fs::read_to_string(file) {
+pub(crate) fn read_worktree_sizes_file(
+    fs: &dyn tddy_fs::Fs,
+    file: &Path,
+) -> WorktreeSizesCacheFile {
+    match fs.read_to_string(file) {
         Ok(data) => serde_json::from_str(&data).unwrap_or_else(|e| {
             warn!("read_worktree_sizes_file: parse {:?}: {}", file, e);
             WorktreeSizesCacheFile::default()
@@ -332,6 +341,7 @@ pub(crate) fn read_worktree_sizes_file(file: &Path) -> WorktreeSizesCacheFile {
 }
 
 pub(crate) fn persist_worktree_size(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     persist_lock: &Mutex<()>,
     project_id: &str,
@@ -342,12 +352,12 @@ pub(crate) fn persist_worktree_size(
     let _guard = persist_lock.lock().unwrap();
     let file = project_sizes_file(root, project_id);
     if let Some(dir) = file.parent() {
-        if let Err(e) = fs::create_dir_all(dir) {
+        if let Err(e) = fs.create_dir_all(dir) {
             warn!("persist_worktree_size: create_dir_all {:?}: {}", dir, e);
             return;
         }
     }
-    let mut cache = read_worktree_sizes_file(&file);
+    let mut cache = read_worktree_sizes_file(fs, &file);
     cache.sizes.insert(
         worktree_size_key(path),
         PersistedWorktreeSize {
@@ -357,7 +367,7 @@ pub(crate) fn persist_worktree_size(
     );
     match serde_json::to_string_pretty(&cache) {
         Ok(json) => {
-            if let Err(e) = tddy_core::atomic_file::write_atomic(&file, json) {
+            if let Err(e) = fs.write_atomic(&file, json.as_bytes(), None) {
                 warn!("persist_worktree_size: write {:?}: {}", file, e);
             }
         }
@@ -365,34 +375,35 @@ pub(crate) fn persist_worktree_size(
     }
 }
 
-pub(crate) fn directory_size_bytes_best_effort(path: &Path) -> u64 {
+pub(crate) fn directory_size_bytes_best_effort(fs: &dyn tddy_fs::Fs, path: &Path) -> u64 {
     let walk_root = path.to_path_buf();
     let mut total = 0u64;
-    if let Ok(m) = fs::metadata(path) {
-        if m.is_file() {
-            return m.len();
+    // `metadata_follow`, as before: the question stays about the file itself.
+    if let Ok(m) = fs.metadata_follow(path) {
+        if m.kind == tddy_fs::FsKind::File {
+            return m.len;
         }
     }
     let mut stack = vec![walk_root.clone()];
     while let Some(p) = stack.pop() {
-        let read_dir = match fs::read_dir(&p) {
-            Ok(d) => d,
+        let entries = match fs.read_dir(&p) {
+            Ok(entries) => entries,
             Err(_) => continue,
         };
-        for ent in read_dir.flatten() {
-            let meta = match ent.metadata() {
+        for ent in entries {
+            // `metadata_follow`, as before: the walk follows a link.
+            let meta = match fs.metadata_follow(&ent) {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            if meta.is_dir() {
-                if paths_equal(&p, &walk_root)
-                    && ent.file_name().as_os_str() == std::ffi::OsStr::new(".worktrees")
+            if meta.kind == tddy_fs::FsKind::Dir {
+                if paths_equal(&p, &walk_root) && ent.file_name().is_some_and(|n| n == ".worktrees")
                 {
                     continue;
                 }
-                stack.push(ent.path());
+                stack.push(ent);
             } else {
-                total += meta.len();
+                total += meta.len;
             }
         }
     }

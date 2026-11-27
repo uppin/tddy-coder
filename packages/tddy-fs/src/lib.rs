@@ -57,6 +57,11 @@ pub trait Fs: Send + Sync + Debug {
     fn read_to_string(&self, path: &Path) -> io::Result<String>;
     /// Plain write (truncating). Prefer [`Fs::write_atomic`] for anything a crash must not lose.
     fn write(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
+    /// Create `path` holding `contents`, failing with [`io::ErrorKind::AlreadyExists`] when
+    /// anything — a file, directory or symlink — already exists there: an exclusive create, so
+    /// a concurrent creator cannot slip between the existence check and the creation. The loser
+    /// leaves the stored bytes untouched. Parents are not created; create them first.
+    fn create_new(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
     fn append(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
     /// Replace `path` with `contents` so a reader sees the whole old or the whole new file.
     ///
@@ -76,6 +81,10 @@ pub trait Fs: Send + Sync + Debug {
     /// generating a signing key against one data directory — the loser keeps the winner's key
     /// rather than publishing its own over it).
     fn hard_link(&self, original: &Path, link: &Path) -> io::Result<()>;
+    /// Copy the file at `from` to `to`, creating `to` or truncating it. Fails when `from` is
+    /// missing or is not a file. Parents are not created. On DiskFs this is `std::fs::copy`,
+    /// so the copy carries the source's mode; MemFs mints the copy with the default file mode.
+    fn copy(&self, from: &Path, to: &Path) -> io::Result<()>;
     fn remove_file(&self, path: &Path) -> io::Result<()>;
     /// Remove an empty directory, failing on a non-empty one: `remove_dir_all` would delete a
     /// directory the caller did not create (a failed bind's cleanup removing only what it made).

@@ -6,7 +6,7 @@ use tddy_rpc::Status;
 use tddy_sandbox::{
     context_reach, is_withheld_through_a_link, matches_context_globs, root_relative, ContextReach,
 };
-use tddy_worktree_service::worktree_files::{canonicalize_root, validate_rel_path_shape};
+use tddy_worktree_service::worktree_files::{canonicalize_root_on, validate_rel_path_shape};
 
 /// The walk's answer about the worktree ([`tddy_sandbox::context_reach`]), taken at most once per
 /// read and shared across a batch, because the batch is one read of one worktree — or handed in
@@ -107,6 +107,7 @@ impl<'a> WorktreeReach<'a> {
 /// blunt reason that a re-derivation is what went wrong: the rule was added to the walk alone, and
 /// the reader kept serving what the manifest had already refused to name.
 pub(super) fn resolve_allow_listed_context_file(
+    fs: &dyn tddy_fs::Fs,
     worktree_root: &Path,
     rel_path: &str,
     globs: &[&str],
@@ -126,10 +127,10 @@ pub(super) fn resolve_allow_listed_context_file(
     }
 
     // Now that the caller has been told the path is allow-listed, absence leaks nothing. As in the
-    // sibling reader this is `symlink_metadata`, so the question stays about a name inside the
+    // sibling reader this is `metadata` (no follow), so the question stays about a name inside the
     // worktree; a dangling link exists as a link and is refused below, on resolution.
     let joined = worktree_root.join(&rel_slashed);
-    if let Err(e) = std::fs::symlink_metadata(&joined) {
+    if let Err(e) = fs.metadata(&joined) {
         if e.kind() == std::io::ErrorKind::NotFound {
             log::debug!(
                 "resolve_allow_listed_context_file: allow-listed path {rel_path:?} is not on disk: {e}"
@@ -138,8 +139,8 @@ pub(super) fn resolve_allow_listed_context_file(
         }
     }
 
-    let canonical_root = canonicalize_root(worktree_root)?;
-    let canonical_file = joined.canonicalize().map_err(|e| {
+    let canonical_root = canonicalize_root_on(fs, worktree_root)?;
+    let canonical_file = fs.canonicalize(&joined).map_err(|e| {
         log::debug!("resolve_allow_listed_context_file: canonicalize {joined:?} failed: {e}");
         Status::not_found("context file not found")
     })?;

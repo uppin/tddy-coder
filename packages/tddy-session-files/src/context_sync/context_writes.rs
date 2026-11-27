@@ -30,6 +30,7 @@ use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 /// a real directory ([`prepare_context_write`]); a symlinked one is `PERMISSION_DENIED`, so a
 /// recreated link cannot carry a write outside the context dir.
 pub(super) fn write_context_file(
+    fs: &dyn tddy_fs::Fs,
     context_dir: &Path,
     rel_path: &str,
     bytes: &[u8],
@@ -48,7 +49,7 @@ pub(super) fn write_context_file(
     let target = prepare_context_write(context_dir, rel_path).map_err(write_refusal)?;
     // A path that held a link and now holds a file: the write must replace the link, not land in
     // whatever it pointed at — for a preamble file that would be another guidance file overwritten.
-    unlink_if_symlink(&target)?;
+    unlink_if_symlink_on(fs, &target)?;
 
     // Guidance is markdown by definition, so a `CLAUDE.md` whose bytes are not UTF-8 is not
     // guidance — and the preamble cannot be put in front of it. Writing it through anyway is the
@@ -75,7 +76,7 @@ pub(super) fn write_context_file(
         bytes.to_vec()
     };
 
-    std::fs::write(&target, payload)
+    fs.write(&target, &payload)
         .map_err(|e| Status::internal(format!("failed to write {target:?}: {e}")))
 }
 
@@ -92,6 +93,7 @@ pub(super) fn write_context_file(
 /// steps are counted from the parent it is named under, so that parent must be the directory it
 /// physically lands in.
 pub(super) fn write_context_link(
+    fs: &dyn tddy_fs::Fs,
     context_dir: &Path,
     rel_path: &str,
     target: &str,
@@ -106,13 +108,14 @@ pub(super) fn write_context_link(
         )));
     };
     let link = prepare_context_write(context_dir, &rel_path).map_err(write_refusal)?;
-    match std::fs::symlink_metadata(&link) {
-        Ok(metadata) if metadata.is_dir() => {
+    // `metadata`, as before: the walk does not follow a link, and a link is what lands here.
+    match fs.metadata(&link) {
+        Ok(m) if m.kind == tddy_fs::FsKind::Dir => {
             return Err(Status::internal(format!(
                 "cannot recreate the link {rel_path:?}: a directory is in its way"
             )))
         }
-        Ok(_) => std::fs::remove_file(&link).map_err(|e| {
+        Ok(_) => fs.remove_file(&link).map_err(|e| {
             Status::internal(format!(
                 "failed to replace {link:?} in the context dir: {e}"
             ))
@@ -142,9 +145,12 @@ fn write_refusal(e: std::io::Error) -> Status {
 
 /// Removes `path` when it is a symlink, so the write that follows replaces the link instead of
 /// going through it.
-fn unlink_if_symlink(path: &Path) -> Result<(), Status> {
-    match std::fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => std::fs::remove_file(path)
+fn unlink_if_symlink_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), Status> {
+    // `metadata`, as before: the question stays about the name itself, so a dangling link is
+    // still a link and still goes.
+    match fs.metadata(path) {
+        Ok(m) if m.kind == tddy_fs::FsKind::Symlink => fs
+            .remove_file(path)
             .map_err(|e| Status::internal(format!("failed to replace the link {path:?}: {e}"))),
         _ => Ok(()),
     }
@@ -175,6 +181,7 @@ fn unlink_if_symlink(path: &Path) -> Result<(), Status> {
 /// tree the repository still ships. The containment assertion canonicalizes the link's *parent*,
 /// not the link, so a link whose target is already gone is still removable.
 pub(super) fn remove_context_file(
+    fs: &dyn tddy_fs::Fs,
     context_dir: &Path,
     rel_path: &str,
     globs: &[&str],
@@ -209,12 +216,12 @@ pub(super) fn remove_context_file(
         .iter()
         .any(|file| file.to_string_lossy().replace('\\', "/") == rel_slashed.as_str())
     {
-        return write_context_file(context_dir, &rel_slashed, b"", preamble, guidance_files);
+        return write_context_file(fs, context_dir, &rel_slashed, b"", preamble, guidance_files);
     }
 
     let target = context_dir.join(&rel_slashed);
-    assert_within_context_dir(context_dir, &target)?;
-    match std::fs::remove_file(&target) {
+    assert_within_context_dir_on(fs, context_dir, &target)?;
+    match fs.remove_file(&target) {
         Ok(()) => {}
         // Already gone is the state this asked for.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -227,12 +234,12 @@ pub(super) fn remove_context_file(
 
     let mut parent = target.parent().map(Path::to_path_buf);
     while let Some(dir) = parent {
-        if dir == context_dir || assert_within_context_dir(context_dir, &dir).is_err() {
+        if dir == context_dir || assert_within_context_dir_on(fs, context_dir, &dir).is_err() {
             break;
         }
         // Only an *empty* directory goes; `remove_dir` failing on a non-empty one is how the walk
         // stops without having to list it first.
-        if std::fs::remove_dir(&dir).is_err() {
+        if fs.remove_dir(&dir).is_err() {
             break;
         }
         parent = dir.parent().map(Path::to_path_buf);
@@ -247,8 +254,12 @@ pub(super) fn remove_context_file(
 /// else. `path` is a file that may or may not exist by the time this is asked — an already-deleted
 /// one is the common case — so it is its *parent* that is canonicalized, which is the directory the
 /// unlink actually happens in.
-fn assert_within_context_dir(context_dir: &Path, path: &Path) -> Result<(), Status> {
-    let canonical_dir = context_dir.canonicalize().map_err(|e| {
+fn assert_within_context_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    path: &Path,
+) -> Result<(), Status> {
+    let canonical_dir = fs.canonicalize(context_dir).map_err(|e| {
         Status::internal(format!(
             "context dir {context_dir:?} is not accessible: {e}"
         ))
@@ -256,7 +267,7 @@ fn assert_within_context_dir(context_dir: &Path, path: &Path) -> Result<(), Stat
     let parent = path
         .parent()
         .ok_or_else(|| Status::invalid_argument(format!("{path:?} names no directory")))?;
-    let canonical_parent = parent.canonicalize().map_err(|e| {
+    let canonical_parent = fs.canonicalize(parent).map_err(|e| {
         log::debug!("context_sync: canonicalizing {parent:?} failed: {e}");
         Status::invalid_argument(format!(
             "{parent:?} is not a directory in the context dir: {e}"

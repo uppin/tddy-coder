@@ -52,18 +52,30 @@ pub fn read_worktree_file_bytes(
     rel_path: &str,
     max_bytes: u64,
 ) -> Result<Vec<u8>, Status> {
+    read_worktree_file_bytes_on(&tddy_fs::DiskFs, worktree_root, rel_path, max_bytes)
+}
+
+/// [`read_worktree_file_bytes`] through the filesystem port.
+pub fn read_worktree_file_bytes_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, Status> {
     log::debug!(
         "read_worktree_file_bytes: worktree_root={:?} rel_path={:?} max_bytes={}",
         worktree_root,
         rel_path,
         max_bytes
     );
-    let canonical_file = resolve_listed_worktree_file(worktree_root, rel_path)?;
+    let canonical_file = resolve_listed_worktree_file(fs, worktree_root, rel_path)?;
 
     // Measured and refused *before* the read, not after: the point of this reader is to hand back a
     // file a caller can reconstruct from, and a caller that asked for more than it can hold would
     // otherwise pay for the whole read to be told so.
-    let byte_size = std::fs::metadata(&canonical_file)
+    // `metadata_follow`, as before: the question stays about the file itself.
+    let byte_size = fs
+        .metadata_follow(&canonical_file)
         .map_err(|e| {
             log::error!(
                 "read_worktree_file_bytes: metadata {:?} failed: {}",
@@ -72,7 +84,7 @@ pub fn read_worktree_file_bytes(
             );
             Status::internal(format!("failed to size worktree file: {}", e))
         })?
-        .len();
+        .len;
     if byte_size > max_bytes {
         log::warn!(
             "read_worktree_file_bytes: refused {:?} at {} byte(s), over the {} byte cap",
@@ -88,7 +100,7 @@ pub fn read_worktree_file_bytes(
     // No truncation and no decoding: a shortened or re-encoded file is indistinguishable from a
     // correct one once it has been written, and this reader exists for callers reconstructing a
     // PNG, a UTF-16 document or a file holding one stray byte.
-    let bytes = std::fs::read(&canonical_file).map_err(|e| {
+    let bytes = fs.read(&canonical_file).map_err(|e| {
         log::error!(
             "read_worktree_file_bytes: read {:?} failed: {}",
             canonical_file,
@@ -112,12 +124,21 @@ pub fn list_worktree_directory_entries(
     worktree_root: &Path,
     rel_path: &str,
 ) -> Result<Vec<WorktreeEntry>, Status> {
+    list_worktree_directory_entries_on(&tddy_fs::DiskFs, worktree_root, rel_path)
+}
+
+/// [`list_worktree_directory_entries`] through the filesystem port.
+pub fn list_worktree_directory_entries_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+) -> Result<Vec<WorktreeEntry>, Status> {
     log::debug!(
         "list_worktree_directory_entries: worktree_root={:?} rel_path={:?}",
         worktree_root,
         rel_path
     );
-    let dir_prefix = validate_rel_path(worktree_root, rel_path)?;
+    let dir_prefix = validate_rel_path(fs, worktree_root, rel_path)?;
 
     let files = git_listed_files(worktree_root)?;
 
@@ -149,7 +170,7 @@ pub fn list_worktree_directory_entries(
     }));
     let dir_path = worktree_root.join(&dir_prefix);
     out.extend(file_names.into_iter().map(|name| {
-        let size_bytes = on_disk_size_bytes(&dir_path.join(&name));
+        let size_bytes = on_disk_size_bytes(fs, &dir_path.join(&name));
         WorktreeEntry {
             name,
             is_dir: false,
@@ -171,14 +192,23 @@ pub fn read_worktree_file_utf8(
     worktree_root: &Path,
     rel_path: &str,
 ) -> Result<WorktreeFileContent, Status> {
+    read_worktree_file_utf8_on(&tddy_fs::DiskFs, worktree_root, rel_path)
+}
+
+/// [`read_worktree_file_utf8`] through the filesystem port.
+pub fn read_worktree_file_utf8_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+) -> Result<WorktreeFileContent, Status> {
     log::debug!(
         "read_worktree_file_utf8: worktree_root={:?} rel_path={:?}",
         worktree_root,
         rel_path
     );
-    let canonical_file = resolve_listed_worktree_file(worktree_root, rel_path)?;
+    let canonical_file = resolve_listed_worktree_file(fs, worktree_root, rel_path)?;
 
-    let bytes = std::fs::read(&canonical_file).map_err(|e| {
+    let bytes = fs.read(&canonical_file).map_err(|e| {
         log::error!(
             "read_worktree_file_utf8: read {:?} failed: {}",
             canonical_file,
@@ -220,8 +250,12 @@ pub fn read_worktree_file_utf8(
 /// - a path that resolves outside the root is `PERMISSION_DENIED` even when git lists it, because
 ///   a tracked symlink is a listed path whose *target* is somebody else's file;
 /// - a path the filesystem does not hold is `NOT_FOUND`.
-fn resolve_listed_worktree_file(worktree_root: &Path, rel_path: &str) -> Result<PathBuf, Status> {
-    validate_rel_path(worktree_root, rel_path)?;
+fn resolve_listed_worktree_file(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+) -> Result<PathBuf, Status> {
+    validate_rel_path(fs, worktree_root, rel_path)?;
     let rel_slashed = rel_path.replace('\\', "/");
 
     // The listing is asked FIRST, and the order is a security property rather than a preference.
@@ -246,11 +280,11 @@ fn resolve_listed_worktree_file(worktree_root: &Path, rel_path: &str) -> Result<
     // deleted from the worktree but not yet staged. Saying NOT_FOUND here leaks nothing, because
     // the caller has already been told the path is listed.
     //
-    // `symlink_metadata`, so the question is only ever about a name inside the worktree — following
+    // `metadata`, so the question is only ever about a name inside the worktree — following
     // a link here would let a tracked symlink turn this answer into a report on somebody else's
     // file. A dangling link exists as a link and is refused further down, on resolution.
     let joined = worktree_root.join(&rel_slashed);
-    if let Err(e) = std::fs::symlink_metadata(&joined) {
+    if let Err(e) = fs.metadata(&joined) {
         if e.kind() == std::io::ErrorKind::NotFound {
             log::debug!(
                 "resolve_listed_worktree_file: listed path {:?} is not on disk: {}",
@@ -261,8 +295,8 @@ fn resolve_listed_worktree_file(worktree_root: &Path, rel_path: &str) -> Result<
         }
     }
 
-    let canonical_root = canonicalize_root(worktree_root)?;
-    let canonical_file = joined.canonicalize().map_err(|e| {
+    let canonical_root = canonicalize_root_on(fs, worktree_root)?;
+    let canonical_file = fs.canonicalize(&joined).map_err(|e| {
         log::debug!(
             "resolve_listed_worktree_file: canonicalize {:?} failed: {}",
             joined,
@@ -286,9 +320,10 @@ fn resolve_listed_worktree_file(worktree_root: &Path, rel_path: &str) -> Result<
 /// Size of a listed file as the filesystem reports it, following symlinks — a link's target is what
 /// a reader would actually pull, so that is the size a cap must be applied to. A path git lists but
 /// the filesystem no longer holds has no size to report and yields 0.
-fn on_disk_size_bytes(path: &Path) -> u64 {
-    match std::fs::metadata(path) {
-        Ok(metadata) => metadata.len(),
+fn on_disk_size_bytes(fs: &dyn tddy_fs::Fs, path: &Path) -> u64 {
+    // `metadata_follow`, as before: a link's target is what a reader would actually pull.
+    match fs.metadata_follow(path) {
+        Ok(metadata) => metadata.len,
         Err(e) => {
             log::warn!("on_disk_size_bytes: metadata {:?} unavailable: {}", path, e);
             0
@@ -302,7 +337,12 @@ fn on_disk_size_bytes(path: &Path) -> u64 {
 /// the very same rule; two spellings of "is this inside the worktree" is how one of them ends up
 /// being the lenient one.
 pub fn canonicalize_root(worktree_root: &Path) -> Result<PathBuf, Status> {
-    worktree_root.canonicalize().map_err(|e| {
+    canonicalize_root_on(&tddy_fs::DiskFs, worktree_root)
+}
+
+/// [`canonicalize_root`] through the filesystem port.
+pub fn canonicalize_root_on(fs: &dyn tddy_fs::Fs, worktree_root: &Path) -> Result<PathBuf, Status> {
+    fs.canonicalize(worktree_root).map_err(|e| {
         log::debug!(
             "canonicalize_root: canonicalize {:?} failed: {}",
             worktree_root,
@@ -315,13 +355,17 @@ pub fn canonicalize_root(worktree_root: &Path) -> Result<PathBuf, Status> {
 /// Validates `rel_path` (rejecting absolute paths, leading separators, and `..` traversal) and
 /// returns the directory prefix (empty for the root) with forward-slash separators. Also confirms
 /// the resolved path stays under the canonicalized worktree root.
-fn validate_rel_path(worktree_root: &Path, rel_path: &str) -> Result<String, Status> {
+fn validate_rel_path(
+    fs: &dyn tddy_fs::Fs,
+    worktree_root: &Path,
+    rel_path: &str,
+) -> Result<String, Status> {
     let rel_slashed = validate_rel_path_shape(rel_path)?;
 
-    let canonical_root = canonicalize_root(worktree_root)?;
+    let canonical_root = canonicalize_root_on(fs, worktree_root)?;
     if !rel_slashed.is_empty() {
         let joined = worktree_root.join(&rel_slashed);
-        if let Ok(canonical) = joined.canonicalize() {
+        if let Ok(canonical) = fs.canonicalize(&joined) {
             if !canonical.starts_with(&canonical_root) {
                 log::warn!(
                     "validate_rel_path: rejected path outside worktree: {:?} (root {:?})",

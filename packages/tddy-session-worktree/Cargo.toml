@@ -11,8 +11,12 @@ tddy-changeset = { path = "../tddy-changeset" }
 tddy-session-store = { path = "../tddy-session-store" }
 # The `git` plumbing the worktree is built on. Depends on no workspace crate.
 tddy-git = { path = "../tddy-git" }
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `work_queue_fixtures`: the sessions layout a PR stack lives in.
 tddy-changeset = { path = "../tddy-changeset", features = ["test-support"] }
 tempfile = "3"
