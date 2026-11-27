@@ -103,3 +103,10 @@ child stdio, pipe ends) stay on `libc`/`OwnedFd` and are recorded in the changes
 each crate's `tests/fs_port.rs`, materialize/walk/context behind `<fn>_on` seams, the runner
 and the app behind installed handle statics. Link creation/reading, ownership and fd acts
 stay on `libc` and are recorded in the changeset.
+
+`tddy-workflow`, `tddy-workflow-engine`, `tddy-workflow-recipes`, `tddy-changeset`,
+`tddy-tool-engine`, `tddy-task` and `tddy-actions` do theirs through the port too: guards in
+each crate's `tests/fs_port.rs`, session-file formats and the artifact writer behind
+`<fn>_on` seams, held handles on `BackendInvokeTask`, the hook structs, `SessionWorkQueues`,
+`StartLedger` and `LocalShell`. Temp files handed to an external process by path (`curl`
+for merge-pr) go through the disk port only and are recorded in the changeset.
