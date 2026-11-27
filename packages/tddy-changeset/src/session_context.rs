@@ -1,7 +1,6 @@
 //! Merge JSON into workflow session files for the `set-session-context` CLI.
 
 use anyhow::{bail, Context as AnyhowContext, Result};
-use std::fs;
 use std::path::Path;
 use tddy_graph::session::Session;
 
@@ -28,6 +27,16 @@ pub fn apply_session_context_merge(
     session_id: &str,
     patch: &serde_json::Value,
 ) -> Result<()> {
+    apply_session_context_merge_on(&tddy_fs::DiskFs, workflow_storage_dir, session_id, patch)
+}
+
+/// [`apply_session_context_merge`] through the filesystem port.
+pub fn apply_session_context_merge_on(
+    fs: &dyn tddy_fs::Fs,
+    workflow_storage_dir: &Path,
+    session_id: &str,
+    patch: &serde_json::Value,
+) -> Result<()> {
     log::info!(
         target: "tddy_core::session_context",
         "apply_session_context_merge: session_id={} dir={}",
@@ -42,7 +51,8 @@ pub fn apply_session_context_merge(
     }
 
     let path = workflow_storage_dir.join(format!("{}.session.json", session_id));
-    let raw = fs::read_to_string(&path)
+    let raw = fs
+        .read_to_string(&path)
         .with_context(|| format!("read session file {}", path.display()))?;
     let session: Session = serde_json::from_str(&raw)
         .with_context(|| format!("parse session JSON {}", path.display()))?;
@@ -55,7 +65,7 @@ pub fn apply_session_context_merge(
     session.context.merge_json_object_sync(obj);
 
     let out = serde_json::to_string_pretty(&session)?;
-    crate::atomic_file::write_atomic(&path, out)
+    fs.write_atomic(&path, out.as_bytes(), None)
         .with_context(|| format!("write session file {}", path.display()))?;
     log::info!(
         target: "tddy_core::session_context",

@@ -299,6 +299,15 @@ pub fn write_initial_tool_session_metadata(
     session_dir: &Path,
     opts: InitialToolSessionMetadataOpts,
 ) -> Result<(), crate::WorkflowError> {
+    write_initial_tool_session_metadata_on(&tddy_fs::DiskFs, session_dir, opts)
+}
+
+/// [`write_initial_tool_session_metadata`] through the filesystem port.
+pub fn write_initial_tool_session_metadata_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    opts: InitialToolSessionMetadataOpts,
+) -> Result<(), crate::WorkflowError> {
     let session_id = session_dir
         .file_name()
         .and_then(|n| n.to_str())
@@ -353,7 +362,7 @@ pub fn write_initial_tool_session_metadata(
         agent_conversations: Vec::new(),
         display_name: None,
     };
-    write_session_metadata(session_dir, &metadata)
+    write_session_metadata_on(fs, session_dir, &metadata)
 }
 
 /// Write session metadata to the session directory.
@@ -365,11 +374,20 @@ pub fn write_session_metadata(
     session_dir: &Path,
     metadata: &SessionMetadata,
 ) -> Result<(), crate::WorkflowError> {
+    write_session_metadata_on(&tddy_fs::DiskFs, session_dir, metadata)
+}
+
+/// [`write_session_metadata`] through the filesystem port.
+pub fn write_session_metadata_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    metadata: &SessionMetadata,
+) -> Result<(), crate::WorkflowError> {
     let path = session_dir.join(SESSION_METADATA_FILENAME);
     let contents = serde_yaml::to_string(metadata)
         .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))?;
-    crate::atomic_file::write_atomic_labelled(&path, contents)
-        .map_err(crate::WorkflowError::WriteFailed)
+    fs.write_atomic(&path, contents.as_bytes(), None)
+        .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))
 }
 
 /// Atomically update the `activity_status` field in an existing `.session.yaml`.
@@ -382,10 +400,19 @@ pub fn update_activity_status(
     session_dir: &Path,
     status: &str,
 ) -> Result<(), crate::WorkflowError> {
-    let mut metadata = read_session_metadata(session_dir)?;
+    update_activity_status_on(&tddy_fs::DiskFs, session_dir, status)
+}
+
+/// [`update_activity_status`] through the filesystem port.
+pub fn update_activity_status_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    status: &str,
+) -> Result<(), crate::WorkflowError> {
+    let mut metadata = read_session_metadata_on(fs, session_dir)?;
     metadata.activity_status = Some(status.to_string());
     metadata.updated_at = chrono::Utc::now().to_rfc3339();
-    write_session_metadata(session_dir, &metadata)
+    write_session_metadata_on(fs, session_dir, &metadata)
 }
 
 /// Set `pending_elicitation` in an existing `.session.yaml`, and say whether the session waits on a
@@ -398,19 +425,37 @@ pub fn set_pending_elicitation(
     session_dir: &Path,
     pending: bool,
 ) -> Result<(), crate::WorkflowError> {
-    let mut metadata = read_session_metadata(session_dir)?;
+    set_pending_elicitation_on(&tddy_fs::DiskFs, session_dir, pending)
+}
+
+/// [`set_pending_elicitation`] through the filesystem port.
+pub fn set_pending_elicitation_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    pending: bool,
+) -> Result<(), crate::WorkflowError> {
+    let mut metadata = read_session_metadata_on(fs, session_dir)?;
     if metadata.pending_elicitation == pending {
         return Ok(());
     }
     metadata.pending_elicitation = pending;
     metadata.updated_at = chrono::Utc::now().to_rfc3339();
-    write_session_metadata(session_dir, &metadata)
+    write_session_metadata_on(fs, session_dir, &metadata)
 }
 
 /// Read session metadata from the session directory.
 pub fn read_session_metadata(session_dir: &Path) -> Result<SessionMetadata, crate::WorkflowError> {
+    read_session_metadata_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_session_metadata`] through the filesystem port.
+pub fn read_session_metadata_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<SessionMetadata, crate::WorkflowError> {
     let path = session_dir.join(SESSION_METADATA_FILENAME);
-    let contents = std::fs::read_to_string(&path)
+    let contents = fs
+        .read_to_string(&path)
         .map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))?;
     serde_yaml::from_str(&contents).map_err(|e| crate::WorkflowError::WriteFailed(e.to_string()))
 }

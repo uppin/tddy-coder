@@ -63,7 +63,7 @@ impl AStackHost {
         changeset: Changeset,
     ) -> PathBuf {
         let dir = unified_session_dir_path(self.base(), session_id);
-        std::fs::create_dir_all(&dir).expect("session dir");
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &dir).expect("session dir");
         write_initial_tool_session_metadata(
             &dir,
             InitialToolSessionMetadataOpts {
@@ -141,7 +141,7 @@ pub struct ASessionDir {
 pub fn a_stack_session_dir() -> ASessionDir {
     let host = a_stack_host();
     let dir = unified_session_dir_path(host.base(), "orch");
-    std::fs::create_dir_all(&dir).expect("session dir");
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &dir).expect("session dir");
     write_initial_tool_session_metadata(
         &dir,
         InitialToolSessionMetadataOpts {
@@ -173,7 +173,7 @@ pub fn write_changeset_with_stack(
     changeset: Changeset,
     stack: Option<WorkQueue>,
 ) {
-    std::fs::create_dir_all(session_dir).expect("session dir");
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, session_dir).expect("session dir");
     if !session_dir
         .join(crate::session_metadata::SESSION_METADATA_FILENAME)
         .exists()

@@ -27,10 +27,23 @@ pub fn write_session_provider_account(
     session_dir: &Path,
     account: &SessionProviderAccount,
 ) -> Result<(), crate::WorkflowError> {
+    write_session_provider_account_on(&tddy_fs::DiskFs, session_dir, account)
+}
+
+/// [`write_session_provider_account`] through the filesystem port.
+pub fn write_session_provider_account_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    account: &SessionProviderAccount,
+) -> Result<(), crate::WorkflowError> {
     let yaml = serde_yaml::to_string(account).map_err(|e| {
         crate::WorkflowError::WriteFailed(format!("{SESSION_PROVIDER_ACCOUNT_FILENAME}: {e}"))
     })?;
-    std::fs::write(session_dir.join(SESSION_PROVIDER_ACCOUNT_FILENAME), yaml).map_err(|e| {
+    fs.write(
+        &session_dir.join(SESSION_PROVIDER_ACCOUNT_FILENAME),
+        yaml.as_bytes(),
+    )
+    .map_err(|e| {
         crate::WorkflowError::WriteFailed(format!("{SESSION_PROVIDER_ACCOUNT_FILENAME}: {e}"))
     })
 }
@@ -39,8 +52,16 @@ pub fn write_session_provider_account(
 pub fn read_session_provider_account(
     session_dir: &Path,
 ) -> Result<Option<SessionProviderAccount>, crate::WorkflowError> {
+    read_session_provider_account_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_session_provider_account`] through the filesystem port.
+pub fn read_session_provider_account_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<Option<SessionProviderAccount>, crate::WorkflowError> {
     let path = session_dir.join(SESSION_PROVIDER_ACCOUNT_FILENAME);
-    let contents = match std::fs::read_to_string(&path) {
+    let contents = match fs.read_to_string(&path) {
         Ok(contents) => contents,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {

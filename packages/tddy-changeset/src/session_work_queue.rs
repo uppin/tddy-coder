@@ -89,13 +89,20 @@ impl std::error::Error for SessionWorkQueueError {}
 /// Every session's queue on one host, addressed by session id.
 pub struct SessionWorkQueues {
     sessions_dir: PathBuf,
+    fs: Arc<dyn tddy_fs::Fs>,
 }
 
 impl SessionWorkQueues {
     /// `sessions_dir` is `<data>/sessions`.
     pub fn new(sessions_dir: impl Into<PathBuf>) -> Self {
+        Self::with_fs(sessions_dir, Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`SessionWorkQueues::new`] with the filesystem port the records run through.
+    pub fn with_fs(sessions_dir: impl Into<PathBuf>, fs: Arc<dyn tddy_fs::Fs>) -> Self {
         Self {
             sessions_dir: sessions_dir.into(),
+            fs,
         }
     }
 
@@ -108,7 +115,7 @@ impl SessionWorkQueues {
     ) -> Result<SessionWorkQueueRecord, SessionWorkQueueError> {
         let path = self.queue_path(session_id)?;
         with_record_lock(&path, || {
-            if path.exists() {
+            if self.fs.exists(&path) {
                 return Err(SessionWorkQueueError::AlreadyExists {
                     session_id: session_id.to_string(),
                 });
@@ -125,7 +132,7 @@ impl SessionWorkQueues {
                     ..Default::default()
                 },
             };
-            write_record(&path, &record)?;
+            write_record(&*self.fs, &path, &record)?;
             Ok(record)
         })
     }
@@ -135,7 +142,7 @@ impl SessionWorkQueues {
         &self,
         session_id: &str,
     ) -> Result<Option<SessionWorkQueueRecord>, SessionWorkQueueError> {
-        read_record(&self.queue_path(session_id)?)
+        read_record(&*self.fs, &self.queue_path(session_id)?)
     }
 
     /// Change `session_id`'s queue under its record lock; `NoQueue` when it owns none.
@@ -151,7 +158,7 @@ impl SessionWorkQueues {
     ) -> Result<SessionWorkQueueRecord, SessionWorkQueueError> {
         let path = self.queue_path(session_id)?;
         with_record_lock(&path, || {
-            let mut record = read_record(&path)?.ok_or_else(|| SessionWorkQueueError::NoQueue {
+            let mut record = read_record(&*self.fs, &path)?.ok_or_else(|| SessionWorkQueueError::NoQueue {
                 session_id: session_id.to_string(),
             })?;
             let before = record.queue.clone();
@@ -161,7 +168,7 @@ impl SessionWorkQueues {
                 return Ok(record);
             }
             record.queue.revision = before.revision + 1;
-            write_record(&path, &record)?;
+            write_record(&*self.fs, &path, &record)?;
             Ok(record)
         })
     }
@@ -171,7 +178,7 @@ impl SessionWorkQueues {
         &self,
         project_id: &str,
     ) -> Result<Vec<SessionWorkQueueRecord>, SessionWorkQueueError> {
-        let entries = match std::fs::read_dir(&self.sessions_dir) {
+        let entries = match self.fs.read_dir(&self.sessions_dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(source) => {
@@ -182,8 +189,8 @@ impl SessionWorkQueues {
             }
         };
         let mut found = Vec::new();
-        for entry in entries.flatten() {
-            if let Some(record) = read_record(&entry.path().join(WORK_QUEUE_FILE))? {
+        for entry_path in entries {
+            if let Some(record) = read_record(&*self.fs, &entry_path.join(WORK_QUEUE_FILE))? {
                 if record.project_id == project_id {
                     found.push(record);
                 }
@@ -228,24 +235,35 @@ pub fn starts_with_work_queue(with_work_queue: bool, session_role: Option<&str>)
 /// Delete the pre-queue project stack records (`<projects_dir>/*/stacks/`, records and `.op.json`
 /// journals). Returns how many project `stacks` directories were removed; idempotent.
 pub fn drop_old_project_stack_records(projects_dir: &Path) -> std::io::Result<usize> {
-    let entries = match std::fs::read_dir(projects_dir) {
+    drop_old_project_stack_records_on(&tddy_fs::DiskFs, projects_dir)
+}
+
+/// [`drop_old_project_stack_records`] through the filesystem port.
+pub fn drop_old_project_stack_records_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+) -> std::io::Result<usize> {
+    let entries = match fs.read_dir(projects_dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
         Err(e) => return Err(e),
     };
     let mut dropped = 0;
-    for entry in entries {
-        let stacks = entry?.path().join("stacks");
-        if stacks.is_dir() {
-            std::fs::remove_dir_all(&stacks)?;
+    for entry_path in entries {
+        let stacks = entry_path.join("stacks");
+        if matches!(fs.metadata_follow(&stacks).map(|m| m.kind), Ok(tddy_fs::FsKind::Dir)) {
+            fs.remove_dir_all(&stacks)?;
             dropped += 1;
         }
     }
     Ok(dropped)
 }
 
-fn read_record(path: &Path) -> Result<Option<SessionWorkQueueRecord>, SessionWorkQueueError> {
-    let text = match std::fs::read_to_string(path) {
+fn read_record(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+) -> Result<Option<SessionWorkQueueRecord>, SessionWorkQueueError> {
+    let text = match fs.read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(source) => {
@@ -263,17 +281,20 @@ fn read_record(path: &Path) -> Result<Option<SessionWorkQueueRecord>, SessionWor
         })
 }
 
-fn write_record(path: &Path, record: &SessionWorkQueueRecord) -> Result<(), SessionWorkQueueError> {
+fn write_record(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    record: &SessionWorkQueueRecord,
+) -> Result<(), SessionWorkQueueError> {
     let text = serde_yaml::to_string(record).map_err(|e| SessionWorkQueueError::Malformed {
         path: path.to_path_buf(),
         message: e.to_string(),
     })?;
-    tddy_session_store::atomic_file::write_atomic(path, text).map_err(|source| {
-        SessionWorkQueueError::Io {
+    fs.write_atomic(path, text.as_bytes(), None)
+        .map_err(|source| SessionWorkQueueError::Io {
             path: path.to_path_buf(),
             source,
-        }
-    })
+        })
 }
 
 /// The in-process lock of one record, shared by every handle in this process.

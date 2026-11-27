@@ -8,8 +8,7 @@
 //! retained bytes. It is replaced atomically, so a reader never sees half a recording.
 
 use std::io::{self};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 

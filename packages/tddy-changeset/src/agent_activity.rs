@@ -118,15 +118,20 @@ pub struct AgentActivityRecord {
 /// partial rows are not possible. Callers **must not** treat a failure here as fatal — log it
 /// and continue.
 pub fn append_agent_activity(session_dir: &Path, record: &AgentActivityRecord) -> io::Result<()> {
-    std::fs::create_dir_all(session_dir)?;
+    append_agent_activity_on(&tddy_fs::DiskFs, session_dir, record)
+}
+
+/// [`append_agent_activity`] through the filesystem port.
+pub fn append_agent_activity_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    record: &AgentActivityRecord,
+) -> io::Result<()> {
+    fs.create_dir_all(session_dir)?;
     let path = session_dir.join(AGENT_ACTIVITY_FILENAME);
     let mut line = serde_json::to_string(record).map_err(io::Error::other)?;
     line.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    file.write_all(line.as_bytes())
+    fs.append(&path, line.as_bytes())
 }
 
 /// Parse a raw JSON string (a tool's `input_json` / `result_json`) into the structured
@@ -263,7 +268,15 @@ fn lexically_normalized(path: &Path) -> PathBuf {
 /// Returns an empty `Vec` when the file does not exist (no activity recorded yet). Malformed
 /// lines are skipped with a warning; valid lines after them are still returned.
 pub fn read_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRecord>> {
-    let mut records = read_all_agent_activity(session_dir)?;
+    read_agent_activity_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_agent_activity`] through the filesystem port.
+pub fn read_agent_activity_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> io::Result<Vec<AgentActivityRecord>> {
+    let mut records = read_all_agent_activity_on(fs, session_dir)?;
     let skip = records.len().saturating_sub(AGENT_ACTIVITY_READ_CAP);
     records.drain(..skip);
     Ok(records)
@@ -273,7 +286,15 @@ pub fn read_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRe
 /// first-seen order. For a reader that pages through the whole history rather than showing its tail
 /// (`ReadSessionActivity`).
 pub fn read_all_agent_activity(session_dir: &Path) -> io::Result<Vec<AgentActivityRecord>> {
-    Ok(read_all_sequenced_agent_activity(session_dir)?
+    read_all_agent_activity_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_all_agent_activity`] through the filesystem port.
+pub fn read_all_agent_activity_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> io::Result<Vec<AgentActivityRecord>> {
+    Ok(read_all_sequenced_agent_activity_on(fs, session_dir)?
         .into_iter()
         .map(|call| call.record)
         .collect())
@@ -300,11 +321,19 @@ pub struct SequencedActivity {
 /// `PostToolUse` row carries no start time and may carry no input, so the call keeps its
 /// `PreToolUse` row's.
 pub fn read_all_sequenced_agent_activity(session_dir: &Path) -> io::Result<Vec<SequencedActivity>> {
+    read_all_sequenced_agent_activity_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_all_sequenced_agent_activity`] through the filesystem port.
+pub fn read_all_sequenced_agent_activity_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> io::Result<Vec<SequencedActivity>> {
     let path = session_dir.join(AGENT_ACTIVITY_FILENAME);
-    if !path.exists() {
+    if !fs.exists(&path) {
         return Ok(Vec::new());
     }
-    let contents = std::fs::read_to_string(&path)?;
+    let contents = fs.read_to_string(&path)?;
 
     let mut order: Vec<String> = Vec::new();
     let mut by_call: HashMap<String, SequencedActivity> = HashMap::new();
@@ -525,8 +554,7 @@ mod agent_activity_unit_tests {
         let good_b = a_completed_record("call-b", "Bash");
         let log_path = session_dir.join(AGENT_ACTIVITY_FILENAME);
         {
-            use std::io::Write;
-            let mut f = std::fs::File::create(&log_path).unwrap();
+                        let mut f = std::fs::File::create(&log_path).unwrap();
             writeln!(f, "{}", serde_json::to_string(&good_a).unwrap()).unwrap();
             writeln!(f, "{{not valid json}}").unwrap();
             writeln!(f, "{}", serde_json::to_string(&good_b).unwrap()).unwrap();

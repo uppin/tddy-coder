@@ -33,20 +33,38 @@ pub fn write_session_github_source(
     session_dir: &Path,
     source: SessionGithubSource,
 ) -> Result<(), crate::WorkflowError> {
+    write_session_github_source_on(&tddy_fs::DiskFs, session_dir, source)
+}
+
+/// [`write_session_github_source`] through the filesystem port.
+pub fn write_session_github_source_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    source: SessionGithubSource,
+) -> Result<(), crate::WorkflowError> {
     let yaml = serde_yaml::to_string(&source).map_err(|e| {
         crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
     })?;
-    std::fs::write(session_dir.join(SESSION_GITHUB_SOURCE_FILENAME), yaml).map_err(|e| {
-        crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
-    })
+    fs.write(&session_dir.join(SESSION_GITHUB_SOURCE_FILENAME), yaml.as_bytes())
+        .map_err(|e| {
+            crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
+        })
 }
 
 /// The source recorded for the session in `session_dir`; `None` when its start named none.
 pub fn read_session_github_source(
     session_dir: &Path,
 ) -> Result<Option<SessionGithubSource>, crate::WorkflowError> {
+    read_session_github_source_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_session_github_source`] through the filesystem port.
+pub fn read_session_github_source_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<Option<SessionGithubSource>, crate::WorkflowError> {
     let path = session_dir.join(SESSION_GITHUB_SOURCE_FILENAME);
-    let contents = match std::fs::read_to_string(&path) {
+    let contents = match fs.read_to_string(&path) {
         Ok(contents) => contents,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
