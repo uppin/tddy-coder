@@ -44,7 +44,7 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
 /// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
 /// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
 /// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
-const BELONGS_HERE: [&str; 41] = [
+const BELONGS_HERE: [&str; 42] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
