@@ -397,6 +397,8 @@ fn superseded(earlier: &AgentActivityRecord, later: AgentActivityRecord) -> Agen
 
 #[cfg(test)]
 mod agent_activity_unit_tests {
+    use std::io::Write as _;
+
     use super::*;
 
     fn a_completed_record(call_id: &str, tool_name: &str) -> AgentActivityRecord {

@@ -205,7 +205,7 @@ mod tests {
     use crate::github_pr_tools::GITHUB_PR_TOOLS_AVAILABLE_KEY;
     use crate::tdd_small::red::TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS;
     use crate::TddSmallRecipe;
-    use tddy_core::changeset::{read_changeset_on, write_changeset, write_changeset_on, Changeset};
+    use tddy_core::changeset::Changeset;
 
     /// A session directory holding the planning document merged red reads.
     fn a_session_with_a_prd() -> tempfile::TempDir {
