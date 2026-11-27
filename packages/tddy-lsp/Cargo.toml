@@ -23,6 +23,7 @@ lsp-types = "0.94"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
+tddy-fs = { path = "../tddy-fs" }
 tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
 
 [dev-dependencies]

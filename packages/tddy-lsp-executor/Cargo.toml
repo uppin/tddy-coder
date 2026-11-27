@@ -16,6 +16,7 @@ name = "fake_lsp"
 path = "../tddy-lsp/tests/bin/fake_lsp.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 # `index_backed::IndexChannel` is an async port (the daemon's registry dials asynchronously).
 async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }

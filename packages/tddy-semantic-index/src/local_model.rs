@@ -87,8 +87,14 @@ mod inference {
     impl LocalEmbedder {
         /// Load (fetching+caching on first use) the model weights under [`embedding_model_dir`].
         pub fn load(data_dir: &Path) -> anyhow::Result<Self> {
+            Self::load_on(&tddy_fs::DiskFs, data_dir)
+        }
+
+        /// [`LocalEmbedder::load`] through the filesystem port (the hub fetch itself
+        /// stays the hub client's, on the disk cache directory it manages).
+        pub fn load_on(fs: &dyn tddy_fs::Fs, data_dir: &Path) -> anyhow::Result<Self> {
             let cache_dir = embedding_model_dir(data_dir);
-            std::fs::create_dir_all(&cache_dir)
+            fs.create_dir_all(&cache_dir)
                 .with_context(|| format!("create model cache dir {}", cache_dir.display()))?;
 
             let api: Api = ApiBuilder::new()
@@ -108,7 +114,7 @@ mod inference {
                 .with_context(|| format!("fetch {MODEL_REPO}/model.safetensors"))?;
 
             let config: Config = serde_json::from_slice(
-                &std::fs::read(&config_path).context("read model config.json")?,
+                &fs.read(&config_path).context("read model config.json")?,
             )
             .context("parse model config.json")?;
             let tokenizer = Tokenizer::from_file(&tokenizer_path)

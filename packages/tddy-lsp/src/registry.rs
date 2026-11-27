@@ -312,7 +312,15 @@ impl LspRegistry {
 /// [`LspError::Io`] when a `Cargo.toml` on the walk cannot be read, since whether it declares a
 /// workspace is the whole question.
 pub fn workspace_root_for(target_dir: &Path) -> Result<PathBuf, LspError> {
-    nearest_workspace_root(target_dir, None)
+    workspace_root_for_on(&tddy_fs::DiskFs, target_dir)
+}
+
+/// [`workspace_root_for`] through the filesystem port.
+pub fn workspace_root_for_on(
+    fs: &dyn tddy_fs::Fs,
+    target_dir: &Path,
+) -> Result<PathBuf, LspError> {
+    nearest_workspace_root(fs, target_dir, None)
 }
 
 /// [`workspace_root_for`], searching no further out than `bound`.
@@ -326,6 +334,15 @@ pub fn workspace_root_for(target_dir: &Path) -> Result<PathBuf, LspError> {
 /// [`LspError::Io`] when `target_dir` is not beneath `bound`, or when a `Cargo.toml` on the walk
 /// cannot be read.
 pub fn workspace_root_within(target_dir: &Path, bound: &Path) -> Result<PathBuf, LspError> {
+    workspace_root_within_on(&tddy_fs::DiskFs, target_dir, bound)
+}
+
+/// [`workspace_root_within`] through the filesystem port.
+pub fn workspace_root_within_on(
+    fs: &dyn tddy_fs::Fs,
+    target_dir: &Path,
+    bound: &Path,
+) -> Result<PathBuf, LspError> {
     if !target_dir.starts_with(bound) {
         return Err(LspError::Io(format!(
             "{} is outside {}, so no workspace root beneath {} holds it",
@@ -334,22 +351,30 @@ pub fn workspace_root_within(target_dir: &Path, bound: &Path) -> Result<PathBuf,
             bound.display()
         )));
     }
-    nearest_workspace_root(target_dir, Some(bound))
+    nearest_workspace_root(fs, target_dir, Some(bound))
 }
 
-fn nearest_workspace_root(target_dir: &Path, bound: Option<&Path>) -> Result<PathBuf, LspError> {
+fn nearest_workspace_root(
+    fs: &dyn tddy_fs::Fs,
+    target_dir: &Path,
+    bound: Option<&Path>,
+) -> Result<PathBuf, LspError> {
     let mut nearest_manifest = None;
     for ancestor in target_dir.ancestors() {
         let manifest = ancestor.join("Cargo.toml");
-        if manifest.is_file() {
-            let text = std::fs::read_to_string(&manifest)
+        if fs
+            .metadata_follow(&manifest)
+            .map(|m| m.kind == tddy_fs::FsKind::File)
+            .unwrap_or(false)
+        {
+            let text = fs.read_to_string(&manifest)
                 .map_err(|err| LspError::Io(format!("{}: {err}", manifest.display())))?;
             if declares_workspace(&text) {
                 return Ok(ancestor.to_path_buf());
             }
             nearest_manifest.get_or_insert_with(|| ancestor.to_path_buf());
         }
-        if ancestor.join(".git").exists() || Some(ancestor) == bound {
+        if fs.exists(&ancestor.join(".git")) || Some(ancestor) == bound {
             break;
         }
     }
@@ -376,10 +401,21 @@ pub fn srcs_to_document_sources(
     root: &str,
     language_id: &str,
 ) -> Result<Vec<DocumentSource>, LspError> {
+    srcs_to_document_sources_on(&tddy_fs::DiskFs, repo_dir, srcs, root, language_id)
+}
+
+/// [`srcs_to_document_sources`] through the filesystem port.
+pub fn srcs_to_document_sources_on(
+    fs: &dyn tddy_fs::Fs,
+    repo_dir: &Path,
+    srcs: &[String],
+    root: &str,
+    language_id: &str,
+) -> Result<Vec<DocumentSource>, LspError> {
     let mut sources = Vec::with_capacity(srcs.len());
     for pattern in srcs {
         let path = repo_dir.join(root).join(pattern);
-        let text = std::fs::read_to_string(&path)
+        let text = fs.read_to_string(&path)
             .map_err(|err| LspError::Io(format!("{}: {err}", path.display())))?;
         sources.push(DocumentSource {
             uri: format!("file://{}", path.display()),

@@ -8,7 +8,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tddy_task::{TaskBody, TaskContext, TaskStatus};
 
-use crate::chunk::chunk_worktree;
+use crate::chunk::chunk_worktree_on;
 use crate::embed::Embedder;
 use crate::store::{IndexedChunk, SemanticIndexStore};
 
@@ -23,16 +23,19 @@ pub struct SemanticIndexTask<E: Embedder> {
     pub db_path: PathBuf,
     /// The embedder used to vectorize chunks (same one the query is embedded with at search time).
     pub embedder: E,
+    /// The filesystem port the walk and the store's parent directory run through.
+    pub fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl<E: Embedder> SemanticIndexTask<E> {
     /// Walk → chunk → embed → store. Any failure bubbles up as an error for `run` to surface as
     /// `Failed`.
     async fn index(&self) -> anyhow::Result<()> {
-        let chunks = chunk_worktree(&self.worktree_root).context("chunk worktree")?;
+        let chunks = chunk_worktree_on(&*self.fs, &self.worktree_root).context("chunk worktree")?;
 
         if let Some(parent) = self.db_path.parent() {
-            std::fs::create_dir_all(parent)
+            self.fs
+                .create_dir_all(parent)
                 .with_context(|| format!("create session dir {}", parent.display()))?;
         }
         let store = SemanticIndexStore::open(&self.db_path).await?;

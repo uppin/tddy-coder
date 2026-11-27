@@ -14043,7 +14043,6 @@ dependencies = [
  "tempfile",
  "tokenizers",
  "tokio",
- "walkdir",
 ]
 
 [[package]]

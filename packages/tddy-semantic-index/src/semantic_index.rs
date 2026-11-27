@@ -48,6 +48,7 @@ pub async fn run_semantic_index_blocking<E: crate::Embedder + 'static>(
         worktree_root: worktree_root.to_path_buf(),
         db_path: db_path.clone(),
         embedder,
+        fs: std::sync::Arc::new(tddy_fs::DiskFs),
     };
 
     let handle = registry

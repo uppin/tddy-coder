@@ -15,7 +15,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tddy_build::service::{build_list_json, BuildListQuery};
 use tddy_core::toolcall::lsp::{register_lsp_executor, LspExecutor, LspQuery};
-use tddy_lsp::registry::workspace_root_for;
+use tddy_lsp::registry::workspace_root_for_on;
 use tddy_lsp::{
     language_for_target_type, Diagnostic, DocumentSource, LanguageId, Location, LspAllowList,
     LspKey, LspRegistry, LspService, Position, Range, SymbolInfo,
@@ -41,13 +41,28 @@ pub fn register(
 pub struct TddyLspExecutor {
     allow: LspAllowList,
     registry: LspRegistry,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl TddyLspExecutor {
     /// Build an executor over `allow`, spawning servers on `task_registry`.
     pub fn new(allow: LspAllowList, task_registry: TaskRegistry, idle_timeout: Duration) -> Self {
+        Self::with_fs(allow, task_registry, idle_timeout, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`TddyLspExecutor::new`] with the filesystem port document reads run through.
+    pub fn with_fs(
+        allow: LspAllowList,
+        task_registry: TaskRegistry,
+        idle_timeout: Duration,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> Self {
         let registry = LspRegistry::new(allow.clone(), task_registry, idle_timeout);
-        Self { allow, registry }
+        Self {
+            allow,
+            registry,
+            fs,
+        }
     }
 
     /// The underlying registry (e.g. for an idle-reaper loop).
@@ -88,7 +103,7 @@ impl TddyLspExecutor {
             return Err(format!("language '{}' is not allowed", language.as_str()));
         }
         let key = LspKey {
-            root: workspace_root_for(repo_dir).map_err(|e| e.to_string())?,
+            root: workspace_root_for_on(&*self.fs, repo_dir).map_err(|e| e.to_string())?,
             language: language.clone(),
         };
         Ok((language, key))
@@ -102,7 +117,10 @@ impl TddyLspExecutor {
     ) -> Result<(Arc<LspService>, String), String> {
         let (language, key) = self.resolve(repo_dir, &query.target)?;
         let uri = file_uri(repo_dir, &query.file);
-        let text = std::fs::read_to_string(repo_dir.join(&query.file)).unwrap_or_default();
+        let text = self
+            .fs
+            .read_to_string(&repo_dir.join(&query.file))
+            .unwrap_or_default();
         let srcs = [DocumentSource {
             uri: uri.clone(),
             language_id: language.as_str().to_string(),
@@ -197,7 +215,7 @@ impl LspExecutor for TddyLspExecutor {
             .first_available_language(repo_dir)
             .ok_or_else(|| "no language server available for this workspace".to_string())?;
         let key = LspKey {
-            root: workspace_root_for(repo_dir).map_err(|e| e.to_string())?,
+            root: workspace_root_for_on(&*self.fs, repo_dir).map_err(|e| e.to_string())?,
             language,
         };
         block_on(async {

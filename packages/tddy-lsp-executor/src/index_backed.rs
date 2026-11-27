@@ -51,6 +51,7 @@ pub struct IndexLspExecutor {
     /// The languages beyond Rust the index serves — the registry the host built it over. `None`
     /// unless [`IndexLspExecutor::with_supports`] says otherwise: Rust only.
     supports: Option<Arc<SupportRegistry>>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl IndexLspExecutor {
@@ -60,7 +61,15 @@ impl IndexLspExecutor {
         Self {
             index,
             supports: None,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
+    }
+
+    /// The same executor, reading file lines through `fs` instead of the disk.
+    #[must_use]
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     /// Available on an extension-only worktree too when `supports` — the registry the host built
@@ -108,7 +117,7 @@ impl LspExecutor for IndexLspExecutor {
                 .await
                 .map_err(message_of)?
                 .into_inner();
-            let mut columns = Columns::within(repo_dir);
+            let mut columns = Columns::within(&*self.fs, repo_dir);
             let diagnostics = answered
                 .diagnostics
                 .iter()
@@ -186,7 +195,7 @@ impl LspExecutor for IndexLspExecutor {
                 .map_err(message_of)
         })?
         .into_inner();
-        let mut columns = Columns::within(repo_dir);
+        let mut columns = Columns::within(&*self.fs, repo_dir);
         let symbols = answered
             .symbols
             .iter()
@@ -241,7 +250,7 @@ impl IndexLspExecutor {
         query: &LspQuery,
     ) -> Result<PositionRequest, String> {
         let file = bind_to_session_worktree(repo_dir, &query.file)?;
-        let column = byte_column(&repo_dir.join(&file), query.line, query.character)?;
+        let column = byte_column_on(&*self.fs, &repo_dir.join(&file), query.line, query.character)?;
         Ok(PositionRequest {
             workspace_root: repo_dir.display().to_string(),
             file,
@@ -284,7 +293,7 @@ impl IndexLspExecutor {
             answered.map_err(message_of)
         })?;
         let (state, locations) = answered;
-        let mut columns = Columns::within(repo_dir);
+        let mut columns = Columns::within(&*self.fs, repo_dir);
         let locations = locations
             .iter()
             .map(|location| Ok(location_json(&columns.lsp_location(location)?)))
@@ -348,7 +357,12 @@ fn severity_of(severity: u32) -> Result<u8, String> {
 
 /// The text of one line of `path`, without its terminator.
 fn line_of(path: &Path, line: u32) -> Result<String, String> {
-    let text = std::fs::read_to_string(path)
+    line_of_on(&tddy_fs::DiskFs, path, line)
+}
+
+/// [`line_of`] through the filesystem port.
+fn line_of_on(fs: &dyn tddy_fs::Fs, path: &Path, line: u32) -> Result<String, String> {
+    let text = fs.read_to_string(path)
         .map_err(|err| format!("{} cannot be read: {err}", path.display()))?;
     text.split('\n')
         .nth(line as usize)
@@ -359,7 +373,17 @@ fn line_of(path: &Path, line: u32) -> Result<String, String> {
 /// The zero-based byte offset in line `line` of `path` that the zero-based UTF-16 column `column`
 /// names — the tools speak LSP's UTF-16 columns, the index bytes.
 fn byte_column(path: &Path, line: u32, column: u32) -> Result<u32, String> {
-    let text = line_of(path, line)?;
+    byte_column_on(&tddy_fs::DiskFs, path, line, column)
+}
+
+/// [`byte_column`] through the filesystem port.
+fn byte_column_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    line: u32,
+    column: u32,
+) -> Result<u32, String> {
+    let text = line_of_on(fs, path, line)?;
     let mut units = 0;
     for (offset, character) in text.char_indices() {
         if units >= column {
@@ -376,13 +400,15 @@ fn byte_column(path: &Path, line: u32, column: u32) -> Result<u32, String> {
 struct Columns<'a> {
     worktree: &'a Path,
     lines: HashMap<(PathBuf, u32), String>,
+    fs: &'a dyn tddy_fs::Fs,
 }
 
 impl<'a> Columns<'a> {
-    fn within(worktree: &'a Path) -> Self {
+    fn within(fs: &'a dyn tddy_fs::Fs, worktree: &'a Path) -> Self {
         Self {
             worktree,
             lines: HashMap::new(),
+            fs,
         }
     }
 
@@ -423,7 +449,7 @@ impl<'a> Columns<'a> {
         let line = position.line - 1;
         let key = (path.to_path_buf(), line);
         if !self.lines.contains_key(&key) {
-            self.lines.insert(key.clone(), line_of(path, line)?);
+            self.lines.insert(key.clone(), line_of_on(self.fs, path, line)?);
         }
         let text = &self.lines[&key];
         let prefix = text.get(..(position.column - 1) as usize).ok_or_else(|| {
