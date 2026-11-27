@@ -9,7 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_fs::Fs as _;
 
 use super::TmuxError;
 

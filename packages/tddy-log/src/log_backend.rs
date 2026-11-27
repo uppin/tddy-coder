@@ -409,17 +409,19 @@ fn open_log_file(path: &Path) -> Result<Arc<dyn tddy_fs::Fs>, std::io::Error> {
     Ok(fs)
 }
 
+/// An open log file: where it is, and the port it is appended through.
+type LogFileHandle = (PathBuf, Arc<dyn tddy_fs::Fs>);
+
 static FILE_OUTPUTS: once_cell::sync::Lazy<
     Mutex<std::collections::HashMap<PathBuf, Arc<dyn tddy_fs::Fs>>>,
 > = once_cell::sync::Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 /// Legacy: for backward compat during transition.
-static DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<(PathBuf, Arc<dyn tddy_fs::Fs>)>>> =
+static DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<LogFileHandle>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
 
-static WEBRTC_DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<
-    Mutex<Option<(PathBuf, Arc<dyn tddy_fs::Fs>)>>,
-> = once_cell::sync::Lazy::new(|| Mutex::new(None));
+static WEBRTC_DEBUG_OUTPUT_FILE: once_cell::sync::Lazy<Mutex<Option<LogFileHandle>>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(None));
 
 fn format_log_line(record: &Record, format_tpl: Option<&str>) -> String {
     let tpl = format_tpl.unwrap_or(DEFAULT_LOG_FORMAT);

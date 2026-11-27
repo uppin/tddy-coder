@@ -166,6 +166,7 @@ fn identified_rows(
 }
 
 /// The rows of every file declaring `parent_id` as its parent, depth-first, siblings by id.
+#[allow(clippy::too_many_arguments)]
 fn spawned_rows<'a>(
     fs: &dyn tddy_fs::Fs,
     parent_id: &str,
@@ -222,6 +223,7 @@ fn header_string(header: &[serde_json::Value], field: &FieldPath) -> Option<Stri
 }
 
 /// The child conversations of `parent_file`, each with its own descendants, in sibling order.
+#[allow(clippy::too_many_arguments)]
 fn children_of(
     fs: &dyn tddy_fs::Fs,
     parent_file: &Path,
