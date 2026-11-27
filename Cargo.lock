@@ -15117,6 +15117,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tddy-code-restructuring",
+ "tddy-fs",
  "tddy-lsp",
  "tddy-session-store",
  "tddy-task",

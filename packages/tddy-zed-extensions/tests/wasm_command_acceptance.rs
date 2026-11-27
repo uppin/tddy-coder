@@ -15,7 +15,7 @@ use pretty_assertions::assert_eq;
 use serde_json::json;
 use tddy_lsp::LaunchSpec;
 use tddy_zed_extensions::server::client_capabilities;
-use tddy_zed_extensions::wasm::download_refusal;
+use tddy_zed_extensions::wasm::{download_refusal, WasmExtension, CALL_DEADLINE};
 use tddy_zed_extensions::{
     choose_server, install_from_path, set_wasm_enabled, ExtensionError, ExtensionSettings,
     ExtensionsDir, Index, InstallOutcome, ServerChoice, WasmCommandError, WasmHost,
@@ -37,15 +37,7 @@ fn the_choice_through_the_wasm(
     worktree: &AWorktree,
     choice: ServerChoice,
 ) -> Result<ServerChoice, WasmCommandError> {
-    let mut wasm = host
-        .load_opted_in(
-            &the_index_entry(true),
-            &installed.extension_dir(),
-            &a_rust_lib_built_for("0.6.0"),
-            &ExtensionSettings::default(),
-        )
-        .expect("the opted-in fixture loads")
-        .expect("an opted-in extension with an extension.wasm is loaded");
+    let mut wasm = a_loaded_fixture_wasm(host, installed);
     choose_server(
         &installed.manifest(),
         &demo_toml_of(installed),
@@ -53,6 +45,19 @@ fn the_choice_through_the_wasm(
         Some(&mut wasm),
         &worktree.as_wasm_worktree(),
     )
+}
+
+/// The fixture's WASM loaded through `host`: the piece of the choice that pays for the module's
+/// compilation, before any deadline-carrying call begins.
+fn a_loaded_fixture_wasm(host: &WasmHost, installed: &AnInstalledWasmExtension) -> WasmExtension {
+    host.load_opted_in(
+        &the_index_entry(true),
+        &installed.extension_dir(),
+        &a_rust_lib_built_for("0.6.0"),
+        &ExtensionSettings::default(),
+    )
+    .expect("the opted-in fixture loads")
+    .expect("an opted-in extension with an extension.wasm is loaded")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -199,20 +204,23 @@ fn a_looping_call_is_stopped_after_the_deadline() {
     let host = WasmHost::new()
         .expect("a host")
         .with_deadline(A_SHORT_DEADLINE);
+    let mut wasm = a_loaded_fixture_wasm(&host, &installed);
 
-    // When the language's server is chosen
+    // When the language's server is chosen — the clock covers the call alone, not the module
+    // load before it, whose compilation cost says nothing about the deadline
     let started = Instant::now();
-    let stopped = the_choice_through_the_wasm(
-        &host,
-        &installed,
-        &worktree,
+    let stopped = choose_server(
+        &installed.manifest(),
+        &demo_toml_of(&installed),
         installed.unconfigured(LOOPING_LS),
+        Some(&mut wasm),
+        &worktree.as_wasm_worktree(),
     );
     let took = started.elapsed();
 
     // Then the call is stopped and reported, long before anything else would end it (R5)
     assert_eq!(
-        (stopped, took < Duration::from_secs(5)),
+        (stopped, took < CALL_DEADLINE),
         (
             Err(WasmCommandError::DeadlineExceeded {
                 extension: WASM_FIXTURE.to_string(),
