@@ -171,7 +171,7 @@ impl LaunchSessions {
             .await?;
         // A worktree kept after the delete (`keep_worktree_on_delete`) must not keep pointing a
         // shell-run `tddy-tools` at a session that is gone.
-        remove_session_pointer(session_id, &sessions_base).await;
+        remove_session_pointer(&*self.fs, session_id, &sessions_base).await;
         let projects_dir_opt = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
@@ -373,9 +373,9 @@ impl LaunchSessions {
     }
 }
 
-async fn remove_session_pointer(session_id: &str, sessions_base: &std::path::Path) {
+async fn remove_session_pointer(fs: &dyn tddy_fs::Fs, session_id: &str, sessions_base: &std::path::Path) {
     let session_dir = unified_session_dir_path(sessions_base, session_id);
-    remove_recorded_session_pointer(&session_dir).await;
+    remove_recorded_session_pointer(fs, &session_dir).await;
 }
 
 /// The pointer host a session's record names: its target when it has one (the agent ran there),
@@ -392,12 +392,13 @@ fn pointer_host_of(
 /// Remove the session pointer ([`crate::cli_session_pointer`]) from the worktree the session in
 /// `session_dir` records, if it records one — on the target it records (its session `target`, or
 /// its `ssh_config_host`, reached through the ssh client `ssh`) when it records one.
-pub(crate) async fn remove_recorded_session_pointer(session_dir: &Path) {
+pub(crate) async fn remove_recorded_session_pointer(fs: &dyn tddy_fs::Fs, session_dir: &Path) {
     let Ok(metadata) = read_session_metadata(session_dir) else {
         return;
     };
     if let Some(worktree) = &metadata.repo_path {
         crate::cli_session_pointer::remove_session_pointer(
+            fs,
             Path::new(worktree),
             &pointer_host_of(&metadata),
         )
@@ -451,12 +452,13 @@ pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::Sessi
 
 /// [`remove_recorded_session_pointer`], reaching an ssh target through the ssh client `ssh`.
 #[allow(dead_code)]
-pub(crate) async fn remove_recorded_session_pointer_through(session_dir: &Path, ssh: &Path) {
+pub(crate) async fn remove_recorded_session_pointer_through(fs: &dyn tddy_fs::Fs, session_dir: &Path, ssh: &Path) {
     let Ok(metadata) = read_session_metadata(session_dir) else {
         return;
     };
     if let Some(worktree) = metadata.repo_path {
         crate::cli_session_pointer::remove_session_pointer(
+            fs,
             Path::new(&worktree),
             &crate::cli_session_pointer::PointerHost::through(
                 ssh,

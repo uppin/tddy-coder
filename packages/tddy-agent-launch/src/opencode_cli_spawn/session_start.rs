@@ -55,6 +55,8 @@ pub(crate) struct CliSessionStart<'a> {
     /// What the start reads its owner's vault with: the provider account and the commit identity.
     pub account_access: &'a SessionAccountAccess,
     pub route_sources: &'a RouteSources,
+    /// The filesystem the start reads and writes through.
+    pub fs: std::sync::Arc<dyn tddy_fs::Fs>,
     pub progress: &'a AttachmentProgressSink,
     /// Run the harness inside a tmux session as the session's OS user
     /// (`StartSessionRequest.run_in_tmux`, `#tmux-agent` 3/3).

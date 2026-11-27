@@ -1,6 +1,11 @@
 //! Unit tests: a worktree made ready for a launch's per-session hooks — on this host, and through a
 //! remote shell (driven by `LocalShell`, which runs the same commands a target would).
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -84,7 +89,7 @@ async fn the_daemons_shared_hooks_another_session_left_are_removed_before_the_la
     the_daemon_wrote_shared_hooks_for(worktree.path(), AN_ORCHESTRATOR, serde_json::json!({}));
 
     // When the home session's launch prepares it
-    prepare_worktree_for_session_hooks(
+    prepare_worktree_for_session_hooks(&tddy_fs::DiskFs, 
         &the_claude_spec(),
         worktree.path(),
         &slots_with_the_hooks_of(worktree.path(), THE_HOME_SESSION),
@@ -118,7 +123,7 @@ async fn the_operators_own_settings_in_the_shared_file_are_kept() {
     );
 
     // When a launch prepares the worktree
-    prepare_worktree_for_session_hooks(
+    prepare_worktree_for_session_hooks(&tddy_fs::DiskFs, 
         &the_claude_spec(),
         worktree.path(),
         &slots_with_the_hooks_of(worktree.path(), THE_HOME_SESSION),
@@ -143,7 +148,7 @@ async fn a_launch_with_no_session_hooks_file_leaves_the_worktree_alone() {
     the_daemon_wrote_shared_hooks_for(worktree.path(), AN_ORCHESTRATOR, serde_json::json!({}));
 
     // When it prepares the worktree
-    prepare_worktree_for_session_hooks(
+    prepare_worktree_for_session_hooks(&tddy_fs::DiskFs, 
         &the_claude_spec(),
         worktree.path(),
         &RenderedSlots::default(),
@@ -165,7 +170,7 @@ async fn on_a_target_the_shared_hooks_are_released_and_the_hooks_directory_exclu
     the_daemon_wrote_shared_hooks_for(worktree.path(), AN_ORCHESTRATOR, serde_json::json!({}));
 
     // When a launch prepares it through the target's shell
-    prepare_worktree_for_session_hooks(
+    prepare_worktree_for_session_hooks(&tddy_fs::DiskFs, 
         &the_claude_spec(),
         worktree.path(),
         &slots_with_the_hooks_of(worktree.path(), THE_HOME_SESSION),
@@ -188,7 +193,7 @@ async fn on_a_target_with_no_shared_file_only_the_exclude_is_added() {
 
     // When a launch prepares it, twice
     for _ in 0..2 {
-        prepare_worktree_for_session_hooks(
+        prepare_worktree_for_session_hooks(&tddy_fs::DiskFs, 
             &the_claude_spec(),
             worktree.path(),
             &slots_with_the_hooks_of(worktree.path(), THE_HOME_SESSION),

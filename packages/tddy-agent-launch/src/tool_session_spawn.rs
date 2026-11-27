@@ -97,7 +97,7 @@ impl LaunchSessions {
             })
             .await?;
         }
-        crate::start_request_checks::record_requested_github_source(
+        crate::start_request_checks::record_requested_github_source(&*self.fs, 
             &req,
             &tddy_core::session_lifecycle::unified_session_dir_path(
                 &tddy_daemon_kernel::user_paths::sessions_base_for_user(

@@ -123,6 +123,7 @@ pub(super) struct HarnessRemote {
 /// systemd daemon's own `PATH` is minimal). In tmux (`run.in_tmux`) the spec's rendered argv runs in
 /// a session of its own, re-attached on a resume when alive.
 pub(super) async fn launch(
+    fs: &dyn tddy_fs::Fs,
     cli_manager: &Arc<CliSessionManager>,
     session: HarnessSession<'_>,
     launch: HarnessSpecLaunch<'_>,
@@ -174,6 +175,7 @@ pub(super) async fn launch(
             None => on_exit,
         };
         let launched = launch_on_target(
+            fs,
             agent,
             params,
             slots,
@@ -207,6 +209,7 @@ pub(super) async fn launch(
             );
             // The transcript's `tail` lives as long as the session's hook log on the target.
             follow_the_transcript(
+                fs,
                 agent,
                 &followers,
                 TranscriptPlace::Target {
@@ -247,6 +250,7 @@ pub(super) async fn launch(
         // An agent in tmux on this host outlives its client: its follower is stopped with the
         // session (stop, delete), not with a terminal.
         follow_the_transcript(
+            fs,
             agent,
             &followers,
             TranscriptPlace::Host,
@@ -265,6 +269,7 @@ pub(super) async fn launch(
         followers.delivery.is_some() && agent.spec.activity().followed_transcript().is_some();
     let on_exit = if follows_transcript {
         follow_the_transcript(
+            fs,
             agent,
             &followers,
             TranscriptPlace::Host,

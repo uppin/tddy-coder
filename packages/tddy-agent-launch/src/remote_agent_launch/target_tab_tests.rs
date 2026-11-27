@@ -1,6 +1,11 @@
 //! Unit tests: the remote command of a shell tab on a target ([`target_shell_tab_command`]) enters
 //! the worktree and becomes the target's login shell, writing nothing there first.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::path::{Path, PathBuf};
 
 use pretty_assertions::assert_eq;

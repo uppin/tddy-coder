@@ -1,5 +1,10 @@
 //! A split agent's pointer, placed in its context dir and removed when it exits (`#agent-tools 25/28`).
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Arc, Mutex};
 

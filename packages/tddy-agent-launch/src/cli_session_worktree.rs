@@ -55,6 +55,7 @@ pub(crate) struct CliWorktree {
 /// stack node it materializes, or adopt the client-supplied `repo_path` directly (not
 /// daemon-managed; never removed on session end).
 pub(crate) async fn provision_cli_worktree(
+    fs: &dyn tddy_fs::Fs,
     start: &CliWorktreeStart<'_>,
     work_queue_parent: &SpawnWorkQueueParent<'_>,
     progress: &AttachmentProgressSink,
@@ -85,6 +86,7 @@ pub(crate) async fn provision_cli_worktree(
                 .await?;
             progress.begin_phase(StartStep::Worktree);
             let path = cut_worktree(
+                fs,
                 start,
                 &repo_root,
                 &project.git_url,
@@ -113,13 +115,14 @@ pub(crate) async fn provision_cli_worktree(
             })
         }
         WorktreeSource::RepoPath(path) => {
-            let canonical = std::fs::canonicalize(&path).map_err(|e| {
+            let canonical = fs.canonicalize(&path).map_err(|e| {
                 Status::invalid_argument(format!(
                     "repo_path {} is not accessible: {e}",
                     path.display()
                 ))
             })?;
-            if !canonical.is_dir() {
+            // `metadata_follow`, as before: `is_dir` follows a link.
+            if !matches!(fs.metadata_follow(&canonical), Ok(m) if m.kind == tddy_fs::FsKind::Dir) {
                 return Err(Status::invalid_argument(format!(
                     "repo_path {} is not a directory",
                     canonical.display()
@@ -140,6 +143,7 @@ pub(crate) async fn provision_cli_worktree(
 }
 
 async fn cut_worktree(
+    fs: &dyn tddy_fs::Fs,
     start: &CliWorktreeStart<'_>,
     repo_root: &Path,
     git_url: &str,
@@ -150,7 +154,7 @@ async fn cut_worktree(
         tddy_core::select_worktree_base_ref(start.selected_integration_base_ref, chain_base_ref);
     let wt = if let Some(shell) = &start.shell {
         let recorded = recorded_by(shell.clone(), progress);
-        remote_worktree_through(start, git_url, &recorded, worktree_base_ref, progress).await?
+        remote_worktree_through(fs, start, git_url, &recorded, worktree_base_ref, progress).await?
     } else if start.ssh_alias.is_empty() {
         let cut = tddy_session_split::service_util::create_session_worktree(
             start.timeout,
@@ -163,7 +167,7 @@ async fn cut_worktree(
         announce_local_cut(&cut, progress)?;
         cut
     } else {
-        remote_worktree(start, git_url, worktree_base_ref, progress).await?
+        remote_worktree(fs, start, git_url, worktree_base_ref, progress).await?
     };
     tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         start.create_remote_branch,
@@ -190,6 +194,7 @@ fn announce_local_cut(worktree: &Path, progress: &AttachmentProgressSink) -> Res
 
 /// The session's checkout on the ssh target `start.ssh_alias`, cloned from `git_url`.
 async fn remote_worktree(
+    fs: &dyn tddy_fs::Fs,
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     base_ref: Option<String>,
@@ -199,7 +204,7 @@ async fn remote_worktree(
         std::sync::Arc::new(tddy_remote_shell::SshShell::new(start.ssh_alias)),
         progress,
     );
-    remote_worktree_through(start, git_url, &shell, base_ref, progress).await
+    remote_worktree_through(fs, start, git_url, &shell, base_ref, progress).await
 }
 
 /// `shell`, reporting each command it runs to the start's progress, which is how the start's record
@@ -265,6 +270,7 @@ impl tddy_remote_shell::RemoteCallSink for ProgressCalls {
 /// base, resolved on the target after its fetch (`tddy_core::worktree::DEFAULT_BASE_REFS`) — never
 /// from the clone's `HEAD`, which nothing moves after the clone.
 async fn remote_worktree_through(
+    fs: &dyn tddy_fs::Fs,
     start: &CliWorktreeStart<'_>,
     git_url: &str,
     shell: &dyn tddy_remote_shell::RemoteShell,
@@ -338,7 +344,7 @@ async fn remote_worktree_through(
     })?;
     let base = remote_cut_base(shell, &checkout.worktree).await?;
     record_the_cut_branch(start.session_dir, &checkout.branch)?;
-    crate::remote_attachments::copy_attachments_to_target(
+    crate::remote_attachments::copy_attachments_to_target(fs, 
         shell,
         start.session_dir,
         &checkout.worktree,
@@ -558,6 +564,7 @@ mod remote_cut_tests {
 
         // When the checkout is cut on the target
         let worktree = remote_worktree_through(
+            &tddy_fs::DiskFs,
             &start,
             QAPE_HQ,
             &workspace,
@@ -627,6 +634,7 @@ mod remote_cut_tests {
 
         // When the checkout is cut on the target
         remote_worktree_through(
+            &tddy_fs::DiskFs,
             &start,
             QAPE_HQ,
             &workspace,
@@ -707,6 +715,7 @@ mod remote_cut_tests {
 
         // When the checkout is cut on the target
         let worktree = remote_worktree_through(
+            &tddy_fs::DiskFs,
             &start,
             QAPE_HQ,
             &workspace,
@@ -761,6 +770,7 @@ mod remote_cut_tests {
 
         // When the checkout is cut on the target
         remote_worktree_through(
+            &tddy_fs::DiskFs,
             &start,
             QAPE_HQ,
             &workspace,
@@ -829,6 +839,7 @@ mod remote_cut_tests {
 
         // When the session's worktree is cut, with no stack parent to base it on
         cut_worktree(
+            &tddy_fs::DiskFs,
             &start,
             project_checkout.path(),
             QAPE_HQ,
@@ -903,6 +914,7 @@ mod provision_tests {
 
     async fn provisioned(start: &CliWorktreeStart<'_>) -> Result<CliWorktree, tddy_rpc::Status> {
         provision_cli_worktree(
+            &tddy_fs::DiskFs,
             start,
             &SpawnWorkQueueParent::NoParent,
             &AttachmentProgressSink::discarding(),

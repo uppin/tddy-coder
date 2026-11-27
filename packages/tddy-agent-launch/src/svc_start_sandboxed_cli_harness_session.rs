@@ -112,7 +112,7 @@ impl LaunchSessions {
         // request error, never silently ignored.
         let managed_recipe = managed_recipe_for(req)?;
         let session_dir = start.sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        std::fs::create_dir_all(&session_dir)
+        self.fs.create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
 
         // The roster and its endpoints are resolved and warmed before anything is cut or spawned, as
@@ -162,6 +162,7 @@ impl LaunchSessions {
             path: worktree_path,
             ..
         } = provision_cli_worktree(
+            &*self.fs,
             &CliWorktreeStart {
                 session_type: kind.name,
                 cut_label: "start_sandboxed_cli_harness_session: create worktree",
@@ -215,6 +216,7 @@ impl LaunchSessions {
         // jail can reach: written into the worktree now, because the jail reads a copy of it taken
         // after this.
         let hook_token = write_jail_hooks(
+            &*self.fs,
             &session_agent.agent,
             &self.config,
             &worktree_path,
@@ -222,7 +224,7 @@ impl LaunchSessions {
             session_id,
             os_user,
         )?;
-        let dirs = prepare_jail_dirs(&session_dir)?;
+        let dirs = prepare_jail_dirs(&*self.fs, &session_dir)?;
         prepare_jail_context_dir(
             &tddy_session_files::context_files::context_globs(
                 self.coding_agents
@@ -411,6 +413,7 @@ impl LaunchSessions {
 /// socket, when its spec declares `hooks` and its adapter reports over a socket — a jail has no other
 /// way to reach the daemon. Returns the per-session token they report with, to be recorded.
 fn write_jail_hooks(
+    fs: &dyn tddy_fs::Fs,
     agent: &HostAgent,
     config: &DaemonConfig,
     worktree: &Path,
@@ -461,10 +464,10 @@ fn write_jail_hooks(
         return Ok(None);
     };
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        fs.create_dir_all(parent)
             .map_err(|e| Status::internal(format!("create {}: {e}", parent.display())))?;
     }
-    tddy_core::atomic_file::write_atomic(&path, bytes)
+    fs.write_atomic(&path, &bytes, None)
         .map_err(|e| Status::internal(format!("write {}: {e}", path.display())))?;
     Ok(Some(hook_token))
 }

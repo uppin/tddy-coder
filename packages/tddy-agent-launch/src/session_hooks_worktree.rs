@@ -25,6 +25,7 @@ use crate::cli_session_pointer::{inside_a_git_checkout, PointerHost};
 /// hooks file is under `.tddy/hooks/` that directory is git-excluded, and the adapter's legacy
 /// shared file, if it names one, has the daemon's entries released.
 pub(crate) async fn prepare_worktree_for_session_hooks(
+    fs: &dyn tddy_fs::Fs,
     spec: &CodingAgentSpec,
     worktree: &Path,
     slots: &RenderedSlots,
@@ -43,7 +44,7 @@ pub(crate) async fn prepare_worktree_for_session_hooks(
     let legacy = adapter.legacy_shared_file(worktree);
     let release = |bytes: &[u8]| adapter.release_legacy_shared_file(bytes);
     match host {
-        PointerHost::Local => prepare_locally(worktree, legacy.as_deref(), release),
+        PointerHost::Local => prepare_locally(fs, worktree, legacy.as_deref(), release),
         PointerHost::Ssh { shell } => {
             prepare_through(shell, worktree, legacy.as_deref(), release).await
         }
@@ -58,7 +59,7 @@ fn exclude_pattern() -> String {
     format!("/{SESSION_HOOKS_DIR}/")
 }
 
-fn prepare_locally(
+fn prepare_locally(fs: &dyn tddy_fs::Fs, 
     worktree: &Path,
     legacy: Option<&Path>,
     release: impl Fn(&[u8]) -> LegacyRelease,
@@ -70,7 +71,7 @@ fn prepare_locally(
     let Some(legacy) = legacy else {
         return Ok(());
     };
-    let bytes = match std::fs::read(legacy) {
+    let bytes = match fs.read(legacy) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => {
@@ -83,7 +84,7 @@ fn prepare_locally(
     match release(&bytes) {
         LegacyRelease::Keep => return Ok(()),
         LegacyRelease::Rewrite(bytes) => tddy_core::atomic_file::write_atomic(legacy, bytes),
-        LegacyRelease::Remove => std::fs::remove_file(legacy),
+        LegacyRelease::Remove => fs.remove_file(legacy),
     }
     .map_err(|e| {
         Status::internal(format!(

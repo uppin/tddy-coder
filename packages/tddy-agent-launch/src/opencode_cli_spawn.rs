@@ -62,6 +62,7 @@ pub(crate) async fn start_cli_harness_session(
     start: CliSessionStart<'_>,
 ) -> Result<Response<StartSessionResponse>, Status> {
     let CliSessionStart {
+        fs,
         kind,
         agent,
         config,
@@ -125,7 +126,7 @@ pub(crate) async fn start_cli_harness_session(
     refuse_a_role_the_agent_cannot_hold(spec, role_name)?;
 
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    std::fs::create_dir_all(&session_dir)
+    fs.create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
 
     // Resolved before anything is cut or spawned: an account that is missing, locked or cannot
@@ -159,6 +160,7 @@ pub(crate) async fn start_cli_harness_session(
         path: worktree_path,
         project,
     } = provision_cli_worktree(
+        &*fs,
         &CliWorktreeStart {
             session_type: kind.name,
             cut_label: "start_cli_harness_session: create worktree",
@@ -225,6 +227,7 @@ pub(crate) async fn start_cli_harness_session(
         .as_ref()
         .map(|managed| managed.recipe.name().to_string());
     let mut wiring = wire_session_agent(SessionWiringInputs {
+        fs: &*fs,
         spec,
         tddy_tools_path: &crate::cli_harness_jail::agent_tddy_tools(agent)?,
         config,
@@ -302,6 +305,7 @@ pub(crate) async fn start_cli_harness_session(
     slots.argv_extra.extend(carried_effort.args);
     slots.argv_extra.extend(route.args);
     let pointer = place_slot_files_and_pointer(
+        &*fs,
         spec,
         &worktree_path,
         &target_shell,
@@ -310,12 +314,12 @@ pub(crate) async fn start_cli_harness_session(
         &mut slots,
     )
     .await?;
-    let on_exit = removing_session_pointer_on_exit(on_exit, pointer, run_in_tmux);
+    let on_exit = removing_session_pointer_on_exit(std::sync::Arc::clone(&fs), on_exit, pointer, run_in_tmux);
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(carried_effort.env);
     env.extend(route.env);
     // The node launcher is a path of this host: a target runs its own agent, found by its name.
-    let launcher = node_launcher_for(agent, &target_shell);
+    let launcher = node_launcher_for(&*fs, agent, &target_shell);
     let params = harness_template_params(&conversation.bound(HarnessLaunch {
         model: launch_model,
         prompt: Some(&first_prompt),
@@ -332,6 +336,7 @@ pub(crate) async fn start_cli_harness_session(
         &worktree_path,
     )?;
     let launched = launch(
+        &*fs,
         cli_manager,
         HarnessSession::new(session_id, &worktree_path, &session_dir, os_user),
         HarnessSpecLaunch {

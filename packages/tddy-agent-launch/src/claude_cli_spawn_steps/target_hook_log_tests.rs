@@ -6,6 +6,11 @@
 //! `01a20c4d-8862-7201-81da-5f6d0ab37656`): once the agent had `cd`-ed into `model-hound/`, every
 //! hook failed with `cannot create .tddy/hooks.log: Directory nonexistent`.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use pretty_assertions::assert_eq;
 use std::io::Write as _;

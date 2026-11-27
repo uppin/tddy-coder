@@ -127,6 +127,7 @@ pub(crate) fn session_pointer_path(worktree: &Path) -> PathBuf {
 /// when the agent exits. On an ssh target the pointer is placed through the remote-shell port.
 /// `None` writes nothing.
 pub(crate) async fn place_session_pointer(
+    fs: &dyn tddy_fs::Fs,
     pointer: Option<&SessionPointer>,
     worktree: &Path,
     host: &PointerHost,
@@ -150,7 +151,7 @@ pub(crate) async fn place_session_pointer(
             }))
         }
         PointerHost::Local => {
-            let path = place_session_pointer_locally(pointer, worktree)?;
+            let path = place_session_pointer_locally(fs, pointer, worktree)?;
             Ok(Some(PlacedSessionPointer {
                 path,
                 host: PointerHost::Local,
@@ -161,6 +162,7 @@ pub(crate) async fn place_session_pointer(
 
 /// Write `pointer` into `worktree` on this host, git-excluded and owner-only, returning its path.
 pub(crate) fn place_session_pointer_locally(
+    fs: &dyn tddy_fs::Fs,
     pointer: &SessionPointer,
     worktree: &Path,
 ) -> Result<PathBuf, Status> {
@@ -172,10 +174,10 @@ pub(crate) fn place_session_pointer_locally(
             .map_err(|e| Status::internal(e.to_string()))?;
     }
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
+        fs.create_dir_all(dir)
             .map_err(|e| Status::internal(format!("failed to create {}: {e}", dir.display())))?;
     }
-    tddy_core::atomic_file::write_atomic_with_mode(&path, contents, OWNER_ONLY_FILE).map_err(
+    fs.write_atomic(&path, &contents, Some(OWNER_ONLY_FILE)).map_err(
         |e| {
             Status::internal(format!(
                 "failed to write the session pointer {}: {e}",
@@ -328,8 +330,8 @@ pub(crate) fn inside_a_git_checkout(worktree: &Path) -> Result<bool, Status> {
 }
 
 /// Remove `worktree`'s pointer on `host`, if any: the session is gone.
-pub(crate) async fn remove_session_pointer(worktree: &Path, host: &PointerHost) {
-    remove_placed_pointer(&PlacedSessionPointer {
+pub(crate) async fn remove_session_pointer(fs: &dyn tddy_fs::Fs, worktree: &Path, host: &PointerHost) {
+    remove_placed_pointer(fs, &PlacedSessionPointer {
         path: session_pointer_path(worktree),
         host: host.clone(),
     })
@@ -337,10 +339,10 @@ pub(crate) async fn remove_session_pointer(worktree: &Path, host: &PointerHost) 
 }
 
 /// Remove `placed`, on the host it is on.
-pub(crate) async fn remove_placed_pointer(placed: &PlacedSessionPointer) {
+pub(crate) async fn remove_placed_pointer(fs: &dyn tddy_fs::Fs, placed: &PlacedSessionPointer) {
     let (shell, alias): (&dyn RemoteShell, String) = match &placed.host {
         PointerHost::Local => {
-            remove_pointer_file(&placed.path);
+            remove_pointer_file(fs, &placed.path);
             return;
         }
         PointerHost::Ssh { shell } => (shell, shell.alias().to_string()),
@@ -371,8 +373,8 @@ pub(crate) async fn remove_placed_pointer(placed: &PlacedSessionPointer) {
     }
 }
 
-pub(crate) fn remove_pointer_file(path: &Path) {
-    if let Err(e) = std::fs::remove_file(path) {
+pub(crate) fn remove_pointer_file(fs: &dyn tddy_fs::Fs, path: &Path) {
+    if let Err(e) = fs.remove_file(path) {
         if e.kind() != std::io::ErrorKind::NotFound {
             log::warn!(
                 "could not remove the session pointer {}: {e}",
@@ -387,6 +389,7 @@ pub(crate) fn remove_pointer_file(path: &Path) {
 /// exit hook of its own: a tmux pane is kept after its agent exits only for a hook that reads it,
 /// and the pointer's removal is no reason to keep one. That pointer goes with the session's delete.
 pub(crate) fn removing_session_pointer_on_exit(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     on_exit: Option<ExitHook>,
     pointer: Option<PlacedSessionPointer>,
     in_tmux: bool,
@@ -399,7 +402,7 @@ pub(crate) fn removing_session_pointer_on_exit(
     }
     Some(Box::new(move |capture| {
         Box::pin(async move {
-            remove_placed_pointer(&pointer).await;
+            remove_placed_pointer(&*fs, &pointer).await;
             if let Some(on_exit) = on_exit {
                 on_exit(capture).await;
             }

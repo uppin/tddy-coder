@@ -32,7 +32,6 @@
 
 use crate::tool_process_tab::EndedFlag;
 use std::collections::HashMap;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -91,6 +90,7 @@ const DEFAULT_STOP_WATCH_INTERVAL: std::time::Duration = std::time::Duration::fr
 
 /// The daemon's per-OS-user host-session socket servers and the sessions they answer.
 pub struct HostSessionSockets {
+    fs: Arc<dyn tddy_fs::Fs>,
     registry: Arc<HostSessionRegistry>,
     servers: tokio::sync::Mutex<HashMap<String, BoundServer>>,
     stop_watch_interval: std::time::Duration,
@@ -111,6 +111,7 @@ impl HostSessionSockets {
     /// Sockets whose registered sessions' processes are looked at every `stop_watch_interval`.
     pub fn with_stop_watch_interval(stop_watch_interval: std::time::Duration) -> Self {
         Self {
+            fs: Arc::new(tddy_fs::DiskFs),
             registry: Arc::default(),
             servers: tokio::sync::Mutex::default(),
             stop_watch_interval,
@@ -189,8 +190,10 @@ impl HostSessionSockets {
         let mut servers = self.servers.lock().await;
         if let Some(server) = servers.get(os_user) {
             let intact = !server.task.is_finished()
-                && std::fs::symlink_metadata(&server.path)
-                    .map(|m| (m.dev(), m.ino()) == server.identity)
+                && self
+                    .fs
+                    .metadata(&server.path)
+                    .map(|m| (m.dev, m.ino) == (Some(server.identity.0), Some(server.identity.1)))
                     .unwrap_or(false);
             if intact {
                 return Ok(server.path.clone());
@@ -205,7 +208,7 @@ impl HostSessionSockets {
             os_user,
             tddy_daemon_kernel::owner_socket::OwnerSocketKind::HOST_SESSION,
         )?;
-        let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
+        let meta = self.fs.metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
         let registry = Arc::clone(&self.registry);
@@ -216,7 +219,7 @@ impl HostSessionSockets {
             os_user.to_string(),
             BoundServer {
                 path: path.clone(),
-                identity: (meta.dev(), meta.ino()),
+                identity: (meta.dev.unwrap_or(0), meta.ino.unwrap_or(0)),
                 task,
             },
         );

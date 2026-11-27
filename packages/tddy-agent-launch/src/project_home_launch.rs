@@ -161,6 +161,11 @@ impl MainLaunchPlan<'_> {
 /// No `--permission-prompt-tool`: a main is an interactive terminal, so a call outside its
 /// pre-approved set prompts its operator there.
 pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleWiring, Status> {
+    project_home_wiring_on(&tddy_fs::DiskFs, launch)
+}
+
+/// [`project_home_wiring`] through the filesystem port.
+pub(crate) fn project_home_wiring_on(fs: &dyn tddy_fs::Fs, launch: ProjectHomeLaunch<'_>) -> Result<RoleWiring, Status> {
     let ProjectHomeLaunch {
         role,
         config,
@@ -171,7 +176,7 @@ pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleW
         tddy_tools_path,
     } = launch;
     let prompt_file = session_dir.join(PROJECT_HOME_PROMPT_BASENAME);
-    std::fs::write(&prompt_file, project_home_prompt(role)).map_err(|e| {
+    fs.write(&prompt_file, project_home_prompt(role).as_bytes()).map_err(|e| {
         Status::internal(format!(
             "failed to write the main's role prompt {}: {e}",
             prompt_file.display()

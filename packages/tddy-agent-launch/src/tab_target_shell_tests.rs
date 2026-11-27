@@ -2,6 +2,11 @@
 //! tabs — the transport and the worktree from `.session.yaml`, a Coder account from the vault of the
 //! caller's subject — and refuses what it cannot reach.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::path::PathBuf;
 use std::sync::Arc;
 

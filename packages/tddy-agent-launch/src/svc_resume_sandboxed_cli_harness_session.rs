@@ -193,8 +193,9 @@ impl LaunchSessions {
         .map_err(|e| Status::failed_precondition(e.to_string()))?;
 
         let (sandbox_root, egress_dir, scratch_dir, scratch_tmp, context_dir) =
-            prepare_relaunch_dirs(session_dir)?;
+            prepare_relaunch_dirs(&*self.fs, session_dir)?;
         refresh_relaunch_context_dir(
+            &*self.fs,
             worktree_path,
             agents,
             &context_dir,

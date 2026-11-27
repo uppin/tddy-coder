@@ -83,7 +83,7 @@ impl LaunchSessions {
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
-        crate::start_request_checks::record_requested_github_source(
+        crate::start_request_checks::record_requested_github_source(&*self.fs, 
             req,
             &tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, &session_id),
         )?;
@@ -194,6 +194,7 @@ impl LaunchSessions {
         let reports_to = self.reports_to_of(orchestrator.as_ref(), &start.sessions_base);
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::session_start::CliSessionStart {
+                fs: std::sync::Arc::clone(&self.fs),
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,
@@ -307,6 +308,7 @@ impl LaunchSessions {
         let route_sources = tddy_core::provider_route::RouteSources::default();
         crate::opencode_cli_spawn::start_cli_harness_session(
             crate::opencode_cli_spawn::session_start::CliSessionStart {
+                fs: std::sync::Arc::clone(&self.fs),
                 kind: session_agent.kind.clone(),
                 agent: &session_agent.agent,
                 config: &self.config,

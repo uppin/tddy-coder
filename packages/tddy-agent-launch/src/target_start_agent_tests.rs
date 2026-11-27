@@ -3,6 +3,11 @@
 //! ([`resolve_session_agent_for_target`]) — and the question put to the target before anything is
 //! cut ([`require_the_agent_on_the_target`]).
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

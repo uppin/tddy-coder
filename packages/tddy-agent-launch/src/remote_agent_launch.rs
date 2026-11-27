@@ -344,6 +344,7 @@ impl std::error::Error for RemoteLaunchError {}
 /// owner. An exit inside the window fails the launch and leaves no terminal registered. `on_exit`
 /// runs once the client has exited, with its terminal's output.
 pub async fn launch_on_target(
+    fs: &dyn tddy_fs::Fs,
     agent: &HostAgent,
     params: &TemplateParams,
     slots: &RenderedSlots,
@@ -355,12 +356,12 @@ pub async fn launch_on_target(
 
     // The slot files are the target's to hold, so they are taken out before the plan can write
     // them on this host, and written through the port at the paths the agent is told.
-    let (slot_files, plan) = plan_the_launch(agent, params, slots, &remote).await?;
+    let (slot_files, plan) = plan_the_launch(fs, agent, params, slots, &remote).await?;
     // A file the launch rendered into this session's directory on this host (its appended system
     // prompt) is copied into the worktree's `.tddy/` on the target and its argument rewritten to
     // that copy: the target need not have this host's directory, so no host path reaches it.
     let plan =
-        write_rendered_session_files(&SessionFilesPlace::of(&remote), slot_files, plan).await?;
+        write_rendered_session_files(fs, &SessionFilesPlace::of(&remote), slot_files, plan).await?;
     pre_trust_a_claude_clone(agent, &remote).await?;
 
     let client = client_argv_and_env(agent, &remote, &session, plan);

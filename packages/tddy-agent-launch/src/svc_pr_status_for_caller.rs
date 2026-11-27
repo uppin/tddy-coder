@@ -241,6 +241,7 @@ impl LaunchSessions {
         github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
     ) -> Result<ManagedLaunch, Status> {
         prepare_managed_workflow_inner(
+            &*self.fs,
             &self.tddy_data_dir,
             session_id,
             recipe,

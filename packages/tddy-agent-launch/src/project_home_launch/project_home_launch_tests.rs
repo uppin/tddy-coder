@@ -1,6 +1,11 @@
 //! Unit tests: a main launched from the `claude` spec is handed its tool set through the spec's
 //! slots, and gets what the hand-built launch gave it.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::path::Path;
 use std::sync::Arc;
 use tddy_test_hosts::a_tool_host;

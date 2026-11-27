@@ -215,6 +215,7 @@ impl ADaemon {
     async fn starts_an_agent_on(&self, target: &ATarget) {
         let clone_root = target.clone_root();
         launch_on_target(
+        &tddy_fs::DiskFs,
             &the_acme_agent(&target.agents_dir().join("acme")),
             &TemplateParams::new().with("model", MODEL),
             &RenderedSlots::default(),

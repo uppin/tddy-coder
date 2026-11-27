@@ -24,17 +24,25 @@ pub struct NodeLauncher {
 /// canonical directory holds an executable `node` and an `index.js` — and `None` for any other
 /// binary, which then runs as itself.
 pub fn node_launcher_of(resolved_binary: &Path) -> Option<NodeLauncher> {
-    let binary = std::fs::canonicalize(resolved_binary).ok()?;
+    node_launcher_of_on(&tddy_fs::DiskFs, resolved_binary)
+}
+
+/// [`node_launcher_of`] through the filesystem port.
+pub fn node_launcher_of_on(fs: &dyn tddy_fs::Fs, resolved_binary: &Path) -> Option<NodeLauncher> {
+    let binary = fs.canonicalize(resolved_binary).ok()?;
     let install_dir = binary.parent()?;
     let node = install_dir.join("node");
     let entry = install_dir.join("index.js");
-    (is_executable_file(&node) && entry.is_file()).then_some(NodeLauncher { node, entry })
+    // `metadata_follow`, as before: `is_file` follows a link.
+    let is_entry_file = matches!(fs.metadata_follow(&entry), Ok(m) if m.kind == tddy_fs::FsKind::File);
+    (is_executable_file(fs, &node) && is_entry_file).then_some(NodeLauncher { node, entry })
 }
 
 /// Whether `path` is a regular file with an execute bit set.
-fn is_executable_file(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+fn is_executable_file(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    // `metadata_follow`, as before: the question stays about the file itself.
+    fs.metadata_follow(path)
+        .is_ok_and(|m| m.kind == tddy_fs::FsKind::File && m.mode.unwrap_or(0) & 0o111 != 0)
 }
 
 #[cfg(test)]

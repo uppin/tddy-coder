@@ -89,6 +89,11 @@ pub struct AgentNotifyWiring {
 
 /// What a starting claude-cli agent is given so it can notify its operator.
 pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
+    agent_notify_launch_on(&tddy_fs::DiskFs, launch)
+}
+
+/// [`agent_notify_launch`] through the filesystem port.
+pub fn agent_notify_launch_on(fs: &dyn tddy_fs::Fs, launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
     let AgentNotifyLaunch {
         config,
         agent_tool_socket,
@@ -108,9 +113,9 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
         Some(agent_tool_socket),
     );
     let prompt_file = session_dir.join(NOTIFY_SYSTEM_PROMPT_FILE);
-    std::fs::write(
+    fs.write(
         &prompt_file,
-        composed_system_prompt(managed_prompt_file, back_channel_guidance)?,
+        composed_system_prompt_on(fs, managed_prompt_file, back_channel_guidance)?.as_bytes(),
     )
     .map_err(|e| {
         Status::internal(format!(
@@ -126,7 +131,7 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
 
 /// The notify guidance, then the back-channel guidance when there is one, followed by the managed
 /// recipe's prompt read from `managed_prompt_file`.
-fn composed_system_prompt(
+fn composed_system_prompt_on(fs: &dyn tddy_fs::Fs,
     managed_prompt_file: Option<&Path>,
     back_channel_guidance: Option<&str>,
 ) -> Result<String, Status> {
@@ -141,7 +146,7 @@ fn composed_system_prompt(
     let Some(file) = managed_prompt_file else {
         return Ok(guidance);
     };
-    let recipe_prompt = std::fs::read_to_string(file).map_err(|e| {
+    let recipe_prompt = fs.read_to_string(file).map_err(|e| {
         Status::internal(format!(
             "failed to read the recipe prompt {}: {e}",
             file.display()

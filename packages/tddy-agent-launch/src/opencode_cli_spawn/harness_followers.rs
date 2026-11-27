@@ -126,6 +126,7 @@ pub(super) enum TranscriptPlace {
 /// stop and delete end it. A transcript that cannot be placed is logged and not followed — its hooks
 /// still report the session's tool calls.
 pub(super) async fn follow_the_transcript(
+    fs: &dyn tddy_fs::Fs,
     agent: &HostAgent,
     followers: &HarnessFollowers,
     place: TranscriptPlace,
@@ -143,8 +144,8 @@ pub(super) async fn follow_the_transcript(
                 let lease = crate::transcript_follower::host_follow_lease(session_dir);
                 let leased = lease
                     .parent()
-                    .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| std::fs::write(&lease, b""));
+                    .map_or(Ok(()), |parent| fs.create_dir_all(parent))
+                    .and_then(|()| fs.write(&lease, b""));
                 if let Err(error) = leased {
                     log::warn!(
                         "session {session_id}: its agent's transcript is not followed: its lease \

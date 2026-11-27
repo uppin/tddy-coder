@@ -56,7 +56,7 @@ impl LaunchSessions {
             RelayUser::OtherUser
         };
         let logged_out_gh_config = self.tddy_data_dir.join("logged-out-gh");
-        std::fs::create_dir_all(&logged_out_gh_config).map_err(|e| {
+        self.fs.create_dir_all(&logged_out_gh_config).map_err(|e| {
             Status::internal(format!(
                 "failed to create {}: {e}",
                 logged_out_gh_config.display()

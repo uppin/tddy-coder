@@ -53,7 +53,12 @@ pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Remove `path`, a file that may already be gone; any other failure is logged under `what`.
 pub(crate) fn remove_if_present(path: &std::path::Path, what: &str) {
-    if let Err(error) = std::fs::remove_file(path) {
+    remove_if_present_on(&tddy_fs::DiskFs, path, what)
+}
+
+/// [`remove_if_present`] through the filesystem port.
+pub(crate) fn remove_if_present_on(fs: &dyn tddy_fs::Fs, path: &std::path::Path, what: &str) {
+    if let Err(error) = fs.remove_file(path) {
         if error.kind() != std::io::ErrorKind::NotFound {
             log::warn!("removing {what} {}: {error}", path.display());
         }
@@ -91,10 +96,21 @@ pub fn tail_command(path: &str, offset: u64, alive_while: &str, waits_for_file: 
 /// reads that one from its first byte.
 ///
 /// Clones share the offset: the one in memory, and the file.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FollowOffset {
+    fs: Arc<dyn tddy_fs::Fs>,
     in_memory: Arc<AtomicU64>,
     persisted: Option<PathBuf>,
+}
+
+impl Default for FollowOffset {
+    fn default() -> Self {
+        Self {
+            fs: Arc::new(tddy_fs::DiskFs),
+            in_memory: Arc::default(),
+            persisted: None,
+        }
+    }
 }
 
 impl FollowOffset {
@@ -108,7 +124,14 @@ impl FollowOffset {
     /// delivered line. A missing or unreadable file is the file's first byte.
     #[must_use]
     pub fn persisted_at(path: PathBuf) -> Self {
+        Self::persisted_at_on(Arc::new(tddy_fs::DiskFs), path)
+    }
+
+    /// [`FollowOffset::persisted_at`] through the filesystem port.
+    #[must_use]
+    pub fn persisted_at_on(fs: Arc<dyn tddy_fs::Fs>, path: PathBuf) -> Self {
         Self {
+            fs,
             in_memory: Arc::default(),
             persisted: Some(path),
         }
@@ -119,7 +142,7 @@ impl FollowOffset {
         let Some(path) = &self.persisted else {
             return self.in_memory.load(Ordering::SeqCst);
         };
-        match std::fs::read_to_string(path) {
+        match self.fs.read_to_string(path) {
             Ok(text) => match text.trim_end_matches('\n').split_once('\t') {
                 Some((offset, counted)) if counted == followed => match offset.parse() {
                     Ok(offset) => offset,
@@ -165,7 +188,7 @@ impl FollowOffset {
         let Some(path) = &self.persisted else {
             return;
         };
-        if let Err(error) = write_atomically(path, format!("{offset}\t{followed}").as_bytes()) {
+        if let Err(error) = write_atomically(&*self.fs, path, format!("{offset}\t{followed}").as_bytes()) {
             log::warn!("follow offset {}: {error}", path.display());
         }
     }
@@ -175,18 +198,18 @@ impl FollowOffset {
     pub fn forget(&self) {
         self.in_memory.store(0, Ordering::SeqCst);
         if let Some(path) = &self.persisted {
-            remove_if_present(path, "follow offset");
+            remove_if_present_on(&*self.fs, path, "follow offset");
         }
     }
 }
 
-fn write_atomically(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+fn write_atomically(fs: &dyn tddy_fs::Fs, path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
     let temporary = path.with_extension("offset.tmp");
-    std::fs::write(&temporary, contents)?;
-    std::fs::rename(&temporary, path)
+    fs.write(&temporary, contents)?;
+    fs.rename(&temporary, path)
 }
 
 /// Where a followed file's lines go.

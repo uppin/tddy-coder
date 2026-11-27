@@ -47,6 +47,8 @@ pub(crate) struct SessionWiringInputs<'a> {
     pub tddy_tools_path: &'a str,
     pub config: &'a DaemonConfig,
     pub tddy_data_dir: &'a Path,
+    /// The filesystem the wiring reads and writes through.
+    pub fs: &'a dyn tddy_fs::Fs,
     /// The session's OS user's agent-tool socket, served by this daemon: its hooks report and its
     /// notifications go over it.
     pub agent_tool_socket: &'a Path,
@@ -121,6 +123,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
         tddy_tools_path,
         config,
         tddy_data_dir,
+        fs,
         agent_tool_socket,
         os_user,
         session_id,
@@ -153,6 +156,7 @@ pub(crate) fn wire_session_agent(inputs: SessionWiringInputs<'_>) -> Result<Sess
     }) = managed
     {
         let launch = managed_launch::prepare_managed_workflow_inner(
+            fs,
             tddy_data_dir,
             session_id,
             recipe,
