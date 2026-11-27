@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! [`super::read_tab_roster`] and [`super::write_tab_roster`]: the roster file round-trips, keeps
 //! what it does not know, and reads as empty before anything wrote it.
 

@@ -139,16 +139,38 @@ pub trait StartedSessionDetails: Send + Sync {
 static RECOVERED_LEDGERS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
 /// The ledger of the starts one orchestrator session asked for.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct StartLedger {
     dir: PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
+
+impl std::fmt::Debug for StartLedger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StartLedger")
+            .field("dir", &self.dir)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for StartLedger {
+    fn eq(&self, other: &Self) -> bool {
+        self.dir == other.dir
+    }
+}
+impl Eq for StartLedger {}
 
 impl StartLedger {
     /// The ledger kept in `session_dir` (`artifacts/session-starts/`).
     pub fn in_session_dir(session_dir: &Path) -> Self {
+        Self::in_session_dir_on(session_dir, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`StartLedger::in_session_dir`] with the filesystem port the records run through.
+    pub fn in_session_dir_on(session_dir: &Path, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
         Self {
             dir: session_dir.join("artifacts").join("session-starts"),
+            fs,
         }
     }
 
@@ -178,7 +200,7 @@ impl StartLedger {
     /// The record of `start_id`, or an error naming it when this ledger has none.
     pub fn read(&self, start_id: &str) -> anyhow::Result<StartLedgerRecord> {
         let path = self.path_of(start_id)?;
-        let bytes = match std::fs::read(&path) {
+        let bytes = match self.fs.read(&path) {
             Ok(bytes) => bytes,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 anyhow::bail!("no start {start_id} is recorded for this session")
@@ -193,19 +215,20 @@ impl StartLedger {
 
     /// Mark every record still `running` as failed by a daemon restart; how many.
     pub fn recover_interrupted(&self) -> anyhow::Result<usize> {
-        let entries = match std::fs::read_dir(&self.dir) {
+        let entries = match self.fs.read_dir(&self.dir) {
             Ok(entries) => entries,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
             Err(e) => return Err(e).context("reading the session-start ledger"),
         };
         let mut recovered = 0;
-        for entry in entries {
-            let path = entry?.path();
+        for path in entries {
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
-            let bytes =
-                std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+            let bytes = self
+                .fs
+                .read(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
             let mut record: StartLedgerRecord = serde_json::from_slice(&bytes)
                 .with_context(|| format!("{} is not a start record", path.display()))?;
             if record.state != StartState::Running {
@@ -236,13 +259,16 @@ impl StartLedger {
     /// Write `record` in place of the one it replaces, atomically: a reader sees the old record or
     /// the new one, never a part of either.
     fn persist(&self, record: &StartLedgerRecord) -> anyhow::Result<()> {
-        std::fs::create_dir_all(&self.dir)
+        self.fs
+            .create_dir_all(&self.dir)
             .with_context(|| format!("creating {}", self.dir.display()))?;
         let path = self.path_of(&record.start_id)?;
-        let tmp = self.dir.join(format!("{}.json.tmp", record.start_id));
         let bytes = serde_json::to_vec_pretty(record)?;
-        std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
-        std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
+        // The port's atomic write is the same write-then-rename over a sibling temp file
+        // this ledger used to roll by hand.
+        self.fs
+            .write_atomic(&path, &bytes, None)
+            .with_context(|| format!("replacing {}", path.display()))?;
         Ok(())
     }
 }

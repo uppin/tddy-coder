@@ -3,7 +3,6 @@
 //! Persists agent/interview text to **`.workflow/bugfix_interview_handoff.txt`** so **analyze** can
 //! merge it after hooks clear **`answers`** (same relay pattern as [`crate::tdd::interview`]).
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use tddy_core::backend::{ClarificationQuestion, QuestionOption};
@@ -84,6 +83,15 @@ pub fn persist_bugfix_interview_handoff_for_analyze(
     session_dir: &Path,
     handoff_text: &str,
 ) -> std::io::Result<()> {
+    persist_bugfix_interview_handoff_for_analyze_on(&tddy_fs::DiskFs, session_dir, handoff_text)
+}
+
+/// [`persist_bugfix_interview_handoff_for_analyze`] through the filesystem port.
+pub fn persist_bugfix_interview_handoff_for_analyze_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    handoff_text: &str,
+) -> std::io::Result<()> {
     let path = handoff_path(session_dir);
     log::info!(
         target: "tddy_workflow_recipes::bugfix::interview",
@@ -92,9 +100,10 @@ pub fn persist_bugfix_interview_handoff_for_analyze(
         path
     );
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
-    tddy_core::atomic_file::write_atomic(&path, handoff_text)
+    fs.write_atomic(&path, handoff_text.as_bytes(), None)
+        .map_err(std::io::Error::other)
 }
 
 /// Merge relay file into **`prompt`** (and visible **analyze** context) before the **analyze** system prompt runs.
@@ -102,8 +111,17 @@ pub fn apply_bugfix_interview_handoff_to_analyze_context(
     session_dir: &Path,
     context: &Context,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    apply_bugfix_interview_handoff_to_analyze_context_on(&tddy_fs::DiskFs, session_dir, context)
+}
+
+/// [`apply_bugfix_interview_handoff_to_analyze_context`] through the filesystem port.
+pub fn apply_bugfix_interview_handoff_to_analyze_context_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let path = handoff_path(session_dir);
-    if !path.exists() {
+    if !fs.exists(&path) {
         log::debug!(
             target: "tddy_workflow_recipes::bugfix::interview",
             "apply_bugfix_interview_handoff_to_analyze_context: no relay at {:?}",
@@ -111,7 +129,8 @@ pub fn apply_bugfix_interview_handoff_to_analyze_context(
         );
         return Ok(());
     }
-    let text = fs::read_to_string(&path)
+    let text = fs
+        .read_to_string(&path)
         .map_err(|e| format!("read bugfix interview handoff {}: {}", path.display(), e))?;
     let trimmed = text.trim();
     if trimmed.is_empty() {

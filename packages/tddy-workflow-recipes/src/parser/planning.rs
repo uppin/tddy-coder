@@ -86,7 +86,7 @@ struct StructuredPlan {
 
 /// Parse LLM planning response. JSON must come from tddy-tools submit (no inline parsing).
 pub fn parse_planning_response(s: &str) -> Result<PlanningOutput, ParseError> {
-    parse_planning_response_impl(s, None)
+    parse_planning_response_impl(&tddy_fs::DiskFs, s, None)
 }
 
 /// Like parse_planning_response but resolves `prd` when it is a path to an MD file (relative to base_path).
@@ -94,7 +94,16 @@ pub fn parse_planning_response_with_base(
     s: &str,
     _base_path: &std::path::Path,
 ) -> Result<PlanningOutput, ParseError> {
-    parse_planning_response_impl(s, Some(_base_path))
+    parse_planning_response_with_base_on(&tddy_fs::DiskFs, s, _base_path)
+}
+
+/// [`parse_planning_response_with_base`] through the filesystem port.
+pub fn parse_planning_response_with_base_on(
+    fs: &dyn tddy_fs::Fs,
+    s: &str,
+    _base_path: &std::path::Path,
+) -> Result<PlanningOutput, ParseError> {
+    parse_planning_response_impl(fs, s, Some(_base_path))
 }
 
 /// Heuristic: `prd` is a relative markdown file reference, not inline PRD body (which has newlines).
@@ -108,6 +117,7 @@ fn prd_value_looks_like_md_file_path(prd: &str) -> bool {
 }
 
 fn parse_planning_response_impl(
+    fs: &dyn tddy_fs::Fs,
     s: &str,
     _base_path: Option<&std::path::Path>,
 ) -> Result<PlanningOutput, ParseError> {
@@ -123,8 +133,12 @@ fn parse_planning_response_impl(
         .ok_or_else(|| ParseError::Malformed("prd missing or empty".into()))?;
     if let Some(base) = _base_path {
         let path = base.join(prd.trim());
-        if path.exists() && path.is_file() {
-            prd = std::fs::read_to_string(&path).map_err(|e| {
+        if fs
+            .metadata_follow(&path)
+            .map(|m| m.kind == tddy_fs::FsKind::File)
+            .unwrap_or(false)
+        {
+            prd = fs.read_to_string(&path).map_err(|e| {
                 ParseError::Malformed(format!("failed to read prd file {}: {}", path.display(), e))
             })?;
         } else if prd_value_looks_like_md_file_path(&prd) {

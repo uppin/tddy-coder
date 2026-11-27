@@ -11,7 +11,7 @@ use super::analyze::{
 use super::interview;
 use crate::tdd::hooks_common;
 use tddy_core::backend::AgentOutputSink;
-use tddy_core::changeset::{read_changeset, update_state, write_changeset};
+use tddy_core::changeset::{read_changeset_on, update_state, write_changeset_on};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
@@ -20,14 +20,23 @@ use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{clear_sinks, set_sinks};
 
 /// Hooks for [`super::BugfixRecipe`]. Emits goal/state events and provides an agent output sink.
-#[derive(Debug)]
 pub struct BugfixWorkflowHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl BugfixWorkflowHooks {
     pub fn new(event_tx: Option<mpsc::Sender<WorkflowEvent>>) -> Self {
-        Self { event_tx }
+        Self {
+            event_tx,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
+        }
+    }
+
+    /// The same hooks, running their file I/O through `fs` instead of the disk.
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     fn agent_output_sink_impl(&self) -> Option<AgentOutputSink> {
@@ -40,10 +49,10 @@ impl BugfixWorkflowHooks {
     }
 }
 
-fn set_analyzing_state(session_dir: &std::path::Path) {
-    if let Ok(mut cs) = read_changeset(session_dir) {
+fn set_analyzing_state(fs: &dyn tddy_fs::Fs, session_dir: &std::path::Path) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("Analyzing"));
-        if let Err(e) = write_changeset(session_dir, &cs) {
+        if let Err(e) = write_changeset_on(fs, session_dir, &cs) {
             log::debug!("[bugfix hooks] could not write Analyzing state: {}", e);
         } else {
             log::debug!("[bugfix hooks] changeset state -> Analyzing");
@@ -51,10 +60,10 @@ fn set_analyzing_state(session_dir: &std::path::Path) {
     }
 }
 
-fn set_interviewing_state(session_dir: &std::path::Path) {
-    if let Ok(mut cs) = read_changeset(session_dir) {
+fn set_interviewing_state(fs: &dyn tddy_fs::Fs, session_dir: &std::path::Path) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("Interviewing"));
-        if let Err(e) = write_changeset(session_dir, &cs) {
+        if let Err(e) = write_changeset_on(fs, session_dir, &cs) {
             log::debug!("[bugfix hooks] could not write Interviewing state: {}", e);
         } else {
             log::debug!("[bugfix hooks] changeset state -> Interviewing");
@@ -64,8 +73,12 @@ fn set_interviewing_state(session_dir: &std::path::Path) {
 
 /// Prepend optional analyze summary (from `changeset.artifacts["analyze_summary"]`) to the
 /// reproduce prompt so the backend sees triage context.
-fn merge_analyze_summary_into_prompt(context: &Context, session_dir: &std::path::Path) {
-    let Ok(cs) = read_changeset(session_dir) else {
+fn merge_analyze_summary_into_prompt(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+    session_dir: &std::path::Path,
+) {
+    let Ok(cs) = read_changeset_on(fs, session_dir) else {
         return;
     };
     let Some(summary) = cs.artifacts.get("analyze_summary") else {
@@ -92,7 +105,10 @@ fn merge_analyze_summary_into_prompt(context: &Context, session_dir: &std::path:
 }
 
 /// `before_task` body for **`interview`** (TDD-shaped: prompts + optional session/changeset seed).
-fn before_bugfix_interview(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn before_bugfix_interview(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::info!("[bugfix hooks] before_bugfix_interview: set prompts (bugfix interview module)");
     let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
     if let Some(answers) = context.get_sync::<String>("answers") {
@@ -123,19 +139,23 @@ fn before_bugfix_interview(context: &Context) -> Result<(), Box<dyn Error + Send
         let repo_path = context
             .get_sync::<PathBuf>("output_dir")
             .map(|p| p.display().to_string());
-        seed_bugfix_changeset_if_missing(session_dir.as_path(), feature_input, repo_path);
-        set_interviewing_state(session_dir.as_path());
+        seed_bugfix_changeset_if_missing(fs, session_dir.as_path(), feature_input, repo_path);
+        set_interviewing_state(fs, session_dir.as_path());
     }
     Ok(())
 }
 
 /// `before_task` body for **`analyze`**: merge interview relay, triage system prompt, changeset seed/state.
-fn before_bugfix_analyze(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn before_bugfix_analyze(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::info!(
         "[bugfix hooks] before_bugfix_analyze: merge interview relay, set system prompt and state"
     );
     if let Some(ref session_dir) = context.get_sync::<PathBuf>("session_dir") {
-        interview::apply_bugfix_interview_handoff_to_analyze_context(
+        interview::apply_bugfix_interview_handoff_to_analyze_context_on(
+            fs,
             session_dir.as_path(),
             context,
         )?;
@@ -146,8 +166,8 @@ fn before_bugfix_analyze(context: &Context) -> Result<(), Box<dyn Error + Send +
         let repo_path = context
             .get_sync::<PathBuf>("output_dir")
             .map(|p| p.display().to_string());
-        seed_bugfix_changeset_if_missing(session_dir.as_path(), feature_input, repo_path);
-        set_analyzing_state(session_dir.as_path());
+        seed_bugfix_changeset_if_missing(fs, session_dir.as_path(), feature_input, repo_path);
+        set_analyzing_state(fs, session_dir.as_path());
     }
     Ok(())
 }
@@ -168,16 +188,17 @@ impl RunnerHooks for BugfixWorkflowHooks {
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         log::debug!("[bugfix hooks] before_task: {}", task_id);
         match task_id {
-            "interview" => before_bugfix_interview(context)?,
-            "analyze" => before_bugfix_analyze(context)?,
+            "interview" => before_bugfix_interview(&*self.fs, context)?,
+            "analyze" => before_bugfix_analyze(&*self.fs, context)?,
             "reproduce" => {
                 log::info!("[bugfix hooks] before_task reproduce: set system prompt");
                 context.set_sync("system_prompt", reproduce_system_prompt());
                 if let Some(ref session_dir) = context.get_sync::<PathBuf>("session_dir") {
-                    merge_analyze_summary_into_prompt(context, session_dir.as_path());
+                    merge_analyze_summary_into_prompt(&*self.fs, context, session_dir.as_path());
                     // Align with TDD `acceptance-tests`: create session worktree after triage names exist
                     // in `changeset.yaml` (from `analyze` submit), so reproduce runs against isolated tree.
                     hooks_common::ensure_worktree_for_session(
+                        &*self.fs,
                         session_dir.as_path(),
                         context,
                         self.event_tx.as_ref(),
@@ -220,13 +241,14 @@ impl RunnerHooks for BugfixWorkflowHooks {
         if task_id == "interview" {
             log::info!("[bugfix hooks] after_task interview: persist handoff + Interviewed state");
             if let Some(session_dir) = context.get_sync::<PathBuf>("session_dir") {
-                interview::persist_bugfix_interview_handoff_for_analyze(
+                interview::persist_bugfix_interview_handoff_for_analyze_on(
+                    &*self.fs,
                     session_dir.as_path(),
                     &result.response,
                 )?;
-                if let Ok(mut cs) = read_changeset(session_dir.as_path()) {
+                if let Ok(mut cs) = read_changeset_on(&*self.fs, session_dir.as_path()) {
                     update_state(&mut cs, WorkflowState::new("Interviewed"));
-                    let _ = write_changeset(session_dir.as_path(), &cs);
+                    let _ = write_changeset_on(&*self.fs, session_dir.as_path(), &cs);
                 }
             } else {
                 log::debug!("[bugfix hooks] after_task interview: no session_dir in context");
@@ -235,7 +257,7 @@ impl RunnerHooks for BugfixWorkflowHooks {
         if task_id == "analyze" {
             log::info!("[bugfix hooks] after_task analyze: persisting submit to changeset");
             if let Some(session_dir) = context.get_sync::<PathBuf>("session_dir") {
-                apply_analyze_submit_to_changeset(session_dir.as_path(), result)?;
+                apply_analyze_submit_to_changeset(&*self.fs, session_dir.as_path(), result)?;
             } else {
                 log::debug!("[bugfix hooks] after_task analyze: no session_dir in context");
             }

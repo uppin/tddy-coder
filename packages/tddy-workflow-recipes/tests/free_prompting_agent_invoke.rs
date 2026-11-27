@@ -41,7 +41,7 @@ async fn free_prompting_prompting_task_invokes_coding_backend() {
         inner: inner.clone(),
         invoke_count: invoke_count.clone(),
     });
-    let graph = recipe.build_graph(backend);
+    let graph = recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let task = graph
         .get_task("prompting")
         .expect("free-prompting graph must expose a prompting task");

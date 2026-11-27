@@ -16,12 +16,22 @@ use super::prompt;
 #[derive(Debug)]
 pub struct GrillMeWorkflowHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl GrillMeWorkflowHooks {
     pub fn new(event_tx: Option<mpsc::Sender<WorkflowEvent>>) -> Self {
         log::debug!("GrillMeWorkflowHooks::new event_tx={}", event_tx.is_some());
-        Self { event_tx }
+        Self {
+            event_tx,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
+        }
+    }
+
+    /// The same hooks, running their file I/O through `fs` instead of the disk.
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     fn agent_output_sink_impl(&self) -> Option<AgentOutputSink> {
@@ -135,8 +145,8 @@ impl RunnerHooks for GrillMeWorkflowHooks {
         if task_id == "grill" {
             if let Some(dir) = context.get_sync::<std::path::PathBuf>("session_dir") {
                 let path = dir.join(".workflow").join("grill_ask_answers.txt");
-                if path.exists() {
-                    match std::fs::read_to_string(&path) {
+                if self.fs.exists(&path) {
+                    match self.fs.read_to_string(&path) {
                         Ok(s) => {
                             let t = s.trim();
                             if !t.is_empty() {
@@ -146,7 +156,7 @@ impl RunnerHooks for GrillMeWorkflowHooks {
                                     t.len()
                                 );
                             }
-                            let _ = std::fs::remove_file(&path);
+                            let _ = self.fs.remove_file(&path);
                         }
                         Err(e) => {
                             log::warn!("[grill-me hooks] read {}: {}", path.display(), e);

@@ -167,25 +167,35 @@ impl ReadReach {
 
 /// Run `Read`, `Grep` or `Glob` within `reach`. Any other tool is an error outcome.
 pub async fn execute_in_reach(reach: &ReadReach, tool_name: &str, args_json: &str) -> ToolOutcome {
+    execute_in_reach_on(&tddy_fs::DiskFs, reach, tool_name, args_json).await
+}
+
+/// [`execute_in_reach`] through the filesystem port.
+pub async fn execute_in_reach_on(
+    fs: &dyn tddy_fs::Fs,
+    reach: &ReadReach,
+    tool_name: &str,
+    args_json: &str,
+) -> ToolOutcome {
     let args: serde_json::Value = match serde_json::from_str(args_json) {
         Ok(v) => v,
         Err(e) => return ToolOutcome::err(format!("invalid args_json: {e}")),
     };
     match tool_name {
-        "Read" => read_in_reach(reach, &args),
+        "Read" => read_in_reach(fs, reach, &args),
         "Grep" => grep_in_reach(reach, &args).await,
         "Glob" => glob_in_reach(reach, &args),
         other => ToolOutcome::err(format!("{other} is not answered within a read reach")),
     }
 }
 
-fn read_in_reach(reach: &ReadReach, args: &serde_json::Value) -> ToolOutcome {
+fn read_in_reach(fs: &dyn tddy_fs::Fs, reach: &ReadReach, args: &serde_json::Value) -> ToolOutcome {
     let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
         return ToolOutcome::err("Read: missing 'path' argument");
     };
     match reach.resolve(path) {
         Ok(resolved) => match reach.check_listed(&resolved) {
-            Ok(()) => crate::read_resolved(&resolved, args),
+            Ok(()) => crate::read_resolved(fs, &resolved, args),
             Err(e) => ToolOutcome::err(format!("Read: {e}")),
         },
         Err(e) => ToolOutcome::err(format!("Read: {e}")),

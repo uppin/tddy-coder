@@ -6,13 +6,20 @@
 use super::model::Changeset;
 use crate::error::WorkflowError;
 use log::info;
-use std::fs;
 use std::path::Path;
 
 /// Read changeset from plan directory.
 pub fn read_changeset(session_dir: &Path) -> Result<Changeset, WorkflowError> {
+    read_changeset_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_changeset`] through the filesystem port.
+pub fn read_changeset_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<Changeset, WorkflowError> {
     let path = session_dir.join("changeset.yaml");
-    let content = fs::read_to_string(&path).map_err(|e| {
+    let content = fs.read_to_string(&path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             WorkflowError::ChangesetMissing(format!(
                 "changeset.yaml not found in {} — run the plan goal first",
@@ -34,11 +41,29 @@ pub fn write_changeset(session_dir: &Path, changeset: &Changeset) -> Result<(), 
     write_changeset_atomic(session_dir, changeset)
 }
 
+/// [`write_changeset`] through the filesystem port.
+pub fn write_changeset_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    changeset: &Changeset,
+) -> Result<(), WorkflowError> {
+    write_changeset_atomic_on(fs, session_dir, changeset)
+}
+
 /// Ensures the session's changeset carries `recipe_name` — creates changeset.yaml with this
 /// recipe if none exists yet, fills in `recipe` if the existing changeset has it unset, and
 /// leaves an already-set (possibly different) recipe untouched.
 pub fn ensure_changeset_recipe(session_dir: &Path, recipe_name: &str) -> Result<(), WorkflowError> {
-    let mut cs = match read_changeset(session_dir) {
+    ensure_changeset_recipe_on(&tddy_fs::DiskFs, session_dir, recipe_name)
+}
+
+/// [`ensure_changeset_recipe`] through the filesystem port.
+pub fn ensure_changeset_recipe_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    recipe_name: &str,
+) -> Result<(), WorkflowError> {
+    let mut cs = match read_changeset_on(fs, session_dir) {
         Ok(cs) => cs,
         Err(WorkflowError::ChangesetMissing(_)) => Changeset::default(),
         Err(e) => return Err(e),
@@ -47,12 +72,21 @@ pub fn ensure_changeset_recipe(session_dir: &Path, recipe_name: &str) -> Result<
         return Ok(());
     }
     cs.recipe = Some(recipe_name.to_string());
-    write_changeset(session_dir, &cs)
+    write_changeset_on(fs, session_dir, &cs)
 }
 
 /// Atomically replace `changeset.yaml` (write swap file + rename) so readers never see a partial
 /// file, and a write that runs out of disk leaves the previous changeset standing.
 pub fn write_changeset_atomic(
+    session_dir: &Path,
+    changeset: &Changeset,
+) -> Result<(), WorkflowError> {
+    write_changeset_atomic_on(&tddy_fs::DiskFs, session_dir, changeset)
+}
+
+/// [`write_changeset_atomic`] through the filesystem port.
+pub fn write_changeset_atomic_on(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     changeset: &Changeset,
 ) -> Result<(), WorkflowError> {
@@ -64,7 +98,8 @@ pub fn write_changeset_atomic(
     let path = session_dir.join("changeset.yaml");
     let content =
         serde_yaml::to_string(changeset).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
-    crate::atomic_file::write_atomic_labelled(&path, content).map_err(WorkflowError::WriteFailed)
+    fs.write_atomic(&path, content.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))
 }
 
 #[cfg(test)]

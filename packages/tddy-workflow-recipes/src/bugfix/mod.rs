@@ -31,7 +31,7 @@ impl WorkflowRecipe for BugfixRecipe {
         "bugfix"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         log::debug!("[bugfix recipe] build_graph: interview → analyze → reproduce → end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let interview = Arc::new(BackendInvokeTask::from_recipe(
@@ -39,18 +39,21 @@ impl WorkflowRecipe for BugfixRecipe {
             GoalId::new("interview"),
             recipe.clone(),
             backend.clone(),
+            fs.clone(),
         ));
         let analyze = Arc::new(BackendInvokeTask::from_recipe(
             "analyze",
             GoalId::new("analyze"),
             recipe.clone(),
             backend.clone(),
+            fs.clone(),
         ));
         let reproduce = Arc::new(BackendInvokeTask::from_recipe(
             "reproduce",
             GoalId::new("reproduce"),
             recipe,
             backend,
+            fs.clone(),
         ));
         let end = Arc::new(EndTask::new("end"));
 
@@ -240,7 +243,7 @@ mod tests {
         // Given
         let backend = Arc::new(StubBackend::new());
         let recipe = BugfixRecipe;
-        let graph = recipe.build_graph(backend);
+        let graph = recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
         let ctx = Context::new();
 
         // When / Then

@@ -58,7 +58,7 @@ fn merge_pr_graph_has_ordered_goals() {
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
     let backend = Arc::new(StubBackend::new());
-    let graph = recipe.build_graph(backend);
+    let graph = recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let ctx = Context::new();
 
     // Then
@@ -158,7 +158,7 @@ fn merge_pr_merges_pr_when_token_present() {
     let (recipe, _) =
         workflow_recipe_and_manifest_from_cli_name("merge-pr").expect("merge-pr must resolve");
     let backend = Arc::new(StubBackend::new());
-    let graph = recipe.build_graph(backend);
+    let graph = recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let ctx = Context::new();
 
     // Then

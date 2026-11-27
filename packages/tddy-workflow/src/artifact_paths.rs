@@ -55,13 +55,21 @@ pub fn canonical_attachment_write_path(session_dir: &Path, basename: &str) -> Pa
 }
 
 /// When `session_dir` is nested under `.../sessions/<uuid>/...`, returns `<uuid>/<basename>` if that file exists (legacy layout).
-fn artifact_at_sessions_uuid_root(session_dir: &Path, basename: &str) -> Option<PathBuf> {
+fn artifact_at_sessions_uuid_root(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Option<PathBuf> {
     let mut current = session_dir.to_path_buf();
     loop {
         let parent = current.parent()?;
         if parent.file_name() == Some(OsStr::new("sessions")) {
             let p = current.join(basename);
-            if p.is_file() {
+            if fs
+                .metadata_follow(&p)
+                .map(|m| m.kind == tddy_fs::FsKind::File)
+                .unwrap_or(false)
+            {
                 return Some(p);
             }
             return None;
@@ -76,15 +84,29 @@ fn artifact_at_sessions_uuid_root(session_dir: &Path, basename: &str) -> Option<
 
 /// Resolves an existing file for `basename` (prefers `artifacts/`, then legacy UUID-root, then session root).
 pub fn resolve_existing_session_artifact(session_dir: &Path, basename: &str) -> Option<PathBuf> {
+    resolve_existing_session_artifact_on(&tddy_fs::DiskFs, session_dir, basename)
+}
+
+/// [`resolve_existing_session_artifact`] through the filesystem port.
+pub fn resolve_existing_session_artifact_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Option<PathBuf> {
+    let is_file = |p: &Path| {
+        fs.metadata_follow(p)
+            .map(|m| m.kind == tddy_fs::FsKind::File)
+            .unwrap_or(false)
+    };
     let artifacts_path = session_artifacts_root(session_dir).join(basename);
-    if artifacts_path.is_file() {
+    if is_file(&artifacts_path) {
         log::info!(
             "[tddy_workflow] session artifact (artifacts): {:?}",
             artifacts_path
         );
         return Some(artifacts_path);
     }
-    if let Some(p) = artifact_at_sessions_uuid_root(session_dir, basename) {
+    if let Some(p) = artifact_at_sessions_uuid_root(fs, session_dir, basename) {
         log::info!(
             "[tddy_workflow] session artifact (legacy uuid root): {:?}",
             p
@@ -92,7 +114,7 @@ pub fn resolve_existing_session_artifact(session_dir: &Path, basename: &str) -> 
         return Some(p);
     }
     let flat = session_dir.join(basename);
-    if flat.is_file() {
+    if is_file(&flat) {
         log::info!(
             "[tddy_workflow] session artifact (session root): {:?}",
             flat
@@ -112,8 +134,17 @@ pub const SESSION_ARTIFACT_READ_PLACEHOLDER: &str = "Could not read session arti
 
 /// Reads UTF-8 from the resolved artifact path, if the file exists and is readable.
 pub fn read_session_artifact_utf8(session_dir: &Path, basename: &str) -> Option<String> {
-    resolve_existing_session_artifact(session_dir, basename)
-        .and_then(|p| std::fs::read_to_string(p).ok())
+    read_session_artifact_utf8_on(&tddy_fs::DiskFs, session_dir, basename)
+}
+
+/// [`read_session_artifact_utf8`] through the filesystem port.
+pub fn read_session_artifact_utf8_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Option<String> {
+    resolve_existing_session_artifact_on(fs, session_dir, basename)
+        .and_then(|p| fs.read_to_string(&p).ok())
 }
 
 /// Like [`read_session_artifact_utf8`], but returns [`SESSION_ARTIFACT_READ_PLACEHOLDER`] when missing or unreadable.
@@ -135,8 +166,16 @@ pub struct SessionAttachmentFile {
 /// filesystems. Regular files only — subdirectories and other non-regular entries are skipped. A
 /// session with no attachments directory (the common case) yields an empty list, not an error.
 pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile> {
+    list_session_attachments_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`list_session_attachments`] through the filesystem port.
+pub fn list_session_attachments_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Vec<SessionAttachmentFile> {
     let attachments_dir = session_attachments_root(session_dir);
-    let Ok(entries) = std::fs::read_dir(&attachments_dir) else {
+    let Ok(entries) = fs.read_dir(&attachments_dir) else {
         log::debug!(
             "list_session_attachments: no attachments directory at {} — empty listing",
             attachments_dir.display()
@@ -145,16 +184,16 @@ pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile
     };
 
     let mut files: Vec<SessionAttachmentFile> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
+    for path in entries {
+        // `metadata_follow`, as before: the walk follows a link.
+        let Ok(metadata) = fs.metadata_follow(&path) else {
             log::warn!(
                 "list_session_attachments: metadata unavailable for {} — skipping",
                 path.display()
             );
             continue;
         };
-        if !metadata.is_file() {
+        if metadata.kind != tddy_fs::FsKind::File {
             log::debug!(
                 "list_session_attachments: skipping non-regular entry {}",
                 path.display()
@@ -167,7 +206,7 @@ pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile
         files.push(SessionAttachmentFile {
             basename,
             path,
-            size_bytes: metadata.len(),
+            size_bytes: metadata.len,
         });
     }
     files.sort_by(|a, b| a.basename.cmp(&b.basename));

@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use tddy_core::changeset::{read_changeset, resolve_model, update_state};
+use tddy_core::changeset::{read_changeset_on, resolve_model, update_state};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::prepend_context_header;
@@ -17,7 +17,10 @@ use crate::tdd::{
 };
 use crate::SessionArtifactManifest;
 
-pub(crate) fn before_interview(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub(crate) fn before_interview(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::debug!(
         target: "tddy_workflow_recipes::tdd::hooks",
         "before_interview: preparing prompts and session_dir"
@@ -71,32 +74,39 @@ pub(crate) fn before_interview(context: &Context) -> Result<(), Box<dyn Error + 
         .get_sync::<String>("model")
         .unwrap_or_else(|| "sonnet".to_string());
     context.set_sync("model", model);
-    if let Ok(mut cs) = read_changeset(&session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, &session_dir) {
         update_state(&mut cs, WorkflowState::new("Interviewing"));
-        hooks_common::write_changeset_logged(&session_dir, &cs, "before_interview Interviewing");
+        hooks_common::write_changeset_logged(
+            fs,
+            &session_dir,
+            &cs,
+            "before_interview Interviewing",
+        );
     }
     Ok(())
 }
 
 pub(crate) fn before_plan_with_interview(
+    fs: &dyn tddy_fs::Fs,
     context: &Context,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    hooks_common::before_plan(context)?;
+    hooks_common::before_plan(fs, context)?;
     let session_dir: PathBuf = context
         .get_sync("session_dir")
         .ok_or("before_plan_with_interview requires session_dir")?;
-    interview::apply_staged_interview_handoff_to_plan_context(&session_dir, context)?;
+    interview::apply_staged_interview_handoff_to_plan_context_on(fs, &session_dir, context)?;
     Ok(())
 }
 
 pub(crate) fn before_acceptance_tests(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = hooks_common::read_primary_session_document(session_dir, manifest)?;
-    let changeset = read_changeset(session_dir).map_err(|e| e.to_string())?;
+    let prd = hooks_common::read_primary_session_document(fs, session_dir, manifest)?;
+    let changeset = read_changeset_on(fs, session_dir).map_err(|e| e.to_string())?;
     let defaults = hooks_common::recipe_default_models_str(recipe);
     let model = resolve_model(
         Some(&changeset),
@@ -136,9 +146,10 @@ pub(crate) fn before_acceptance_tests(
     context.set_sync("is_resume", false);
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("model", model);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("AcceptanceTesting"));
         hooks_common::write_changeset_logged(
+            fs,
             session_dir,
             &cs,
             "before_acceptance_tests AcceptanceTesting",
@@ -148,15 +159,17 @@ pub(crate) fn before_acceptance_tests(
 }
 
 pub(crate) fn before_red(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = hooks_common::read_primary_session_document(session_dir, manifest)?;
-    let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md"))
+    let prd = hooks_common::read_primary_session_document(fs, session_dir, manifest)?;
+    let at = fs
+        .read_to_string(&(session_dir.join("acceptance-tests.md")))
         .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
-    let changeset = read_changeset(session_dir).ok();
+    let changeset = read_changeset_on(fs, session_dir).ok();
     let defaults = hooks_common::recipe_default_models_str(recipe);
     let model = resolve_model(
         changeset.as_ref(),
@@ -196,19 +209,21 @@ pub(crate) fn before_red(
         context.set_sync("session_id", session_id);
     }
     context.set_sync("is_resume", false);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("RedTesting"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "before_red RedTesting");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "before_red RedTesting");
     }
     Ok(())
 }
 
 pub(crate) fn before_demo(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let demo_plan = std::fs::read_to_string(session_dir.join("demo-plan.md"))
+    let demo_plan = fs
+        .read_to_string(&(session_dir.join("demo-plan.md")))
         .map_err(|e| format!("read demo-plan.md: {}", e))?;
     let prompt = format!(
         "Execute the demo described in demo-plan.md:\n\n{}",
@@ -224,27 +239,30 @@ pub(crate) fn before_demo(
         repo_dir.as_deref(),
         &ctx_artifacts,
     );
-    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(fs, session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", demo::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoRunning"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "before_demo DemoRunning");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "before_demo DemoRunning");
     }
     Ok(())
 }
 
 pub(crate) fn before_evaluate(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     _recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let prd = hooks_common::read_primary_session_document_optional(session_dir, manifest);
-    let changeset_raw = std::fs::read_to_string(session_dir.join("changeset.yaml")).ok();
+    let prd = hooks_common::read_primary_session_document_optional(fs, session_dir, manifest);
+    let changeset_raw = fs
+        .read_to_string(&(session_dir.join("changeset.yaml")))
+        .ok();
     let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
     let repo_dir: Option<PathBuf> = context
         .get_sync("worktree_dir")
@@ -256,25 +274,27 @@ pub(crate) fn before_evaluate(
         repo_dir.as_deref(),
         &ctx_artifacts,
     );
-    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(fs, session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", evaluate::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("Evaluating"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "before_evaluate Evaluating");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "before_evaluate Evaluating");
     }
     Ok(())
 }
 
 pub(crate) fn before_validate(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let eval_report = std::fs::read_to_string(session_dir.join("evaluation-report.md"))
+    let eval_report = fs
+        .read_to_string(&(session_dir.join("evaluation-report.md")))
         .map_err(|e| format!("read evaluation-report.md: {}", e))?;
     let prompt = validate_subagents::build_prompt(&eval_report);
     let repo_dir: Option<PathBuf> = context
@@ -287,25 +307,27 @@ pub(crate) fn before_validate(
         repo_dir.as_deref(),
         &ctx_artifacts,
     );
-    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(fs, session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", validate_subagents::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("Validating"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "before_validate Validating");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "before_validate Validating");
     }
     Ok(())
 }
 
 pub(crate) fn before_refactor(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let refactor_plan = std::fs::read_to_string(session_dir.join("refactoring-plan.md"))
+    let refactor_plan = fs
+        .read_to_string(&(session_dir.join("refactoring-plan.md")))
         .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
     let prompt = refactor::build_prompt(&refactor_plan);
     let repo_dir: Option<PathBuf> = context
@@ -318,20 +340,21 @@ pub(crate) fn before_refactor(
         repo_dir.as_deref(),
         &ctx_artifacts,
     );
-    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(fs, session_dir)?;
     context.set_sync("prompt", prompt);
     context.set_sync("system_prompt", refactor::system_prompt());
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("Refactoring"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "before_refactor Refactoring");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "before_refactor Refactoring");
     }
     Ok(())
 }
 
 pub(crate) fn before_update_docs(
+    fs: &dyn tddy_fs::Fs,
     manifest: &dyn SessionArtifactManifest,
     session_dir: &Path,
     context: &Context,
@@ -365,7 +388,7 @@ pub(crate) fn before_update_docs(
     context.set_sync("prompt", prompt);
 
     let mut system_prompt = update_docs::system_prompt();
-    if let Ok(cs) = read_changeset(session_dir) {
+    if let Ok(cs) = read_changeset_on(fs, session_dir) {
         if let Some(ref branch) = cs.branch {
             system_prompt.push_str("\n\n**FINAL STEP**: After completing all documentation updates, commit all modifications with a descriptive message and push to the remote branch: ");
             system_prompt.push_str(branch);
@@ -374,12 +397,17 @@ pub(crate) fn before_update_docs(
     }
     context.set_sync("system_prompt", system_prompt);
     context.set_sync("session_dir", session_dir.to_path_buf());
-    let session_id = hooks_common::resolve_agent_session_id(session_dir)?;
+    let session_id = hooks_common::resolve_agent_session_id(fs, session_dir)?;
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", true);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("UpdatingDocs"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "before_update_docs UpdatingDocs");
+        hooks_common::write_changeset_logged(
+            fs,
+            session_dir,
+            &cs,
+            "before_update_docs UpdatingDocs",
+        );
     }
     Ok(())
 }

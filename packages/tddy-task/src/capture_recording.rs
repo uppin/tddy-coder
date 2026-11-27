@@ -7,10 +7,8 @@
 //! The file is a small versioned header (magic, version, start and end offsets) followed by the raw
 //! retained bytes. It is replaced atomically, so a reader never sees half a recording.
 
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::io::{self};
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
@@ -72,21 +70,23 @@ impl CaptureRecording {
     /// The temporary file sits beside `path`, so the rename never crosses a filesystem. A write that
     /// fails leaves `path` as it was and no temporary file behind.
     pub fn write_atomically(&self, path: &Path) -> io::Result<()> {
-        let temporary = temporary_beside(path);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        let written = file
-            .write_all(&self.encode())
-            .and_then(|()| file.sync_all());
-        drop(file);
-        let replaced = written.and_then(|()| fs::rename(&temporary, path));
-        if let Err(error) = replaced {
-            discard(&temporary);
-            return Err(error);
+        self.write_atomically_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`CaptureRecording::write_atomically`] through the filesystem port.
+    pub fn write_atomically_on(&self, fs: &dyn tddy_fs::Fs, path: &Path) -> io::Result<()> {
+        // The port's atomic write creates a missing parent; this write must not: a target
+        // whose directory does not exist is a failed write, as the temporary's creation
+        // beside it was. Creating the directory is `record`'s step, above.
+        if let Some(parent) = path.parent() {
+            if !fs.exists(parent) {
+                return Err(io::Error::from(io::ErrorKind::NotFound));
+            }
         }
-        Ok(())
+        // The port's atomic write is the swap-then-rename this did by hand, through a
+        // temporary beside `path`, so the rename never crosses a filesystem. A write that
+        // fails leaves `path` as it was.
+        fs.write_atomic(path, &self.encode(), None)
     }
 
     /// Snapshot `capture` and replace the recording at `path` with it, on a blocking thread,
@@ -95,14 +95,23 @@ impl CaptureRecording {
     /// A poisoned capture is still recorded: its bytes and offsets stay consistent, because every
     /// append updates them together.
     pub async fn record(capture: &Mutex<TerminalCapture>, path: &Path) -> io::Result<()> {
+        Self::record_on(std::sync::Arc::new(tddy_fs::DiskFs), capture, path).await
+    }
+
+    /// [`CaptureRecording::record`] through the filesystem port.
+    pub async fn record_on(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        capture: &Mutex<TerminalCapture>,
+        path: &Path,
+    ) -> io::Result<()> {
         let snapshot = Self::of(&capture.lock().unwrap_or_else(PoisonError::into_inner));
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
             // A session's `terminals/` directory exists only once something is recorded into it.
             if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
+                fs.create_dir_all(parent)?;
             }
-            snapshot.write_atomically(&path)
+            snapshot.write_atomically_on(&*fs, &path)
         })
         .await
         .map_err(io::Error::other)?
@@ -111,7 +120,12 @@ impl CaptureRecording {
     /// The recording at `path`. A wrong magic, an unknown version or offsets that do not match the
     /// data are `InvalidData`.
     pub fn read(path: &Path) -> io::Result<Self> {
-        Self::decode(&fs::read(path)?)
+        Self::read_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`CaptureRecording::read`] through the filesystem port.
+    pub fn read_on(fs: &dyn tddy_fs::Fs, path: &Path) -> io::Result<Self> {
+        Self::decode(&fs.read(path)?)
     }
 
     /// The header followed by the retained bytes.
@@ -166,23 +180,4 @@ fn take<const N: usize>(cursor: &mut &[u8]) -> io::Result<[u8; N]> {
 
 fn invalid(reason: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason.to_owned())
-}
-
-/// A path beside `path` that no other write in this process uses: the process id and a counter.
-fn temporary_beside(path: &Path) -> PathBuf {
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    path.with_file_name(format!(".{name}.{}.{sequence}.tmp", std::process::id()))
-}
-
-/// Remove a temporary file a failed write left behind. The write's own error is what the caller
-/// sees, so a removal that also fails is logged rather than returned.
-fn discard(temporary: &Path) {
-    if let Err(error) = fs::remove_file(temporary) {
-        log::warn!(
-            "could not remove the temporary capture recording {}: {error}",
-            temporary.display()
-        );
-    }
 }

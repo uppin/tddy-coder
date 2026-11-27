@@ -28,9 +28,13 @@ pub struct BackendInvokeTask {
     backend: Arc<dyn CodingBackend>,
     recipe: Arc<dyn WorkflowRecipe>,
     goal_requires_tddy_tools_submit: bool,
+    fs: Arc<dyn tddy_fs::Fs>,
 }
 
 impl BackendInvokeTask {
+    // Eight arguments: the task's identity (id/goal/submit key), its behaviour (hints,
+    // backend, recipe, submit policy) and the filesystem port it caches through.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
         goal_id: GoalId,
@@ -39,6 +43,7 @@ impl BackendInvokeTask {
         backend: Arc<dyn CodingBackend>,
         recipe: Arc<dyn WorkflowRecipe>,
         goal_requires_tddy_tools_submit: bool,
+        fs: Arc<dyn tddy_fs::Fs>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -48,6 +53,7 @@ impl BackendInvokeTask {
             backend,
             recipe,
             goal_requires_tddy_tools_submit,
+            fs,
         }
     }
 
@@ -57,6 +63,7 @@ impl BackendInvokeTask {
         goal_id: GoalId,
         recipe: Arc<dyn WorkflowRecipe>,
         backend: Arc<dyn CodingBackend>,
+        fs: Arc<dyn tddy_fs::Fs>,
     ) -> Self {
         let hints = recipe.goal_hints(&goal_id).unwrap_or_else(|| {
             panic!(
@@ -75,6 +82,7 @@ impl BackendInvokeTask {
             backend,
             recipe,
             goal_requires_tddy_tools_submit,
+            fs,
         )
     }
 }
@@ -171,7 +179,7 @@ impl Task for BackendInvokeTask {
                         digest.len()
                     );
                     if let Some(cached_output) =
-                        lookup_cached_completed_submit(sd.as_path(), &action_key, digest)
+                        lookup_cached_completed_submit(&*self.fs, sd.as_path(), &action_key, digest)
                     {
                         log::info!(
                             target: "tddy_core::workflow::backend_invoke_task",
@@ -279,6 +287,7 @@ impl Task for BackendInvokeTask {
                             self.goal_id.as_str(),
                         );
                         match persist_successful_submit_to_action_cache(
+                            &*self.fs,
                             sd.as_path(),
                             self.goal_id.as_str(),
                             &action_key,

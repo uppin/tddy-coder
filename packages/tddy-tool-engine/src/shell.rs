@@ -56,11 +56,20 @@ pub trait Shell: Send + Sync {
 /// Today's exec path: the code-managing host's own filesystem.
 pub struct LocalShell {
     root: PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl LocalShell {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self::with_fs(root, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`LocalShell::new`] with the filesystem port its reads and writes run through.
+    pub fn with_fs(root: impl Into<PathBuf>, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        Self {
+            root: root.into(),
+            fs,
+        }
     }
 }
 
@@ -76,15 +85,21 @@ impl Shell for LocalShell {
 
     async fn read_to_string(&self, path: &str) -> Result<String, ShellError> {
         let resolved = contain_path(&self.root, path).map_err(ShellError::Io)?;
-        std::fs::read_to_string(&resolved).map_err(|e| ShellError::Io(e.to_string()))
+        self.fs
+            .read_to_string(&resolved)
+            .map_err(|e| ShellError::Io(e.to_string()))
     }
 
     async fn write_string(&self, path: &str, contents: &str) -> Result<(), ShellError> {
         let resolved = contain_path(&self.root, path).map_err(ShellError::Io)?;
         if let Some(parent) = resolved.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ShellError::Io(e.to_string()))?;
+            self.fs
+                .create_dir_all(parent)
+                .map_err(|e| ShellError::Io(e.to_string()))?;
         }
-        std::fs::write(&resolved, contents).map_err(|e| ShellError::Io(e.to_string()))
+        self.fs
+            .write(&resolved, contents.as_bytes())
+            .map_err(|e| ShellError::Io(e.to_string()))
     }
 
     async fn run(&self, command: &str) -> Result<std::process::Output, ShellError> {

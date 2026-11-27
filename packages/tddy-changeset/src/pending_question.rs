@@ -114,15 +114,28 @@ impl PendingQuestion {
 /// Written to a sibling temp file and renamed over the real one, so a concurrent reader sees the
 /// whole old question or the whole new one, never a torn file.
 pub fn write_pending_question(session_dir: &Path, question: &PendingQuestion) -> io::Result<()> {
+    write_pending_question_on(&tddy_fs::DiskFs, session_dir, question)
+}
+
+/// [`write_pending_question`] through the filesystem port: the port's atomic write is the
+/// same write-then-rename over a sibling temp file this module used to roll by hand.
+pub fn write_pending_question_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    question: &PendingQuestion,
+) -> io::Result<()> {
     let json = serde_json::to_vec_pretty(question).map_err(io::Error::other)?;
-    let temp = session_dir.join(format!("{PENDING_QUESTION_FILE}.tmp"));
-    std::fs::write(&temp, json)?;
-    std::fs::rename(&temp, session_dir.join(PENDING_QUESTION_FILE))
+    fs.write_atomic(&session_dir.join(PENDING_QUESTION_FILE), &json, None)
 }
 
 /// The session is no longer waiting. Clearing a session that waits on nothing is not an error.
 pub fn clear_pending_question(session_dir: &Path) -> io::Result<()> {
-    match std::fs::remove_file(session_dir.join(PENDING_QUESTION_FILE)) {
+    clear_pending_question_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`clear_pending_question`] through the filesystem port.
+pub fn clear_pending_question_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> io::Result<()> {
+    match fs.remove_file(&session_dir.join(PENDING_QUESTION_FILE)) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }
@@ -130,7 +143,15 @@ pub fn clear_pending_question(session_dir: &Path) -> io::Result<()> {
 
 /// The question `session_dir`'s session is waiting on, if any.
 pub fn read_pending_question(session_dir: &Path) -> io::Result<Option<PendingQuestion>> {
-    match std::fs::read(session_dir.join(PENDING_QUESTION_FILE)) {
+    read_pending_question_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_pending_question`] through the filesystem port.
+pub fn read_pending_question_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> io::Result<Option<PendingQuestion>> {
+    match fs.read(&session_dir.join(PENDING_QUESTION_FILE)) {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map(Some)
             .map_err(io::Error::other),

@@ -209,6 +209,15 @@ pub fn format_validation_errors(errors: &[SchemaError]) -> String {
 /// Writes the goal schema and all common schemas to the given path.
 /// Used by `get-schema` subcommand when -o is specified.
 pub fn write_schema_to_path(goal: &str, out_path: &Path) -> std::io::Result<()> {
+    write_schema_to_path_on(&tddy_fs::DiskFs, goal, out_path)
+}
+
+/// [`write_schema_to_path`] through the filesystem port.
+pub fn write_schema_to_path_on(
+    fs: &dyn tddy_fs::Fs,
+    goal: &str,
+    out_path: &Path,
+) -> std::io::Result<()> {
     let schema_str = get_schema(goal).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -217,9 +226,9 @@ pub fn write_schema_to_path(goal: &str, out_path: &Path) -> std::io::Result<()> 
     })?;
 
     if let Some(parent) = out_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
-    std::fs::write(out_path, schema_str)?;
+    fs.write(out_path, schema_str.as_bytes())?;
 
     let base_dir = out_path.parent().unwrap();
     for (_uri, path) in COMMON_SCHEMAS {
@@ -227,9 +236,9 @@ pub fn write_schema_to_path(goal: &str, out_path: &Path) -> std::io::Result<()> 
             if let Some(contents) = file.contents_utf8() {
                 let common_out = base_dir.join(path);
                 if let Some(parent) = common_out.parent() {
-                    std::fs::create_dir_all(parent)?;
+                    fs.create_dir_all(parent)?;
                 }
-                std::fs::write(&common_out, contents)?;
+                fs.write(&common_out, contents.as_bytes())?;
             }
         }
     }

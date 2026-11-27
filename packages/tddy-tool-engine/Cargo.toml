@@ -35,6 +35,7 @@ tddy-worktree-service = { path = "../tddy-worktree-service" }
 # `agent_notification_limits`: `NotifyOperator` refuses what `tddy-tools notify` refuses
 # (`#home-inbox` 11/11). Already in this crate's tree (through `tddy-task`), so no crate is added.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-fs = { path = "../tddy-fs" }
 futures-util = "0.3"
 
 # Signalling a timed-out shell's whole *process group* — `kill(-pid, …)`, which neither `std` nor
@@ -43,6 +44,8 @@ futures-util = "0.3"
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `work_item_link_tools.rs` links a session through the stack crate's own operation.
 tddy-work-queue = { path = "../tddy-work-queue" }
 prost = "0.13"

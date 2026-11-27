@@ -6,7 +6,9 @@ use std::sync::mpsc;
 use std::sync::Arc;
 
 use tddy_core::backend::{AgentOutputSink, ProgressSink};
-use tddy_core::changeset::{read_changeset, update_state, write_changeset, SessionEntry};
+use tddy_core::changeset::{
+    read_changeset, read_changeset_on, update_state, write_changeset, SessionEntry,
+};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::stream::ProgressEvent as StreamProgressEvent;
 use tddy_core::workflow::context::Context;
@@ -29,6 +31,7 @@ pub struct TddSmallWorkflowHooks {
     recipe: Arc<dyn WorkflowRecipe>,
     manifest: Arc<dyn SessionArtifactManifest>,
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl TddSmallWorkflowHooks {
@@ -41,6 +44,7 @@ impl TddSmallWorkflowHooks {
             recipe,
             manifest,
             event_tx: None,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
     }
 
@@ -54,7 +58,14 @@ impl TddSmallWorkflowHooks {
             recipe,
             manifest,
             event_tx,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
+    }
+
+    /// The same hooks, running their file I/O through `fs` instead of the disk.
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     fn agent_output_sink_impl(&self) -> Option<AgentOutputSink> {
@@ -77,10 +88,11 @@ impl TddSmallWorkflowHooks {
         let event_tx = self.event_tx.clone();
 
         let recipe_for_progress = self.recipe.clone();
+        let fs_for_progress = self.fs.clone();
         Some(ProgressSink::new(move |ev: &StreamProgressEvent| {
             if let StreamProgressEvent::SessionStarted { session_id } = ev {
                 if let Some(ref dir) = session_dir {
-                    if let Ok(mut cs) = read_changeset(dir) {
+                    if let Ok(mut cs) = read_changeset_on(&*fs_for_progress, dir) {
                         let already_exists = cs.sessions.iter().any(|s| s.id == *session_id);
                         if !already_exists {
                             let tag = match task_id.as_deref() {
@@ -99,6 +111,7 @@ impl TddSmallWorkflowHooks {
                         }
                         cs.state.session_id = Some(session_id.clone());
                         hooks_common::write_changeset_logged(
+                            &*fs_for_progress,
                             dir,
                             &cs,
                             "tdd_small progress_sink SessionStarted",
@@ -136,7 +149,7 @@ impl RunnerHooks for TddSmallWorkflowHooks {
             let _ = tx.send(WorkflowEvent::GoalStarted(task_id.to_string()));
         }
         if task_id == "plan" {
-            hooks_common::before_plan(context)?;
+            hooks_common::before_plan(&*self.fs, context)?;
         } else {
             let session_dir: Option<PathBuf> = context
                 .get_sync("session_dir")
@@ -149,12 +162,14 @@ impl RunnerHooks for TddSmallWorkflowHooks {
             match task_id {
                 "red" => {
                     hooks_common::ensure_worktree_for_session(
+                        &*self.fs,
                         &session_dir,
                         context,
                         self.event_tx.as_ref(),
                         "[tdd-small hooks] merged red",
                     )?;
                     before::before_merged_red(
+                        &*self.fs,
                         &session_dir,
                         context,
                         self.recipe.as_ref(),
@@ -162,6 +177,7 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                     )?;
                 }
                 "green" => hooks_common::before_green(
+                    &*self.fs,
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
@@ -169,17 +185,24 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                     "tddy_workflow_recipes::tdd_small::hooks",
                 )?,
                 "post-green-review" => before::before_post_green_review(
+                    &*self.fs,
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                 )?,
-                "refactor" => {
-                    before::before_refactor(&session_dir, context, self.manifest.as_ref())?
-                }
-                "update-docs" => {
-                    before::before_update_docs(self.manifest.as_ref(), &session_dir, context)?
-                }
+                "refactor" => before::before_refactor(
+                    &*self.fs,
+                    &session_dir,
+                    context,
+                    self.manifest.as_ref(),
+                )?,
+                "update-docs" => before::before_update_docs(
+                    &*self.fs,
+                    self.manifest.as_ref(),
+                    &session_dir,
+                    context,
+                )?,
                 _ => {}
             }
         }
@@ -255,6 +278,7 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                     .get_sync("session_dir")
                     .ok_or("plan after_task requires session_dir in context (set by PlanTask)")?;
                 after::after_plan(
+                    &*self.fs,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                     &session_dir,
@@ -270,9 +294,11 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                     .get_sync("output")
                     .ok_or("after_task requires output in context")?;
                 match task_id {
-                    "red" => after::after_red(&session_dir, &output, context)?,
-                    "green" => after::after_green(&session_dir, &output)?,
-                    "post-green-review" => after::after_post_green_review(&session_dir, &output)?,
+                    "red" => after::after_red(&*self.fs, &session_dir, &output, context)?,
+                    "green" => after::after_green(&*self.fs, &session_dir, &output)?,
+                    "post-green-review" => {
+                        after::after_post_green_review(&*self.fs, &session_dir, &output)?
+                    }
                     _ => {}
                 }
             }
@@ -283,8 +309,8 @@ impl RunnerHooks for TddSmallWorkflowHooks {
                     .or_else(|| context.get_sync("output_dir"));
                 if let (Some(ref output), Some(ref session_dir)) = (output, session_dir) {
                     match task_id {
-                        "refactor" => after::after_refactor(session_dir, output)?,
-                        "update-docs" => after::after_update_docs(session_dir, output)?,
+                        "refactor" => after::after_refactor(&*self.fs, session_dir, output)?,
+                        "update-docs" => after::after_update_docs(&*self.fs, session_dir, output)?,
                         _ => {}
                     }
                 }
@@ -307,12 +333,16 @@ impl RunnerHooks for TddSmallWorkflowHooks {
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"))?;
         let basename = self.manifest.primary_document_basename()?;
-        let prd_path = tddy_workflow::resolve_existing_session_artifact(&session_dir, &basename)?;
+        let prd_path = tddy_workflow::resolve_existing_session_artifact_on(
+            &*self.fs,
+            &session_dir,
+            &basename,
+        )?;
         log::debug!(
             "[tdd-small hooks] elicitation DocumentApproval reading {:?}",
             prd_path
         );
-        let prd_content = std::fs::read_to_string(&prd_path).ok()?;
+        let prd_content = self.fs.read_to_string(&prd_path).ok()?;
         Some(ElicitationEvent::DocumentApproval {
             content: prd_content,
         })

@@ -43,7 +43,7 @@ fn tdd_small_graph_excludes_demo_and_acceptance_tests_nodes() {
     .collect();
 
     // When
-    let graph = TddSmallRecipe.build_graph(backend);
+    let graph = TddSmallRecipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let ids: BTreeSet<String> = graph.task_ids().cloned().collect();
     let ctx = Context::new();
 

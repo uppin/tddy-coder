@@ -43,7 +43,7 @@ impl WorkflowRecipe for ReviewRecipe {
         "review"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         log::info!("ReviewRecipe::build_graph: inspect -> branch-review -> end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let inspect = Arc::new(BackendInvokeTask::from_recipe(
@@ -51,12 +51,14 @@ impl WorkflowRecipe for ReviewRecipe {
             GoalId::new(TASK_INSPECT),
             recipe.clone(),
             backend.clone(),
+            fs.clone(),
         ));
         let branch_review = Arc::new(BackendInvokeTask::from_recipe(
             TASK_BRANCH_REVIEW,
             GoalId::new(TASK_BRANCH_REVIEW),
             recipe,
             backend,
+            fs.clone(),
         ));
         let end = Arc::new(EndTask::new("end"));
 

@@ -32,7 +32,7 @@ pub mod work_queue_store;
 // The storage layer these modules are built on, named at the `crate::` paths they used inside
 // `tddy-core`.
 use tddy_session_store::error::WorkflowError;
-use tddy_session_store::{atomic_file, error, output};
+use tddy_session_store::{error, output};
 
 pub use agent_conversation::{
     record_agent_conversation, AgentConversation, AgentConversationReason,

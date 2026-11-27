@@ -23,7 +23,7 @@ pub use tddy_workflow::{GoalHints, PermissionHint};
 pub trait WorkflowRecipe: Send + Sync {
     fn name(&self) -> &str;
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph;
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph;
 
     fn create_hooks(&self, event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks>;
 

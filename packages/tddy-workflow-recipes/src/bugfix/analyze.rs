@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use tddy_core::changeset::{
-    read_changeset, update_state, write_changeset, BranchWorktreeIntent, Changeset,
+    read_changeset_on, update_state, write_changeset_on, BranchWorktreeIntent, Changeset,
 };
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::task::TaskResult;
@@ -50,6 +50,7 @@ This step does not require `tddy-tools submit` unless the workflow configuration
 
 /// Apply a completed `analyze` task result to `changeset.yaml` under `session_dir`.
 pub fn apply_analyze_submit_to_changeset(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     task_result: &TaskResult,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -73,10 +74,9 @@ pub fn apply_analyze_submit_to_changeset(
         parsed.worktree_suggestion,
         parsed.name
     );
-    let mut cs: Changeset =
-        read_changeset(session_dir).map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            format!("read changeset: {}", e).into()
-        })?;
+    let mut cs: Changeset = read_changeset_on(fs, session_dir).map_err(
+        |e| -> Box<dyn std::error::Error + Send + Sync> { format!("read changeset: {}", e).into() },
+    )?;
     cs.branch_suggestion = Some(parsed.branch_suggestion.clone());
     cs.worktree_suggestion = Some(parsed.worktree_suggestion);
     if cs.workflow.as_ref().and_then(|w| w.branch_worktree_intent)
@@ -100,11 +100,11 @@ pub fn apply_analyze_submit_to_changeset(
         .filter(|e| !e.is_empty())
     {
         let artifacts_root = tddy_workflow::session_artifacts_root(session_dir);
-        crate::writer::write_exploration_file(&artifacts_root, exploration)
+        crate::writer::write_exploration_file_on(fs, &artifacts_root, exploration)
             .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
     }
     update_state(&mut cs, WorkflowState::new("Reproducing"));
-    write_changeset(session_dir, &cs)?;
+    write_changeset_on(fs, session_dir, &cs)?;
     log::info!(
         "[bugfix analyze] persisted analyze output and set workflow state to Reproducing under {:?}",
         session_dir
@@ -115,11 +115,12 @@ pub fn apply_analyze_submit_to_changeset(
 /// Seed `changeset.yaml` when missing so the analyze step can read/write `changeset.yaml`
 /// (same lifecycle idea as TDD [`crate::tdd::hooks::before_plan`]).
 pub(crate) fn seed_bugfix_changeset_if_missing(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     feature_input: String,
     repo_path: Option<String>,
 ) {
-    if read_changeset(session_dir).is_ok() {
+    if read_changeset_on(fs, session_dir).is_ok() {
         return;
     }
     let init_cs = Changeset {
@@ -128,7 +129,7 @@ pub(crate) fn seed_bugfix_changeset_if_missing(
         recipe: Some("bugfix".to_string()),
         ..Changeset::default()
     };
-    if let Err(e) = write_changeset(session_dir, &init_cs) {
+    if let Err(e) = write_changeset_on(fs, session_dir, &init_cs) {
         log::debug!(
             "[bugfix analyze] seed_bugfix_changeset_if_missing write failed: {}",
             e
@@ -157,7 +158,7 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("mkdir");
-        write_changeset(&dir, &Changeset::default()).expect("seed");
+        tddy_core::changeset::write_changeset(&dir, &Changeset::default()).expect("seed");
         dir
     }
 
@@ -173,7 +174,7 @@ mod tests {
         };
 
         // When
-        let err = apply_analyze_submit_to_changeset(&dir, &tr).unwrap_err();
+        let err = apply_analyze_submit_to_changeset(&tddy_fs::DiskFs, &dir, &tr).unwrap_err();
 
         // Then
         assert!(
@@ -195,7 +196,7 @@ mod tests {
         };
 
         // When / Then
-        assert!(apply_analyze_submit_to_changeset(&dir, &tr).is_err());
+        assert!(apply_analyze_submit_to_changeset(&tddy_fs::DiskFs, &dir, &tr).is_err());
     }
 
     #[test]
@@ -211,8 +212,8 @@ mod tests {
         };
 
         // When
-        apply_analyze_submit_to_changeset(&dir, &tr).expect("apply");
-        let cs = read_changeset(&dir).expect("read");
+        apply_analyze_submit_to_changeset(&tddy_fs::DiskFs, &dir, &tr).expect("apply");
+        let cs = tddy_core::changeset::read_changeset(&dir).expect("read");
 
         // Then
         assert_eq!(

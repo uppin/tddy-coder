@@ -3,20 +3,28 @@
 use crate::parser::{
     AcceptanceTestsOutput, DemoPlan, EvaluateOutput, GreenOutput, PlanningOutput, RedOutput,
 };
-use std::fs;
 use std::path::{Path, PathBuf};
 use tddy_core::error::WorkflowError;
 use tddy_workflow::session_artifacts_root;
 
 /// Inject a "Related Documents" section with relative links to peer .md files in `peer_scan_root`.
 pub fn inject_cross_references(content: &str, peer_scan_root: &Path, self_name: &str) -> String {
-    let mut peers: Vec<String> = fs::read_dir(peer_scan_root)
-        .ok()
+    inject_cross_references_on(&tddy_fs::DiskFs, content, peer_scan_root, self_name)
+}
+
+/// [`inject_cross_references`] through the filesystem port.
+pub fn inject_cross_references_on(
+    fs: &dyn tddy_fs::Fs,
+    content: &str,
+    peer_scan_root: &Path,
+    self_name: &str,
+) -> String {
+    let mut peers: Vec<String> = fs
+        .read_dir(peer_scan_root)
+        .unwrap_or_default()
         .into_iter()
-        .flatten()
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let name = e.file_name().into_string().ok()?;
+        .filter_map(|path| {
+            let name = path.file_name()?.to_str()?.to_string();
             if name.ends_with(".md") && name != self_name {
                 Some(format!("[{}](./{})", name, name))
             } else {
@@ -67,31 +75,44 @@ fn slugify(s: &str, max_len: usize) -> String {
 
 /// Write the session ID to `.session` in the output directory.
 pub fn write_session_file(output_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
-    let session_path = output_dir.join(".session");
-    tddy_core::atomic_file::write_atomic_labelled(&session_path, session_id)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_session_file_on(&tddy_fs::DiskFs, output_dir, session_id)
 }
 
 /// Read the session ID from `.session` in the plan directory.
 pub fn read_session_file(session_dir: &Path) -> Result<String, WorkflowError> {
-    let session_path = session_dir.join(".session");
-    fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+    read_session_file_on(&tddy_fs::DiskFs, session_dir)
 }
 
 /// Write the implementation session ID to `.impl-session` in the plan directory.
 /// Used by the red goal so the green goal can resume the same session.
 pub fn write_impl_session_file(session_dir: &Path, session_id: &str) -> Result<(), WorkflowError> {
+    write_impl_session_file_on(&tddy_fs::DiskFs, session_dir, session_id)
+}
+
+/// [`write_impl_session_file`] through the filesystem port.
+pub fn write_impl_session_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    session_id: &str,
+) -> Result<(), WorkflowError> {
     let session_path = session_dir.join(".impl-session");
-    tddy_core::atomic_file::write_atomic_labelled(&session_path, session_id)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    fs.write_atomic(&session_path, session_id.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))
 }
 
 /// Read the implementation session ID from `.impl-session` in the plan directory.
 pub fn read_impl_session_file(session_dir: &Path) -> Result<String, WorkflowError> {
+    read_impl_session_file_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_impl_session_file`] through the filesystem port.
+pub fn read_impl_session_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<String, WorkflowError> {
     let session_path = session_dir.join(".impl-session");
-    fs::read_to_string(&session_path).map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+    fs.read_to_string(&session_path)
+        .map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
 }
 
 /// Write the primary planning document under `session_dir/artifacts/<prd_basename>`.
@@ -102,29 +123,41 @@ pub fn write_artifacts(
     planning: &PlanningOutput,
     prd_basename: &str,
 ) -> Result<(), WorkflowError> {
+    write_artifacts_on(&tddy_fs::DiskFs, output_dir, planning, prd_basename)
+}
+
+/// [`write_artifacts`] through the filesystem port.
+pub fn write_artifacts_on(
+    fs: &dyn tddy_fs::Fs,
+    output_dir: &Path,
+    planning: &PlanningOutput,
+    prd_basename: &str,
+) -> Result<(), WorkflowError> {
     if planning.prd.trim().is_empty() {
         return Err(WorkflowError::WriteFailed(
             "PRD content is empty or whitespace-only".into(),
         ));
     }
 
-    fs::create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs.create_dir_all(output_dir)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     if let Some(ref demo) = planning.demo_plan {
-        write_demo_plan_file(output_dir, demo)?;
+        write_demo_plan_file_on(fs, output_dir, demo)?;
     }
 
     let artifacts_root = session_artifacts_root(output_dir);
-    fs::create_dir_all(&artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs.create_dir_all(&artifacts_root)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     log::info!(
         "[tddy-workflow-recipes] write_artifacts prd at {:?}/{}",
         artifacts_root,
         prd_basename
     );
     let prd_path = artifacts_root.join(prd_basename);
-    let prd_content = inject_cross_references(&planning.prd, &artifacts_root, prd_basename);
-    tddy_core::atomic_file::write_atomic_labelled(&prd_path, prd_content)
-        .map_err(WorkflowError::WriteFailed)?;
+    let prd_content = inject_cross_references_on(fs, &planning.prd, &artifacts_root, prd_basename);
+    fs.write_atomic(&prd_path, prd_content.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     if let Some(exploration) = planning
         .exploration
@@ -132,7 +165,7 @@ pub fn write_artifacts(
         .map(str::trim)
         .filter(|e| !e.is_empty())
     {
-        write_exploration_file(&artifacts_root, exploration)?;
+        write_exploration_file_on(fs, &artifacts_root, exploration)?;
     }
 
     Ok(())
@@ -149,16 +182,35 @@ pub fn write_exploration_file(
     artifacts_root: &Path,
     exploration: &str,
 ) -> Result<(), WorkflowError> {
-    fs::create_dir_all(artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    write_exploration_file_on(&tddy_fs::DiskFs, artifacts_root, exploration)
+}
+
+/// [`write_exploration_file`] through the filesystem port.
+pub fn write_exploration_file_on(
+    fs: &dyn tddy_fs::Fs,
+    artifacts_root: &Path,
+    exploration: &str,
+) -> Result<(), WorkflowError> {
+    fs.create_dir_all(artifacts_root)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     let path = artifacts_root.join(EXPLORATION_BASENAME);
-    let content = inject_cross_references(exploration, artifacts_root, EXPLORATION_BASENAME);
-    tddy_core::atomic_file::write_atomic_labelled(&path, content)
-        .map_err(WorkflowError::WriteFailed)?;
+    let content = inject_cross_references_on(fs, exploration, artifacts_root, EXPLORATION_BASENAME);
+    fs.write_atomic(&path, content.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     log::info!(
         "[tddy-workflow-recipes] write_artifacts exploration at {:?}",
         path
     );
     Ok(())
+}
+
+fn write_atomic_string(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    content: &str,
+) -> Result<(), WorkflowError> {
+    fs.write_atomic(path, content.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))
 }
 
 /// Write demo-plan.md to the plan directory.
@@ -167,6 +219,15 @@ pub fn write_exploration_file(
 /// [`read_demo_plan_file`] can round-trip the full [`DemoPlan`] including the new structured
 /// recipe fields (`mode`, `hostfwd`, `deploy_steps`, `verify_command`, `build_target`).
 pub fn write_demo_plan_file(session_dir: &Path, demo: &DemoPlan) -> Result<(), WorkflowError> {
+    write_demo_plan_file_on(&tddy_fs::DiskFs, session_dir, demo)
+}
+
+/// [`write_demo_plan_file`] through the filesystem port.
+pub fn write_demo_plan_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    demo: &DemoPlan,
+) -> Result<(), WorkflowError> {
     // Embed structured recipe as JSON front-matter for lossless round-trip.
     let frontmatter_json = serde_json::to_string(demo)
         .map_err(|e| WorkflowError::WriteFailed(format!("serialize demo plan: {}", e)))?;
@@ -184,15 +245,23 @@ pub fn write_demo_plan_file(session_dir: &Path, demo: &DemoPlan) -> Result<(), W
         ));
     }
     out.push_str(&format!("## Verification\n\n{}\n", demo.verification));
-    let content = inject_cross_references(&out, session_dir, "demo-plan.md");
+    let content = inject_cross_references_on(fs, &out, session_dir, "demo-plan.md");
     let path = session_dir.join("demo-plan.md");
-    tddy_core::atomic_file::write_atomic_labelled(&path, content)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_atomic_string(fs, &path, &content)
 }
 
 /// Write demo-results.md to the plan directory.
 pub fn write_demo_results_file(
+    session_dir: &Path,
+    summary: &str,
+    steps_completed: u32,
+) -> Result<(), WorkflowError> {
+    write_demo_results_file_on(&tddy_fs::DiskFs, session_dir, summary, steps_completed)
+}
+
+/// [`write_demo_results_file`] through the filesystem port.
+pub fn write_demo_results_file_on(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     summary: &str,
     steps_completed: u32,
@@ -202,9 +271,7 @@ pub fn write_demo_results_file(
         summary, steps_completed
     );
     let path = session_dir.join("demo-results.md");
-    tddy_core::atomic_file::write_atomic_labelled(&path, content)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_atomic_string(fs, &path, &content)
 }
 
 /// Write acceptance-tests.md to the plan directory.
@@ -212,41 +279,74 @@ pub fn write_acceptance_tests_file(
     session_dir: &Path,
     output: &AcceptanceTestsOutput,
 ) -> Result<(), WorkflowError> {
+    write_acceptance_tests_file_on(&tddy_fs::DiskFs, session_dir, output)
+}
+
+/// [`write_acceptance_tests_file`] through the filesystem port.
+pub fn write_acceptance_tests_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    output: &AcceptanceTestsOutput,
+) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("acceptance-tests.md");
-    let content =
-        inject_cross_references(&output.to_markdown(), session_dir, "acceptance-tests.md");
-    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    let content = inject_cross_references_on(
+        fs,
+        &output.to_markdown(),
+        session_dir,
+        "acceptance-tests.md",
+    );
+    write_atomic_string(fs, &md_path, &content)
 }
 
 /// Write red-output.md to the plan directory.
 pub fn write_red_output_file(session_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
+    write_red_output_file_on(&tddy_fs::DiskFs, session_dir, output)
+}
+
+/// [`write_red_output_file`] through the filesystem port.
+pub fn write_red_output_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    output: &RedOutput,
+) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("red-output.md");
-    let content = inject_cross_references(&output.to_markdown(), session_dir, "red-output.md");
-    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    let content =
+        inject_cross_references_on(fs, &output.to_markdown(), session_dir, "red-output.md");
+    write_atomic_string(fs, &md_path, &content)
 }
 
 /// Write progress.md to the plan directory. Unfilled checkboxes for failed tests and skeletons.
 /// Next goal uses this to mark items as done, skipped, or failed.
 pub fn write_progress_file(session_dir: &Path, output: &RedOutput) -> Result<(), WorkflowError> {
+    write_progress_file_on(&tddy_fs::DiskFs, session_dir, output)
+}
+
+/// [`write_progress_file`] through the filesystem port.
+pub fn write_progress_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    output: &RedOutput,
+) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("progress.md");
     let content = output.to_progress_markdown();
-    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_atomic_string(fs, &md_path, &content)
 }
 
 /// Update progress.md in the plan directory with green goal results.
 /// Overwrites with updated checkboxes: [x] for passing, [!] for failing.
 pub fn update_progress_file(session_dir: &Path, output: &GreenOutput) -> Result<(), WorkflowError> {
+    update_progress_file_on(&tddy_fs::DiskFs, session_dir, output)
+}
+
+/// [`update_progress_file`] through the filesystem port.
+pub fn update_progress_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    output: &GreenOutput,
+) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("progress.md");
     let content = output.to_updated_progress_markdown();
-    tddy_core::atomic_file::write_atomic_labelled(&md_path, content)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_atomic_string(fs, &md_path, &content)
 }
 
 /// Update acceptance-tests.md in the plan directory with green goal results.
@@ -255,21 +355,38 @@ pub fn update_acceptance_tests_file(
     session_dir: &Path,
     output: &GreenOutput,
 ) -> Result<(), WorkflowError> {
+    update_acceptance_tests_file_on(&tddy_fs::DiskFs, session_dir, output)
+}
+
+/// [`update_acceptance_tests_file`] through the filesystem port.
+pub fn update_acceptance_tests_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    output: &GreenOutput,
+) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("acceptance-tests.md");
-    if !md_path.exists() {
+    if !fs.exists(&md_path) {
         return Ok(());
     }
-    let content =
-        fs::read_to_string(&md_path).map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
+    let content = fs
+        .read_to_string(&md_path)
+        .map_err(|e| WorkflowError::PlanDirInvalid(e.to_string()))?;
     let updated = output.update_acceptance_tests_content(&content);
-    tddy_core::atomic_file::write_atomic_labelled(&md_path, updated)
-        .map_err(WorkflowError::WriteFailed)?;
-    Ok(())
+    write_atomic_string(fs, &md_path, &updated)
 }
 
 /// Write evaluation-report.md to session_dir (not working_dir).
 /// Called by the evaluate-changes workflow after a successful backend invocation.
 pub fn write_evaluation_report(
+    session_dir: &Path,
+    output: &EvaluateOutput,
+) -> Result<(), WorkflowError> {
+    write_evaluation_report_on(&tddy_fs::DiskFs, session_dir, output)
+}
+
+/// [`write_evaluation_report`] through the filesystem port.
+pub fn write_evaluation_report_on(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     output: &EvaluateOutput,
 ) -> Result<(), WorkflowError> {
@@ -351,10 +468,7 @@ pub fn write_evaluation_report(
         session_dir.join("evaluation-report.md").display()
     );
 
-    tddy_core::atomic_file::write_atomic_labelled(&session_dir.join("evaluation-report.md"), md)
-        .map_err(WorkflowError::WriteFailed)?;
-
-    Ok(())
+    write_atomic_string(fs, &session_dir.join("evaluation-report.md"), &md)
 }
 
 pub use tddy_core::output::{default_tddy_data_dir, SESSIONS_SUBDIR};
@@ -368,15 +482,34 @@ pub fn create_session_dir_in(base: &Path) -> Result<PathBuf, WorkflowError> {
 
 /// Create a session directory at `{base}/sessions/{id}/` using the given session id.
 pub fn create_session_dir_with_id(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
+    create_session_dir_with_id_on(&tddy_fs::DiskFs, base, session_id)
+}
+
+/// [`create_session_dir_with_id`] through the filesystem port.
+pub fn create_session_dir_with_id_on(
+    fs: &dyn tddy_fs::Fs,
+    base: &Path,
+    session_id: &str,
+) -> Result<PathBuf, WorkflowError> {
     let sessions_dir = base.join(SESSIONS_SUBDIR);
     let session_dir = sessions_dir.join(session_id);
-    fs::create_dir_all(&session_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs.create_dir_all(&session_dir)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     Ok(session_dir)
 }
 
 /// Same layout as [`create_session_dir_with_id`]: `{base}/sessions/{id}/`.
 pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf, WorkflowError> {
     create_session_dir_with_id(base, session_id)
+}
+
+/// [`create_session_dir_under`] through the filesystem port.
+pub fn create_session_dir_under_on(
+    fs: &dyn tddy_fs::Fs,
+    base: &Path,
+    session_id: &str,
+) -> Result<PathBuf, WorkflowError> {
+    create_session_dir_with_id_on(fs, base, session_id)
 }
 
 /// Read and parse `demo-plan.md` from `session_dir`, reconstructing a [`DemoPlan`].
@@ -390,8 +523,17 @@ pub fn create_session_dir_under(base: &Path, session_id: &str) -> Result<PathBuf
 /// # Errors
 /// Returns [`WorkflowError::WriteFailed`] if the file cannot be read.
 pub fn read_demo_plan_file(session_dir: &Path) -> Result<DemoPlan, WorkflowError> {
+    read_demo_plan_file_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_demo_plan_file`] through the filesystem port.
+pub fn read_demo_plan_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<DemoPlan, WorkflowError> {
     let path = session_dir.join("demo-plan.md");
-    let content = fs::read_to_string(&path)
+    let content = fs
+        .read_to_string(&path)
         .map_err(|e| WorkflowError::WriteFailed(format!("read demo-plan.md: {}", e)))?;
 
     // Extract JSON front-matter block: <!-- tddy-demo-recipe: { ... } -->
@@ -443,6 +585,27 @@ fn extract_markdown_section(content: &str, heading: &str) -> Option<String> {
     }
 }
 
+/// [`write_session_file`] through the filesystem port.
+pub fn write_session_file_on(
+    fs: &dyn tddy_fs::Fs,
+    output_dir: &Path,
+    session_id: &str,
+) -> Result<(), WorkflowError> {
+    let session_path = output_dir.join(".session");
+    fs.write_atomic(&session_path, session_id.as_bytes(), None)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))
+}
+
+/// [`read_session_file`] through the filesystem port.
+pub fn read_session_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<String, WorkflowError> {
+    let session_path = session_dir.join(".session");
+    fs.read_to_string(&session_path)
+        .map_err(|e| WorkflowError::SessionMissing(format!("{}", e)))
+}
+
 #[cfg(test)]
 mod exploration_artifact_tests {
     use super::*;
@@ -454,8 +617,8 @@ mod exploration_artifact_tests {
             label,
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).expect("create output dir");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create output dir");
         dir
     }
 
@@ -476,14 +639,14 @@ mod exploration_artifact_tests {
             "write_artifacts must write exploration.md under artifacts/; expected {}",
             exploration_path.display()
         );
-        let content = fs::read_to_string(&exploration_path).expect("read exploration.md");
+        let content = std::fs::read_to_string(&exploration_path).expect("read exploration.md");
         assert!(
             content.contains("`src/lib.rs:10:1` — entry point"),
             "exploration.md must contain the submitted code map entry; got:\n{}",
             content
         );
 
-        let _ = fs::remove_dir_all(&output_dir);
+        let _ = std::fs::remove_dir_all(&output_dir);
     }
 
     #[test]
@@ -506,6 +669,6 @@ mod exploration_artifact_tests {
             "no exploration.md must be written when the plan submit omits the field"
         );
 
-        let _ = fs::remove_dir_all(&output_dir);
+        let _ = std::fs::remove_dir_all(&output_dir);
     }
 }

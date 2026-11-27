@@ -147,9 +147,9 @@ impl WorkflowRecipe for TddRecipe {
         "tdd"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
-        graph::build_full_tdd_workflow_graph(backend, recipe)
+        graph::build_full_tdd_workflow_graph(backend, recipe, fs)
     }
 
     fn create_hooks(&self, event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {
