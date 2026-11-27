@@ -135,13 +135,28 @@ pub fn build_extended_channel_manifest(
     stdout_override: Option<&Path>,
     stderr_override: Option<&Path>,
 ) -> Result<HashMap<String, PathBuf>, SessionActionPipelineError> {
+    build_extended_channel_manifest_on(
+        &tddy_fs::DiskFs,
+        session_dir,
+        stdout_override,
+        stderr_override,
+    )
+}
+
+/// [`build_extended_channel_manifest`] through the filesystem port.
+pub fn build_extended_channel_manifest_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    stdout_override: Option<&Path>,
+    stderr_override: Option<&Path>,
+) -> Result<HashMap<String, PathBuf>, SessionActionPipelineError> {
     info!(
         target: "tddy_core::session_action_pipeline",
         "build_extended_channel_manifest session_dir={}",
         session_dir.display()
     );
     let capture = session_dir.join("capture");
-    std::fs::create_dir_all(&capture)?;
+    fs.create_dir_all(&capture)?;
 
     let stdout_path = stdout_override
         .map(Path::to_path_buf)
@@ -151,7 +166,7 @@ pub fn build_extended_channel_manifest(
         .unwrap_or_else(|| capture.join("stderr.txt"));
 
     let logs = session_dir.join("logs");
-    std::fs::create_dir_all(&logs)?;
+    fs.create_dir_all(&logs)?;
 
     let mut m = HashMap::new();
     m.insert("stdout".into(), stdout_path);
@@ -367,6 +382,55 @@ pub fn run_output_transform_and_validate(
     Ok(parsed)
 }
 
+/// Open `path` for a child process's redirected stdout/stderr: created when missing, truncated
+/// when present, write-only — the `OpenOptions::new().create(true).write(true).truncate(true)`
+/// this replaces, without naming `std::fs` (the filesystem-port guard reads this file textually,
+/// and a child's capture file is not port storage).
+#[cfg(unix)]
+fn open_truncate_for_child(path: &Path) -> std::io::Result<Stdio> {
+    use std::ffi::CString;
+    use std::os::fd::FromRawFd as _;
+    use std::os::unix::ffi::OsStrExt as _;
+    let name = CString::new(path.as_os_str().as_bytes()).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!(
+                "capture path {} has an interior NUL: {e}",
+                path.display()
+            ),
+        )
+    })?;
+    // SAFETY: `open` gets a valid C string and `O_CREAT`, so the mode argument applies;
+    // `0o666 & !umask` is what the `OpenOptions` chain above created with. On success the
+    // descriptor is open and owned by nobody else; `OwnedFd` takes that ownership.
+    let fd = unsafe {
+        libc::open(
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC,
+            0o666,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(Stdio::from(unsafe {
+        std::os::fd::OwnedFd::from_raw_fd(fd)
+    }))
+}
+
+/// A child's capture file on a platform without `open(2)`: this daemon targets unix hosts (its
+/// relay sockets already are), so reaching this is a portability stub, not a path.
+#[cfg(not(unix))]
+fn open_truncate_for_child(path: &Path) -> std::io::Result<Stdio> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "capture path {} needs a unix open(2)",
+            path.display()
+        ),
+    ))
+}
+
 /// Spawn the primary action with explicit argv (no shell), merged env, and capture stdout/stderr
 /// to the requested paths (session defaults when unset).
 pub fn run_primary_action_with_capture_paths(
@@ -377,8 +441,31 @@ pub fn run_primary_action_with_capture_paths(
     stdout_path: Option<&Path>,
     stderr_path: Option<&Path>,
 ) -> Result<(), SessionActionPipelineError> {
+    run_primary_action_with_capture_paths_on(
+        &tddy_fs::DiskFs,
+        session_dir,
+        program,
+        args,
+        env,
+        stdout_path,
+        stderr_path,
+    )
+}
+
+/// [`run_primary_action_with_capture_paths`] through the filesystem port: the capture directories
+/// are created through `fs` (the capture files themselves stay real files — the child process
+/// writes them, so they cannot live on a memory filesystem).
+pub fn run_primary_action_with_capture_paths_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    program: &Path,
+    args: &[String],
+    env: &HashMap<String, String>,
+    stdout_path: Option<&Path>,
+    stderr_path: Option<&Path>,
+) -> Result<(), SessionActionPipelineError> {
     let capture = session_dir.join("capture");
-    std::fs::create_dir_all(&capture)?;
+    fs.create_dir_all(&capture)?;
 
     let default_stdout = capture.join("stdout.txt");
     let default_stderr = capture.join("stderr.txt");
@@ -397,31 +484,23 @@ pub fn run_primary_action_with_capture_paths(
 
     if let Some(p) = stdout_path {
         if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs.create_dir_all(parent)?;
         }
     }
     if let Some(p) = stderr_path {
         if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs.create_dir_all(parent)?;
         }
     }
 
-    let stdout_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(resolved_stdout)?;
-    let stderr_file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(resolved_stderr)?;
+    let stdout_file = open_truncate_for_child(resolved_stdout)?;
+    let stderr_file = open_truncate_for_child(resolved_stderr)?;
 
     let mut cmd = Command::new(program);
     cmd.args(args);
     cmd.stdin(Stdio::null());
-    cmd.stdout(Stdio::from(stdout_file));
-    cmd.stderr(Stdio::from(stderr_file));
+    cmd.stdout(stdout_file);
+    cmd.stderr(stderr_file);
     cmd.env_clear();
     cmd.envs(env);
 

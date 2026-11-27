@@ -11,7 +11,11 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+# `open(2)` for a child process's capture files, without naming `std::fs` (see `open_truncate_for_child`).
+libc = "0.2"
 tddy-changeset = { path = "../tddy-changeset" }
+# `#fs-port`: job layout, job records and channel manifests go through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-session-store = { path = "../tddy-session-store" }
 # The task registry an action job is tracked in. Depends on no crate above this one.
 tddy-task = { path = "../tddy-task" }

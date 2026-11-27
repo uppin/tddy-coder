@@ -1,6 +1,5 @@
 //! Session action job execution: manifest validation, blocking invoke, async spawn, wait, stop.
 
-use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -41,8 +40,15 @@ fn job_record_path(job_dir: &Path) -> PathBuf {
 }
 
 pub(crate) fn ensure_jobs_layout(session_dir: &Path) -> Result<(), SessionActionJobsError> {
+    ensure_jobs_layout_on(&tddy_fs::DiskFs, session_dir)
+}
+
+pub(crate) fn ensure_jobs_layout_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<(), SessionActionJobsError> {
     let root = session_jobs_root(session_dir);
-    fs::create_dir_all(root.join("jobs"))?;
+    fs.create_dir_all(&root.join("jobs"))?;
     info!(
         target: "tddy_core::session_action_jobs",
         "ensure_jobs_layout session_dir={} root={}",
@@ -122,20 +128,40 @@ struct PersistedJob {
 }
 
 fn read_job(job_dir: &Path) -> Result<Option<PersistedJob>, SessionActionJobsError> {
+    read_job_on(&tddy_fs::DiskFs, job_dir)
+}
+
+fn read_job_on(
+    fs: &dyn tddy_fs::Fs,
+    job_dir: &Path,
+) -> Result<Option<PersistedJob>, SessionActionJobsError> {
     let p = job_record_path(job_dir);
-    if !p.is_file() {
-        return Ok(None);
+    // Not-a-file is no job (a directory at the record path reads as none, as before). Only
+    // "no such file" is none among the errors; anything else surfaces through `Io`.
+    match fs.metadata(&p) {
+        Ok(meta) if meta.kind != tddy_fs::FsKind::File => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Ok(_) => {}
+        Err(error) => return Err(SessionActionJobsError::from(error)),
     }
-    let text = fs::read_to_string(&p)?;
+    let text = fs.read_to_string(&p)?;
     serde_json::from_str(&text)
         .map(Some)
         .map_err(|e| SessionActionJobsError::JobState(e.to_string()))
 }
 
 fn write_job_atomic(job_dir: &Path, job: &PersistedJob) -> Result<(), SessionActionJobsError> {
+    write_job_atomic_on(&tddy_fs::DiskFs, job_dir, job)
+}
+
+fn write_job_atomic_on(
+    fs: &dyn tddy_fs::Fs,
+    job_dir: &Path,
+    job: &PersistedJob,
+) -> Result<(), SessionActionJobsError> {
     let payload = serde_json::to_string_pretty(job)
         .map_err(|e| SessionActionJobsError::JobState(e.to_string()))?;
-    crate::atomic_file::write_atomic(&job_record_path(job_dir), payload)?;
+    fs.write_atomic(&job_record_path(job_dir), payload.as_bytes(), None)?;
     debug!(
         target: "tddy_core::session_action_jobs",
         "write_job_atomic job_id={} phase={:?}",
@@ -151,7 +177,17 @@ fn start_async_job(
     args: &Value,
     repo: Option<&Path>,
 ) -> Result<(String, PathBuf, PathBuf), SessionActionJobsError> {
-    ensure_jobs_layout(session_dir)?;
+    start_async_job_on(&tddy_fs::DiskFs, session_dir, manifest, args, repo)
+}
+
+fn start_async_job_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    manifest: &ActionManifest,
+    args: &Value,
+    repo: Option<&Path>,
+) -> Result<(String, PathBuf, PathBuf), SessionActionJobsError> {
+    ensure_jobs_layout_on(fs, session_dir)?;
     let cwd = repo
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| session_dir.to_path_buf());
@@ -159,11 +195,12 @@ fn start_async_job(
     let (handle, _registry) = start_manifest_async(session_dir, manifest, cwd)?;
     let job_id = handle.id.0.clone();
     let job_dir = job_workspace(session_dir, &job_id);
-    fs::create_dir_all(&job_dir)?;
+    fs.create_dir_all(&job_dir)?;
     let stdout_path = job_dir.join("stdout.log");
     let stderr_path = job_dir.join("stderr.log");
-    File::create(&stdout_path)?;
-    File::create(&stderr_path)?;
+    // Empty log files, as `File::create` left them: the mirror appends from here.
+    fs.write(&stdout_path, &[])?;
+    fs.write(&stderr_path, &[])?;
 
     schedule_async_log_mirror(handle, stdout_path.clone(), stderr_path.clone());
 
