@@ -89,6 +89,20 @@ fn create_new_writes_once_then_refuses() {
 }
 
 #[test]
+fn create_new_with_mode_lands_at_that_mode_and_refuses_existing() {
+    each_adapter(|s| {
+        let path = s.at("n/secret");
+        s.fs.create_dir_all(path.parent().unwrap()).unwrap();
+        s.fs.create_new_with_mode(&path, b"key", 0o600).unwrap();
+        assert_eq!(s.fs.read(&path).unwrap(), b"key");
+        assert_eq!(s.fs.metadata(&path).unwrap().mode, Some(0o600));
+        let err = s.fs.create_new_with_mode(&path, b"other", 0o600).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(s.fs.read(&path).unwrap(), b"key");
+    });
+}
+
+#[test]
 fn create_new_refuses_an_existing_directory() {
     each_adapter(|s| {
         let dir = s.at("n/dir");

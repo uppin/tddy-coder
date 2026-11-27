@@ -444,6 +444,23 @@ impl Fs for MemFs {
         Ok(())
     }
 
+    fn create_new_with_mode(&self, path: &Path, contents: &[u8], mode: u32) -> io::Result<()> {
+        let key = normalized(path)?;
+        let mut tree = self.lock();
+        if tree.nodes.contains_key(&key) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{}: already exists", path.display()),
+            ));
+        }
+        require_parent_dirs(&tree, &key)?;
+        take_fault(&mut tree, path)?;
+        let (id, uid) = (tree.mint(), 0);
+        tree.nodes
+            .insert(key, Node::file(id, uid, contents.to_vec(), mode));
+        Ok(())
+    }
+
     fn append(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         let key = normalized(path)?;
         let mut tree = self.lock();

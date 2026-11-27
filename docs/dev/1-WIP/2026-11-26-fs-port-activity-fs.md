@@ -20,7 +20,12 @@ Production disk I/O of these crates, moved onto `tddy-fs` (~135 fs lines incl. t
 | `tddy-cli-sessions` | 10 |
 
 ## Boundaries
-- Changes no on-disk format, path or mode; adds no `Fs` method (a missing one is n1's to add — raise it on n1's PR).
+- Changes no on-disk format, path or mode. One additive `Fs` method this node owns (operator
+  decision pattern of n3/n5; n1 is landed): `Fs::create_new_with_mode` — exclusive create at
+  exactly a mode — with `DiskFs` + `MemFs` implementations and conformance tests, in its own
+  commit. The tmux pane-env file carries credentials and must be `0600` from creation, never
+  wider, not even briefly; `create_new` + `set_mode` would leave a umask window, and
+  `write_atomic` would replace rather than refuse an existing file.
 - Touches no crate outside the table (callers outside it only get a `DiskFs` argument at composition sites).
 - Test-only crates (testing-commons, e2e, vm-testkit, test-hosts) keep real disk.
 
@@ -36,7 +41,7 @@ These surfaces are **theirs to create**; implementing one here collides with the
 
 | Node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `n1` fs-crate (#1045) | `tddy_fs::{Fs, DiskFs, MemFs, AsyncFs, write_atomic*}` | production code calls the port; tests inject `MemFs` | add methods to `Fs`, change adapters, or add another atomic writer |
+| `n1` fs-crate (#1045) | `tddy_fs::{Fs, DiskFs, MemFs, AsyncFs, write_atomic*}` | production code calls the port; tests inject `MemFs` | change adapters (except the one additive `create_new_with_mode` this node owns, recorded above), or add another atomic writer |
 
 ## Draft PR contract
 First push: constructor/function signatures of the listed crates changed to take `Arc<dyn Fs>` (bodies keep
