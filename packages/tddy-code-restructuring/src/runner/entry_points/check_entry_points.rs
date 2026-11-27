@@ -41,7 +41,6 @@ use super::super::refuse_repo_scoped_state;
 
 use super::super::StatePaths;
 
-
 use super::super::PlanProgress;
 
 use super::super::SnapshotRewrite;
