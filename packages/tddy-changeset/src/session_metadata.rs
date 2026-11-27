@@ -367,7 +367,7 @@ pub fn write_initial_tool_session_metadata_on(
 
 /// Write session metadata to the session directory.
 ///
-/// Goes through [`crate::atomic_file::write_atomic`]: a session whose `.session.yaml` is
+/// Goes through the port's atomic write: a session whose `.session.yaml` is
 /// truncated is a session the daemon and the web can no longer see, even while its agent process
 /// is alive, so a failed rewrite must leave the previous file standing rather than empty it.
 pub fn write_session_metadata(

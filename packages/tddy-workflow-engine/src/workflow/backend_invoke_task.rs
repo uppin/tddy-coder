@@ -32,6 +32,9 @@ pub struct BackendInvokeTask {
 }
 
 impl BackendInvokeTask {
+    // Eight arguments: the task's identity (id/goal/submit key), its behaviour (hints,
+    // backend, recipe, submit policy) and the filesystem port it caches through.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
         goal_id: GoalId,

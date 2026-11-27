@@ -22,7 +22,6 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};

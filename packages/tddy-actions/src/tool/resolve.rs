@@ -61,7 +61,7 @@ fn is_executable(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
     // `metadata_follow`, as before: the question stays about the file itself. Off Unix the
     // port reports no mode, and the old answer there was simply that the file exists.
     fs.metadata_follow(path).is_ok_and(|meta| {
-        meta.kind == tddy_fs::FsKind::File && meta.mode.map_or(true, |mode| mode & 0o111 != 0)
+        meta.kind == tddy_fs::FsKind::File && meta.mode.is_none_or(|mode| mode & 0o111 != 0)
     })
 }
 
