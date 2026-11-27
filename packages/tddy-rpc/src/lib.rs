@@ -3,6 +3,7 @@
 pub mod bridge;
 pub mod client_engine;
 pub mod envelope;
+pub mod instrumented;
 pub mod message;
 pub mod server_engine;
 pub mod status;
@@ -12,6 +13,7 @@ pub mod types;
 pub use bridge::{
     BidiStreamOutput, MultiRpcService, ResponseBody, RpcBridge, RpcResult, RpcService, ServiceEntry,
 };
+pub use instrumented::InstrumentedRpcService;
 pub use message::{RequestMetadata, RequestTransport, RpcMessage};
 pub use status::{Code, Status};
 pub use transport::RpcClientTransport;

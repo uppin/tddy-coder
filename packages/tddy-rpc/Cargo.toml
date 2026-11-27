@@ -13,6 +13,10 @@ async-trait = "0.1"
 futures-core = "0.3"
 log = "0.4"
 prost = "0.13"
+# Recording an RPC on the daemon's metrics (see `instrumented.rs`): the wrapper lives here
+# because `RpcService` is this crate's port. Acyclic — `tddy-metrics` names none of this
+# crate's types.
+tddy-metrics = { path = "../tddy-metrics" }
 tokio = { version = "1", features = ["rt", "sync"] }
 tonic = { version = "0.11", optional = true }
 

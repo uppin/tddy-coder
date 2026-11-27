@@ -69,6 +69,9 @@ const BELONGS_HERE: [&str; 41] = [
     // Builds and starts this crate's own `runtime::build` for the binary host and dials the
     // per-OS-user agent-tool socket it serves (`#agent-tools` 26/28).
     "server_agent_tool_socket_acceptance.rs",
+    // Mounts this crate's own `server::{run_server, rpc_service_for}`: the public listener
+    // serves no `/metrics`, and the served RPC counts on the daemon registry (`#fs-port` 2/13).
+    "metrics_endpoint_acceptance.rs",
     // Mounts `runtime::build` and reads the vaults it shares through `DaemonRuntime`'s accessor.
     "accounts_stub_daemon_acceptance.rs",
     // Mounts `runtime::build` and asks its accounts service, which reads the registry the host

@@ -54,6 +54,11 @@ pub struct RunServerOptions {
     pub debug: Option<String>,
     /// Config and sender for the "started"/"stopped" Telegram lifecycle messages. `None` sends none.
     pub lifecycle_telegram: Option<(DaemonConfig, Arc<dyn TelegramSender + Send + Sync>)>,
+    /// The daemon's Prometheus metrics. `Some` records every RPC the web listener serves
+    /// (through [`tddy_rpc::InstrumentedRpcService`]); `None` serves RPCs uninstrumented.
+    /// The `/metrics` listener itself is the binary's to start (see `main.rs`) — this is only
+    /// the recording half, so an embedding host that serves no HTTP still counts its RPCs.
+    pub metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
     /// Lets an external task (e.g. an idle-timeout monitor) trigger graceful shutdown without
     /// ctrl_c or SIGTERM. When `None`, only OS signals shut the server down.
     pub shutdown_rx: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -73,6 +78,20 @@ pub fn serving_sandboxed_codebase_support() -> Option<ClientSandboxedCodebaseSup
     })
 }
 
+/// The RPC service the web listener serves: the roster, instrumented with `metrics` when the
+/// daemon has a `metrics:` section, bare otherwise. Split out so the metrics acceptance suite
+/// can drive the exact service the listener serves without booting HTTP.
+pub fn rpc_service_for(
+    entries: Vec<tddy_rpc::ServiceEntry>,
+    metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
+) -> Arc<dyn tddy_rpc::RpcService> {
+    let multi = MultiRpcService::new(entries);
+    match metrics {
+        Some(metrics) => Arc::new(tddy_rpc::InstrumentedRpcService::new(multi, metrics)),
+        None => Arc::new(multi),
+    }
+}
+
 /// Start the web server with static bundle and RPC services.
 pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
     let RunServerOptions {
@@ -89,6 +108,7 @@ pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
         allowed_agents,
         debug,
         lifecycle_telegram,
+        metrics,
         shutdown_rx,
     } = options;
 
@@ -101,8 +121,10 @@ pub async fn run_server(options: RunServerOptions) -> anyhow::Result<()> {
     let rpc_router = if rpc_entries.is_empty() {
         None
     } else {
-        let multi = MultiRpcService::new(rpc_entries);
-        Some(connect_router(RpcBridge::new(multi)))
+        Some(connect_router(RpcBridge::new(rpc_service_for(
+            rpc_entries,
+            metrics,
+        ))))
     };
 
     let client_config = ClientConfig {

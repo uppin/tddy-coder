@@ -349,12 +349,23 @@ pub struct MetricsConfig {
 /// Refuse a `metrics.listen` that would put `/metrics` on the public web port.
 ///
 /// Returns the error naming both settings when `metrics.listen`'s port equals `listen.web_port`.
+/// No `metrics:` section, or no `web_port` to clash with, is accepted: the former binds nothing,
+/// and the latter is [`DaemonConfig`]'s own startup error, not this check's.
 pub fn check_metrics_listen(
-    _listen: &ListenConfig,
-    _metrics: Option<&MetricsConfig>,
+    listen: &ListenConfig,
+    metrics: Option<&MetricsConfig>,
 ) -> Result<(), String> {
-    // TODO(daemon-metrics): implement
-    Err("TODO(daemon-metrics): implement".to_string())
+    let (Some(metrics), Some(web_port)) = (metrics, listen.web_port) else {
+        return Ok(());
+    };
+    if metrics.listen.port() == web_port {
+        return Err(format!(
+            "metrics.listen ({}) must not share its port with listen.web_port ({web_port}): \
+             /metrics is served on a private listener of its own, never on the public web port",
+            metrics.listen,
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]

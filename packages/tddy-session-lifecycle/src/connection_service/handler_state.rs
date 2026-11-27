@@ -271,6 +271,7 @@ impl DaemonSessionHost {
             tab_target_shell: self.tab_target_shell.clone(),
             session_tabs: Arc::new(self.clone()),
             session_closes: Arc::clone(&self.session_closes) as _,
+            metrics: self.metrics(),
         }
     }
 }

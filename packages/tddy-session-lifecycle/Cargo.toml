@@ -45,6 +45,8 @@ tddy-work-queue = { path = "../tddy-work-queue" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-rpc = { path = "../tddy-rpc" }
+# The metrics `with_metrics` installs on the host (see `connection_service/svc_metrics_wiring`).
+tddy-metrics = { path = "../tddy-metrics" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
 # `#fs-port`: socket dirs, conversation listings and session-dir scans go through the port.

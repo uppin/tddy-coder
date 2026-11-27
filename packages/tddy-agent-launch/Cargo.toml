@@ -33,6 +33,8 @@ tddy-pty = { path = "../tddy-pty" }
 # The port an agent's slot files and session pointer reach a remote worktree through.
 tddy-remote-shell = { path = "../tddy-remote-shell" }
 tddy-rpc = { path = "../tddy-rpc" }
+# The metrics `start_session_core` counts starts on (see `harness_profile_request`).
+tddy-metrics = { path = "../tddy-metrics" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }

@@ -191,6 +191,10 @@ pub struct LaunchSessions {
     pub session_tabs: Arc<dyn SessionTabEnding>,
     /// The closes running on this host: a resume or a delete of a session being closed is refused.
     pub session_closes: Arc<dyn SessionClosesInFlight>,
+    /// The daemon's Prometheus metrics, copied from the host each call's `LaunchSessions` is
+    /// built from. `None` on a host the composition root installed none on — and on every test
+    /// host, which asserts outcomes, not counters.
+    pub metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
 }
 
 /// The closes running on this host (docs/ft/daemon/session-liveness.md § Closing a session), as the

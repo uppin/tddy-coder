@@ -239,6 +239,10 @@ pub struct DaemonSessionHost {
         Option<Arc<tddy_session_activity::project_notification_log::ProjectNotificationLog>>,
     /// The project-home watch tools' store (`#activity-wake` 2/3); `None` on a host with none.
     session_watches: Option<Arc<tddy_session_activity::session_watches::SessionWatchStore>>,
+    /// The daemon's Prometheus metrics, installed by the composition root with
+    /// [`Self::with_metrics`]. `None` on a host with no `metrics:` section, whose starts are
+    /// then uncounted — and on every test host, which asserts outcomes, not counters.
+    metrics: Option<Arc<tddy_metrics::DaemonMetrics>>,
     /// The central watch over each project's remote trunk (`#orchestra` 5/9); `None` on a host
     /// with none.
     trunk_watching: Option<Arc<svc_trunk_watch_wiring::TrunkWatching>>,
@@ -573,6 +577,7 @@ mod trunk_watch_wiring_unit_tests;
 pub use svc_list_exec_tools_wiring::start_choices;
 mod roster_keepalive;
 mod svc_coding_agents_wiring;
+mod svc_metrics_wiring;
 mod svc_project_notification_log_wiring;
 mod svc_reachable_sessions;
 mod svc_session_identity_wiring;

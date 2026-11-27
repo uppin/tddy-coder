@@ -34,8 +34,18 @@ impl LaunchSessions {
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_session_core_cancellable(req, progress, &CancellationToken::new())
-            .await
+        let outcome = self
+            .start_session_core_cancellable(req, progress, &CancellationToken::new())
+            .await;
+        // The one choke point every caller-facing start takes: count its outcome. `None` on a
+        // host with no `metrics:` section, whose starts stay uncounted.
+        if let Some(metrics) = &self.metrics {
+            metrics.session_started(match &outcome {
+                Ok(_) => tddy_metrics::StartResult::Started,
+                Err(_) => tddy_metrics::StartResult::Failed,
+            });
+        }
+        outcome
     }
 
     /// [`Self::start_session_core`] for a start that can be cancelled: once `cancel` is signalled the

@@ -93,7 +93,8 @@ impl BuildContext {
         let connection_impl = self
             .build_session_host(&mut mount, &shared, &served, askpass_endpoint)?
             .with_session_watches(Arc::clone(&shared.session_watches))
-            .with_trunk_watch(Arc::clone(&shared.session_notification_bus));
+            .with_trunk_watch(Arc::clone(&shared.session_notification_bus))
+            .with_metrics(self.metrics.clone());
         let hosted = self.install_session_host(connection_impl);
         // The host owns the GitHub inbox the session inspector's PR tab reads through; the worktree
         // service is built before it, so the source is attached now.

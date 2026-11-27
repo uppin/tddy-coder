@@ -84,10 +84,7 @@ impl DaemonMetrics {
     pub fn new(build_version: &str) -> Self {
         let mut registry = Registry::default();
 
-        let build_info = Info::new(vec![(
-            "version".to_string(),
-            build_version.to_string(),
-        )]);
+        let build_info = Info::new(vec![("version".to_string(), build_version.to_string())]);
         registry.register(
             "tddy_build_info",
             "The daemon build this registry belongs to, as a version label.",
@@ -157,7 +154,9 @@ impl DaemonMetrics {
             StartResult::Started => "started",
             StartResult::Failed => "failed",
         };
-        self.session_starts.get_or_create(&StartLabels { result }).inc();
+        self.session_starts
+            .get_or_create(&StartLabels { result })
+            .inc();
     }
 
     pub fn set_sessions_active(&self, kind: &str, count: i64) {

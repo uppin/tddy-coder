@@ -30,6 +30,13 @@ listen:
   web_port: 8899
   web_host: 127.0.0.1
 
+# Prometheus metrics on a private listener of their own. Absent (as here) binds nothing.
+# `GET http://<listen>/metrics` serves the OpenMetrics text exposition; every other path 404s,
+# and the web listener never serves /metrics. A port equal to `listen.web_port` refuses startup,
+# naming both settings.
+#metrics:
+#  listen: "127.0.0.1:9464"
+
 # Unique LiveKit identity per process in `livekit.common_room` (defaults to hostname, e.g. udoo).
 # Fixed to "dev" for local dev — avoids needing to look up udoo-XXXXX after each restart.
 # Set daemon_instance_id_append_startup_timestamp: true if running multiple daemons simultaneously.

@@ -1,7 +1,7 @@
 # Changeset: tddy-daemon exposes Prometheus `/metrics` on a private listener
 
 **Date**: 2026-11-26
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — green implemented (this node), gates pending
 **Type**: Feature
 **Complexity**: 4 — new crate + new external dep (`prometheus-client`, operator-approved 2026-11-26) + config contract + daemon wiring + RPC instrumentation seam
 **PR**: [#1046](https://github.com/uppin/tddy-coder/pull/1046)
@@ -79,6 +79,27 @@ Gates: `./test -p tddy-metrics -p tddy-daemon-kernel -p tddy-daemon`.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement
+- [x] TDD Green — implement
 - [ ] /validate-changes
 - [ ] /pr-wrap
+
+## Green notes (2026-11-27, n2 green)
+
+- `tddy-metrics`: `DaemonMetrics` owns one `Registry` + the seven families (`Info` for
+  `tddy_build_info`, counter families for starts/RPC, gauge families for active sessions,
+  `Gauge` for LiveKit rooms and `process_open_fds` — refreshed inside `encode()`, so a direct
+  call and an HTTP scrape read a current value). `MetricsServer` serves `GET /metrics` as
+  `text/plain; version=0.0.4`, 404 elsewhere.
+- `check_metrics_listen`: port equality refuses, naming both settings; no section (or no
+  `web_port`) is accepted. `main.rs` gates startup on it; `dev.daemon.yaml` carries a commented
+  example; `daemon-settings.md` documents the section (settings saves carry it through untouched).
+- RPC seam: `tddy_rpc::InstrumentedRpcService` (the port's crate, per `tddy-daemon/CLAUDE.md`)
+  records dispatch latency + lowercase code (`ok`, `not_found`, …); `server::rpc_service_for`
+  installs it when the runtime built metrics, and the daemon test drives that exact seam.
+- Sessions: `start_session_core` (the documented choke point) counts `Started`/`Failed` via an
+  optional handle threaded host → `LaunchSessions` with `with_metrics` (no `new` signature
+  churn across its 13 call sites).
+- Deferred (no owner, invented semantics, no test coverage): live refresh of the
+  `tddy_sessions_active` and `tddy_livekit_rooms_connected` gauges. Their setter APIs ship tested
+  (`endpoint.rs`); wiring them needs roster/room query APIs that do not exist (`CliSessionManager`
+  exposes no counts; room state is spread across the supervisor/session rooms). Follow-up node.
