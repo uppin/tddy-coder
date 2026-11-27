@@ -86,12 +86,21 @@ impl ToolRegistry {
     /// [`ExtensionOwner::name`]s is [`ToolError::UnknownExtension`], a section its owner refuses is
     /// [`ToolError::ExtensionRejected`] — both naming the file the tool came from (an override, or
     /// the built-in's embedded path).
+    pub fn load_with_owners(
+        builtin: Self,
+        overrides_dir: &Path,
+        owners: &[&dyn ExtensionOwner],
+    ) -> Result<Self, ToolError> {
+        Self::load_with_owners_on(&tddy_fs::DiskFs, builtin, overrides_dir, owners)
+    }
+
+    /// [`ToolRegistry::load_with_owners`] through the filesystem port.
     pub fn load_with_owners_on(fs: &dyn tddy_fs::Fs,
         builtin: Self,
         overrides_dir: &Path,
         owners: &[&dyn ExtensionOwner],
     ) -> Result<Self, ToolError> {
-        let registry = Self::load(builtin, overrides_dir)?;
+        let registry = Self::load_on(fs, builtin, overrides_dir)?;
         registry.validate_extensions(owners)?;
         Ok(registry)
     }
