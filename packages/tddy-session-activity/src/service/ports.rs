@@ -155,4 +155,7 @@ pub struct ActivityPorts {
     pub daemon_instance_id: String,
     /// The spec bindings `StreamSessionUsage` evaluates each session with.
     pub usage_bindings: UsageBindings,
+    /// The filesystem this host reads and writes through — `DiskFs` in production, `MemFs` in a
+    /// test that drives the service without touching disk.
+    pub fs: Arc<dyn tddy_fs::Fs>,
 }

@@ -107,6 +107,7 @@ impl DaemonSessionHost {
     fn activity_ports(&self) -> ActivityPorts {
         let for_tokens = self.clone();
         ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             // `resolve_os_user` already draws the crate's two distinct refusals — an unverifiable
             // token is `UNAUTHENTICATED`, a GitHub user with no `users[]` row is
             // `PERMISSION_DENIED` — from this daemon's own config, and in that order.

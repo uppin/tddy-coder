@@ -27,19 +27,14 @@ pub const ANSWER_WAIT_FILE: &str = "answer-wait-ms";
 /// # Errors
 /// When the record cannot be written.
 pub fn record_answer_wait(session_dir: &Path, wait: Duration) -> std::io::Result<()> {
-    std::fs::write(
-        session_dir.join(ANSWER_WAIT_FILE),
-        wait.as_millis().to_string(),
-    )
+    record_answer_wait_on(&tddy_fs::DiskFs, session_dir, wait)
 }
 
 /// The answer wait the start of the session in `session_dir` recorded; `None` when it recorded
 /// none (or the record does not parse).
 #[must_use]
 pub fn recorded_answer_wait(session_dir: &Path) -> Option<Duration> {
-    let text = std::fs::read_to_string(session_dir.join(ANSWER_WAIT_FILE)).ok()?;
-    let millis: u64 = text.trim().parse().ok()?;
-    Some(Duration::from_millis(millis))
+    recorded_answer_wait_on(&tddy_fs::DiskFs, session_dir)
 }
 
 /// How long the hook of the session in `session_dir`, of `session_type`, is held: its recorded
@@ -62,17 +57,20 @@ pub fn session_answer_wait(
 
 /// [`record_answer_wait`] through the filesystem port.
 pub fn record_answer_wait_on(
-    _fs: &dyn tddy_fs::Fs,
-    _session_dir: &Path,
-    _wait: Duration,
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    wait: Duration,
 ) -> std::io::Result<()> {
-    // TODO(activity-fs): implement
-    Err(std::io::Error::other("TODO(activity-fs): implement"))
+    fs.write(
+        &session_dir.join(ANSWER_WAIT_FILE),
+        wait.as_millis().to_string().as_bytes(),
+    )
 }
 
 /// [`recorded_answer_wait`] through the filesystem port.
 #[must_use]
-pub fn recorded_answer_wait_on(_fs: &dyn tddy_fs::Fs, _session_dir: &Path) -> Option<Duration> {
-    // TODO(activity-fs): implement
-    None
+pub fn recorded_answer_wait_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Option<Duration> {
+    let text = fs.read_to_string(&session_dir.join(ANSWER_WAIT_FILE)).ok()?;
+    let millis: u64 = text.trim().parse().ok()?;
+    Some(Duration::from_millis(millis))
 }

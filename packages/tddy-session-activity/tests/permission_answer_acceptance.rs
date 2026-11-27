@@ -165,6 +165,7 @@ impl HostBuilder {
             .extend(self.active.iter().map(|id| id.to_string()));
         let pending = Arc::new(PendingAnswers::new());
         let service = ActivityServiceImpl::new(ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             os_users: Arc::new(|_token: &str| {
                 Err(Status::unauthenticated(
                     "no session token is presented on the hook path",

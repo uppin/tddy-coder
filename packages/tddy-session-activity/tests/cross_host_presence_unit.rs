@@ -114,6 +114,7 @@ fn a_host_whose_child_is_orchestrated_on(
         .unwrap()
         .extend(active.iter().map(|id| id.to_string()));
     let service = ActivityServiceImpl::new(ActivityPorts {
+        fs: Arc::new(tddy_fs::DiskFs),
         os_users: Arc::new(|_token: &str| {
             Err(Status::unauthenticated("no token on the hook path"))
         }),

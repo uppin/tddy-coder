@@ -70,23 +70,31 @@ pub fn list_sessions_in_dir(
     sessions_base: &Path,
     live: &LiveSessions,
 ) -> anyhow::Result<Vec<SessionEntry>> {
+    list_sessions_in_dir_on(&tddy_fs::DiskFs, sessions_base, live)
+}
+
+/// [`list_sessions_in_dir`] through the filesystem port.
+pub fn list_sessions_in_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    sessions_base: &Path,
+    live: &LiveSessions,
+) -> anyhow::Result<Vec<SessionEntry>> {
     let mut result = Vec::new();
     let sessions_root = sessions_base.join(SESSIONS_SUBDIR);
-    let entries = match std::fs::read_dir(&sessions_root) {
+    let entries = match fs.read_dir(&sessions_root) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
         Err(e) => return Err(e.into()),
     };
 
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() {
+    for path in entries {
+        // `metadata_follow`, as before: `is_dir` follows a link.
+        if !matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::Dir) {
             continue;
         }
         let session_dir = path;
         let metadata_path = session_dir.join(tddy_core::SESSION_METADATA_FILENAME);
-        if !metadata_path.exists() {
+        if !fs.exists(&metadata_path) {
             continue;
         }
         let metadata: SessionMetadata = match read_session_metadata(&session_dir) {

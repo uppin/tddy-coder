@@ -113,6 +113,7 @@ impl ProjectNotificationLog {
             if batch.lost > 0 && batch.through_seq > held_through {
                 let gap = gap_record(&batch, state.newest_seq + 1);
                 append_held(
+                    &*self.fs,
                     &path,
                     &mut state,
                     Held {
@@ -136,6 +137,7 @@ impl ProjectNotificationLog {
                     ..record
                 };
                 append_held(
+                    &*self.fs,
                     &path,
                     &mut state,
                     Held {

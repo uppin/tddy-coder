@@ -208,6 +208,7 @@ fn relayed_records(batch: &[&(HeldRecord, String)]) -> Result<Vec<RelayedRecord>
 pub struct NotificationRelay {
     log: Arc<ProjectNotificationLog>,
     ports: Arc<dyn RelayPorts>,
+    fs: Arc<dyn tddy_fs::Fs>,
     state_file: PathBuf,
     state: Mutex<RelayState>,
     /// Per session, the other host its orchestrator runs on and the orchestrator — read once from
@@ -237,8 +238,18 @@ impl NotificationRelay {
         ports: Arc<dyn RelayPorts>,
         state_dir: &Path,
     ) -> anyhow::Result<Self> {
+        Self::open_on(Arc::new(tddy_fs::DiskFs), log, ports, state_dir)
+    }
+
+    /// [`NotificationRelay::open`] through the filesystem port.
+    pub fn open_on(
+        fs: Arc<dyn tddy_fs::Fs>,
+        log: Arc<ProjectNotificationLog>,
+        ports: Arc<dyn RelayPorts>,
+        state_dir: &Path,
+    ) -> anyhow::Result<Self> {
         let state_file = state_dir.join(RELAY_STATE_FILE);
-        let persisted: PersistedState = match std::fs::read_to_string(&state_file) {
+        let persisted: PersistedState = match fs.read_to_string(&state_file) {
             Ok(body) => serde_json::from_str(&body)
                 .map_err(|e| anyhow::anyhow!("read {}: {e}", state_file.display()))?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => PersistedState::default(),
@@ -255,6 +266,7 @@ impl NotificationRelay {
         Ok(Self {
             log,
             ports,
+            fs,
             state_file,
             state: Mutex::new(state),
             orchestrators: Mutex::new(HashMap::new()),
@@ -681,7 +693,7 @@ impl NotificationRelay {
                 interests: state.interests.clone(),
             }
         };
-        if let Err(e) = write_atomically(&self.state_file, &persisted) {
+        if let Err(e) = write_atomically(&*self.fs, &self.state_file, &persisted) {
             log::warn!(
                 target: "tddy_session_activity::notification_relay",
                 "could not persist the relay's state: {e:#}"
@@ -690,15 +702,15 @@ impl NotificationRelay {
     }
 }
 
-fn write_atomically(path: &Path, state: &PersistedState) -> anyhow::Result<()> {
+fn write_atomically(fs: &dyn tddy_fs::Fs, path: &Path, state: &PersistedState) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        fs.create_dir_all(parent)
             .map_err(|e| anyhow::anyhow!("create {}: {e}", parent.display()))?;
     }
     let body = serde_json::to_string(state)?;
     let temporary = path.with_extension("json.tmp");
-    std::fs::write(&temporary, body)
+    fs.write(&temporary, body.as_bytes())
         .map_err(|e| anyhow::anyhow!("write {}: {e}", temporary.display()))?;
-    std::fs::rename(&temporary, path)
+    fs.rename(&temporary, path)
         .map_err(|e| anyhow::anyhow!("replace {}: {e}", path.display()))
 }

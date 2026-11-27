@@ -81,6 +81,7 @@ impl AnActivityHost {
         let bus_received = Arc::new(RecordingSessionNotificationSubscriber::new());
         let bus = SessionNotificationBus::new().with_subscriber(Arc::clone(&bus_received));
         let service = ActivityServiceImpl::new(ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             os_users: Arc::new(|_token: &str| {
                 Err(Status::unauthenticated(
                     "no session token is presented on the hook path",

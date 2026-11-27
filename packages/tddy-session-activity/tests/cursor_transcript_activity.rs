@@ -77,6 +77,7 @@ impl ACursorHost {
     /// The host's activity handlers, built afresh as each of the daemon's calls builds them.
     fn service(&self) -> ActivityServiceImpl {
         ActivityServiceImpl::new(ActivityPorts {
+            fs: Arc::new(tddy_fs::DiskFs),
             os_users: Arc::new(|_token: &str| {
                 Err(Status::unauthenticated(
                     "no session token is presented on the hook path",
