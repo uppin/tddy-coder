@@ -112,8 +112,13 @@ pub const SESSION_ARTIFACT_READ_PLACEHOLDER: &str = "Could not read session arti
 
 /// Reads UTF-8 from the resolved artifact path, if the file exists and is readable.
 pub fn read_session_artifact_utf8(session_dir: &Path, basename: &str) -> Option<String> {
+    read_session_artifact_utf8_on(&tddy_fs::DiskFs, session_dir, basename)
+}
+
+/// [`read_session_artifact_utf8`] through the filesystem port.
+pub fn read_session_artifact_utf8_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, basename: &str) -> Option<String> {
     resolve_existing_session_artifact(session_dir, basename)
-        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|p| fs.read_to_string(&p).ok())
 }
 
 /// Like [`read_session_artifact_utf8`], but returns [`SESSION_ARTIFACT_READ_PLACEHOLDER`] when missing or unreadable.
@@ -135,8 +140,13 @@ pub struct SessionAttachmentFile {
 /// filesystems. Regular files only — subdirectories and other non-regular entries are skipped. A
 /// session with no attachments directory (the common case) yields an empty list, not an error.
 pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile> {
+    list_session_attachments_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`list_session_attachments`] through the filesystem port.
+pub fn list_session_attachments_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Vec<SessionAttachmentFile> {
     let attachments_dir = session_attachments_root(session_dir);
-    let Ok(entries) = std::fs::read_dir(&attachments_dir) else {
+    let Ok(entries) = fs.read_dir(&attachments_dir) else {
         log::debug!(
             "list_session_attachments: no attachments directory at {} — empty listing",
             attachments_dir.display()
@@ -145,16 +155,16 @@ pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile
     };
 
     let mut files: Vec<SessionAttachmentFile> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Ok(metadata) = entry.metadata() else {
+    for path in entries {
+        // `metadata_follow`, as before: the walk follows a link.
+        let Ok(metadata) = fs.metadata_follow(&path) else {
             log::warn!(
                 "list_session_attachments: metadata unavailable for {} — skipping",
                 path.display()
             );
             continue;
         };
-        if !metadata.is_file() {
+        if metadata.kind != tddy_fs::FsKind::File {
             log::debug!(
                 "list_session_attachments: skipping non-regular entry {}",
                 path.display()
@@ -167,7 +177,7 @@ pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile
         files.push(SessionAttachmentFile {
             basename,
             path,
-            size_bytes: metadata.len(),
+            size_bytes: metadata.len,
         });
     }
     files.sort_by(|a, b| a.basename.cmp(&b.basename));

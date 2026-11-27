@@ -6,6 +6,8 @@ publish = false
 description = "Workflow artifact layout and manifest wiring (decouples tddy-core from fixed PRD paths)"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 
