@@ -9,7 +9,6 @@
 use std::io;
 use std::path::Path;
 
-
 /// The marker's file name in the session directory.
 pub const WORKTREE_REMOVED_MARKER: &str = "worktree-removed";
 

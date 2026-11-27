@@ -43,11 +43,9 @@ pub fn cleanup_materialized_attachments_on(
 /// entry reports 0 rather than failing the start — the bytes are already written, and this value
 /// only feeds a progress event.
 pub fn attachment_size_bytes_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, basename: &str) -> u64 {
-    fs.metadata_follow(
-        &tddy_workflow::session_attachments_root(session_dir).join(basename),
-    )
-    .map(|m| m.len)
-    .unwrap_or(0)
+    fs.metadata_follow(&tddy_workflow::session_attachments_root(session_dir).join(basename))
+        .map(|m| m.len)
+        .unwrap_or(0)
 }
 
 /// Where a start-session request's progress goes while it is being served: attachment

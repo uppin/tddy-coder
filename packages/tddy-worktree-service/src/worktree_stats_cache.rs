@@ -35,7 +35,11 @@ pub(crate) fn build_worktree_stat_snapshots(
     snapshots
 }
 
-pub(crate) fn write_worktree_stats_cache_file(fs: &dyn tddy_fs::Fs, path: &Path, snapshots: Vec<WorktreeStatSnapshot>) {
+pub(crate) fn write_worktree_stats_cache_file(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    snapshots: Vec<WorktreeStatSnapshot>,
+) {
     let payload = WorktreeStatsCacheFile { snapshots };
     match serde_json::to_string_pretty(&payload) {
         Ok(json) => {

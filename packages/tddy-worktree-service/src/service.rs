@@ -539,9 +539,7 @@ impl WorktreeService for WorktreeServiceImpl {
             project_id,
             self.sessions_dir_of(&os_user).map_or_else(Vec::new, |dir| {
                 crate::target_worktree_stats::target_sessions_of_project(
-                    &*self.fs,
-                    &dir,
-                    project_id,
+                    &*self.fs, &dir, project_id,
                 )
             }),
             &mut snapshot,

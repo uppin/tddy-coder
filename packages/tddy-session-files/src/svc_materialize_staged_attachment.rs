@@ -186,7 +186,12 @@ impl AttachmentState<'_> {
             progress.report(data.len() as u64, frame.total_byte_size);
         }
 
-        crate::session_attachments::write_attachment_bytes_on(self.fs, session_dir, basename, &data)?;
+        crate::session_attachments::write_attachment_bytes_on(
+            self.fs,
+            session_dir,
+            basename,
+            &data,
+        )?;
         Ok(())
     }
 

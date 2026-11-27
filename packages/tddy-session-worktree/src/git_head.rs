@@ -115,12 +115,7 @@ fn common_dir_of(fs: &dyn tddy_fs::Fs, git_dir: &Path) -> PathBuf {
 /// resolve through one lookup. Per-worktree refs — HEAD itself, `refs/bisect/*`, `refs/worktree/*` —
 /// exist only in the git dir, and a linked worktree's shared refs exist only in the common dir; for
 /// an ordinary checkout the two are the same directory and the second read never happens.
-fn read_ref(
-    fs: &dyn tddy_fs::Fs,
-    git_dir: &Path,
-    common_dir: &Path,
-    name: &str,
-) -> Option<String> {
+fn read_ref(fs: &dyn tddy_fs::Fs, git_dir: &Path, common_dir: &Path, name: &str) -> Option<String> {
     if !is_plausible_ref_name(name) {
         return None;
     }

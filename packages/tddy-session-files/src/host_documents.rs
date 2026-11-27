@@ -527,17 +527,11 @@ pub fn stream_document_frames_on<T>(
             let _ = tx.send(Ok(frame(Vec::new(), total_byte_size)));
         }
         Some(first) => {
-            if tx
-                .send(Ok(frame(first.to_vec(), total_byte_size)))
-                .is_err()
-            {
+            if tx.send(Ok(frame(first.to_vec(), total_byte_size))).is_err() {
                 return;
             }
             for chunk in chunks {
-                if tx
-                    .send(Ok(frame(chunk.to_vec(), total_byte_size)))
-                    .is_err()
-                {
+                if tx.send(Ok(frame(chunk.to_vec(), total_byte_size))).is_err() {
                     return;
                 }
             }

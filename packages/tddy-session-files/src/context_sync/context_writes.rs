@@ -149,7 +149,8 @@ fn unlink_if_symlink_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), Status>
     // `metadata`, as before: the question stays about the name itself, so a dangling link is
     // still a link and still goes.
     match fs.metadata(path) {
-        Ok(m) if m.kind == tddy_fs::FsKind::Symlink => fs.remove_file(path)
+        Ok(m) if m.kind == tddy_fs::FsKind::Symlink => fs
+            .remove_file(path)
             .map_err(|e| Status::internal(format!("failed to replace the link {path:?}: {e}"))),
         _ => Ok(()),
     }

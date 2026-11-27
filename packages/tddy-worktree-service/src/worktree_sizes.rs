@@ -323,7 +323,10 @@ pub(crate) fn worktree_size_key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-pub(crate) fn read_worktree_sizes_file(fs: &dyn tddy_fs::Fs, file: &Path) -> WorktreeSizesCacheFile {
+pub(crate) fn read_worktree_sizes_file(
+    fs: &dyn tddy_fs::Fs,
+    file: &Path,
+) -> WorktreeSizesCacheFile {
     match fs.read_to_string(file) {
         Ok(data) => serde_json::from_str(&data).unwrap_or_else(|e| {
             warn!("read_worktree_sizes_file: parse {:?}: {}", file, e);
@@ -394,8 +397,7 @@ pub(crate) fn directory_size_bytes_best_effort(fs: &dyn tddy_fs::Fs, path: &Path
                 Err(_) => continue,
             };
             if meta.kind == tddy_fs::FsKind::Dir {
-                if paths_equal(&p, &walk_root)
-                    && ent.file_name().is_some_and(|n| n == ".worktrees")
+                if paths_equal(&p, &walk_root) && ent.file_name().is_some_and(|n| n == ".worktrees")
                 {
                     continue;
                 }

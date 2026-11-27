@@ -112,8 +112,7 @@ fn read_host_document_resolves_session_artifact_scope_under_the_callers_os_user(
 #[test]
 fn read_host_document_resolves_session_upload_scope_with_upload_id_slash_file_name() {
     // Given — a session holding uploads/u1/notes.txt
-    let (data, _session_dir) =
-        a_session_with_artifacts(None, Some(("u1", "notes.txt", b"notes")));
+    let (data, _session_dir) = a_session_with_artifacts(None, Some(("u1", "notes.txt", b"notes")));
 
     // When
     let doc = read_host_document_bytes(
@@ -201,8 +200,7 @@ fn read_host_document_refuses_a_relative_path_with_dotdot_segments() {
 #[test]
 fn read_host_document_refuses_a_session_upload_path_that_names_no_drop() {
     // Given — a session holding uploads/u1/notes.txt
-    let (data, _session_dir) =
-        a_session_with_artifacts(None, Some(("u1", "notes.txt", b"notes")));
+    let (data, _session_dir) = a_session_with_artifacts(None, Some(("u1", "notes.txt", b"notes")));
 
     // When — the file is addressed without its drop
     let err = read_host_document_bytes(

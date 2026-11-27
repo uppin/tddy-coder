@@ -103,7 +103,11 @@ impl Mirror {
     /// than from `marker`: the caller builds `marker` from what the room says now, which knows
     /// nothing of the deltas an earlier run already applied, so resuming from it would replay the
     /// session from its first tick.
-    pub fn open_or_create(fs: &dyn tddy_fs::Fs, dest: &Path, marker: MirrorMarker) -> Result<Self, MirrorError> {
+    pub fn open_or_create(
+        fs: &dyn tddy_fs::Fs,
+        dest: &Path,
+        marker: MirrorMarker,
+    ) -> Result<Self, MirrorError> {
         if let Some(persisted) = read_marker(fs, dest)? {
             if persisted.session_id != marker.session_id {
                 return Err(MirrorError::ForeignSession {
@@ -163,7 +167,11 @@ impl Mirror {
     ///
     /// Never partially applies: a patch that does not apply cleanly leaves the mirror exactly as it
     /// was, so the reconcile that follows starts from a state the syncer can describe.
-    pub fn apply(&mut self, fs: &dyn tddy_fs::Fs, delta: &Delta) -> Result<ApplyOutcome, MirrorError> {
+    pub fn apply(
+        &mut self,
+        fs: &dyn tddy_fs::Fs,
+        delta: &Delta,
+    ) -> Result<ApplyOutcome, MirrorError> {
         // Several tool calls landing in one poll window each name the same tick, so the same
         // delta arrives once per call. De-duplicating by `seq` is what makes it apply once.
         if delta.seq <= self.marker.last_seq {
@@ -220,7 +228,11 @@ impl Mirror {
     /// actual state makes the next delta look already-applied, and skipping a delta is the one
     /// divergence nothing downstream reports. Recording it lower costs one further reconcile, which
     /// is logged.
-    pub fn record_restored(&mut self, fs: &dyn tddy_fs::Fs, applied_seq: u64) -> Result<(), MirrorError> {
+    pub fn record_restored(
+        &mut self,
+        fs: &dyn tddy_fs::Fs,
+        applied_seq: u64,
+    ) -> Result<(), MirrorError> {
         self.marker.last_head_commit = self.head_commit()?;
         self.marker.last_seq = applied_seq;
         self.write_marker(fs)

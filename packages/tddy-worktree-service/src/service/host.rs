@@ -43,7 +43,10 @@ impl WorktreeServiceImpl {
         let fs: Arc<dyn tddy_fs::Fs> = Arc::new(tddy_fs::DiskFs);
         Self {
             fs: Arc::clone(&fs),
-            worktree_stats_cache: Arc::new(WorktreeStatsCache::new(cache_root.clone(), Arc::clone(&fs))),
+            worktree_stats_cache: Arc::new(WorktreeStatsCache::new(
+                cache_root.clone(),
+                Arc::clone(&fs),
+            )),
             worktree_size_calculator: Arc::new(WorktreeSizeCalculator::new(
                 cache_root,
                 DAEMON_SIZE_WALK_PERMITS,

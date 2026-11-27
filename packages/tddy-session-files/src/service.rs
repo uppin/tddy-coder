@@ -265,11 +265,10 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
     ) -> Result<Response<ListSessionWorkflowFilesResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
-        let basenames =
-            crate::session_workflow_files::list_allowlisted_workflow_basenames_on(
-                &*self.ports.fs,
-                &session_dir,
-            )?;
+        let basenames = crate::session_workflow_files::list_allowlisted_workflow_basenames_on(
+            &*self.ports.fs,
+            &session_dir,
+        )?;
         Ok(Response::new(ListSessionWorkflowFilesResponse {
             files: basenames
                 .into_iter()
@@ -284,12 +283,11 @@ impl tddy_service::proto::session_files::SessionFilesService for SessionFilesSer
     ) -> Result<Response<ReadSessionWorkflowFileResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.session_dir(&req.session_token, &req.session_id)?;
-        let content_utf8 =
-            crate::session_workflow_files::read_allowlisted_workflow_file_utf8_on(
-                &*self.ports.fs,
-                &session_dir,
-                &req.basename,
-            )?;
+        let content_utf8 = crate::session_workflow_files::read_allowlisted_workflow_file_utf8_on(
+            &*self.ports.fs,
+            &session_dir,
+            &req.basename,
+        )?;
         Ok(Response::new(ReadSessionWorkflowFileResponse {
             content_utf8,
         }))

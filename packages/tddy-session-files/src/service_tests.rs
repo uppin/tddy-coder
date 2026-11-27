@@ -62,9 +62,8 @@ impl AHost {
     /// A staged file whose uploader never wrote the final chunk: bytes on disk, no
     /// `.staged-complete` marker beside them.
     fn with_an_interrupted_staged_upload(&self, staging_id: &str, file_name: &str) -> &Self {
-        let batch =
-            session_attachment_staging::staging_root_for(OS_USER, &self.staging_base_dir)
-                .join(staging_id);
+        let batch = session_attachment_staging::staging_root_for(OS_USER, &self.staging_base_dir)
+            .join(staging_id);
         std::fs::create_dir_all(&batch).expect("the staging batch dir");
         std::fs::write(batch.join(file_name), b"the bytes that did arrive")
             .expect("the partial file");
@@ -231,8 +230,7 @@ async fn refuses_a_method_whose_session_token_is_not_this_hosts() {
 #[test]
 fn refuses_a_path_that_escapes_its_scope() {
     // When
-    let outcome =
-        validate_relative_path(HostDocumentScope::SessionWorktree, "../../etc/passwd");
+    let outcome = validate_relative_path(HostDocumentScope::SessionWorktree, "../../etc/passwd");
 
     // Then
     assert_eq!(
@@ -348,8 +346,8 @@ fn resolves_a_contained_path_to_its_canonical_file() {
     std::fs::write(scope_root.join("docs/PRD.md"), b"# the plan").expect("the document");
 
     // When
-    let resolved = contained_in_scope_root(&scope_root, "docs/PRD.md")
-        .expect("a contained path must resolve");
+    let resolved =
+        contained_in_scope_root(&scope_root, "docs/PRD.md").expect("a contained path must resolve");
 
     // Then
     assert_eq!(

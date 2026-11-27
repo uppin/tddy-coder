@@ -113,8 +113,9 @@ impl SessionFileStore {
         let unique = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let temporary = dir.join(format!(".{name}.{}.{unique}.tmp", std::process::id()));
         let target = dir.join(name);
-        let written =
-            fs.write(&temporary, content.as_bytes()).and_then(|()| fs.rename(&temporary, &target));
+        let written = fs
+            .write(&temporary, content.as_bytes())
+            .and_then(|()| fs.rename(&temporary, &target));
         if let Err(e) = written {
             let _ = fs.remove_file(&temporary);
             return Err(io_err(e));
@@ -137,7 +138,11 @@ impl SessionFileStore {
         };
         let mut files = Vec::new();
         for path in entries {
-            let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+            let Some(name) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
             // `metadata_follow`, as before: the walk follows a link.

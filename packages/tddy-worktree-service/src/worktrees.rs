@@ -6,7 +6,6 @@ use std::process::Command;
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
 
-
 /// One row from `git worktree list` after parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeListRow {
@@ -343,10 +342,7 @@ pub fn path_is_present(path: &Path) -> Result<bool, RemoveWorktreeError> {
 }
 
 /// [`path_is_present`] through the filesystem port.
-pub fn path_is_present_on(
-    fs: &dyn tddy_fs::Fs,
-    path: &Path,
-) -> Result<bool, RemoveWorktreeError> {
+pub fn path_is_present_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<bool, RemoveWorktreeError> {
     // `metadata`, as before: the question stays about the name itself, so a dangling link
     // counts as present and is removed as a link rather than reported missing.
     match fs.metadata(path) {

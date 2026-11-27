@@ -8,7 +8,6 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-
 /// Why a home worktree could not be created or brought current.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HomeWorktreeError {
@@ -102,9 +101,7 @@ fn is_linked_worktree_of(
     path: &Path,
 ) -> Result<bool, HomeWorktreeError> {
     let listing = git(main_repo, &["worktree", "list", "--porcelain"])?;
-    let wanted = fs
-        .canonicalize(path)
-        .unwrap_or_else(|_| path.to_path_buf());
+    let wanted = fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     Ok(listing
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))

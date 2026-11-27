@@ -556,10 +556,8 @@ impl Fs for MemFs {
         require_parent_dirs(&tree, &dst)?;
         // A copy is a new file with the source's bytes, as on disk.
         let (id, uid) = (tree.mint(), 0);
-        tree.nodes.insert(
-            dst,
-            Node::file(id, uid, bytes, DEFAULT_FILE_MODE),
-        );
+        tree.nodes
+            .insert(dst, Node::file(id, uid, bytes, DEFAULT_FILE_MODE));
         Ok(())
     }
 
