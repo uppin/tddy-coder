@@ -117,8 +117,12 @@ impl SimulatorLister for BridgeBinarySimulatorLister {
         parse_listed_devices(&String::from_utf8_lossy(&output.stdout))
     }
 
+    /// Nothing is run: the error still names the bridge, so a log says which one was not asked.
     #[cfg(not(target_os = "macos"))]
     fn booted(&self) -> Result<Vec<BootedSimulator>, String> {
-        Err("iOS Simulators run only on macOS".to_string())
+        Err(format!(
+            "iOS Simulators run only on macOS; {} was not asked to list any",
+            self.bridge.display()
+        ))
     }
 }
