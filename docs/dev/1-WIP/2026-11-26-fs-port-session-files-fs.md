@@ -20,8 +20,21 @@ Production disk I/O of these crates, moved onto `tddy-fs` (~209 fs lines incl. t
 | `tddy-subagent-worktree` | 7 |
 | `tddy-session-sync` | 5 |
 
+Plus two additive port methods this node owns (operator decision 2026-11-27, as n3's `Fs`
+expansion), in one surface commit ahead of the crate ports:
+- `Fs::create_new` — exclusive create, `AlreadyExists` when anything exists there — with `DiskFs`
+  + `MemFs` implementations and conformance tests. The attachment writers need a single atomic
+  check-and-create (`create_new` open semantics) that the port did not have; emulating it with
+  check-then-write would trade the atomicity the writers document for a race.
+- `Fs::copy` — file copy, `IsADirectory` on a directory source on both adapters — with `DiskFs`
+  + `MemFs` implementations, an `AsyncFs::copy` facade, and conformance tests. The worktree
+  scratch-index seeding copies an index file; read+write would lose the source's mode and the
+  single-step failure shape, so the port owns the operation instead.
+
 ## Boundaries
-- Changes no on-disk format, path or mode; adds no `Fs` method (a missing one is n1's to add — raise it on n1's PR).
+- Changes no on-disk format, path or mode; adds exactly two `Fs` methods (`create_new` +
+  `copy`, in this node's surface commit — n1 is landed, so additive surface grows on the consuming
+  node by operator consent).
 - Touches no crate outside the table (callers outside it only get a `DiskFs` argument at composition sites).
 - Test-only crates (testing-commons, e2e, vm-testkit, test-hosts) keep real disk.
 
@@ -37,7 +50,7 @@ These surfaces are **theirs to create**; implementing one here collides with the
 
 | Node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `n1` fs-crate (#1045) | `tddy_fs::{Fs, DiskFs, MemFs, AsyncFs, write_atomic*}` | production code calls the port; tests inject `MemFs` | add methods to `Fs`, change adapters, or add another atomic writer |
+| `n1` fs-crate (#1045) | `tddy_fs::{Fs, DiskFs, MemFs, AsyncFs, write_atomic*}` | production code calls the port; tests inject `MemFs` | change adapters (except the one additive `create_new` this node owns, recorded above), or add another atomic writer |
 
 ## Draft PR contract
 First push: constructor/function signatures of the listed crates changed to take `Arc<dyn Fs>` (bodies keep

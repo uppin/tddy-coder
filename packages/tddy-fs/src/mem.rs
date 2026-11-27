@@ -424,6 +424,26 @@ impl Fs for MemFs {
         Ok(())
     }
 
+    fn create_new(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        let key = normalized(path)?;
+        let mut tree = self.lock();
+        if tree.nodes.contains_key(&key) {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("{}: already exists", path.display()),
+            ));
+        }
+        require_parent_dirs(&tree, &key)?;
+        take_fault(&mut tree, path)?;
+        // A new file is minted and owned by the tree's default owner, as in [`Fs::write`].
+        let (id, uid) = (tree.mint(), 0);
+        tree.nodes.insert(
+            key,
+            Node::file(id, uid, contents.to_vec(), DEFAULT_FILE_MODE),
+        );
+        Ok(())
+    }
+
     fn append(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         let key = normalized(path)?;
         let mut tree = self.lock();
@@ -520,6 +540,26 @@ impl Fs for MemFs {
         }
         // The same node under two names: one identity, as one inode on disk.
         tree.nodes.insert(dst, node);
+        Ok(())
+    }
+
+    fn copy(&self, from: &Path, to: &Path) -> io::Result<()> {
+        let src = normalized(from)?;
+        let dst = normalized(to)?;
+        let mut tree = self.lock();
+        let bytes = match tree.nodes.get(&src) {
+            Some(Node::File { bytes, .. }) => bytes.clone(),
+            Some(Node::Dir { .. }) => return Err(is_a_directory(from)),
+            Some(Node::Socket { .. }) => return Err(socket_not_storage(from)),
+            None => return Err(not_found(from)),
+        };
+        require_parent_dirs(&tree, &dst)?;
+        // A copy is a new file with the source's bytes, as on disk.
+        let (id, uid) = (tree.mint(), 0);
+        tree.nodes.insert(
+            dst,
+            Node::file(id, uid, bytes, DEFAULT_FILE_MODE),
+        );
         Ok(())
     }
 
