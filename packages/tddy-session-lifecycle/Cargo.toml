@@ -47,6 +47,8 @@ tddy-workflow = { path = "../tddy-workflow" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
+# `#fs-port`: socket dirs, conversation listings and session-dir scans go through the port.
+tddy-fs = { path = "../tddy-fs" }
 # The mirror algorithm an agent clone runs in-process (docs/ft/daemon/session-worktree-sync.md).
 # The same crate the standalone `tddy-session-sync` client is built from, used as a library: a
 # second implementation of "restore from the WIP ref, apply a delta, notice a divergence" would be

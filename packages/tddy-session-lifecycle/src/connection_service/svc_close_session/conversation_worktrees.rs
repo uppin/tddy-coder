@@ -88,13 +88,20 @@ async fn plan_conversation_worktree(
 /// The name of every directory in `directory`, sorted. Only "there is no such directory" is no
 /// conversation; any other failure to read it, or one of its entries, is the error.
 fn conversation_directory_names(directory: &Path) -> std::io::Result<Vec<String>> {
+    conversation_directory_names_on(&tddy_fs::DiskFs, directory)
+}
+
+/// [`conversation_directory_names`] through the filesystem port.
+pub fn conversation_directory_names_on(
+    fs: &dyn tddy_fs::Fs,
+    directory: &Path,
+) -> std::io::Result<Vec<String>> {
     let mut names = Vec::new();
-    for entry in std::fs::read_dir(directory)? {
-        let path = entry?.path();
-        // `metadata` follows a link, as the directory walk of a removal does; a link to nothing
-        // holds nothing.
-        match std::fs::metadata(&path) {
-            Ok(metadata) if metadata.is_dir() => {}
+    for path in fs.read_dir(directory)? {
+        // `metadata_follow`, as before: the walk follows a link, and a link to nothing holds
+        // nothing.
+        match fs.metadata_follow(&path) {
+            Ok(meta) if meta.kind == tddy_fs::FsKind::Dir => {}
             Ok(_) => continue,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error),

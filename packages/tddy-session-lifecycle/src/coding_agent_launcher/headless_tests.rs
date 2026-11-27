@@ -5,6 +5,11 @@
 //! `tests/headless_subagents_from_spec_acceptance.rs` and
 //! `tests/headless_claude_subagent_from_spec_acceptance.rs`.
 
+// Test-only: included via `mod` under `#[cfg(all(test, unix))]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;

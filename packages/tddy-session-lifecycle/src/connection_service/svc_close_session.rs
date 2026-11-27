@@ -23,7 +23,9 @@ mod close_plan;
 mod close_tabs;
 mod close_task;
 mod closes_in_flight;
-mod conversation_worktrees;
+// `pub` for the port seam the `fs_port` suite drives: everything else in the module stays
+// private, so the newly reachable surface is `conversation_directory_names_on` alone.
+pub mod conversation_worktrees;
 mod worktree_reads;
 
 pub(crate) use closes_in_flight::SessionCloses;

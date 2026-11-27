@@ -24,6 +24,11 @@
 //!
 //! Feature: docs/ft/daemon/remote-codebase-mode.md § Workspace tool sandbox
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use crate::test_util::{test_service, TestDaemon, TEST_TOKEN};
 use std::sync::atomic::{AtomicUsize, Ordering};

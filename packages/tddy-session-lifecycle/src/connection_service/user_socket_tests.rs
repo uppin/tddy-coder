@@ -6,6 +6,11 @@
 //!
 //! Changeset: docs/dev/1-WIP/2026-09-19-keyring-github-identity.md (host socket under the supervisor)
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::host_session_socket::*;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};

@@ -404,7 +404,9 @@ mod svc_activity_ports;
 pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
-mod svc_close_session;
+// `pub` for the `conversation_worktrees` port seam the `fs_port` suite drives; every sibling
+// module stays private, and nothing else under it is `pub`, so that seam is all it newly reaches.
+pub mod svc_close_session;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;

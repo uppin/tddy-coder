@@ -26,6 +26,7 @@ use tddy_core::McpServerSpec;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_identity::local_base_instance_id_for_config;
 use tddy_discovery::subagent::SubagentError;
+use tddy_fs::Fs as _;
 use tddy_subagent_worktree::ConversationId;
 
 /// Whether `spec`'s headless MCP slot (its agent's own when the headless block names none) registers
@@ -365,7 +366,9 @@ impl Drop for ClaimedFiles {
         if self.kept {
             return;
         }
-        if let Err(e) = std::fs::remove_dir_all(&self.dir) {
+        // `DiskFs`, not a port parameter: the directory was claimed on the real disk by
+        // `tddy-coding-subagent`, so its removal lands on the same filesystem it was made on.
+        if let Err(e) = tddy_fs::DiskFs.remove_dir_all(&self.dir) {
             log::warn!(
                 "could not remove the files of a headless launch that failed, at {}: {e}",
                 self.dir.display()
