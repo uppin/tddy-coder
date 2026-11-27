@@ -92,3 +92,8 @@ the changeset: glob matching and sqlite in `tddy-usage`, `chown`/`dup2` via `lib
 behind held handles (`TurnFiles`, `UsageTap`, `SpecHeadlessBackend::with_fs`), and the
 conversation log appended per line through the port. What the port cannot express stays off it
 and is recorded in the changeset: process spawning and socket binding.
+
+`tddy-supervisor` and `tddy-spawn` do theirs through the port too: guards in each crate's
+`tests/fs_port.rs`, the supervisor and cgroup broker behind held handles, spawner entry points
+behind `<fn>_on` seams. Descriptor-bound operations (socket-directory `fstat`/`fchown`,
+child stdio, pipe ends) stay on `libc`/`OwnedFd` and are recorded in the changeset.
