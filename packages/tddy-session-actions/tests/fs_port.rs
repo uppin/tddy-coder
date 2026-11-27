@@ -9,13 +9,14 @@ fn the_channel_manifest_is_built_through_the_fs_port() {
     let session_dir = std::path::Path::new("/sessions/s-1");
 
     // When — the manifest is built with session defaults through the port.
-    let manifest = tddy_session_actions::session_action_pipeline::build_extended_channel_manifest_on(
-        &fs,
-        session_dir,
-        None,
-        None,
-    )
-    .expect("a channel manifest");
+    let manifest =
+        tddy_session_actions::session_action_pipeline::build_extended_channel_manifest_on(
+            &fs,
+            session_dir,
+            None,
+            None,
+        )
+        .expect("a channel manifest");
 
     // Then — stdout/stderr default under `capture/`, `logs` names the logs dir, and both
     // directories exist in memory rather than on disk.
@@ -35,7 +36,9 @@ fn the_channel_manifest_is_built_through_the_fs_port() {
         "logs names the session logs dir"
     );
     assert_eq!(
-        fs.metadata(&session_dir.join("capture")).expect("capture").kind,
+        fs.metadata(&session_dir.join("capture"))
+            .expect("capture")
+            .kind,
         tddy_fs::FsKind::Dir,
         "the capture dir is created through the port"
     );
@@ -44,6 +47,13 @@ fn the_channel_manifest_is_built_through_the_fs_port() {
         tddy_fs::FsKind::Dir,
         "the logs dir is created through the port"
     );
+}
+
+#[test]
+fn caller_capture_overrides_win_byte_for_byte_through_the_fs_port() {
+    // Given — a session directory that exists only in memory.
+    let fs = tddy_fs::MemFs::new();
+    let session_dir = std::path::Path::new("/sessions/s-1");
 
     // When — the caller overrides both capture paths.
     let custom_out = std::path::Path::new("/elsewhere/out.txt");

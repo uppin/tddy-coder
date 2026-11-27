@@ -22,7 +22,10 @@ fn the_registry_key_is_the_canonical_session_dir_through_the_fs_port() {
 
     // And — a directory that does not exist yet keys by what it will be called.
     let missing = std::path::Path::new("/sessions/not-yet");
-    assert_eq!(tddy_session_catalog::read::catalog_key_on(&fs, missing), missing);
+    assert_eq!(
+        tddy_session_catalog::read::catalog_key_on(&fs, missing),
+        missing
+    );
     assert!(
         tddy_session_catalog::read::session_catalog_on(&fs, missing).is_none(),
         "no catalog is registered for an unknown session"

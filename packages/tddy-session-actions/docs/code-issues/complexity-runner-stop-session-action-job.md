@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 40 | 5 | 5 | 5 | first detection |
 | 2026-09-23 | 40 | 5 | 5 | 5 | **unchanged** — measured in the new home at wrap: the body is line-for-line identical to its `tddy-core` origin on `master` (`#carve` 12/14, #522 moved it with `git mv`) |
+| 2026-11-27 | 40 | — | — | — | **unchanged by #1048** (`#fs-port` 4/13): `stop_session_action_job` is byte-identical on `origin/feature/fs-port/daemon-fs` and HEAD (fn line to closing brace, 40 lines both; the diff names it nowhere). The +57 in `runner.rs` is the `*_on` port wrappers and `read_job`'s match. Nesting, branches and exits not re-derived. Still open, unclaimed |
 
 ## What the tool found
 

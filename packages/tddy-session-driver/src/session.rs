@@ -36,7 +36,10 @@ pub fn create_session_dir_on(
 ) -> anyhow::Result<PathBuf> {
     let session_dir = base.join(session_id);
     fs.create_dir_all(&session_dir).map_err(|e| {
-        anyhow::anyhow!("create the session directory {}: {e}", session_dir.display())
+        anyhow::anyhow!(
+            "create the session directory {}: {e}",
+            session_dir.display()
+        )
     })?;
     fs.canonicalize(&session_dir).map_err(anyhow::Error::from)
 }

@@ -192,13 +192,16 @@ pub fn build_split_context_dir_on(
                 )))
             }
         };
-        fs.write(&path, tddy_sandbox::prepend_preamble(&preamble, &body).as_bytes())
-            .map_err(|e| {
-                Status::internal(format!(
-                    "failed to write split context {}: {e}",
-                    filename.display()
-                ))
-            })?;
+        fs.write(
+            &path,
+            tddy_sandbox::prepend_preamble(&preamble, &body).as_bytes(),
+        )
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to write split context {}: {e}",
+                filename.display()
+            ))
+        })?;
     }
     Ok(context_dir)
 }

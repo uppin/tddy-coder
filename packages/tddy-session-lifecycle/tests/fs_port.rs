@@ -7,8 +7,10 @@ fn conversation_directories_are_listed_through_the_fs_port() {
     // Given — conversation worktrees that exist only in memory, plus a file that is none.
     let fs = tddy_fs::MemFs::new();
     let directory = std::path::Path::new("/sessions/s-1/conversations");
-    fs.create_dir_all(&directory.join("b")).expect("conversation b");
-    fs.create_dir_all(&directory.join("a")).expect("conversation a");
+    fs.create_dir_all(&directory.join("b"))
+        .expect("conversation b");
+    fs.create_dir_all(&directory.join("a"))
+        .expect("conversation a");
     fs.write(&directory.join("note.txt"), b"not a conversation")
         .expect("a file beside the conversations");
 

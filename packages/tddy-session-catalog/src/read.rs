@@ -170,10 +170,7 @@ pub fn session_catalog(session_dir: &Path) -> Option<Arc<SessionCatalog>> {
 }
 
 /// [`session_catalog`] through the filesystem port.
-pub fn session_catalog_on(
-    fs: &dyn tddy_fs::Fs,
-    session_dir: &Path,
-) -> Option<Arc<SessionCatalog>> {
+pub fn session_catalog_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Option<Arc<SessionCatalog>> {
     CATALOG
         .get(&catalog_key_on(fs, session_dir))
         .map(|entry| Arc::clone(entry.value()))

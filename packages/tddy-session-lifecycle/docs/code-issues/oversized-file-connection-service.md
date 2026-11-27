@@ -6,7 +6,7 @@
 **Metrics:** **525 production lines** by the changeset's counter (2026-10-09; 582 on `origin/master` before #536; the 508 / 503 below are an earlier counter) · budget 500 (the inline-test-block rule; the naive count to the first `#[cfg(test)]` reads 18)
 **Thresholds breached:** length 525 > 500
 **Restructure:** group the facade blocks by receiver (see "What would close it"); #536 has landed the moves, so the re-measure the earlier note waited for is done: 525
-**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack measurement (431 by `restructure lines`); still over 500 by the whole-file count — **unclaimed**
+**Status:** Open — partially fixed by #924 (`#remote-shell` 8/11): restored to below its before-the-stack measurement (431 by `restructure lines`); still over 500 by the whole-file count — **unclaimed** · touched by #1048 (`#fs-port` 4/13, +2, still over; see the 2026-11-27 row)
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -32,6 +32,7 @@
 | 2026-11-16 | +6 | #921 (`#remote-shell` 7/7), by `git diff --numstat` (6 added, 0 removed; the record's counter not re-run): the host's Coder credential field and its re-exports. Still over 500 by the record's counter; not split here |
 | 2026-11-16 | 433 → 431 by `restructure lines` (558 → 556 whole file) | #924 (`#remote-shell` 8/11) sweep: the re-export block this stack lengthened moved with its neighbours into a module the facade re-exports. Restored to below its before-the-stack measurement; still over 500 by the whole-file count, so this record stays open on the remainder |
 | 2026-11-24 | +4 (575 → 579 whole file, `wc -l` on `origin/master` `df43ffc6c` and HEAD) | #1032 (session close): the host's `session_closes` field with its doc comment and the `svc_close_session` module line. Grown; not split — the close's own code lives in `svc_close_session/` |
+| 2026-11-27 | +2 (whole file, `git diff --numstat`: 3 added, 1 removed) | #1048 (`#fs-port` 4/13): `mod svc_close_session` becomes `pub mod` with its two-line port-seam comment, so the `fs_port` integration suite can drive `conversation_directory_names_on` through it. Touched, grown by two; still over 500 by the record's counter. Not split here — no other `#fs-port` node touches this file, but the file's own follow-up (group the facade blocks by receiver) owns the seam |
 
 ## What grew it
 

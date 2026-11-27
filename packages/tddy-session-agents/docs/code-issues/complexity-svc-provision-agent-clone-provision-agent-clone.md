@@ -14,6 +14,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-10-24 | 86 | first detection. 84 at `origin/feature/start-progress/supervisor-handoff` (already over the ceiling, unrecorded); #737 added the `progress` parameter and the `ForwardedStartFailure::into_status` mapping (+2) when the forward became relayed |
+| 2026-11-27 | 86 | **unchanged by #1048** (`#fs-port` 4/13): `provision_agent_clone` is byte-identical on `origin/feature/fs-port/daemon-fs` and HEAD (fn line to closing brace, 86 lines both). The +8 in the file is the `records_a_session` → `records_a_session_on` port split, a different function. Still open, unclaimed (the #start-progress 4/8 deferral stands) |
 
 ## What would close it
 

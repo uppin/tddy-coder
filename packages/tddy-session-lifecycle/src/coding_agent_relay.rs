@@ -176,9 +176,7 @@ fn make_owner_only(dir: &Path) -> Result<(), SubagentError> {
     // SAFETY: `geteuid` reads this process's effective uid; it has no preconditions.
     let this_uid = unsafe { libc::geteuid() };
     // Unknown owner or mode refuses like a wrong one: the check is meaningless without them.
-    if metadata.kind != tddy_fs::FsKind::Dir
-        || metadata.uid.unwrap_or(u32::MAX) != this_uid
-    {
+    if metadata.kind != tddy_fs::FsKind::Dir || metadata.uid.unwrap_or(u32::MAX) != this_uid {
         return Err(SubagentError::from(format!(
             "the relay socket directory {} is not a directory this daemon owns",
             dir.display()

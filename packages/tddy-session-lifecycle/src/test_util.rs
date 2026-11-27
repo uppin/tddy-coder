@@ -27,11 +27,11 @@ use tddy_service::proto::session::{
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::DaemonConfig;
-use tddy_fs::Fs as _;
 use crate::connection_service::DaemonSessionHost;
 use crate::peer_routing::PeerRouting;
 use crate::{DaemonRpcFamilies, WorkQueueHandler};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
+use tddy_fs::Fs as _;
 
 /// Token accepted by [`test_service`] as a valid session token.
 pub const TEST_TOKEN: &str = "valid-token";

@@ -23,16 +23,18 @@ fn hook_registrations_are_written_through_the_fs_port() {
 
     // Then — both land with their exact bytes, parents created on the way.
     assert!(files.is_empty(), "written files are drained");
-    for (path, want) in [
-        ("/sessions/s-1/mcp.json", &br#"{"mcp": true}"#[..]),
-        ("/sessions/s-1/hooks/hooks.json", &br#"{"hooks": []}"#[..]),
-    ] {
-        assert_eq!(
-            fs.read(std::path::Path::new(path)).expect("written"),
-            want,
-            "{path} holds what the slots rendered, in memory rather than on disk"
-        );
-    }
+    assert_eq!(
+        fs.read(std::path::Path::new("/sessions/s-1/mcp.json"))
+            .expect("written"),
+        &br#"{"mcp": true}"#[..],
+        "mcp.json holds what the slots rendered, in memory rather than on disk"
+    );
+    assert_eq!(
+        fs.read(std::path::Path::new("/sessions/s-1/hooks/hooks.json"))
+            .expect("written"),
+        &br#"{"hooks": []}"#[..],
+        "hooks.json holds what the slots rendered, in memory rather than on disk"
+    );
 }
 
 #[test]
