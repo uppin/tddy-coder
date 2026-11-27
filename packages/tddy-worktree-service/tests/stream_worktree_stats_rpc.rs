@@ -59,7 +59,7 @@ fn test_service(sessions_base: PathBuf, os_user: &str, calc_root: PathBuf) -> Wo
         }
     });
     let sizer: Arc<dyn Fn(&Path) -> u64 + Send + Sync> = Arc::new(|_| SIZE_BYTES);
-    let calculator = Arc::new(WorktreeSizeCalculator::with_sizer(calc_root, 2, sizer));
+    let calculator = Arc::new(WorktreeSizeCalculator::with_sizer(calc_root, 2, sizer, Arc::new(tddy_fs::DiskFs)));
     WorktreeServiceImpl::new(config, tddy_data_dir, user_resolver)
         .with_worktree_size_calculator(calculator)
 }

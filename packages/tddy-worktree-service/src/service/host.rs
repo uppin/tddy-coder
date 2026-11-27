@@ -40,11 +40,14 @@ impl WorktreeServiceImpl {
         user_resolver: SessionUserResolver,
     ) -> Self {
         let cache_root = worktrees::projects_stats_cache_root(&tddy_data_dir);
+        let fs: Arc<dyn tddy_fs::Fs> = Arc::new(tddy_fs::DiskFs);
         Self {
-            worktree_stats_cache: Arc::new(WorktreeStatsCache::new(cache_root.clone())),
+            fs: Arc::clone(&fs),
+            worktree_stats_cache: Arc::new(WorktreeStatsCache::new(cache_root.clone(), Arc::clone(&fs))),
             worktree_size_calculator: Arc::new(WorktreeSizeCalculator::new(
                 cache_root,
                 DAEMON_SIZE_WALK_PERMITS,
+                Arc::clone(&fs),
             )),
             session_rooms: Arc::new(NoSessionRooms),
             idle_tracker: None,
@@ -182,7 +185,12 @@ impl WorktreeServiceImpl {
         worktree: &str,
     ) -> Option<TargetSession> {
         let sessions_dir = self.sessions_dir_of(os_user)?;
-        crate::target_worktrees::target_session_of_worktree(&sessions_dir, project_id, worktree)
+        crate::target_worktrees::target_session_of_worktree(
+            &*self.fs,
+            &sessions_dir,
+            project_id,
+            worktree,
+        )
     }
 
     /// Authenticates the caller and returns the directory of `session_id` when it exists under the

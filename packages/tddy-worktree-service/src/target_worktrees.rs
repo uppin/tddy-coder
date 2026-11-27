@@ -86,15 +86,21 @@ pub(crate) fn target_session_from(
 /// a worktree of this host's clone.
 #[must_use]
 pub fn target_session_of_worktree(
+    fs: &dyn tddy_fs::Fs,
     sessions_dir: &Path,
     project_id: &str,
     worktree: &str,
 ) -> Option<TargetSession> {
-    std::fs::read_dir(sessions_dir)
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    fs.read_dir(sessions_dir)
         .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|dir| dir.is_dir())
+        .into_iter()
+        .filter(|dir| {
+            matches!(
+                fs.metadata_follow(dir),
+                Ok(m) if m.kind == tddy_fs::FsKind::Dir
+            )
+        })
         .filter_map(|dir| {
             let metadata = tddy_core::read_session_metadata(&dir).ok()?;
             (metadata.project_id == project_id)

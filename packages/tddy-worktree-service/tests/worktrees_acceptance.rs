@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 use tddy_worktree_service::worktrees::{
     projects_stats_cache_root, remove_worktree_under_repo, WorktreeStatsCache,
@@ -78,7 +79,7 @@ fn stats_cache_persists_and_is_served_without_re_diff_on_each_list_call() {
     let root = projects_stats_cache_root(tmp.path());
     assert_eq!(root, tmp.path().join("projects"));
 
-    let cache = WorktreeStatsCache::new(root);
+    let cache = WorktreeStatsCache::new(root, Arc::new(tddy_fs::DiskFs));
     let project_id = "proj-acceptance-1";
     let (_guard, main_repo, _wt) = init_repo_with_secondary_worktree();
 

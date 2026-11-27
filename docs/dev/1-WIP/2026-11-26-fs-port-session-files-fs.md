@@ -65,11 +65,33 @@ working on `DiskFs` where unmigrated, marked `// TODO(session-files-fs): impleme
     n1 ⇒ n3, n4, n5, n6, n7, n8, n9, n10, n11, n12, n13      (n2: standalone)
 
 ## Scope
-- [ ] `tddy-session-files` migrated
-- [ ] `tddy-worktree-service` migrated
-- [ ] `tddy-session-worktree` migrated
-- [ ] `tddy-subagent-worktree` migrated
-- [ ] `tddy-session-sync` migrated
+- [x] `tddy-session-files` migrated (2026-11-27, on master base `681d10612`)
+- [x] `tddy-worktree-service` migrated
+- [x] `tddy-session-worktree` migrated
+- [x] `tddy-subagent-worktree` migrated
+- [x] `tddy-session-sync` migrated
+
+## Known gaps (operator steer 2026-11-27: every remaining `DiskFs` named here with its reason)
+
+Production code reaches disk only through an injected `Fs` handle (`&dyn Fs` / `&AsyncFs` / `Arc<dyn Fs>`
+field); `DiskFs` appears solely at composition roots. The only exceptions:
+
+- `fast_forward_home_worktree` (worktree-service): pure git subprocess, zero filesystem ops — kept
+  single-version; there is no handle to inject into it.
+- `test_util.rs` (worktree-service): `DiskFs.write` in a test helper that is deliberately ungated so
+  downstream integration suites (`tddy-daemon/tests/*`) can use it; real disk is the point.
+- Backward-compat wrappers (`<fn>` delegating to `<fn>_on(&DiskFs, …)`): kept wherever a crate outside
+  this node's table calls the old signature (`tddy-daemon-rpc`, `tddy-agent-launch`,
+  `tddy-session-activity`, `tddy-daemon/tests`, `tddy-session-lifecycle/tests`,
+  `tddy-integration-tests`, `tddy-core` re-exports). The port seam (`_on`) is injected and MemFs-drivable;
+  the wrapper is the composition root for those external callers.
+- Git-subprocess-bound paths (`Mirror`, `Conversations`, `uncommitted_state_as_commit`): the handle is
+  injected but always bound to `DiskFs` at the composition root — a `MemFs` could never back the
+  repositories git itself reads and writes.
+
+OPEN QUESTION (not implemented — no such requirement found in this changeset, the PRD, or the ledger):
+per-crate/module metrics labels on Fs call sites. If `tddy-metrics` needs crate/module labels on
+filesystem operations, that is a separate surface decision for the metrics owner, not this node.
 
 ## Red-step state
 

@@ -7,15 +7,18 @@ use crate::worktrees::WorktreeStatSnapshot;
 
 use log::{debug, info, warn};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
-pub(crate) fn build_worktree_stat_snapshots(rows: &[WorktreeListRow]) -> Vec<WorktreeStatSnapshot> {
+pub(crate) fn build_worktree_stat_snapshots(
+    fs: &dyn tddy_fs::Fs,
+    rows: &[WorktreeListRow],
+) -> Vec<WorktreeStatSnapshot> {
     let mut snapshots = Vec::with_capacity(rows.len());
     for row in rows {
-        let disk_bytes = directory_size_bytes_best_effort(&row.path);
+        let disk_bytes = directory_size_bytes_best_effort(fs, &row.path);
         let numstat = git_diff_numstat(&row.path);
         let updated_at_unix_ms = chrono::Utc::now().timestamp_millis();
         snapshots.push(WorktreeStatSnapshot {
@@ -32,11 +35,11 @@ pub(crate) fn build_worktree_stat_snapshots(rows: &[WorktreeListRow]) -> Vec<Wor
     snapshots
 }
 
-pub(crate) fn write_worktree_stats_cache_file(path: &Path, snapshots: Vec<WorktreeStatSnapshot>) {
+pub(crate) fn write_worktree_stats_cache_file(fs: &dyn tddy_fs::Fs, path: &Path, snapshots: Vec<WorktreeStatSnapshot>) {
     let payload = WorktreeStatsCacheFile { snapshots };
     match serde_json::to_string_pretty(&payload) {
         Ok(json) => {
-            if let Err(e) = tddy_core::atomic_file::write_atomic(path, json) {
+            if let Err(e) = fs.write_atomic(path, json.as_bytes(), None) {
                 warn!("write_worktree_stats_cache_file: write {:?}: {}", path, e);
             } else {
                 debug!("write_worktree_stats_cache_file: wrote {:?}", path);
@@ -49,15 +52,17 @@ pub(crate) fn write_worktree_stats_cache_file(path: &Path, snapshots: Vec<Worktr
 /// Tracks expensive git/stat work; used by acceptance tests to ensure list RPC does not re-diff.
 pub struct WorktreeStatsCache {
     root: PathBuf,
+    fs: Arc<dyn tddy_fs::Fs>,
     /// Simulates `git diff` / stat work invoked during refresh.
     pub test_git_diff_invocations: AtomicU64,
 }
 
 impl WorktreeStatsCache {
-    pub fn new(root: PathBuf) -> Self {
+    pub fn new(root: PathBuf, fs: Arc<dyn tddy_fs::Fs>) -> Self {
         info!("WorktreeStatsCache::new root={:?}", root);
         Self {
             root,
+            fs,
             test_git_diff_invocations: AtomicU64::new(0),
         }
     }
@@ -83,7 +88,7 @@ impl WorktreeStatsCache {
             project_id, main_repo
         );
         let dir = self.project_cache_dir(project_id);
-        if let Err(e) = fs::create_dir_all(&dir) {
+        if let Err(e) = self.fs.create_dir_all(&dir) {
             warn!("refresh_stats_for_project: create_dir_all {:?}: {}", dir, e);
         }
 
@@ -96,20 +101,20 @@ impl WorktreeStatsCache {
             project_id
         );
 
-        let snapshots = build_worktree_stat_snapshots(&rows);
+        let snapshots = build_worktree_stat_snapshots(&*self.fs, &rows);
 
         self.test_git_diff_invocations
             .fetch_add(1, Ordering::SeqCst);
 
         let path = self.cache_file_path(project_id);
-        write_worktree_stats_cache_file(&path, snapshots);
+        write_worktree_stats_cache_file(&*self.fs, &path, snapshots);
     }
 
     /// List path used by RPC: must serve last snapshot without re-running diff each time.
     pub fn list_cached_stats(&self, project_id: &str) -> Vec<WorktreeStatSnapshot> {
         debug!("list_cached_stats: project_id={}", project_id);
         let path = self.cache_file_path(project_id);
-        let data = match fs::read_to_string(&path) {
+        let data = match self.fs.read_to_string(&path) {
             Ok(s) => s,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 debug!("list_cached_stats: no cache file yet {:?}", path);
@@ -139,7 +144,7 @@ impl WorktreeStatsCache {
     pub fn invalidate_project(&self, project_id: &str) {
         debug!("invalidate_project: {}", project_id);
         let path = self.cache_file_path(project_id);
-        match fs::remove_file(&path) {
+        match self.fs.remove_file(&path) {
             Ok(()) => info!("invalidate_project: removed {:?}", path),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 debug!("invalidate_project: no file {:?}", path)

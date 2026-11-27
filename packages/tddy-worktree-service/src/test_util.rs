@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
+use tddy_fs::Fs as _;
 
 use crate::service::WorktreeServiceImpl;
 
@@ -26,12 +27,15 @@ pub const TEST_USER: &str = "testuser";
 pub fn test_config_for_os_user(os_user: &str) -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
-    std::fs::write(&path, "").expect("write test config");
-    std::fs::write(
-        dir.path().join("users.yaml"),
-        format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n"),
-    )
-    .expect("write test users");
+    tddy_fs::DiskFs
+        .write(&path, b"")
+        .expect("write test config");
+    tddy_fs::DiskFs
+        .write(
+            &dir.path().join("users.yaml"),
+            format!("- github_user: \"{TEST_USER}\"\n  os_user: \"{os_user}\"\n").as_bytes(),
+        )
+        .expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 
