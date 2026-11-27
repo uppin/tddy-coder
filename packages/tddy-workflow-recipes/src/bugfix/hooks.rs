@@ -11,9 +11,7 @@ use super::analyze::{
 use super::interview;
 use crate::tdd::hooks_common;
 use tddy_core::backend::AgentOutputSink;
-use tddy_core::changeset::{
-    read_changeset_on, update_state, write_changeset_on,
-};
+use tddy_core::changeset::{read_changeset_on, update_state, write_changeset_on};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;

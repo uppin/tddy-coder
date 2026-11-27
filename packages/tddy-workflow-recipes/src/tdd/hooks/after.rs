@@ -6,8 +6,8 @@ use std::error::Error;
 use std::path::Path;
 
 use tddy_core::changeset::{
-    append_session_and_update_state, read_changeset_on, update_state,
-    BranchWorktreeIntent, Changeset,
+    append_session_and_update_state, read_changeset_on, update_state, BranchWorktreeIntent,
+    Changeset,
 };
 use tddy_core::error::WorkflowError;
 use tddy_core::workflow::context::Context;

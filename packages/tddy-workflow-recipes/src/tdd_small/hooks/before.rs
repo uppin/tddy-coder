@@ -5,9 +5,7 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use tddy_core::changeset::{
-    read_changeset_on, resolve_model, update_state,
-};
+use tddy_core::changeset::{read_changeset_on, resolve_model, update_state};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::prepend_context_header;

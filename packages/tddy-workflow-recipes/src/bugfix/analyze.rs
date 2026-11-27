@@ -5,8 +5,7 @@
 use std::path::Path;
 
 use tddy_core::changeset::{
-    read_changeset_on, update_state, write_changeset_on,
-    BranchWorktreeIntent, Changeset,
+    read_changeset_on, update_state, write_changeset_on, BranchWorktreeIntent, Changeset,
 };
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::task::TaskResult;

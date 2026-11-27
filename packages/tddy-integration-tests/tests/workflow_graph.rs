@@ -37,7 +37,11 @@ use common::{bugfix_recipe, bugfix_stub_invoke_request, stub_invoke_request};
 #[tokio::test]
 async fn tdd_graph_interview_precedes_plan() {
     let backend = Arc::new(StubBackend::new());
-    let graph = build_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     assert!(
         graph.get_task("interview").is_some(),
@@ -63,7 +67,11 @@ async fn tdd_graph_interview_precedes_plan() {
 #[tokio::test]
 async fn tdd_full_graph_interview_precedes_plan() {
     let backend = Arc::new(StubBackend::new());
-    let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_full_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     assert!(
         graph.get_task("interview").is_some(),
@@ -93,7 +101,11 @@ async fn tdd_full_graph_interview_precedes_plan() {
 #[tokio::test]
 async fn graph_topology_plan_to_refactor_edges() {
     let backend = Arc::new(StubBackend::new());
-    let graph = build_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     assert_eq!(graph.id, "tdd_workflow");
 
@@ -113,7 +125,11 @@ async fn graph_topology_plan_to_refactor_edges() {
 #[tokio::test]
 async fn full_graph_topology_includes_all_goals() {
     let backend = Arc::new(StubBackend::new());
-    let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_full_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     assert_eq!(graph.id, "tdd_full_workflow");
 
@@ -152,7 +168,11 @@ async fn full_graph_topology_includes_all_goals() {
 #[tokio::test]
 async fn full_graph_conditional_demo_edge() {
     let backend = Arc::new(StubBackend::new());
-    let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_full_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     let ctx_skip = Context::new();
     ctx_skip.set_sync("run_optional_step_x", false);
@@ -204,7 +224,11 @@ async fn full_graph_conditional_demo_edge() {
 #[tokio::test]
 async fn full_graph_green_routes_per_changeset_demo_intent() {
     let backend = Arc::new(StubBackend::new());
-    let graph = build_full_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_full_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     let dir = std::env::temp_dir().join(format!(
         "tddy-full-graph-demo-intent-{}",
@@ -397,7 +421,13 @@ async fn backend_invoke_task_submit_takes_priority_over_questions() {
         .store("plan", plan_json);
 
     let recipe = common::tdd_recipe();
-    let task = BackendInvokeTask::from_recipe("plan", GoalId::new("plan"), recipe, backend.clone(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let task = BackendInvokeTask::from_recipe(
+        "plan",
+        GoalId::new("plan"),
+        recipe,
+        backend.clone(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
     let ctx = Context::new();
     ctx.set_sync("prompt", "Add feature");
     ctx.set_sync("output_dir", std::path::PathBuf::from("/tmp"));
@@ -546,7 +576,11 @@ async fn flow_runner_tdd_full_sequence_completes() {
     let storage = Arc::new(FileSessionStorage::new(dir.clone()));
 
     let backend = Arc::new(StubBackend::new());
-    let graph = Arc::new(build_tdd_workflow_graph(backend, common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs)));
+    let graph = Arc::new(build_tdd_workflow_graph(
+        backend,
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    ));
 
     let repo = dir.join("repo");
     std::fs::create_dir_all(&repo).expect("create repo root");
@@ -1147,8 +1181,6 @@ fn ac_invoke_only_graph(backend: Arc<StubBackend>) -> Arc<tddy_core::workflow::g
         "accept_invoke",
         GoalId::new("acceptance-tests"),
         recipe,
-        backend,
-    )
         backend,
         std::sync::Arc::new(tddy_fs::DiskFs),
     ));

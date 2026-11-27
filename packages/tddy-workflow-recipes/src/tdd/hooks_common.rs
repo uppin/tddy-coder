@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use tddy_core::changeset::{
-    get_session_for_tag, read_changeset_on, resolve_model, update_state,
-    write_changeset_on, Changeset,
+    get_session_for_tag, read_changeset_on, resolve_model, update_state, write_changeset_on,
+    Changeset,
 };
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::setup_worktree_for_session_with_optional_chain_base;
