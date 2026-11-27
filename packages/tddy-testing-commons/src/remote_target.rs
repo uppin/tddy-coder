@@ -61,7 +61,9 @@ pub fn write_executable(path: &Path, script: &str) {
                 .output()
             {
                 Ok(output) => break output,
-                Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 40 => {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 40 =>
+                {
                     attempt += 1;
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
