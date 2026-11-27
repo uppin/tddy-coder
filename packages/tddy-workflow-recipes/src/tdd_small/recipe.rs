@@ -38,10 +38,10 @@ impl WorkflowRecipe for TddSmallRecipe {
         "tdd-small"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         log::info!("TddSmallRecipe::build_graph: constructing tdd-small workflow graph");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
-        build_tdd_small_workflow_graph(backend, recipe)
+        build_tdd_small_workflow_graph(backend, recipe, fs)
     }
 
     fn create_hooks(&self, event_tx: Option<WorkflowEventSender>) -> Arc<dyn RunnerHooks> {

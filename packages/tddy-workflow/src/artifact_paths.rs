@@ -55,13 +55,21 @@ pub fn canonical_attachment_write_path(session_dir: &Path, basename: &str) -> Pa
 }
 
 /// When `session_dir` is nested under `.../sessions/<uuid>/...`, returns `<uuid>/<basename>` if that file exists (legacy layout).
-fn artifact_at_sessions_uuid_root(session_dir: &Path, basename: &str) -> Option<PathBuf> {
+fn artifact_at_sessions_uuid_root(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Option<PathBuf> {
     let mut current = session_dir.to_path_buf();
     loop {
         let parent = current.parent()?;
         if parent.file_name() == Some(OsStr::new("sessions")) {
             let p = current.join(basename);
-            if p.is_file() {
+            if fs
+                .metadata_follow(&p)
+                .map(|m| m.kind == tddy_fs::FsKind::File)
+                .unwrap_or(false)
+            {
                 return Some(p);
             }
             return None;
@@ -76,15 +84,29 @@ fn artifact_at_sessions_uuid_root(session_dir: &Path, basename: &str) -> Option<
 
 /// Resolves an existing file for `basename` (prefers `artifacts/`, then legacy UUID-root, then session root).
 pub fn resolve_existing_session_artifact(session_dir: &Path, basename: &str) -> Option<PathBuf> {
+    resolve_existing_session_artifact_on(&tddy_fs::DiskFs, session_dir, basename)
+}
+
+/// [`resolve_existing_session_artifact`] through the filesystem port.
+pub fn resolve_existing_session_artifact_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Option<PathBuf> {
+    let is_file = |p: &Path| {
+        fs.metadata_follow(p)
+            .map(|m| m.kind == tddy_fs::FsKind::File)
+            .unwrap_or(false)
+    };
     let artifacts_path = session_artifacts_root(session_dir).join(basename);
-    if artifacts_path.is_file() {
+    if is_file(&artifacts_path) {
         log::info!(
             "[tddy_workflow] session artifact (artifacts): {:?}",
             artifacts_path
         );
         return Some(artifacts_path);
     }
-    if let Some(p) = artifact_at_sessions_uuid_root(session_dir, basename) {
+    if let Some(p) = artifact_at_sessions_uuid_root(fs, session_dir, basename) {
         log::info!(
             "[tddy_workflow] session artifact (legacy uuid root): {:?}",
             p
@@ -92,7 +114,7 @@ pub fn resolve_existing_session_artifact(session_dir: &Path, basename: &str) -> 
         return Some(p);
     }
     let flat = session_dir.join(basename);
-    if flat.is_file() {
+    if is_file(&flat) {
         log::info!(
             "[tddy_workflow] session artifact (session root): {:?}",
             flat
@@ -117,7 +139,7 @@ pub fn read_session_artifact_utf8(session_dir: &Path, basename: &str) -> Option<
 
 /// [`read_session_artifact_utf8`] through the filesystem port.
 pub fn read_session_artifact_utf8_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, basename: &str) -> Option<String> {
-    resolve_existing_session_artifact(session_dir, basename)
+    resolve_existing_session_artifact_on(fs, session_dir, basename)
         .and_then(|p| fs.read_to_string(&p).ok())
 }
 

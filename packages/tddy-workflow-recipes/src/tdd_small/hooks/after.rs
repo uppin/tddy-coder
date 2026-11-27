@@ -6,26 +6,26 @@ use std::error::Error;
 use std::path::Path;
 
 use tddy_core::changeset::{
-    append_session_and_update_state, read_changeset, update_state, BranchWorktreeIntent, Changeset,
-};
+    append_session_and_update_state, read_changeset, update_state, BranchWorktreeIntent, Changeset, read_changeset_on};
 use tddy_core::error::WorkflowError;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 
 use crate::parser::{
-    parse_green_response, parse_planning_response_with_base, parse_red_response,
+    parse_green_response, parse_planning_response_with_base_on, parse_red_response,
     parse_refactor_response, parse_update_docs_response, PlanningOutput,
 };
 use crate::tdd::hooks_common;
 use crate::tdd_small::parse_post_green_review_response;
 use crate::writer::{
-    update_acceptance_tests_file, update_progress_file, write_evaluation_report,
-    write_progress_file, write_red_output_file,
+    update_acceptance_tests_file_on, update_progress_file_on, write_artifacts_on,
+    write_evaluation_report_on, write_progress_file_on, write_red_output_file_on,
 };
-use crate::{write_artifacts, EvaluateOutput, SessionArtifactManifest};
+use crate::{EvaluateOutput, SessionArtifactManifest};
 
 pub(crate) fn after_plan(
+    fs: &dyn tddy_fs::Fs,
     recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
     session_dir: &Path,
@@ -35,7 +35,7 @@ pub(crate) fn after_plan(
         .get_sync("parsed_planning")
         .or_else(|| {
             let output: String = context.get_sync("output")?;
-            parse_planning_response_with_base(&output, session_dir).ok()
+            parse_planning_response_with_base_on(fs, &output, session_dir).ok()
         })
         .ok_or("plan after_task requires parsed_planning or parseable output in context")?;
     let prd_bn = manifest
@@ -46,7 +46,7 @@ pub(crate) fn after_plan(
         prd_bn,
         session_dir
     );
-    write_artifacts(session_dir, &planning, &prd_bn)?;
+    write_artifacts_on(fs, session_dir, &planning, &prd_bn)?;
     let session_id: String = context
         .get_sync("session_id")
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
@@ -54,7 +54,7 @@ pub(crate) fn after_plan(
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
     let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
-    let mut cs = read_changeset(session_dir).unwrap_or_else(|_| Changeset::default());
+    let mut cs = read_changeset_on(fs, session_dir).unwrap_or_else(|_| Changeset::default());
     cs.name = planning.name.clone();
     cs.initial_prompt = Some(feature_input);
     cs.discovery = planning.discovery.clone();
@@ -85,25 +85,26 @@ pub(crate) fn after_plan(
             Some("system-prompt-plan.md".to_string()),
         );
     }
-    hooks_common::write_changeset_logged(session_dir, &cs, "after_plan Planned");
+    hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_plan Planned");
     Ok(())
 }
 
 pub(crate) fn after_red(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     output: &str,
     context: &Context,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let parsed = parse_red_response(output).map_err(WorkflowError::ParseError)?;
-    let _ = write_red_output_file(session_dir, &parsed);
-    let _ = write_progress_file(session_dir, &parsed);
+    let _ = write_red_output_file_on(fs, session_dir, &parsed);
+    let _ = write_progress_file_on(fs, session_dir, &parsed);
     let session_id: String = context
         .get_sync("session_id")
         .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
     let backend_name: String = context
         .get_sync("backend_name")
         .unwrap_or_else(|| "claude".to_string());
-    let mut cs = read_changeset(session_dir).unwrap_or_default();
+    let mut cs = read_changeset_on(fs, session_dir).unwrap_or_default();
     let session_exists = cs.sessions.iter().any(|s| s.id == session_id);
     if session_exists {
         update_state(&mut cs, WorkflowState::new("RedTestsReady"));
@@ -117,27 +118,29 @@ pub(crate) fn after_red(
             None,
         );
     }
-    hooks_common::write_changeset_logged(session_dir, &cs, "after_red RedTestsReady");
+    hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_red RedTestsReady");
     Ok(())
 }
 
 pub(crate) fn after_green(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     output: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let parsed = parse_green_response(output).map_err(WorkflowError::ParseError)?;
-    let _ = update_progress_file(session_dir, &parsed);
-    let _ = update_acceptance_tests_file(session_dir, &parsed);
+    let _ = update_progress_file_on(fs, session_dir, &parsed);
+    let _ = update_acceptance_tests_file_on(fs, session_dir, &parsed);
     if parsed.all_tests_passing() {
-        if let Ok(mut cs) = read_changeset(session_dir) {
+        if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
             update_state(&mut cs, WorkflowState::new("GreenComplete"));
-            hooks_common::write_changeset_logged(session_dir, &cs, "after_green GreenComplete");
+            hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_green GreenComplete");
         }
     }
     Ok(())
 }
 
 pub(crate) fn after_post_green_review(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     output: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -157,7 +160,7 @@ pub(crate) fn after_post_green_review(
         affected_tests: vec![],
         validity_assessment: parsed.validity_assessment.clone(),
     };
-    write_evaluation_report(session_dir, &eval)?;
+    write_evaluation_report_on(fs, session_dir, &eval)?;
     let refactoring_plan_path = session_dir.join("refactoring-plan.md");
     if !refactoring_plan_path.exists() {
         tddy_core::atomic_file::write_atomic(
@@ -176,9 +179,9 @@ pub(crate) fn after_post_green_review(
             format!("write refactoring-plan: {}", e).into()
         })?;
     }
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("ValidateComplete"));
-        hooks_common::write_changeset_logged(
+        hooks_common::write_changeset_logged(fs, 
             session_dir,
             &cs,
             "after_post_green_review ValidateComplete",
@@ -188,25 +191,27 @@ pub(crate) fn after_post_green_review(
 }
 
 pub(crate) fn after_refactor(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     output: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("RefactorComplete"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "after_refactor RefactorComplete");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_refactor RefactorComplete");
     }
     Ok(())
 }
 
 pub(crate) fn after_update_docs(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     output: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = parse_update_docs_response(output).map_err(WorkflowError::ParseError)?;
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("DocsUpdated"));
-        hooks_common::write_changeset_logged(session_dir, &cs, "after_update_docs DocsUpdated");
+        hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_update_docs DocsUpdated");
     }
     Ok(())
 }

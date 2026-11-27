@@ -41,7 +41,7 @@ async fn grill_me_backend_invoke_waits_for_host_gate_without_relayed_ask_answers
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task =
-        BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend);
+        BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
     ctx.set_sync("output_dir", std::env::temp_dir());
@@ -63,7 +63,7 @@ async fn grill_me_backend_invoke_continues_when_grill_ask_answers_file_present()
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(GrillMeRecipe);
     let backend: Arc<dyn CodingBackend> = Arc::new(OutputOnlyBackend);
     let task =
-        BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend);
+        BackendInvokeTask::from_recipe("grill", GoalId::new("grill"), recipe.clone(), backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let tmp = std::env::temp_dir().join(format!("grill-gate-relay-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(tmp.join(".workflow")).unwrap();
@@ -99,6 +99,7 @@ async fn tdd_interview_backend_invoke_completes_without_tddy_tools_submit() {
         GoalId::new("interview"),
         recipe.clone(),
         backend,
+        std::sync::Arc::new(tddy_fs::DiskFs),
     );
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
@@ -126,6 +127,7 @@ async fn free_prompting_backend_invoke_completes_without_tddy_tools_submit() {
         GoalId::new("prompting"),
         recipe.clone(),
         backend,
+        std::sync::Arc::new(tddy_fs::DiskFs),
     );
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");
@@ -156,6 +158,7 @@ async fn free_prompting_backend_invoke_persists_output_into_context_for_plain_mo
         GoalId::new("prompting"),
         recipe.clone(),
         backend,
+        std::sync::Arc::new(tddy_fs::DiskFs),
     );
     let ctx = Context::new();
     ctx.set_sync("feature_input", "hello");

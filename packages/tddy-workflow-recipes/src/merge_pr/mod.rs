@@ -43,7 +43,7 @@ impl WorkflowRecipe for MergePrRecipe {
         "merge-pr"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         log::info!("MergePrRecipe::build_graph: analyze -> sync-main -> finalize -> end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let analyze = Arc::new(BackendInvokeTask::from_recipe(
@@ -51,18 +51,21 @@ impl WorkflowRecipe for MergePrRecipe {
             GoalId::new(TASK_ANALYZE),
             recipe.clone(),
             backend.clone(),
+            fs.clone(),
         ));
         let sync = Arc::new(BackendInvokeTask::from_recipe(
             TASK_SYNC_MAIN,
             GoalId::new(TASK_SYNC_MAIN),
             recipe.clone(),
             backend.clone(),
+            fs.clone(),
         ));
         let finalize = Arc::new(BackendInvokeTask::from_recipe(
             TASK_FINALIZE,
             GoalId::new(TASK_FINALIZE),
             recipe,
             backend,
+            fs.clone(),
         ));
         let end = Arc::new(EndTask::new("end"));
 

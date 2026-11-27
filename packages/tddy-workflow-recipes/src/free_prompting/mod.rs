@@ -29,7 +29,7 @@ impl WorkflowRecipe for FreePromptingRecipe {
         "free-prompting"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         log::info!(
             "FreePromptingRecipe::build_graph: single prompting (backend invoke, no end edge)"
         );
@@ -39,6 +39,7 @@ impl WorkflowRecipe for FreePromptingRecipe {
             GoalId::new("prompting"),
             recipe,
             backend,
+            fs.clone(),
         ));
 
         GraphBuilder::new("free_prompting")

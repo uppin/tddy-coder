@@ -6,7 +6,6 @@
 //! **Terminology:** Same relay pattern as [`grill_me`](crate::grill_me) (e.g. persisted answers
 //! under the session tree); see `grill_me::hooks` for the grill-phase counterpart.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use tddy_core::workflow::context::Context;
@@ -79,6 +78,15 @@ pub fn persist_interview_handoff_for_plan(
     session_dir: &Path,
     handoff_text: &str,
 ) -> std::io::Result<()> {
+    persist_interview_handoff_for_plan_on(&tddy_fs::DiskFs, session_dir, handoff_text)
+}
+
+/// [`persist_interview_handoff_for_plan`] through the filesystem port.
+pub fn persist_interview_handoff_for_plan_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    handoff_text: &str,
+) -> std::io::Result<()> {
     let path = interview_handoff_path(session_dir);
     log::info!(
         target: "tddy_workflow_recipes::tdd::interview",
@@ -87,9 +95,10 @@ pub fn persist_interview_handoff_for_plan(
         path
     );
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs.create_dir_all(parent)?;
     }
-    tddy_core::atomic_file::write_atomic(&path, handoff_text)
+    fs.write_atomic(&path, handoff_text.as_bytes(), None)
+        .map_err(std::io::Error::other)
 }
 
 /// Load relay into context for [`PlanTask`](super::PlanTask) (`answers` / follow-up prompt path).
@@ -97,8 +106,17 @@ pub fn apply_staged_interview_handoff_to_plan_context(
     session_dir: &Path,
     context: &Context,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    apply_staged_interview_handoff_to_plan_context_on(&tddy_fs::DiskFs, session_dir, context)
+}
+
+/// [`apply_staged_interview_handoff_to_plan_context`] through the filesystem port.
+pub fn apply_staged_interview_handoff_to_plan_context_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    context: &Context,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let path = interview_handoff_path(session_dir);
-    if !path.exists() {
+    if !fs.exists(&path) {
         log::debug!(
             target: "tddy_workflow_recipes::tdd::interview",
             "apply_staged_interview_handoff_to_plan_context: no relay file at {:?}",
@@ -106,7 +124,7 @@ pub fn apply_staged_interview_handoff_to_plan_context(
         );
         return Ok(());
     }
-    let text = fs::read_to_string(&path)
+    let text = fs.read_to_string(&path)
         .map_err(|e| format!("read interview handoff relay {}: {}", path.display(), e))?;
     let trimmed = text.trim();
     if trimmed.is_empty() {

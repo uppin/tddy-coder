@@ -1,6 +1,5 @@
 //! GitHub REST merge for **merge-pr** (PR lookup, merge API).
 
-use std::fs;
 use std::process::Command;
 
 use serde_json::Value;
@@ -25,6 +24,17 @@ fn temp_response_path(prefix: &str) -> std::path::PathBuf {
 /// `token` is the credential of the account the project is assigned. It is a plain parameter and
 /// never an `Option`: a blank one is refused, and nothing is read from the process environment.
 pub fn merge_open_pr_for_branch(
+    params: MergePrGithubParams,
+    token: &str,
+) -> Result<String, String> {
+    merge_open_pr_for_branch_on(&tddy_fs::DiskFs, params, token)
+}
+
+/// [`merge_open_pr_for_branch`] through the filesystem port. The temp files are handed to
+/// `curl` by path, so the port here is the disk one; the seam exists so the reads and
+/// cleanups are the port's, not raw `std::fs`.
+pub fn merge_open_pr_for_branch_on(
+    fs: &dyn tddy_fs::Fs,
     params: MergePrGithubParams,
     token: &str,
 ) -> Result<String, String> {
@@ -54,14 +64,14 @@ pub fn merge_open_pr_for_branch(
     )?;
 
     if !(200..300).contains(&pulls_http) {
-        fs::remove_file(&pulls_path).ok();
+        let _ = fs.remove_file(&pulls_path);
         return Err(format!(
             "merge-pr: GitHub API list pulls failed with HTTP {pulls_http}"
         ));
     }
 
-    let pulls_raw = fs::read_to_string(&pulls_path).map_err(|e| e.to_string())?;
-    fs::remove_file(&pulls_path).ok();
+    let pulls_raw = fs.read_to_string(&pulls_path).map_err(|e| e.to_string())?;
+    let _ = fs.remove_file(&pulls_path);
     let pulls: Value = serde_json::from_str(&pulls_raw).map_err(|e| {
         format!("merge-pr: failed to parse GitHub pulls JSON: {e}; body={pulls_raw:?}")
     })?;
@@ -89,21 +99,21 @@ pub fn merge_open_pr_for_branch(
     );
 
     let merge_body_path = temp_response_path("tddy-gh-merge-body");
-    fs::write(&merge_body_path, br#"{"merge_method":"merge"}"#).map_err(|e| e.to_string())?;
+    fs.write(&merge_body_path, br#"{"merge_method":"merge"}"#).map_err(|e| e.to_string())?;
 
     let merge_http = curl_github_put_json(&merge_url, &merge_body_path, token, &merge_path)?;
-    fs::remove_file(&merge_body_path).ok();
+    let _ = fs.remove_file(&merge_body_path);
 
     if !(200..300).contains(&merge_http) {
-        let merge_raw = fs::read_to_string(&merge_path).unwrap_or_default();
-        fs::remove_file(&merge_path).ok();
+        let merge_raw = fs.read_to_string(&merge_path).unwrap_or_default();
+        let _ = fs.remove_file(&merge_path);
         return Err(format!(
             "merge-pr: GitHub merge API failed with HTTP {merge_http}: {merge_raw}"
         ));
     }
 
-    let merge_raw = fs::read_to_string(&merge_path).map_err(|e| e.to_string())?;
-    fs::remove_file(&merge_path).ok();
+    let merge_raw = fs.read_to_string(&merge_path).map_err(|e| e.to_string())?;
+    let _ = fs.remove_file(&merge_path);
 
     let merged: Value = serde_json::from_str(&merge_raw).map_err(|e| {
         format!("merge-pr: failed to parse merge response: {e}; body={merge_raw:?}")

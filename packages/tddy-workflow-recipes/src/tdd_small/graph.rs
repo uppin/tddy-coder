@@ -18,6 +18,7 @@ use crate::tdd::plan_task::PlanTask;
 pub fn build_tdd_small_workflow_graph(
     backend: Arc<dyn CodingBackend>,
     recipe: Arc<dyn WorkflowRecipe>,
+    fs: Arc<dyn tddy_fs::Fs>,
 ) -> Graph {
     log::info!(
         "build_tdd_small_workflow_graph: wiring plan→red→green→post-green-review→refactor→update-docs→end"
@@ -28,30 +29,35 @@ pub fn build_tdd_small_workflow_graph(
         GoalId::new("red"),
         recipe.clone(),
         backend.clone(),
+            fs.clone(),
     ));
     let green = Arc::new(BackendInvokeTask::from_recipe(
         "green",
         GoalId::new("green"),
         recipe.clone(),
         backend.clone(),
+            fs.clone(),
     ));
     let post_green = Arc::new(BackendInvokeTask::from_recipe(
         "post-green-review",
         GoalId::new("post-green-review"),
         recipe.clone(),
         backend.clone(),
+            fs.clone(),
     ));
     let refactor = Arc::new(BackendInvokeTask::from_recipe(
         "refactor",
         GoalId::new("refactor"),
         recipe.clone(),
         backend.clone(),
+            fs.clone(),
     ));
     let update_docs = Arc::new(BackendInvokeTask::from_recipe(
         "update-docs",
         GoalId::new("update-docs"),
         recipe.clone(),
         backend.clone(),
+            fs.clone(),
     ));
     let end = Arc::new(EndTask::new("end"));
 
@@ -89,7 +95,7 @@ mod tests {
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddSmallRecipe);
 
         // When
-        let g = build_tdd_small_workflow_graph(backend, recipe);
+        let g = build_tdd_small_workflow_graph(backend, recipe, std::sync::Arc::new(tddy_fs::DiskFs));
 
         // Then
         assert_eq!(

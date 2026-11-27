@@ -32,7 +32,7 @@ impl WorkflowRecipe for GrillMeRecipe {
         "grill-me"
     }
 
-    fn build_graph(&self, backend: Arc<dyn CodingBackend>) -> Graph {
+    fn build_graph(&self, backend: Arc<dyn CodingBackend>, fs: Arc<dyn tddy_fs::Fs>) -> Graph {
         log::info!("GrillMeRecipe::build_graph: grill -> create-plan -> end");
         let recipe: Arc<dyn WorkflowRecipe> = Arc::new(*self);
         let grill = Arc::new(BackendInvokeTask::from_recipe(
@@ -40,12 +40,14 @@ impl WorkflowRecipe for GrillMeRecipe {
             GoalId::new("grill"),
             recipe.clone(),
             backend.clone(),
+            fs.clone(),
         ));
         let create_plan = Arc::new(BackendInvokeTask::from_recipe(
             "create-plan",
             GoalId::new("create-plan"),
             recipe,
             backend,
+            fs.clone(),
         ));
         let end = Arc::new(EndTask::new("end"));
 
@@ -175,8 +177,8 @@ impl WorkflowRecipe for GrillMeRecipe {
             return Some(vec![prompt::grill_host_gate_question()]);
         };
         let path = dir.join(".workflow").join("grill_ask_answers.txt");
-        if path.exists() {
-            if let Ok(s) = std::fs::read_to_string(&path) {
+        if tddy_fs::Fs::exists(&tddy_fs::DiskFs, &path) {
+            if let Ok(s) = tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, &path) {
                 if !s.trim().is_empty() {
                     return None;
                 }

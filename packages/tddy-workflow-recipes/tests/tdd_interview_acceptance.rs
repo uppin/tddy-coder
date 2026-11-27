@@ -90,7 +90,7 @@ async fn tdd_interview_handoff_populates_plan_context() {
     backend.push_ok(plan_json);
 
     let recipe: Arc<dyn WorkflowRecipe> = Arc::new(TddRecipe);
-    let graph = Arc::new(build_tdd_workflow_graph(backend.clone(), recipe.clone()));
+    let graph = Arc::new(build_tdd_workflow_graph(backend.clone(), recipe.clone(), std::sync::Arc::new(tddy_fs::DiskFs)));
     assert!(
         graph.get_task("interview").is_some(),
         "graph must include interview task"

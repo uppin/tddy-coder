@@ -71,6 +71,9 @@ async fn backend_invoke_task_populates_remote_from_ctx_keys() {
         GoalId::new("prompting"),
         Arc::new(FreePromptingRecipe),
         backend,
+    )
+        backend,
+        std::sync::Arc::new(tddy_fs::DiskFs),
     );
 
     let ctx = Context::new();
@@ -122,6 +125,9 @@ async fn backend_invoke_task_remote_is_none_when_ctx_keys_absent() {
         GoalId::new("prompting"),
         Arc::new(FreePromptingRecipe),
         backend,
+    )
+        backend,
+        std::sync::Arc::new(tddy_fs::DiskFs),
     );
 
     let ctx = Context::new();

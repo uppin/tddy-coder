@@ -112,7 +112,7 @@ fn review_recipe_build_graph_smoke() {
     let backend: Arc<dyn tddy_core::backend::CodingBackend> = Arc::new(StubBackend::new());
 
     // When / Then — must not panic
-    let _g = r.build_graph(backend);
+    let _g = r.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
 }
 
 #[test]

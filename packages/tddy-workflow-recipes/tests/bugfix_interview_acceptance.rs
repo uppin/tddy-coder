@@ -22,7 +22,7 @@ fn bugfix_graph_orders_interview_before_analyze() {
     // Given
     let backend = Arc::new(StubBackend::new());
     let recipe = BugfixRecipe;
-    let graph = recipe.build_graph(backend);
+    let graph = recipe.build_graph(backend, std::sync::Arc::new(tddy_fs::DiskFs));
     let ctx = Context::new();
 
     // Then

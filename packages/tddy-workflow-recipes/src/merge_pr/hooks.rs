@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use tddy_core::backend::AgentOutputSink;
-use tddy_core::changeset::{read_changeset, BranchWorktreeIntent};
+use tddy_core::changeset::{read_changeset, BranchWorktreeIntent, read_changeset_on};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
@@ -21,14 +21,23 @@ use crate::tdd::hooks_common;
 use super::{TASK_ANALYZE, TASK_FINALIZE, TASK_SYNC_MAIN};
 
 /// Hooks for merge-pr: read-only analysis, then worktree-isolated sync + finalize.
-#[derive(Debug)]
 pub struct MergePrWorkflowHooks {
     event_tx: Option<mpsc::Sender<WorkflowEvent>>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl MergePrWorkflowHooks {
     pub fn new(event_tx: Option<mpsc::Sender<WorkflowEvent>>) -> Self {
-        Self { event_tx }
+        Self {
+            event_tx,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
+        }
+    }
+
+    /// The same hooks, running their file I/O through `fs` instead of the disk.
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     fn agent_output_sink_impl(&self) -> Option<AgentOutputSink> {
@@ -60,6 +69,7 @@ impl RunnerHooks for MergePrWorkflowHooks {
         if task_id == TASK_SYNC_MAIN {
             if let Some(ref session_dir) = context.get_sync::<PathBuf>("session_dir") {
                 hooks_common::ensure_worktree_for_session(
+                    &*self.fs,
                     session_dir.as_path(),
                     context,
                     self.event_tx.as_ref(),
@@ -68,7 +78,7 @@ impl RunnerHooks for MergePrWorkflowHooks {
             }
         }
 
-        let target_branch = resolve_target_branch_from_changeset(context);
+        let target_branch = resolve_target_branch_from_changeset(&*self.fs, context);
 
         let working = context
             .get_sync::<PathBuf>("worktree_dir")
@@ -134,9 +144,9 @@ impl RunnerHooks for MergePrWorkflowHooks {
 
 /// Read the changeset from session_dir and extract the target branch name
 /// when `branch_worktree_intent` is `WorkOnSelectedBranch`.
-fn resolve_target_branch_from_changeset(context: &Context) -> Option<String> {
+fn resolve_target_branch_from_changeset(fs: &dyn tddy_fs::Fs, context: &Context) -> Option<String> {
     let session_dir = context.get_sync::<PathBuf>("session_dir")?;
-    let cs = read_changeset(&session_dir).ok()?;
+    let cs = read_changeset_on(fs, &session_dir).ok()?;
     let wf = cs.workflow.as_ref()?;
     if wf.branch_worktree_intent == Some(BranchWorktreeIntent::WorkOnSelectedBranch) {
         let branch = wf.selected_branch_to_work_on.clone();

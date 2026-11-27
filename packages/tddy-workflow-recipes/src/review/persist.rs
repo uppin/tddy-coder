@@ -1,6 +1,5 @@
 //! Persist **`review.md`** from validated branch-review submit JSON.
 
-use std::fs;
 use std::path::Path;
 
 use super::parse::parse_branch_review_output;
@@ -8,16 +7,26 @@ use super::REVIEW_MD_BASENAME;
 
 /// Write `session_dir/review.md` from a **`branch-review`** JSON payload (same shape as `tddy-tools submit`).
 pub fn persist_review_md_to_session_dir(session_dir: &Path, json: &str) -> Result<(), String> {
+    persist_review_md_to_session_dir_on(&tddy_fs::DiskFs, session_dir, json)
+}
+
+/// [`persist_review_md_to_session_dir`] through the filesystem port.
+pub fn persist_review_md_to_session_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    json: &str,
+) -> Result<(), String> {
     log::info!(
         "persist_review_md_to_session_dir: session_dir={}",
         session_dir.display()
     );
     let out = parse_branch_review_output(json)?;
-    fs::create_dir_all(session_dir).map_err(|e| e.to_string())?;
+    fs.create_dir_all(session_dir).map_err(|e| e.to_string())?;
     let path = session_dir.join(REVIEW_MD_BASENAME);
-    tddy_core::atomic_file::write_atomic(
+    fs.write_atomic(
         &path,
-        out.review_body_markdown.trim_end_matches('\n').to_string() + "\n",
+        (out.review_body_markdown.trim_end_matches('\n').to_string() + "\n").as_bytes(),
+        None,
     )
     .map_err(|e| format!("write {}: {e}", path.display()))?;
     log::info!(

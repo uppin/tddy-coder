@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use tddy_core::changeset::{
-    get_session_for_tag, read_changeset, resolve_model, update_state, write_changeset, Changeset,
+    get_session_for_tag, read_changeset, read_changeset_on, resolve_model, update_state,
+    write_changeset_on, Changeset,
 };
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::setup_worktree_for_session_with_optional_chain_base;
@@ -23,14 +24,15 @@ use crate::SessionArtifactManifest;
 
 /// Read primary planning document using recipe basename and migration-aware resolution.
 pub(crate) fn read_primary_session_document(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let bn = manifest
         .primary_document_basename()
         .ok_or("recipe has no primary session document key (prd) in manifest")?;
-    let path =
-        tddy_workflow::resolve_existing_session_artifact(session_dir, &bn).ok_or_else(|| {
+    let path = tddy_workflow::resolve_existing_session_artifact_on(fs, session_dir, &bn)
+        .ok_or_else(|| {
             format!(
                 "primary planning document ({}) not found under {:?}",
                 bn, session_dir
@@ -41,16 +43,17 @@ pub(crate) fn read_primary_session_document(
         "read_primary_session_document: {:?}",
         path
     );
-    std::fs::read_to_string(&path)
+    fs.read_to_string(&path)
         .map_err(|e| format!("read primary planning document {}: {}", path.display(), e).into())
 }
 
 pub(crate) fn read_primary_session_document_optional(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     manifest: &dyn SessionArtifactManifest,
 ) -> Option<String> {
     let bn = manifest.primary_document_basename()?;
-    tddy_workflow::read_session_artifact_utf8(session_dir, &bn)
+    tddy_workflow::read_session_artifact_utf8_on(fs, session_dir, &bn)
 }
 
 pub(crate) fn recipe_default_models_str(recipe: &dyn WorkflowRecipe) -> BTreeMap<String, String> {
@@ -62,17 +65,18 @@ pub(crate) fn recipe_default_models_str(recipe: &dyn WorkflowRecipe) -> BTreeMap
 }
 
 pub(crate) fn resolve_agent_session_id(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let changeset =
-        read_changeset(session_dir).map_err(|e| -> Box<dyn Error + Send + Sync> { Box::new(e) })?;
+    let changeset = read_changeset_on(fs, session_dir)
+        .map_err(|e| -> Box<dyn Error + Send + Sync> { Box::new(e) })?;
     changeset
         .state
         .session_id
         .clone()
         .or_else(|| get_session_for_tag(&changeset, "impl"))
         .or_else(|| {
-            std::fs::read_to_string(session_dir.join(".impl-session"))
+            fs.read_to_string(&session_dir.join(".impl-session"))
                 .ok()
                 .map(|s| s.trim().to_string())
         })
@@ -86,8 +90,13 @@ pub(crate) fn resolve_agent_session_id(
 }
 
 /// Persist `changeset.yaml`; on failure log a warning (hooks historically ignored errors to avoid breaking the TUI turn).
-pub(crate) fn write_changeset_logged(session_dir: &Path, cs: &Changeset, operation: &'static str) {
-    if let Err(e) = write_changeset(session_dir, cs) {
+pub(crate) fn write_changeset_logged(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    cs: &Changeset,
+    operation: &'static str,
+) {
+    if let Err(e) = write_changeset_on(fs, session_dir, cs) {
         log::warn!(
             target: "tddy_workflow_recipes::tdd::hooks_common",
             "write_changeset failed during {}: {} (session_dir={})",
@@ -98,13 +107,16 @@ pub(crate) fn write_changeset_logged(session_dir: &Path, cs: &Changeset, operati
     }
 }
 
-pub(crate) fn before_plan(context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub(crate) fn before_plan(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let dir: PathBuf = resolve_existing_session_dir_for_plan(context).map_err(|e| {
         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
             as Box<dyn Error + Send + Sync>
     })?;
     context.set_sync("session_dir", dir.clone());
-    if read_changeset(&dir).is_err() {
+    if read_changeset_on(fs, &dir).is_err() {
         let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
         let repo_path = context
             .get_sync::<PathBuf>("output_dir")
@@ -114,17 +126,18 @@ pub(crate) fn before_plan(context: &Context) -> Result<(), Box<dyn Error + Send 
             repo_path,
             ..Changeset::default()
         };
-        write_changeset_logged(&dir, &init_cs, "before_plan init changeset");
+        write_changeset_logged(fs, &dir, &init_cs, "before_plan init changeset");
     }
-    let mut cs = read_changeset(&dir).map_err(|e| e.to_string())?;
+    let mut cs = read_changeset_on(fs, &dir).map_err(|e| e.to_string())?;
     update_state(&mut cs, WorkflowState::new("Planning"));
-    write_changeset_logged(&dir, &cs, "before_plan Planning state");
+    write_changeset_logged(fs, &dir, &cs, "before_plan Planning state");
     Ok(())
 }
 
 /// Ensure worktree exists (shared by classic `acceptance-tests` and `tdd-small` merged `red`).
 /// `log_label` prefixes stub-backend and error logs for traceability.
 pub(crate) fn ensure_worktree_for_session(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     event_tx: Option<&mpsc::Sender<WorkflowEvent>>,
@@ -133,7 +146,7 @@ pub(crate) fn ensure_worktree_for_session(
     if context.get_sync::<PathBuf>("worktree_dir").is_some() {
         return Ok(());
     }
-    let cs = read_changeset(session_dir).map_err(|e| e.to_string())?;
+    let cs = read_changeset_on(fs, session_dir).map_err(|e| e.to_string())?;
     if let Some(ref wt) = cs.worktree {
         context.set_sync("worktree_dir", PathBuf::from(wt));
         return Ok(());
@@ -187,17 +200,19 @@ pub(crate) fn ensure_worktree_for_session(
 }
 
 pub(crate) fn before_green(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     context: &Context,
     recipe: &dyn WorkflowRecipe,
     manifest: &dyn SessionArtifactManifest,
     log_target: &'static str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let progress = std::fs::read_to_string(session_dir.join("progress.md"))
+    let progress = fs
+        .read_to_string(&session_dir.join("progress.md"))
         .map_err(|e| format!("read progress.md: {}", e))?;
-    let prd = read_primary_session_document_optional(session_dir, manifest);
-    let at = std::fs::read_to_string(session_dir.join("acceptance-tests.md")).ok();
-    let changeset = read_changeset(session_dir).ok();
+    let prd = read_primary_session_document_optional(fs, session_dir, manifest);
+    let at = fs.read_to_string(&session_dir.join("acceptance-tests.md")).ok();
+    let changeset = read_changeset_on(fs, session_dir).ok();
     let new_agent_session = context
         .get_sync::<bool>("new_agent_session")
         .unwrap_or(false);
@@ -205,7 +220,7 @@ pub(crate) fn before_green(
         context.remove_sync("session_id");
         context.set_sync("is_resume", false);
     } else {
-        let session_id = resolve_agent_session_id(session_dir).map_err(|e| {
+        let session_id = resolve_agent_session_id(fs, session_dir).map_err(|e| {
             format!(
                 "green requires changeset with state.session_id, impl session, or .impl-session file: {}",
                 e
@@ -249,9 +264,9 @@ pub(crate) fn before_green(
     context.set_sync("system_prompt", green::system_prompt(run_optional_step_x));
     context.set_sync("session_dir", session_dir.to_path_buf());
     context.set_sync("model", model);
-    if let Ok(mut cs) = read_changeset(session_dir) {
+    if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("GreenImplementing"));
-        write_changeset_logged(session_dir, &cs, "before_green GreenImplementing");
+        write_changeset_logged(fs, session_dir, &cs, "before_green GreenImplementing");
     }
     Ok(())
 }
