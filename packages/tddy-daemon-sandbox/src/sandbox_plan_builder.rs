@@ -56,16 +56,36 @@ fn input_mounts(inputs: &[ActionInput]) -> Vec<MountSpec> {
 }
 
 fn ensure_layout_dirs(layout: &ActionSandboxLayout) -> Result<(PathBuf, PathBuf), SandboxError> {
-    std::fs::create_dir_all(&layout.project_root).map_err(|e| SandboxError::Io(e.to_string()))?;
+    ensure_layout_dirs_on(&tddy_fs::DiskFs, layout)
+}
+
+/// [`ensure_layout_dirs`] through the filesystem port.
+fn ensure_layout_dirs_on(
+    fs: &dyn tddy_fs::Fs,
+    layout: &ActionSandboxLayout,
+) -> Result<(PathBuf, PathBuf), SandboxError> {
+    create_dir_on(fs, &layout.project_root)?;
     let scratch_home = layout.scratch_dir.join("home");
     let scratch_tmp = layout.scratch_dir.join("tmp");
-    std::fs::create_dir_all(&scratch_home).map_err(|e| SandboxError::Io(e.to_string()))?;
-    std::fs::create_dir_all(&scratch_tmp).map_err(|e| SandboxError::Io(e.to_string()))?;
+    create_dir_on(fs, &scratch_home)?;
+    create_dir_on(fs, &scratch_tmp)?;
     Ok((scratch_home, scratch_tmp))
 }
 
+/// Create `path` and its parents through the filesystem port.
+fn create_dir_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), SandboxError> {
+    fs.create_dir_all(path)
+        .map_err(|e| SandboxError::Io(e.to_string()))
+}
+
 fn canonicalize_path(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    canonicalize_path_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`canonicalize_path`] through the filesystem port: resolved when the path still exists, else
+/// the path as spelled.
+fn canonicalize_path_on(fs: &dyn tddy_fs::Fs, path: &Path) -> PathBuf {
+    fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn is_allowed_cwd(cwd: &Path, layout: &ActionSandboxLayout, mounts: &[MountSpec]) -> bool {
@@ -176,7 +196,7 @@ pub fn build_action_runner_plan(
     let egress_dir = canonicalize_path(&sandbox.output_dir);
     let scratch_dir = project_root.join(".work");
     let context_dir = project_root.join("context");
-    std::fs::create_dir_all(&context_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+    create_dir_on(&tddy_fs::DiskFs, &context_dir)?;
 
     let ready_marker = project_root.join("sandbox.ready");
     let grpc_socket = project_root.join("sandbox.grpc.sock");

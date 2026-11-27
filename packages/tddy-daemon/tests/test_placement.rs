@@ -44,7 +44,7 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
 /// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
 /// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
 /// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
-const BELONGS_HERE: [&str; 40] = [
+const BELONGS_HERE: [&str; 41] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
@@ -114,6 +114,9 @@ const BELONGS_HERE: [&str; 40] = [
     // Mounts `runtime::build` and reads the host service it wired into the exec-tool handler,
     // through the daemon's own start options and start resolution (`#remote-shell` 11/11).
     "orchestrator_target_start_acceptance.rs",
+    // Names `tddy_daemon::local_socket_server` and reads this package's own `src/` through
+    // `CARGO_MANIFEST_DIR`, so it is about `tddy-daemon` wherever it sits (`#fs-port` 3/13).
+    "fs_port.rs",
 ];
 
 /// AC5 — only the suites that exercise this crate remain.

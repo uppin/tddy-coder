@@ -22,7 +22,6 @@
 //! does not need to be.
 
 use std::os::fd::{FromRawFd, OwnedFd, RawFd};
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
@@ -107,28 +106,54 @@ pub fn bind_owner_only(
     os_user: &str,
     kind: OwnerSocketKind,
 ) -> anyhow::Result<UnixListener> {
+    bind_owner_only_on(&tddy_fs::DiskFs, path, os_user, kind)
+}
+
+/// [`bind_owner_only`] through the filesystem port.
+pub fn bind_owner_only_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    os_user: &str,
+    kind: OwnerSocketKind,
+) -> anyhow::Result<UnixListener> {
     let target = crate::privilege_drop::resolve_pty_os_user(os_user).map_err(anyhow::Error::msg)?;
     let euid = unsafe { libc::geteuid() };
     let needs_chown = target.uid != euid;
-    let (user_dir, run_dir) = socket_parent_dirs(path)?;
+    let (user_dir, run_dir) = socket_parent_dirs_on(fs, path)?;
 
     // Traversable but not listable by others: the user reaches its own subdirectory through it.
-    let created_run = ensure_dir(run_dir, 0o711, &[euid, target.uid], false)?;
-    let created_user = ensure_dir(user_dir, 0o700, &[euid, target.uid], true)?;
+    let created_run = ensure_dir_on(fs, run_dir, 0o711, &[euid, target.uid], false)?;
+    let created_user = ensure_dir_on(fs, user_dir, 0o700, &[euid, target.uid], true)?;
     // Only now, with the directory closed to everyone else, may anything exist inside it.
-    if let Err(e) = clear_stale_socket(path, &[euid, target.uid]) {
-        undo(path, user_dir, run_dir, created_user, created_run, false);
+    if let Err(e) = clear_stale_socket_on(fs, path, &[euid, target.uid]) {
+        undo_on(
+            fs,
+            path,
+            user_dir,
+            run_dir,
+            created_user,
+            created_run,
+            false,
+        );
         return Err(e);
     }
     let listener = match UnixListener::bind(path) {
         Ok(l) => l,
         Err(e) => {
-            undo(path, user_dir, run_dir, created_user, created_run, false);
+            undo_on(
+                fs,
+                path,
+                user_dir,
+                run_dir,
+                created_user,
+                created_run,
+                false,
+            );
             return Err(anyhow::Error::new(e).context(format!("bind {}", path.display())));
         }
     };
     let finish = || -> anyhow::Result<()> {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        fs.set_mode(path, 0o600)
             .context("restrict the socket to its owner")?;
         if needs_chown {
             let not_privileged = || not_privileged_to_hand_over(kind, euid, os_user, target.uid);
@@ -140,7 +165,7 @@ pub fn bind_owner_only(
             .context("make the socket non-blocking")
     };
     if let Err(e) = finish() {
-        undo(path, user_dir, run_dir, created_user, created_run, true);
+        undo_on(fs, path, user_dir, run_dir, created_user, created_run, true);
         return Err(e.context(format!(
             "refusing to serve {os_user}'s {} with wider access than theirs",
             kind.noun
@@ -149,7 +174,10 @@ pub fn bind_owner_only(
     Ok(listener)
 }
 
-fn socket_parent_dirs(path: &Path) -> anyhow::Result<(&Path, &Path)> {
+fn socket_parent_dirs_on<'a>(
+    fs: &dyn tddy_fs::Fs,
+    path: &'a Path,
+) -> anyhow::Result<(&'a Path, &'a Path)> {
     let user_dir = path.parent().context("socket path has no directory")?;
     let run_dir = user_dir
         .parent()
@@ -157,7 +185,10 @@ fn socket_parent_dirs(path: &Path) -> anyhow::Result<(&Path, &Path)> {
     let data_dir = run_dir
         .parent()
         .context("socket path has no data directory")?;
-    if !data_dir.is_dir() {
+    let data_dir_exists = fs
+        .metadata_follow(data_dir)
+        .is_ok_and(|meta| meta.kind == tddy_fs::FsKind::Dir);
+    if !data_dir_exists {
         bail!("data dir {} does not exist", data_dir.display());
     }
     Ok((user_dir, run_dir))
@@ -172,14 +203,35 @@ pub fn undo(
     created_run: bool,
     bound: bool,
 ) {
+    undo_on(
+        &tddy_fs::DiskFs,
+        path,
+        user_dir,
+        run_dir,
+        created_user,
+        created_run,
+        bound,
+    )
+}
+
+/// [`undo`] through the filesystem port.
+pub fn undo_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    user_dir: &Path,
+    run_dir: &Path,
+    created_user: bool,
+    created_run: bool,
+    bound: bool,
+) {
     if bound {
-        let _ = std::fs::remove_file(path);
+        let _ = fs.remove_file(path);
     }
     if created_user {
-        let _ = std::fs::remove_dir(user_dir);
+        let _ = fs.remove_dir(user_dir);
     }
     if created_run {
-        let _ = std::fs::remove_dir(run_dir);
+        let _ = fs.remove_dir(run_dir);
     }
 }
 
@@ -191,25 +243,37 @@ pub fn ensure_dir(
     allowed_owners: &[u32],
     must_narrow: bool,
 ) -> anyhow::Result<bool> {
-    let created = match std::fs::symlink_metadata(dir) {
+    ensure_dir_on(&tddy_fs::DiskFs, dir, mode, allowed_owners, must_narrow)
+}
+
+/// [`ensure_dir`] through the filesystem port.
+pub fn ensure_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &Path,
+    mode: u32,
+    allowed_owners: &[u32],
+    must_narrow: bool,
+) -> anyhow::Result<bool> {
+    let created = match fs.metadata(dir) {
         Ok(meta) => {
-            if !meta.is_dir() {
+            if meta.kind != tddy_fs::FsKind::Dir {
                 bail!("{} exists and is not a directory", dir.display());
             }
-            if !allowed_owners.contains(&meta.uid()) {
+            if !meta.uid.is_some_and(|uid| allowed_owners.contains(&uid)) {
                 bail!(
                     "{} is owned by uid {}, which is neither this daemon nor the session's user",
                     dir.display(),
-                    meta.uid()
+                    meta.uid
+                        .map(|uid| uid.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
                 );
             }
             false
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // Born with at most `mode` (the umask can only remove bits), never wider.
-            std::fs::DirBuilder::new()
-                .mode(mode)
-                .create(dir)
+            // Born at exactly `mode`, never wider: the mode rides on the creation itself, so
+            // there is no window in which the directory is listable at the process umask.
+            fs.create_dir_all_with_mode(dir, mode)
                 .with_context(|| format!("create {}", dir.display()))?;
             true
         }
@@ -217,9 +281,9 @@ pub fn ensure_dir(
     };
     // The umask may have removed bits the user needs (`x` on the run dir); an old directory may
     // carry more than it should. Both are set explicitly rather than trusted.
-    let current = std::fs::metadata(dir)?.permissions().mode() & 0o7777;
-    if current != mode || must_narrow {
-        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode))
+    let current = fs.metadata_follow(dir)?.mode.map(|mode| mode & 0o7777);
+    if current != Some(mode) || must_narrow {
+        fs.set_mode(dir, mode)
             .with_context(|| format!("set {} to {mode:o}", dir.display()))?;
     }
     Ok(created)
@@ -228,22 +292,33 @@ pub fn ensure_dir(
 /// Remove a socket file a dead daemon left — and only that: it must be a socket, owned by us or the
 /// target user, with nothing listening on it.
 pub fn clear_stale_socket(path: &Path, allowed_owners: &[u32]) -> anyhow::Result<()> {
-    let meta = match std::fs::symlink_metadata(path) {
+    clear_stale_socket_on(&tddy_fs::DiskFs, path, allowed_owners)
+}
+
+/// [`clear_stale_socket`] through the filesystem port.
+pub fn clear_stale_socket_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    allowed_owners: &[u32],
+) -> anyhow::Result<()> {
+    let meta = match fs.metadata(path) {
         Ok(meta) => meta,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(anyhow::Error::new(e).context(format!("stat {}", path.display()))),
     };
-    if !meta.file_type().is_socket() {
+    if meta.kind != tddy_fs::FsKind::Socket {
         bail!(
             "{} exists and is not a socket; not removing it",
             path.display()
         );
     }
-    if !allowed_owners.contains(&meta.uid()) {
+    if !meta.uid.is_some_and(|uid| allowed_owners.contains(&uid)) {
         bail!(
             "{} is a socket owned by uid {}; not removing it",
             path.display(),
-            meta.uid()
+            meta.uid
+                .map(|uid| uid.to_string())
+                .unwrap_or_else(|| "unknown".to_string())
         );
     }
     match std::os::unix::net::UnixStream::connect(path) {
@@ -251,9 +326,9 @@ pub fn clear_stale_socket(path: &Path, allowed_owners: &[u32]) -> anyhow::Result
             "something is already listening on {}; not taking it over",
             path.display()
         ),
-        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => {
-            std::fs::remove_file(path).with_context(|| format!("remove stale {}", path.display()))
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => fs
+            .remove_file(path)
+            .with_context(|| format!("remove stale {}", path.display())),
         Err(e) => Err(anyhow::Error::new(e).context(format!(
             "cannot tell whether {} is live; not removing it",
             path.display()
@@ -274,6 +349,16 @@ pub fn chown(path: &Path, uid: u32, gid: u32) -> anyhow::Result<()> {
 
 /// Take ownership of `fd` as `os_user`'s socket of `kind`, if it is one. Closed otherwise.
 pub fn adopt_descriptor(
+    os_user: &str,
+    fd: RawFd,
+    kind: OwnerSocketKind,
+) -> Option<(UnixListener, PathBuf)> {
+    adopt_descriptor_on(&tddy_fs::DiskFs, os_user, fd, kind)
+}
+
+/// [`adopt_descriptor`] through the filesystem port.
+pub fn adopt_descriptor_on(
+    fs: &dyn tddy_fs::Fs,
     os_user: &str,
     fd: RawFd,
     kind: OwnerSocketKind,
@@ -302,7 +387,7 @@ pub fn adopt_descriptor(
         return None;
     }
     let listener = UnixListener::from(owned);
-    match vet(os_user, &listener) {
+    match vet_on(fs, os_user, &listener) {
         Ok(path) => Some((listener, path)),
         Err(why) => {
             log::error!(
@@ -316,6 +401,15 @@ pub fn adopt_descriptor(
 
 /// The path `listener` is bound at, once it is shown to be `os_user`'s and nobody else's.
 pub fn vet(os_user: &str, listener: &UnixListener) -> Result<PathBuf, String> {
+    vet_on(&tddy_fs::DiskFs, os_user, listener)
+}
+
+/// [`vet`] through the filesystem port.
+pub fn vet_on(
+    fs: &dyn tddy_fs::Fs,
+    os_user: &str,
+    listener: &UnixListener,
+) -> Result<PathBuf, String> {
     require_listening(listener)?;
     let address = listener
         .local_addr()
@@ -325,24 +419,30 @@ pub fn vet(os_user: &str, listener: &UnixListener) -> Result<PathBuf, String> {
         .ok_or("it is not bound to a path")?
         .to_path_buf();
     let target = crate::privilege_drop::resolve_pty_os_user(os_user)?;
-    let file = std::fs::symlink_metadata(&path)
+    let file = fs
+        .metadata(&path)
         .map_err(|e| format!("cannot stat its path {}: {e}", path.display()))?;
-    if !file.file_type().is_socket() {
+    if file.kind != tddy_fs::FsKind::Socket {
         return Err(format!("{} is not a socket", path.display()));
     }
-    if file.uid() != target.uid {
+    if file.uid != Some(target.uid) {
+        let owner = file
+            .uid
+            .map(|uid| uid.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
         return Err(format!(
             "{} is owned by uid {}, not by {os_user} (uid {})",
             path.display(),
-            file.uid(),
+            owner,
             target.uid
         ));
     }
-    if file.permissions().mode() & 0o077 != 0 {
+    let mode = file.mode.unwrap_or(0);
+    if mode & 0o077 != 0 {
         return Err(format!(
             "{} is accessible to more than its owner (mode {:o})",
             path.display(),
-            file.permissions().mode() & 0o7777
+            mode & 0o7777
         ));
     }
     Ok(path)

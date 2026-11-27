@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 
 use crate::config::access::UserMapping;
-use crate::first_login_enrolment::{enrol_first_login, EnrolmentRefusal};
+use crate::first_login_enrolment::{enrol_first_login_on, EnrolmentRefusal};
 
 /// A cheap-to-clone handle on the daemon's `users:` rows. Clones share the rows.
 #[derive(Clone, Default)]
@@ -125,6 +125,17 @@ impl LiveUsers {
         github_user: &str,
         os_user: &str,
     ) -> Result<UserMapping, EnrolmentRefusal> {
+        self.enrol_first_login_on(&tddy_fs::DiskFs, config_path, github_user, os_user)
+    }
+
+    /// [`Self::enrol_first_login`] through the filesystem port.
+    pub fn enrol_first_login_on(
+        &self,
+        fs: &dyn tddy_fs::Fs,
+        config_path: &Path,
+        github_user: &str,
+        os_user: &str,
+    ) -> Result<UserMapping, EnrolmentRefusal> {
         let _file = self.lock_file_writes();
         if self.inner.owned_by_supervisor {
             return Err(EnrolmentRefusal::OwnedBySupervisor);
@@ -151,7 +162,7 @@ impl LiveUsers {
                 })
             }
         };
-        let mapping = enrol_first_login(&users_path, github_user, os_user)?;
+        let mapping = enrol_first_login_on(fs, &users_path, github_user, os_user)?;
         self.inner
             .rows
             .write()

@@ -29,7 +29,6 @@
 
 use std::collections::HashMap;
 use std::os::fd::RawFd;
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -130,11 +129,19 @@ pub fn adopt_user_sockets_from_environment() -> Vec<InheritedAgentToolSocket> {
 
 /// Adopt each `(os user, descriptor)` that is that user's one daemon socket; close the rest.
 pub fn adopt_user_descriptors(descriptors: Vec<(String, RawFd)>) -> Vec<InheritedAgentToolSocket> {
+    adopt_user_descriptors_on(&tddy_fs::DiskFs, descriptors)
+}
+
+/// [`adopt_user_descriptors`] through the filesystem port.
+pub fn adopt_user_descriptors_on(
+    fs: &dyn tddy_fs::Fs,
+    descriptors: Vec<(String, RawFd)>,
+) -> Vec<InheritedAgentToolSocket> {
     descriptors
         .into_iter()
         .filter_map(|(os_user, fd)| {
             let (listener, path) =
-                owner_socket::adopt_descriptor(&os_user, fd, OwnerSocketKind::USER_DAEMON)?;
+                owner_socket::adopt_descriptor_on(fs, &os_user, fd, OwnerSocketKind::USER_DAEMON)?;
             Some(InheritedAgentToolSocket {
                 os_user,
                 listener,
@@ -240,6 +247,11 @@ impl AgentToolSockets {
     /// supervisor starts next is handed it again. A later [`Self::ensure_bound`] binds afresh a
     /// socket this daemon bound.
     pub fn stop_serving(&self) {
+        self.stop_serving_on(&tddy_fs::DiskFs)
+    }
+
+    /// [`Self::stop_serving`] through the filesystem port.
+    pub fn stop_serving_on(&self, fs: &dyn tddy_fs::Fs) {
         let servers: Vec<BoundServer> = self
             .servers
             .lock()
@@ -249,10 +261,12 @@ impl AgentToolSockets {
             .collect();
         for server in servers {
             server.task.abort();
-            let still_its_file = std::fs::symlink_metadata(&server.path)
-                .is_ok_and(|m| (m.dev(), m.ino()) == server.identity);
+            let still_its_file = fs
+                .metadata(&server.path)
+                .map(|meta| meta.dev.zip(meta.ino) == Some(server.identity))
+                .unwrap_or(false);
             if still_its_file && server.bound_here {
-                let _ = std::fs::remove_file(&server.path);
+                let _ = fs.remove_file(&server.path);
             }
         }
     }
@@ -261,7 +275,18 @@ impl AgentToolSockets {
     /// already. Refuses a user it cannot give an owner-only socket to — under the supervisor, a user
     /// not listed under `agent_tool_sockets:` — naming the setting to add.
     pub async fn ensure_bound(&self, os_user: &str, data_dir: &Path) -> anyhow::Result<PathBuf> {
-        self.ensure_bound_blocking(os_user, data_dir)
+        self.ensure_bound_on(&tddy_fs::DiskFs, os_user, data_dir)
+            .await
+    }
+
+    /// [`Self::ensure_bound`] through the filesystem port.
+    pub async fn ensure_bound_on(
+        &self,
+        fs: &dyn tddy_fs::Fs,
+        os_user: &str,
+        data_dir: &Path,
+    ) -> anyhow::Result<PathBuf> {
+        self.ensure_bound_blocking_on(fs, os_user, data_dir)
     }
 
     /// [`Self::ensure_bound`] for a call site that is not `async` — a tool-server resolver, a
@@ -274,11 +299,22 @@ impl AgentToolSockets {
     /// with no listener, which is refused at once). Only the first session of a user pays that; later
     /// ones `stat` the bound file. `HostSessionSockets` does the same work on a worker.
     pub fn ensure_bound_blocking(&self, os_user: &str, data_dir: &Path) -> anyhow::Result<PathBuf> {
+        self.ensure_bound_blocking_on(&tddy_fs::DiskFs, os_user, data_dir)
+    }
+
+    /// [`Self::ensure_bound_blocking`] through the filesystem port.
+    pub fn ensure_bound_blocking_on(
+        &self,
+        fs: &dyn tddy_fs::Fs,
+        os_user: &str,
+        data_dir: &Path,
+    ) -> anyhow::Result<PathBuf> {
         let mut servers = self.servers.lock().expect("agent-tool servers lock");
         if let Some(server) = servers.get(os_user) {
             let intact = !server.task.is_finished()
-                && std::fs::symlink_metadata(&server.path)
-                    .map(|m| (m.dev(), m.ino()) == server.identity)
+                && fs
+                    .metadata(&server.path)
+                    .map(|meta| meta.dev.zip(meta.ino) == Some(server.identity))
                     .unwrap_or(false);
             if intact {
                 return Ok(server.path.clone());
@@ -293,8 +329,8 @@ impl AgentToolSockets {
             inherited.get_mut(os_user).map(Option::take)
         };
         let (path, listener, bound_here) =
-            acquire_agent_tool_socket(os_user, data_dir, inherited, self.placement)?;
-        let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
+            acquire_agent_tool_socket_on(fs, os_user, data_dir, inherited, self.placement)?;
+        let meta = fs.metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
         let task = tokio::spawn(serve(
@@ -307,7 +343,10 @@ impl AgentToolSockets {
             os_user.to_string(),
             BoundServer {
                 path: path.clone(),
-                identity: (meta.dev(), meta.ino()),
+                identity: meta
+                    .dev
+                    .zip(meta.ino)
+                    .context("the bound socket has no file identity")?,
                 bound_here,
                 task,
             },
@@ -329,7 +368,8 @@ impl Drop for AgentToolSockets {
     }
 }
 
-fn acquire_agent_tool_socket(
+fn acquire_agent_tool_socket_on(
+    fs: &dyn tddy_fs::Fs,
     os_user: &str,
     data_dir: &Path,
     inherited: Option<Option<InheritedAgentToolSocket>>,
@@ -359,13 +399,13 @@ fn acquire_agent_tool_socket(
                  create their socket and hand it over on the next start"
         ),
         None if placement == AgentToolSocketPlacement::Embedded => {
-            let (path, listener) = bind_embedded_socket()?;
+            let (path, listener) = bind_embedded_socket_on(fs)?;
             (path, listener, true)
         }
         None => {
             let path = user_socket_path_for_user(data_dir, os_user)?;
             let listener =
-                owner_socket::bind_owner_only(&path, os_user, OwnerSocketKind::USER_DAEMON)?;
+                owner_socket::bind_owner_only_on(fs, &path, os_user, OwnerSocketKind::USER_DAEMON)?;
             (path, listener, true)
         }
     };
@@ -375,9 +415,8 @@ fn acquire_agent_tool_socket(
 /// Bind this embedded instance's next socket ([`crate::next_embedded_socket_path`]), owner-only,
 /// once the sockets of instances that are gone are cleared. The path is this instance's alone, so a
 /// file already there is one a dead process with this pid left — cleared only if nothing listens.
-fn bind_embedded_socket() -> anyhow::Result<(PathBuf, UnixListener)> {
-    use std::os::unix::fs::PermissionsExt;
-    crate::agent_tool_socket::clear_dead_instances_sockets();
+fn bind_embedded_socket_on(fs: &dyn tddy_fs::Fs) -> anyhow::Result<(PathBuf, UnixListener)> {
+    crate::agent_tool_socket::clear_dead_instances_sockets_on(fs);
     let path = crate::next_embedded_socket_path();
     if path.as_os_str().len() > MAX_SOCKET_PATH_BYTES {
         bail!(
@@ -388,10 +427,10 @@ fn bind_embedded_socket() -> anyhow::Result<(PathBuf, UnixListener)> {
         );
     }
     // SAFETY: reads this process's own credentials.
-    owner_socket::clear_stale_socket(&path, &[unsafe { libc::geteuid() }])?;
+    owner_socket::clear_stale_socket_on(fs, &path, &[unsafe { libc::geteuid() }])?;
     let listener = UnixListener::bind(&path)
         .with_context(|| format!("bind the agent-tool socket {}", path.display()))?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+    fs.set_mode(&path, 0o600)
         .with_context(|| format!("restrict {} to its owner", path.display()))?;
     listener
         .set_nonblocking(true)

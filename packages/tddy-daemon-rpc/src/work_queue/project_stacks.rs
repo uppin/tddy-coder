@@ -130,18 +130,28 @@ pub(crate) fn require_a_stack(session_dir: &Path) -> Result<(), Status> {
 /// Sessions on this host that own a work queue, by queue id — a queue's id is its owning session's,
 /// so each queue is referenced by that one session.
 pub(super) fn referencing_sessions_by_stack(sessions_base: &Path) -> HashMap<String, Vec<String>> {
+    referencing_sessions_by_stack_on(&tddy_fs::DiskFs, sessions_base)
+}
+
+/// [`referencing_sessions_by_stack`] through the filesystem port.
+pub fn referencing_sessions_by_stack_on(
+    fs: &dyn tddy_fs::Fs,
+    sessions_base: &Path,
+) -> HashMap<String, Vec<String>> {
     let mut by_stack: HashMap<String, Vec<String>> = HashMap::new();
     let sessions_dir = sessions_base.join("sessions");
-    let Ok(entries) = std::fs::read_dir(&sessions_dir) else {
+    let Ok(entries) = fs.read_dir(&sessions_dir) else {
         return by_stack;
     };
-    for entry in entries.flatten() {
-        let owns_a_queue = entry
-            .path()
-            .join(tddy_core::session_work_queue::WORK_QUEUE_FILE)
-            .is_file();
+    for path in entries {
+        let owns_a_queue = fs
+            .metadata(&path.join(tddy_core::session_work_queue::WORK_QUEUE_FILE))
+            .is_ok_and(|m| m.kind == tddy_fs::FsKind::File);
         if owns_a_queue {
-            let session_id = entry.file_name().to_string_lossy().into_owned();
+            let session_id = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             by_stack.insert(session_id.clone(), vec![session_id]);
         }
     }

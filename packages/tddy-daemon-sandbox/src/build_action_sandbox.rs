@@ -18,7 +18,6 @@
 //! than through the backend's logs: the Seatbelt wrapper appends a line of its own to the stderr log,
 //! and the cgroups backend does not capture the child's output at all.
 
-use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -139,14 +138,23 @@ async fn run_in_jail(
         cached: false,
         exit_code,
         argv: spec.command.clone(),
-        stdout: read_capture(&jail.stdout()),
-        stderr: read_capture(&jail.stderr()),
+        stdout: read_capture_on(&tddy_fs::DiskFs, &jail.stdout()),
+        stderr: read_capture_on(&tddy_fs::DiskFs, &jail.stderr()),
     })
 }
 
 /// Create the jail's directories, clear what an earlier run captured, and create each declared output.
 /// A mount needs its path to exist, so an output file is created empty and the action writes into it.
 fn prepare_jail(jail: &ActionJail, spec: &ActionSpec) -> Result<(), BuildError> {
+    prepare_jail_on(&tddy_fs::DiskFs, jail, spec)
+}
+
+/// [`prepare_jail`] through the filesystem port.
+fn prepare_jail_on(
+    fs: &dyn tddy_fs::Fs,
+    jail: &ActionJail,
+    spec: &ActionSpec,
+) -> Result<(), BuildError> {
     let dirs = [
         jail.root.clone(),
         jail.scratch.join("home"),
@@ -154,10 +162,10 @@ fn prepare_jail(jail: &ActionJail, spec: &ActionSpec) -> Result<(), BuildError> 
         jail.out.clone(),
     ];
     for dir in &dirs {
-        create_dir(dir)?;
+        create_dir_on(fs, dir)?;
     }
     for capture in [jail.stdout(), jail.stderr()] {
-        match std::fs::remove_file(&capture) {
+        match fs.remove_file(&capture) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(io_error(&capture, e)),
@@ -165,15 +173,14 @@ fn prepare_jail(jail: &ActionJail, spec: &ActionSpec) -> Result<(), BuildError> 
     }
     for output in &spec.outputs {
         match output.kind {
-            OutputKind::Directory => create_dir(&output.host_path)?,
+            OutputKind::Directory => create_dir_on(fs, &output.host_path)?,
             OutputKind::File => {
                 if let Some(parent) = output.host_path.parent() {
-                    create_dir(parent)?;
+                    create_dir_on(fs, parent)?;
                 }
-                OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&output.host_path)
+                // Created empty for the mount, as `create(true)` did: the action writes into it.
+                // `append` opens or creates exactly like the `OpenOptions` it replaces.
+                fs.append(&output.host_path, &[])
                     .map_err(|e| io_error(&output.host_path, e))?;
             }
         }
@@ -298,18 +305,19 @@ fn run_to_exit(plan: SandboxPlan) -> Result<i32, SandboxError> {
     }
 }
 
-/// What the launcher captured into `path`, decoded lossily. Empty when the command wrote nothing, or
-/// when the launcher never ran; the exit code tells those apart.
-fn read_capture(path: &Path) -> String {
-    String::from_utf8_lossy(&std::fs::read(path).unwrap_or_default()).into_owned()
+/// What the launcher captured into `path`, decoded lossily, through the filesystem port. Empty when
+/// the command wrote nothing, or when the launcher never ran; the exit code tells those apart.
+fn read_capture_on(fs: &dyn tddy_fs::Fs, path: &Path) -> String {
+    String::from_utf8_lossy(&fs.read(path).unwrap_or_default()).into_owned()
 }
 
 fn jail_error(action_id: &str, error: impl std::fmt::Display) -> BuildError {
     BuildError::Exec(format!("hermetic action {action_id}: {error}"))
 }
 
-fn create_dir(path: &Path) -> Result<(), BuildError> {
-    std::fs::create_dir_all(path).map_err(|e| io_error(path, e))
+/// Create `path` and its missing parents through the filesystem port.
+fn create_dir_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), BuildError> {
+    fs.create_dir_all(path).map_err(|e| io_error(path, e))
 }
 
 fn io_error(path: &Path, error: std::io::Error) -> BuildError {

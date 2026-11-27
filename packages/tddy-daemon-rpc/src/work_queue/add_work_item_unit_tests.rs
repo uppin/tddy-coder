@@ -1,3 +1,6 @@
+#![cfg(test)]
+// Test-only module (included as `#[cfg(test)] mod`): real disk stays out of the
+// fs-port production guard, which only reads file-local markers.
 //! Unit tests: `WorkQueueRpcHandler::add_work_item` — the stack guard (`require_a_stack`,
 //! `#orchestrators` 12/12 B9) refusing a session that names no stack, whatever its recipe,
 //! before its stack is touched. There is no first-write create on the session-addressed path.

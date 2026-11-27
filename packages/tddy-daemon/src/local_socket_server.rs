@@ -79,6 +79,19 @@ pub enum SocketSource {
     SelfBind(PathBuf),
 }
 
+/// Clear the way for a self-bound local socket through the filesystem port: its directory
+/// exists, and no stale file sits at its path.
+pub fn prepare_self_bind_socket_on(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs.create_dir_all(parent)
+            .with_context(|| format!("create local socket dir {}", parent.display()))?;
+    }
+    // A file a dead daemon left would make `bind` refuse the path; whatever is there is not a
+    // live socket, and a removal failure fails the bind below with the path named.
+    let _ = fs.remove_file(path);
+    Ok(())
+}
+
 /// Decide whether to adopt a systemd-passed activation fd or bind the socket path ourselves.
 pub fn resolve_socket_source(
     my_pid: u32,
@@ -188,11 +201,7 @@ where
             listener
         }
         SocketSource::SelfBind(path) => {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .with_context(|| format!("create local socket dir {}", parent.display()))?;
-            }
-            let _ = std::fs::remove_file(&path);
+            prepare_self_bind_socket_on(&tddy_fs::DiskFs, &path)?;
             let listener = tokio::net::UnixListener::bind(&path)
                 .with_context(|| format!("bind local socket {}", path.display()))?;
             log::info!(

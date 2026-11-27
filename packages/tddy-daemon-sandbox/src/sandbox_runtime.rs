@@ -16,10 +16,10 @@ pub fn attach_sandbox_request(
     extra_read_paths: Vec<PathBuf>,
     stdin: Option<String>,
 ) -> ActionSpec {
-    let output_dir = std::fs::canonicalize(&output_dir).unwrap_or(output_dir);
+    let output_dir = canonicalize_path_on(&tddy_fs::DiskFs, &output_dir);
     let extra_read_paths = extra_read_paths
         .into_iter()
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+        .map(|p| canonicalize_path_on(&tddy_fs::DiskFs, &p))
         .collect();
     spec.sandbox = Some(SandboxRequest {
         output_dir,
@@ -28,6 +28,11 @@ pub fn attach_sandbox_request(
         stdin,
     });
     spec
+}
+
+/// Resolve `path` when it still exists through the filesystem port, else keep it as spelled.
+fn canonicalize_path_on(fs: &dyn tddy_fs::Fs, path: &std::path::Path) -> PathBuf {
+    fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Spawn an action declared with a [`SandboxRequest`] inside a platform sandbox.

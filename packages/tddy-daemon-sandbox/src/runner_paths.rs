@@ -124,9 +124,17 @@ fn detect_binary_load_paths(_binary: &str) -> Vec<PathBuf> {
 }
 
 fn canonical_binary_path(binary: &str) -> Option<PathBuf> {
+    canonical_binary_path_on(&tddy_fs::DiskFs, binary)
+}
+
+/// [`canonical_binary_path`] through the filesystem port.
+///
+/// A bare name still resolves off the working directory: only an absolute path names a file the
+/// port can resolve, and the relative branch keeps the `Path` spelling it had.
+fn canonical_binary_path_on(fs: &dyn tddy_fs::Fs, binary: &str) -> Option<PathBuf> {
     let path = Path::new(binary);
     if path.is_absolute() {
-        std::fs::canonicalize(path).ok()
+        fs.canonicalize(path).ok()
     } else {
         std::env::current_dir().ok()?.join(path).canonicalize().ok()
     }

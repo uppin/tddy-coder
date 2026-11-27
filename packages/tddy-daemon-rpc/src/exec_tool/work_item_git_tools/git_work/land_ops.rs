@@ -17,8 +17,9 @@ use tddy_work_queue::waves::queue_waves;
 
 use tddy_session_activity::work_queue_activity::WorkQueueChange;
 
+use super::journal::{remove_journal, write_journal};
 use super::queue_ports::DaemonQueueWorld;
-use super::{journal_path, node_of, write_journal, GitEnv};
+use super::{node_of, GitEnv};
 use crate::work_queue::move_activity::MovedQueue;
 
 /// Drive an engine future from the blocking thread the git work runs on.
@@ -255,9 +256,7 @@ fn run_land(
         env.set_phase(item_id, "merged")?;
     }
     if report.stopped_at.is_none() {
-        if let Ok(path) = journal_path(env) {
-            let _ = std::fs::remove_file(path);
-        }
+        remove_journal(env);
     }
     announce(env, land_changes(&report));
     Ok(report)

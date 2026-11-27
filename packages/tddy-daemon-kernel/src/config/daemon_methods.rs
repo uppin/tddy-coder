@@ -68,7 +68,13 @@ impl DaemonConfig {
 
     /// Load config from a YAML file.
     pub fn load(path: &std::path::Path) -> anyhow::Result<Self> {
-        let contents = std::fs::read_to_string(path)
+        Self::load_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`Self::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, path: &std::path::Path) -> anyhow::Result<Self> {
+        let contents = fs
+            .read_to_string(path)
             .map_err(|e| anyhow::anyhow!("failed to read config {}: {}", path.display(), e))?;
         refuse_obsolete_supervisor_block(&contents, path)?;
         refuse_removed_agent_sections(&contents, path)?;
@@ -86,7 +92,7 @@ impl DaemonConfig {
         // or launched the way this system renders it, and mapping nobody silently would refuse
         // every login without saying why.
         let source = crate::users_file::UsersFileSource::from_environment(path);
-        config.users = crate::users_file::load_users_file(&source)?;
+        config.users = crate::users_file::load_users_file_on(fs, &source)?;
         Ok(config)
     }
 

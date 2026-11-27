@@ -135,38 +135,24 @@ fn wire_status(status: tddy_daemon_extensions::IntegrationStatus) -> WireIntegra
 /// commented). Preserving them needs a comment-aware YAML editor, which is a new dependency and so
 /// the developer's call.
 fn write_config(path: &Path, config: &DaemonConfig) -> Result<(), Status> {
+    write_config_on(&tddy_fs::DiskFs, path, config)
+}
+
+/// [`write_config`] through the filesystem port.
+///
+/// The port's atomic write is the same swap-then-rename the temp file did, and carrying the
+/// target's mode over the replacement is the port's own rule — so a write that fails midway
+/// leaves the operator's configuration exactly as it was, and the file keeps the mode they gave
+/// it.
+fn write_config_on(fs: &dyn tddy_fs::Fs, path: &Path, config: &DaemonConfig) -> Result<(), Status> {
     let yaml = serde_yaml::to_string(config)
         .map_err(|e| Status::internal(format!("failed to serialize the daemon config: {e}")))?;
-    let dir = path.parent().ok_or_else(|| {
-        Status::internal(format!(
-            "config path {} names no directory to write into",
-            path.display()
-        ))
-    })?;
-    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| {
-        Status::internal(format!(
-            "failed to create a temporary file in {}: {e}",
-            dir.display()
-        ))
-    })?;
-    std::io::Write::write_all(&mut temp, yaml.as_bytes())
-        .map_err(|e| Status::internal(format!("failed to write the daemon config: {e}")))?;
-    // A rename carries the temp file's permissions, not the target's, so the file the operator
-    // created keeps the mode they gave it.
-    if let Ok(existing) = std::fs::metadata(path) {
-        temp.as_file()
-            .set_permissions(existing.permissions())
-            .map_err(|e| {
-                Status::internal(format!("failed to set the daemon config permissions: {e}"))
-            })?;
-    }
-    temp.persist(path).map_err(|e| {
+    fs.write_atomic(path, yaml.as_bytes(), None).map_err(|e| {
         Status::internal(format!(
             "failed to replace {} with the updated config: {e}",
             path.display()
         ))
-    })?;
-    Ok(())
+    })
 }
 
 #[async_trait]

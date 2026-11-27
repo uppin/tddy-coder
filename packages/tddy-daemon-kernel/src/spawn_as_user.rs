@@ -92,7 +92,7 @@ pub fn merge_spawn_child_path(path_extra: Option<&str>) -> String {
 /// answer.
 #[cfg(unix)]
 pub fn find_program_on_spawn_child_path(program: &str) -> Option<PathBuf> {
-    find_program_on_path(program, &merge_spawn_child_path(None))
+    find_program_on_path_on(&tddy_fs::DiskFs, program, &merge_spawn_child_path(None))
 }
 
 /// [`find_program_on_spawn_child_path`] with the `PATH` to search passed in rather than read from
@@ -108,19 +108,24 @@ pub fn find_program_on_spawn_child_path(program: &str) -> Option<PathBuf> {
 ///
 /// Same reasoning as `tddy_host_service::host_tooling::classify_gh_auth_status`: the part that is worth
 /// pinning is a pure function of its inputs, so it takes them as arguments.
+/// [`find_program_on_spawn_child_path`] through the filesystem port.
 #[cfg(unix)]
-fn find_program_on_path(program: &str, path_value: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-
+fn find_program_on_path_on(
+    fs: &dyn tddy_fs::Fs,
+    program: &str,
+    path_value: &str,
+) -> Option<PathBuf> {
     path_value
         .split(':')
         .filter(|dir| !dir.is_empty())
         .map(|dir| Path::new(dir).join(program))
         .find(|candidate| {
-            // `metadata` follows symlinks, which is what `execve` does too — a `PATH` entry is
-            // usually a symlink into a package's own tree.
-            std::fs::metadata(candidate)
-                .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            // `metadata_follow`, which is what `execve` does too — a `PATH` entry is usually
+            // a symlink into a package's own tree.
+            fs.metadata_follow(candidate).is_ok_and(|meta| {
+                meta.kind == tddy_fs::FsKind::File
+                    && meta.mode.is_some_and(|mode| mode & 0o111 != 0)
+            })
         })
 }
 
@@ -308,11 +313,19 @@ pub fn run_capture_as_user(
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 /// The `PATH` lookup callers need *because* `resolve_tool_path` deliberately has none.
-#[cfg(all(test, unix))]
+#[cfg(test)]
+// The split is deliberate: the guard only reads a plain outer `#[cfg(test)]` as test code,
+// while the pipe and permission bits below only exist on unix.
+#[allow(clippy::mixed_attributes_style)]
 mod find_program_on_path_tests {
-    use super::find_program_on_path;
+    #![cfg(unix)]
+    use super::find_program_on_path_on;
     use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
+
+    fn find_program_on_path(program: &str, path_value: &str) -> Option<PathBuf> {
+        find_program_on_path_on(&tddy_fs::DiskFs, program, path_value)
+    }
 
     fn an_executable_named(name: &str, in_dir: &Path) -> PathBuf {
         let path = in_dir.join(name);

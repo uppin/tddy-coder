@@ -420,10 +420,18 @@ struct SocketWasCleared;
 fn clear_the_socket_of_a_process_that_is_gone(
     socket_path: &Path,
 ) -> Result<SocketWasCleared, IndexDaemonError> {
-    if !socket_path.exists() {
+    clear_the_socket_of_a_process_that_is_gone_on(&tddy_fs::DiskFs, socket_path)
+}
+
+/// [`clear_the_socket_of_a_process_that_is_gone`] through the filesystem port.
+fn clear_the_socket_of_a_process_that_is_gone_on(
+    fs: &dyn tddy_fs::Fs,
+    socket_path: &Path,
+) -> Result<SocketWasCleared, IndexDaemonError> {
+    if !fs.exists(socket_path) {
         return Ok(SocketWasCleared);
     }
-    std::fs::remove_file(socket_path)
+    fs.remove_file(socket_path)
         .map(|()| SocketWasCleared)
         .map_err(|err| IndexDaemonError::NotStarted {
             detail: format!(

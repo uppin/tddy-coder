@@ -9,6 +9,11 @@
 //!
 //! Changeset: docs/dev/changesets/2026-11-07-agent-tool-socket-per-os-user.md
 
+// Test-only: included via `#[path]` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk binds below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use super::*;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::sync::Arc;

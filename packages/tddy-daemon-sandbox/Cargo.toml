@@ -23,6 +23,8 @@ tddy-actions = { path = "../tddy-actions" }
 # `build_action_sandbox` implements `tddy-build`'s `ActionSandbox` port (`#agent-tools 4/12`).
 tddy-build = { path = "../tddy-build" }
 tddy-core = { path = "../tddy-core" }
+# `#fs-port`: production disk I/O goes through the filesystem port.
+tddy-fs = { path = "../tddy-fs" }
 # `AgentActivityHub` and `now_unix_ms` — the only two symbols this subsystem ever reached
 # `connection_service` for, and the whole reason it can live outside `tddy-daemon`.
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
@@ -50,6 +52,8 @@ tddy-sandbox-cgroups = { path = "../tddy-sandbox-cgroups" }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `write_exec_plan`: the process a runner test puts in the PTY; `eventually` — the recording tests
 # wait on a file the periodic recorder writes.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

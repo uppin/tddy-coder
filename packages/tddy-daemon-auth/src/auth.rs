@@ -536,7 +536,7 @@ fn auth_service_entry<P: GitHubOAuthProvider>(
     }
 }
 
-/// Basename of the file [`probe_writable`] creates and removes.
+/// Basename of the file [`probe_writable_on`] creates and removes.
 const PROBE_FILE: &str = "credentials.probe";
 
 /// Owner-only: the directory holds every operator's credential vault.
@@ -548,33 +548,21 @@ const OWNER_ONLY_DIR: u32 = 0o700;
 /// Called once at daemon startup. An unwritable `auth_storage` fails *every* real login (a failed
 /// retention fails the login, PRD D13), so it has to be surfaced at boot rather than to the first
 /// operator who tries to sign in.
-fn probe_writable(dir: &std::path::Path) -> Result<(), String> {
-    ensure_owner_only_dir(dir)?;
-    let probe = dir.join(PROBE_FILE);
-    tddy_core::atomic_file::write_atomic_with_mode(&probe, b"", 0o600)
-        .map_err(|e| format!("writing {}: {e}", probe.display()))?;
-    std::fs::remove_file(&probe).map_err(|e| format!("removing {}: {e}", probe.display()))
-}
-
-/// Create `dir` and its parents, owner-only from the moment they exist.
+/// Probe that `dir` can hold credential vaults, through the filesystem port.
 ///
-/// The mode is given to the *creation* rather than applied afterwards, for the same reason
-/// [`tddy_core::atomic_file`] passes it to `open`: a `create_dir_all` followed by `set_permissions`
+/// The directory is created owner-only from the moment it exists: the mode rides on the
+/// *creation* rather than being applied afterwards, because a create followed by a mode change
 /// leaves a window in which the directory is listable at the process umask. A directory that
-/// already exists therefore keeps the mode it carries — the daemon creates the store's home, it
-/// does not re-impose a mode on one an operator has already set.
-fn ensure_owner_only_dir(dir: &std::path::Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(OWNER_ONLY_DIR)
-            .create(dir)
-            .map_err(|e| format!("creating {}: {e}", dir.display()))
-    }
-    #[cfg(not(unix))]
-    std::fs::create_dir_all(dir).map_err(|e| format!("creating {}: {e}", dir.display()))
+/// already exists keeps the mode it carries — the daemon creates the store's home, it does not
+/// re-impose a mode on one an operator has already set.
+fn probe_writable_on(fs: &dyn tddy_fs::Fs, dir: &std::path::Path) -> Result<(), String> {
+    fs.create_dir_all_with_mode(dir, OWNER_ONLY_DIR)
+        .map_err(|e| format!("creating {}: {e}", dir.display()))?;
+    let probe = dir.join(PROBE_FILE);
+    fs.write_atomic(&probe, b"", Some(0o600))
+        .map_err(|e| format!("writing {}: {e}", probe.display()))?;
+    fs.remove_file(&probe)
+        .map_err(|e| format!("removing {}: {e}", probe.display()))
 }
 
 #[cfg(test)]

@@ -38,7 +38,13 @@ struct DaemonLspRoots {
 }
 
 fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    canonical_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`canonical`] through the filesystem port: resolved when the path still exists, else the path
+/// as spelled.
+fn canonical_on(fs: &dyn tddy_fs::Fs, path: &Path) -> PathBuf {
+    fs.canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn now_unix_ms() -> u64 {

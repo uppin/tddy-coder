@@ -68,11 +68,19 @@ impl UsersFileSource {
 /// and others, and yields a holder that refuses enrolment
 /// ([`LiveUsers::owned_by_supervisor`]).
 pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
+    load_users_file_on(&tddy_fs::DiskFs, source)
+}
+
+/// [`load_users_file`] through the filesystem port.
+pub fn load_users_file_on(
+    fs: &dyn tddy_fs::Fs,
+    source: &UsersFileSource,
+) -> anyhow::Result<LiveUsers> {
     let path = source.path();
-    let contents = std::fs::read_to_string(path).map_err(|error| {
+    let contents = fs.read_to_string(path).map_err(|error| {
         anyhow::anyhow!("could not read users.yaml at {}: {error}", path.display())
     })?;
-    require_root_owned_users_file(source, path)?;
+    require_root_owned_users_file_on(fs, source, path)?;
     let mapping = tddy_users_file::UsersMapping::from_yaml(&contents)
         .map_err(|refusal| anyhow::anyhow!("users.yaml at {}: {refusal}", path.display()))?;
     let rows: Vec<crate::config::access::UserMapping> = mapping
@@ -89,19 +97,26 @@ pub fn load_users_file(source: &UsersFileSource) -> anyhow::Result<LiveUsers> {
     })
 }
 
-fn require_root_owned_users_file(source: &UsersFileSource, path: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::MetadataExt;
-
+fn require_root_owned_users_file_on(
+    fs: &dyn tddy_fs::Fs,
+    source: &UsersFileSource,
+    path: &Path,
+) -> anyhow::Result<()> {
     if let UsersFileSource::HandedBySupervisor(_) = source {
-        let metadata = std::fs::metadata(path)
+        // `metadata_follow`, as before: the mapping's own file is what must be root's.
+        let metadata = fs
+            .metadata_follow(path)
             .map_err(|error| anyhow::anyhow!("users.yaml at {}: {error}", path.display()))?;
-        if metadata.uid() != 0 || metadata.mode() & 0o022 != 0 {
+        // Unknown owner or mode refuses like a wrong one: the check is meaningless without it.
+        let uid = metadata.uid.unwrap_or(u32::MAX);
+        let mode = metadata.mode.unwrap_or(0o777);
+        if uid != 0 || mode & 0o022 != 0 {
             anyhow::bail!(
                 "users.yaml at {} is not root-owned and closed to group and others \
                  (owner uid {}, mode {:o}); a supervised daemon trusts only a mapping root wrote",
                 path.display(),
-                metadata.uid(),
-                metadata.mode() & 0o7777
+                uid,
+                mode & 0o7777
             );
         }
     }
