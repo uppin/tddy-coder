@@ -103,8 +103,8 @@ impl Mirror {
     /// than from `marker`: the caller builds `marker` from what the room says now, which knows
     /// nothing of the deltas an earlier run already applied, so resuming from it would replay the
     /// session from its first tick.
-    pub fn open_or_create(dest: &Path, marker: MirrorMarker) -> Result<Self, MirrorError> {
-        if let Some(persisted) = read_marker(dest)? {
+    pub fn open_or_create(fs: &dyn tddy_fs::Fs, dest: &Path, marker: MirrorMarker) -> Result<Self, MirrorError> {
+        if let Some(persisted) = read_marker(fs, dest)? {
             if persisted.session_id != marker.session_id {
                 return Err(MirrorError::ForeignSession {
                     path: dest.to_path_buf(),
@@ -118,13 +118,13 @@ impl Mirror {
             });
         }
 
-        if !is_adoptable(dest)? {
+        if !is_adoptable(fs, dest)? {
             return Err(MirrorError::NotOwned {
                 path: dest.to_path_buf(),
             });
         }
 
-        std::fs::create_dir_all(dest).map_err(|e| MirrorError::Io {
+        fs.create_dir_all(dest).map_err(|e| MirrorError::Io {
             path: dest.to_path_buf(),
             reason: e.to_string(),
         })?;
@@ -132,7 +132,7 @@ impl Mirror {
             dest: dest.to_path_buf(),
             marker,
         };
-        mirror.write_marker()?;
+        mirror.write_marker(fs)?;
         Ok(mirror)
     }
 
@@ -151,9 +151,9 @@ impl Mirror {
     }
 
     /// Read a file from the mirror, as bytes.
-    pub fn read(&self, rel_path: &str) -> Result<Vec<u8>, MirrorError> {
+    pub fn read(&self, fs: &dyn tddy_fs::Fs, rel_path: &str) -> Result<Vec<u8>, MirrorError> {
         let path = self.dest.join(rel_path);
-        std::fs::read(&path).map_err(|e| MirrorError::Io {
+        fs.read(&path).map_err(|e| MirrorError::Io {
             path,
             reason: e.to_string(),
         })
@@ -163,7 +163,7 @@ impl Mirror {
     ///
     /// Never partially applies: a patch that does not apply cleanly leaves the mirror exactly as it
     /// was, so the reconcile that follows starts from a state the syncer can describe.
-    pub fn apply(&mut self, delta: &Delta) -> Result<ApplyOutcome, MirrorError> {
+    pub fn apply(&mut self, fs: &dyn tddy_fs::Fs, delta: &Delta) -> Result<ApplyOutcome, MirrorError> {
         // Several tool calls landing in one poll window each name the same tick, so the same
         // delta arrives once per call. De-duplicating by `seq` is what makes it apply once.
         if delta.seq <= self.marker.last_seq {
@@ -208,7 +208,7 @@ impl Mirror {
         }
 
         self.marker.last_seq = delta.seq;
-        self.write_marker()?;
+        self.write_marker(fs)?;
         Ok(ApplyOutcome::Applied)
     }
 
@@ -220,20 +220,20 @@ impl Mirror {
     /// actual state makes the next delta look already-applied, and skipping a delta is the one
     /// divergence nothing downstream reports. Recording it lower costs one further reconcile, which
     /// is logged.
-    pub fn record_restored(&mut self, applied_seq: u64) -> Result<(), MirrorError> {
+    pub fn record_restored(&mut self, fs: &dyn tddy_fs::Fs, applied_seq: u64) -> Result<(), MirrorError> {
         self.marker.last_head_commit = self.head_commit()?;
         self.marker.last_seq = applied_seq;
-        self.write_marker()
+        self.write_marker(fs)
     }
 
     /// Persist the marker, which is what lets a restart resume rather than replay.
-    fn write_marker(&self) -> Result<(), MirrorError> {
+    fn write_marker(&self, fs: &dyn tddy_fs::Fs) -> Result<(), MirrorError> {
         let path = self.dest.join(MARKER_FILENAME);
         let body = serde_json::to_vec_pretty(&self.marker).map_err(|e| MirrorError::Io {
             path: path.clone(),
             reason: e.to_string(),
         })?;
-        std::fs::write(&path, body).map_err(|e| MirrorError::Io {
+        fs.write(&path, &body).map_err(|e| MirrorError::Io {
             path,
             reason: e.to_string(),
         })
@@ -274,9 +274,9 @@ impl Mirror {
 ///
 /// A marker that exists but does not parse is an error rather than a `None`: treating it as absent
 /// would make an adoptable-looking directory out of one the syncer already owns.
-fn read_marker(dest: &Path) -> Result<Option<MirrorMarker>, MirrorError> {
+fn read_marker(fs: &dyn tddy_fs::Fs, dest: &Path) -> Result<Option<MirrorMarker>, MirrorError> {
     let path = dest.join(MARKER_FILENAME);
-    let body = match std::fs::read(&path) {
+    let body = match fs.read(&path) {
         Ok(body) => body,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
@@ -295,8 +295,10 @@ fn read_marker(dest: &Path) -> Result<Option<MirrorMarker>, MirrorError> {
 }
 
 /// Whether an unmarked `dest` may be taken over — absent, or present and empty.
-fn is_adoptable(dest: &Path) -> Result<bool, MirrorError> {
-    let mut entries = match std::fs::read_dir(dest) {
+fn is_adoptable(fs: &dyn tddy_fs::Fs, dest: &Path) -> Result<bool, MirrorError> {
+    // The port returns the entries collected: an unreadable entry fails the whole read, which is
+    // the old per-entry `Err` refusal, folded into the read.
+    let entries = match fs.read_dir(dest) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
         Err(e) => {
@@ -306,14 +308,7 @@ fn is_adoptable(dest: &Path) -> Result<bool, MirrorError> {
             })
         }
     };
-    match entries.next() {
-        None => Ok(true),
-        Some(Ok(_)) => Ok(false),
-        Some(Err(e)) => Err(MirrorError::Io {
-            path: dest.to_path_buf(),
-            reason: e.to_string(),
-        }),
-    }
+    Ok(entries.is_empty())
 }
 
 fn git_failed(command: &str, output: &Output) -> MirrorError {

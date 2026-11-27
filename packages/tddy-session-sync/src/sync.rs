@@ -211,6 +211,7 @@ struct Syncer {
     session_token: String,
     client: Arc<dyn tddy_rpc::RpcClientTransport>,
     mirror: Mirror,
+    fs: Arc<dyn tddy_fs::Fs>,
     dest: PathBuf,
     transport: GitTransport,
     /// How long the daemon may say nothing on a stream before it is declared gone.
@@ -226,7 +227,9 @@ impl Syncer {
     ) -> Result<Self, SyncError> {
         // Ownership is settled before a single byte is written: an unmarked non-empty destination
         // and one marked for another session are both refused here (AC26).
+        let fs: Arc<dyn tddy_fs::Fs> = Arc::new(tddy_fs::DiskFs);
         let mirror = Mirror::open_or_create(
+            &*fs,
             &credentials.dest,
             MirrorMarker {
                 session_id: address.session_id.clone(),
@@ -241,6 +244,7 @@ impl Syncer {
             session_token,
             client,
             mirror,
+            fs,
             dest: credentials.dest.clone(),
             transport: GitTransport {
                 daemon_url: credentials.daemon_url.clone(),
@@ -269,7 +273,8 @@ impl Syncer {
         // Whatever tick the fetched WIP ref belongs to, it is not one this mirror applied a patch
         // for, so the applied sequence stays where it is.
         let seq = self.mirror.marker().last_seq;
-        self.mirror.record_restored(seq)?;
+        let fs = Arc::clone(&self.fs);
+        self.mirror.record_restored(&*fs, seq)?;
         Ok(())
     }
 
@@ -288,7 +293,8 @@ impl Syncer {
         };
 
         let delta = self.fetch_delta(&call_id).await?;
-        match self.mirror.apply(&delta)? {
+        let fs = Arc::clone(&self.fs);
+        match self.mirror.apply(&*fs, &delta)? {
             ApplyOutcome::Applied => {
                 log::info!(
                     "applied tick {seq} ({} bytes) from {} ({call_id})",
@@ -354,7 +360,8 @@ impl Syncer {
             &self.transport,
         ))
         .await?;
-        self.mirror.record_restored(applied_seq)?;
+        let fs = Arc::clone(&self.fs);
+        self.mirror.record_restored(&*fs, applied_seq)?;
         log::info!(
             "restored the mirror from {}",
             wip_ref(&self.address.session_id)
