@@ -117,3 +117,10 @@ guards in each crate's `tests/fs_port.rs`, the restructure run state and gates b
 held handles (`Options`, `Workspace`, `PlanStore`, `WorkspaceIndex`), file reads and
 writes behind `<fn>_on` seams. The journal append rides `Fs::append` without the fsync
 it used to do — a durable-append op is missing port surface, recorded in the changeset.
+
+`tddy-vm`, `tddy-host-service`, `tddy-git`, `tddy-projects`, `tddy-discovery`,
+`tddy-github`, `tddy-git-clone` and `tddy-credential-sync` do theirs through the port
+too: guards in each crate's `tests/fs_port.rs`, held handles on the VM library/manager,
+the host stores and the discovery executors, the async build pipelines over an
+`AsyncFs`. Descriptor acts (the `/dev/kvm` probe, `O_NOFOLLOW` log opens) and streamed
+reads of large images stay on `libc` and are recorded in the changeset.
