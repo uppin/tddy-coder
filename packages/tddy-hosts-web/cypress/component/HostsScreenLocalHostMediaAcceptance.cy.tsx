@@ -4,7 +4,7 @@
  *
  * Calls stay on the host's own wire; the stream is watched in the room the start reply names.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-26-ios-simulator-screen-sharing.md (AC-IOS-1)
+ * PRD: docs/ft/web/screen-sharing-sessions.md § iOS Simulator (AC-IOS-1)
  */
 
 import { create } from "@bufbuild/protobuf";

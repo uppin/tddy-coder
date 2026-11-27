@@ -49,9 +49,13 @@ fourth constructor argument, so the connection registry and that opener stay in 
 - `usePresenterRoom(hint)` — joins the presenter room a session's attachment hint names; `idle` with
   no room when the hint names none.
 - `useScreenSharingInput({ picture, room, bridgeIdentity, framebufferWidth, framebufferHeight,
-  onCloseChord })` — forwards pointer and keyboard input on `picture` to the bridge over the
+  onCloseChord })` — forwards pointer, wheel, touch and keyboard input on `picture` to the bridge over the
   screen-sharing input stream; `inputUnavailable` once there is no stream to send on (the peer does
   not serve it, or it ended).
+- `useReceivedVideoStats(room, identity, trackName)` — how that track is arriving (`kbps`, decoded
+  `width × height`, `fps`), sampled once a second from the receiver's `inbound-rtp` video stats
+  (`receivedVideoStats.ts`: `inboundVideoSampleOf`, `receivedVideoStatsBetween`); `null` until a
+  first interval has been measured.
 - `useHasCameraVideo(room, identity)` — whether the participant has a renderable camera track.
 - `RemoteVideo` — the `<video>` for one track, rendered before the track arrives so `videoRef` (the
   input `picture`) is set from the first frame; `testId` keeps the overlays' ids.

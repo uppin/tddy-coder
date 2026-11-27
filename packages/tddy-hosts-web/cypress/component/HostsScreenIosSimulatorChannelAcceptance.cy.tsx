@@ -1,7 +1,7 @@
 /**
  * Acceptance tests: a Mac's booted iOS Simulator is listed on its host row by device and runtime.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-11-26-ios-simulator-screen-sharing.md (AC-IOS-1)
+ * PRD: docs/ft/web/screen-sharing-sessions.md § iOS Simulator (AC-IOS-1)
  */
 
 import { create } from "@bufbuild/protobuf";

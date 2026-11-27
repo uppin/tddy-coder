@@ -1,7 +1,7 @@
 //! Acceptance tests: a booted iOS Simulator attached to its Mac's host row starts through the
 //! `tddy-ios-emulator` bridge, told which device to stream.
 //!
-//! PRD: `docs/ft/web/1-WIP/PRD-2026-11-26-ios-simulator-screen-sharing.md` AC-IOS-2, AC-IOS-7.
+//! PRD: `docs/ft/web/screen-sharing-sessions.md § iOS Simulator` AC-IOS-2, AC-IOS-7.
 //!
 //! The bridge is the `/bin/sh` stand-in (`common::TheBridge`), installed as the iOS bridge only:
 //! the VNC and RDP bridge paths name nothing, so a start routed to the wrong binary fails.

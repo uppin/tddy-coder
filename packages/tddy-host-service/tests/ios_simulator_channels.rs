@@ -1,6 +1,6 @@
 //! A Mac's booted iOS Simulators, as the desktop channels its Hosts row offers.
 //!
-//! PRD: `docs/ft/web/1-WIP/PRD-2026-11-26-ios-simulator-screen-sharing.md` AC-IOS-1.
+//! PRD: `docs/ft/web/screen-sharing-sessions.md § iOS Simulator` AC-IOS-1.
 
 use pretty_assertions::assert_eq;
 use tddy_host_service::ios_simulators::{ios_simulator_channels, BootedSimulator, SimulatorLister};

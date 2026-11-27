@@ -29,6 +29,10 @@ done on it, so a host's desktop is attached to the host itself and opened straig
 screen without creating a session first. Both scopes share the same bridges, the same LiveKit track
 and the same overlay — see [Two scopes](#two-scopes-a-sessions-desktop-and-a-hosts).
 
+On a Mac, a host's desktops include every **booted iOS Simulator**: its device screen is streamed
+and controlled the same way, and an agent on that Mac deploys builds to it with `xcrun simctl` — see
+[iOS Simulator](#ios-simulator).
+
 ## User stories
 
 - As a user I can add a screen-sharing target (label, host:port, protocol, password) to a
@@ -205,7 +209,13 @@ Esc, closing the desktop) unlocks. Where it does not, the overlay says "Esc leav
 because Escape then goes to the browser. `Ctrl+Alt+Esc` still closes the desktop and leaves full
 screen with it. Picture-in-picture and scaling modes are not offered.
 
-Not forwarded: scroll wheel, audio, clipboard and file transfer. See
+**Scrolling and touch.** A mouse wheel or trackpad scroll over the picture is forwarded at the
+pointer, as the desktop's own wheel: VNC wheel buttons, RDP wheel rotation, a swipe on an iOS
+Simulator. The page under the overlay does not scroll. On a touch-screen viewer, a finger on the
+picture is the left button — tap to click, drag to drag — and the page's own touch scrolling and
+zooming are held off while it is there.
+
+Not forwarded: audio, clipboard, file transfer and multi-touch gestures such as pinch. See
 [`packages/tddy-web/docs/remote-desktop-input.md`](../../../packages/tddy-web/docs/remote-desktop-input.md)
 for how the client is built.
 
@@ -288,7 +298,8 @@ and starts no bridge. An X11 display needs no sign-in.
 ### AC-SS-17: One connect per desktop channel
 
 A host row offers one connect action per connectable channel: its endpoint desktops (VNC `:5900`,
-RDP `:3389`) and each X11 display its daemon can open. Each opens its own channel.
+RDP `:3389`), each X11 display its daemon can open, and on a Mac each booted iOS Simulator. Each
+opens its own channel.
 
 ### AC-SS-18: An X11 display is served through x11vnc
 
@@ -297,6 +308,42 @@ loopback only, password-less, on a free port. The bridge is started only once th
 a connection, and is pointed at it. Closing the desktop, the bridge exiting, and a reopen each stop
 that `x11vnc`. A reopen leaves exactly one running, and an `x11vnc` that never accepts fails the
 start with `DeadlineExceeded`, is stopped, and no bridge is started.
+
+### AC-IOS-1: A Mac lists its booted simulators
+
+A macOS host lists exactly its booted iOS Simulators as desktops, each named by device and runtime
+("iPhone 16 Pro · iOS 18.2"). Shut-down devices and devices whose runtime is unavailable are not
+listed. A Mac without Xcode, or a host that is not a Mac, lists none and reports no error.
+
+### AC-IOS-2: The stream is the device screen
+
+Starting a simulator desktop streams the device screen only, without window chrome, at the device
+area's size in pixels rather than the window's.
+
+### AC-IOS-3: Pointer is touch
+
+A press, drag and release in the viewer arrives at the device as touch-down, move and touch-up at
+the matching device points. A scroll arrives as a short swipe.
+
+### AC-IOS-4: Keys type
+
+Printable keys type their character. Return, Backspace, Escape, Tab and the arrow keys act as those
+keys.
+
+### AC-IOS-5: A device that cannot stream says which and why
+
+Starting a device that is shut down or unknown fails with a message naming the device (its udid,
+and its state when it has one). There is no silent black stream.
+
+### AC-IOS-6: A missing permission is named
+
+Without the Screen Recording or the Accessibility permission, the start fails and names the missing
+permission.
+
+### AC-IOS-7: Only on the Mac that runs it
+
+A simulator desktop is bridged only on the Mac that runs it. A target naming another host is
+refused when it is added.
 
 ### AC-SS-16: The two scopes are separate stores
 
@@ -382,6 +429,39 @@ from `PATH`. The displays are listed from `screen_sharing.x11_socket_dir` (defau
 Every host-scoped call carries the operator's own session token, and the daemon rejects one that
 does not — so a host's desktops are reachable only by an authenticated operator, on every wire.
 
+### iOS Simulator
+
+On a Mac that runs a tddy daemon (or Tddy Desktop), each booted iOS Simulator is a desktop on that
+host's row, named by device and runtime, with "Simulator booted" beside it. Its **Connect** attaches
+it as a host target naming the device's udid on the Mac itself and starts it — with no sign-in
+question, because a simulator has none. The daemon runs the `tddy-ios-emulator` bridge, which
+streams the device screen cropped from its window, and turns the viewer's clicks and drags into
+touches, scrolls into swipes and key presses into typing. Tddy Desktop's own host offers Connect
+when the common room is joined and reaches that daemon, since the picture travels through the room.
+
+**Deploying to it.** An agent session on the same Mac installs and launches builds with plain
+`xcrun simctl`, and the result appears in the shared screen:
+
+```
+xcrun simctl install <udid> path/to/App.app
+xcrun simctl launch <udid> com.example.app
+xcrun simctl openurl <udid> https://example.com
+```
+
+`xcrun simctl list devices booted` gives the udid. Whether a sandboxed agent may run `simctl` is not
+decided here: deploys assume an agent shell that can.
+
+**Requirements.**
+
+- macOS, with Xcode selected by `xcode-select`.
+- **Screen Recording** and **Accessibility** granted to the process that runs the bridge (the daemon
+  or Tddy Desktop): Screen Recording to capture the window, Accessibility to find the device screen
+  inside Xcode 27's Device Hub window. A missing one fails the start, named.
+- The device booted, with its window **visible and not minimised** on the logged-in console — in
+  Simulator.app up to Xcode 26, or Device Hub from Xcode 27.
+- The `tddy-ios-emulator` binary beside the daemon; `./install` and `./install --desktop` ship it.
+  Without it the simulator is listed with "No bridge" and no Connect.
+
 ### The desktop credential is asked for, and kept only on Remember
 
 **Inspection first.** Opening a host desktop starts with `InspectHostDesktop`. The daemon runs the
@@ -464,10 +544,9 @@ own logs go to stderr. The configuration still travels to the bridge as JSON on 
 
 ## Current limits
 
-- **A remote desktop cannot be scrolled.** Pointer and keyboard are forwarded
-  ([AC-SS-6](#ac-ss-6-overlay-remote-control)); the wheel is not, on either scope. RFB carries scroll
-  as buttons 4 and 5, so `button_mask` could already express it — nothing but a `wheel` listener is
-  missing.
+- **A scroll is one notch per event.** VNC and RDP receive one wheel click per axis per animation
+  frame, however far the operator scrolled, and an iOS Simulator receives one short swipe with no
+  momentum.
 - A bridge process runs per open desktop. That is the same resource profile on both scopes, and on
   the host scope it is reachable from a screen that lists every host at once.
 - **A desktop's size is read once, at the start.** A desktop that changes resolution afterwards stops
@@ -480,6 +559,14 @@ own logs go to stderr. The configuration still travels to the bridge as JSON on 
   as an X11 channel and is not an endpoint reading either, so nothing offers it.
 - An X11 socket directory the daemon cannot read (for any reason but its absence) lists no X11
   channels and is logged, rather than reported as a failed reading.
+- **An iOS Simulator needs its window on screen.** A headless or locked-screen Mac cannot stream
+  one, and a window moved or resized after Connect is not followed until the desktop is opened
+  again. Rotating the device changes its size mid-stream, which stops the picture updating.
+- **An iOS Simulator's colours are slightly desaturated**: the window is captured in the display's
+  colour space (Display P3 on Apple displays) and streamed as sRGB without conversion, at the
+  window's displayed size rather than the device's native resolution.
+- **No multi-touch on an iOS Simulator**: pinch and two-finger gestures cannot be made from the
+  viewer.
 - X11 displays are found only for the daemon's own OS user, only on Unix, and only through their
   socket directory: no Wayland, no other users' displays, and no X server is ever started.
 
@@ -493,3 +580,5 @@ own logs go to stderr. The configuration still travels to the bridge as JSON on 
 - Kerberos (KDC) authentication, smart cards and RD Gateway for RDP
 - VeNCrypt X509 client certificates, RA2 / RA2ne, Tight security and SASL for VNC
 - Discovering non-default desktop ports
+- Android emulators
+- iOS Simulators on a Mac other than the daemon's own (that Mac runs its own daemon)

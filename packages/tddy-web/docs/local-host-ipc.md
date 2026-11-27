@@ -12,6 +12,15 @@ every screen rendered its "no connection to this host" state.
 [addressed IPC connections](../../tddy-desktop/docs/webview-ipc-connections.md) the host application
 already holds, and it advertises `{"rpc"}` and nothing else.
 
+**Media is lent to it, and only media.** A screen shared from this machine (an iOS Simulator, say)
+is published by a bridge into the common room, and the viewer watches it there through the media
+port with a token of its own — the host connection carries none of it. So when the common room is
+joined and this host's daemon is on it, the connection registry lends the LiveKit connection's
+`media` to the IPC one ([tddy-client-web § Media is lent](../../tddy-client-web/docs/README.md#media-is-lent-calls-are-not)).
+Calls and presence stay on IPC. With no LiveKit configured, or this daemon not on the room, nothing
+is lent and the host is exactly `{"rpc"}`. `cypress/component/DesktopIpcHostAcceptance.cy.tsx` pins
+both.
+
 Feature docs: [Tddy desktop app](../../../docs/ft/desktop/tddy-desktop-tauri.md),
 [Daemon selector + host-connection routing](../../../docs/ft/web/daemon-selector-livekit-rpc.md).
 
