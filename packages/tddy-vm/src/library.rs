@@ -43,16 +43,38 @@ pub const VMS_SUBDIR: &str = "vm";
 pub const MANIFEST_FILENAME: &str = "manifest.yaml";
 
 /// Root of the VM & Image Library.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct VmLibrary {
     root: PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+}
+
+impl std::fmt::Debug for VmLibrary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VmLibrary")
+            .field("root", &self.root)
+            .finish_non_exhaustive()
+    }
 }
 
 impl VmLibrary {
     /// Create a library handle rooted at `root`. Does not touch the filesystem — call
     /// [`VmLibrary::init`] to create the directory tree.
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self::with_fs(root, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`VmLibrary::new`] with the filesystem port the library's files run through.
+    pub fn with_fs(root: impl Into<PathBuf>, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        Self {
+            root: root.into(),
+            fs,
+        }
+    }
+
+    /// The filesystem port this library runs through.
+    pub fn fs_handle(&self) -> std::sync::Arc<dyn tddy_fs::Fs> {
+        self.fs.clone()
     }
 
     /// The library root.
@@ -105,7 +127,7 @@ impl VmLibrary {
             self.prepared_base_dir(),
             self.vms_dir(),
         ] {
-            std::fs::create_dir_all(&dir).map_err(|e| {
+            self.fs.create_dir_all(&dir).map_err(|e| {
                 VmError::BuildFailed(format!("failed to create {}: {e}", dir.display()))
             })?;
         }
@@ -143,9 +165,9 @@ impl VmLibrary {
 
         let dest = self.base_images_dir().join(format!("{name}.qcow2"));
         let staged = self.stage_base_image(src, &dest)?;
-        let placed = place_base_image(&staged, src, &dest);
+        let placed = place_base_image_on(&*self.fs, &staged, src, &dest);
         if staged != src {
-            let _ = std::fs::remove_file(&staged);
+            let _ = self.fs.remove_file(&staged);
         }
         placed.map(|()| dest)
     }
@@ -161,7 +183,7 @@ impl VmLibrary {
             SuppliedImageFormat::Qcow2 => Ok(src.to_path_buf()),
             SuppliedImageFormat::Other(format) => {
                 let staged = dest.with_extension("qcow2.importing");
-                let _ = std::fs::remove_file(&staged);
+                let _ = self.fs.remove_file(&staged);
                 normalise_to_qcow2(src, &format, &staged)?;
                 Ok(staged)
             }
@@ -172,13 +194,13 @@ impl VmLibrary {
     /// Returns the manifest file path.
     pub fn write_manifest(&self, manifest: &VmManifest) -> Result<PathBuf, VmError> {
         let dir = self.vm_dir(&manifest.name);
-        std::fs::create_dir_all(&dir).map_err(|e| {
+        self.fs.create_dir_all(&dir).map_err(|e| {
             VmError::BuildFailed(format!("failed to create {}: {e}", dir.display()))
         })?;
         let path = dir.join(MANIFEST_FILENAME);
         let yaml = serde_yml::to_string(manifest)
             .map_err(|e| VmError::BuildFailed(format!("failed to render manifest YAML: {e}")))?;
-        std::fs::write(&path, yaml).map_err(|e| {
+        self.fs.write(&path, yaml.as_bytes()).map_err(|e| {
             VmError::BuildFailed(format!("failed to write {}: {e}", path.display()))
         })?;
         Ok(path)
@@ -187,8 +209,10 @@ impl VmLibrary {
     /// Read and parse `vm/<name>/manifest.yaml`.
     pub fn read_manifest(&self, name: &str) -> Result<VmManifest, VmError> {
         let path = self.vm_dir(name).join(MANIFEST_FILENAME);
-        let yaml =
-            std::fs::read_to_string(&path).map_err(|_| VmError::NotFound(name.to_string()))?;
+        let yaml = self
+            .fs
+            .read_to_string(&path)
+            .map_err(|_| VmError::NotFound(name.to_string()))?;
         serde_yml::from_str(&yaml)
             .map_err(|e| VmError::BuildFailed(format!("failed to parse {}: {e}", path.display())))
     }
@@ -200,18 +224,19 @@ impl VmLibrary {
     /// readable `manifest.yaml` (e.g. a partially-written directory) are skipped.
     pub fn list_manifests(&self) -> Result<Vec<VmManifest>, VmError> {
         let vms_dir = self.vms_dir();
-        let entries = match std::fs::read_dir(&vms_dir) {
+        let entries = match self.fs.read_dir(&vms_dir) {
             Ok(entries) => entries,
             Err(_) => return Ok(Vec::new()),
         };
 
         let mut manifests = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|e| {
-                VmError::BuildFailed(format!("failed to read {}: {e}", vms_dir.display()))
-            })?;
-            let path = entry.path();
-            if !path.is_dir() {
+        for path in entries {
+            if self
+                .fs
+                .metadata(&path)
+                .map(|m| m.kind != tddy_fs::FsKind::Dir)
+                .unwrap_or(true)
+            {
                 continue;
             }
             let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -227,10 +252,11 @@ impl VmLibrary {
     /// Delete `vm/<name>/` entirely (manifest, overlay, and SSH keys).
     pub fn remove_vm(&self, name: &str) -> Result<(), VmError> {
         let dir = self.vm_dir(name);
-        if !dir.exists() {
+        if !self.fs.exists(&dir) {
             return Err(VmError::NotFound(name.to_string()));
         }
-        std::fs::remove_dir_all(&dir)
+        self.fs
+            .remove_dir_all(&dir)
             .map_err(|e| VmError::BuildFailed(format!("failed to remove {}: {e}", dir.display())))
     }
 
@@ -262,7 +288,7 @@ impl VmLibrary {
             .join(format!("{prepared_base}.qcow2"));
 
         let vm_dir = self.vm_dir(&manifest.name);
-        std::fs::create_dir_all(&vm_dir).map_err(|e| {
+        self.fs.create_dir_all(&vm_dir).map_err(|e| {
             VmError::BuildFailed(format!("failed to create {}: {e}", vm_dir.display()))
         })?;
         let overlay_path = vm_dir.join(format!("{}.qcow2", manifest.name));
@@ -281,7 +307,7 @@ impl VmLibrary {
         let base_size = crate::image_import::virtual_size_bytes(&prepared_base_path)?;
         let overlay_size = crate::image_import::virtual_size_bytes(&overlay_path)?;
         if overlay_size < base_size {
-            let _ = std::fs::remove_file(&overlay_path);
+            let _ = self.fs.remove_file(&overlay_path);
             return Err(VmError::BuildFailed(format!(
                 "disk_size {} gives {} a {overlay_size}-byte disk, smaller than the \
                  {base_size}-byte image it chains onto ({}). The partition table it \
@@ -294,8 +320,8 @@ impl VmLibrary {
             )));
         }
 
-        let keys = generate_vm_ssh_keypair(&vm_dir, &manifest.name)?;
-        let public_key = std::fs::read_to_string(&keys.public_key_path).map_err(|e| {
+        let keys = generate_vm_ssh_keypair_on(&*self.fs, &vm_dir, &manifest.name)?;
+        let public_key = self.fs.read_to_string(&keys.public_key_path).map_err(|e| {
             VmError::BuildFailed(format!(
                 "failed to read the generated public key {}: {e}",
                 keys.public_key_path.display()
@@ -323,8 +349,13 @@ impl VmLibrary {
 ///
 /// `source` is the file the caller actually asked to import — the same as `staged` unless it
 /// needed normalising — and is what the refusal names, since that is the path the caller knows.
-fn place_base_image(staged: &Path, source: &Path, dest: &Path) -> Result<(), VmError> {
-    if dest.exists() {
+fn place_base_image_on(
+    fs: &dyn tddy_fs::Fs,
+    staged: &Path,
+    source: &Path,
+    dest: &Path,
+) -> Result<(), VmError> {
+    if fs.exists(dest) {
         if files_have_identical_content(staged, dest)? {
             return Ok(());
         }
@@ -338,14 +369,14 @@ fn place_base_image(staged: &Path, source: &Path, dest: &Path) -> Result<(), VmE
         )));
     }
 
-    std::fs::copy(staged, dest).map_err(|e| {
+    fs.copy(staged, dest).map_err(|e| {
         VmError::BuildFailed(format!(
             "failed to copy base image {} to {}: {e}",
             source.display(),
             dest.display()
         ))
     })?;
-    set_readonly_file(dest)
+    set_readonly_file_on(fs, dest)
 }
 
 /// The qcow2 header prefix [`names_a_backing_file`] reads: magic (4 bytes), version (4),
@@ -360,8 +391,7 @@ const QCOW2_MAGIC: &[u8] = b"QFI\xfb";
 fn read_image_header(src: &Path) -> Result<Vec<u8>, VmError> {
     use std::io::Read;
 
-    let file = std::fs::File::open(src)
-        .map_err(|e| VmError::BuildFailed(format!("failed to open {}: {e}", src.display())))?;
+    let file = crate::image_import::open_for_read(src)?;
     let mut header = Vec::new();
     file.take(QCOW2_HEADER_PREFIX_LEN)
         .read_to_end(&mut header)
@@ -404,10 +434,20 @@ pub struct VmSshKeypair {
 ///
 /// The private key is left at mode `0600`; OpenSSH refuses to use anything more permissive.
 pub fn generate_vm_ssh_keypair(dir: &Path, name: &str) -> Result<VmSshKeypair, VmError> {
+    generate_vm_ssh_keypair_on(&tddy_fs::DiskFs, dir, name)
+}
+
+/// [`generate_vm_ssh_keypair`] through the filesystem port (`ssh-keygen` itself stays
+/// the external process it is; the removals and the mode fix go through the port).
+pub fn generate_vm_ssh_keypair_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &Path,
+    name: &str,
+) -> Result<VmSshKeypair, VmError> {
     let private_key_path = dir.join(format!("id_{name}"));
     let public_key_path = dir.join(format!("id_{name}.pub"));
-    let _ = std::fs::remove_file(&private_key_path);
-    let _ = std::fs::remove_file(&public_key_path);
+    let _ = fs.remove_file(&private_key_path);
+    let _ = fs.remove_file(&public_key_path);
 
     let output = std::process::Command::new("ssh-keygen")
         .args(["-q", "-t", "ed25519", "-N", "", "-C"])
@@ -424,7 +464,7 @@ pub fn generate_vm_ssh_keypair(dir: &Path, name: &str) -> Result<VmSshKeypair, V
         )));
     }
 
-    set_owner_only_file(&private_key_path)?;
+    set_owner_only_file(fs, &private_key_path)?;
     Ok(VmSshKeypair {
         private_key_path,
         public_key_path,
@@ -435,37 +475,44 @@ pub fn generate_vm_ssh_keypair(dir: &Path, name: &str) -> Result<VmSshKeypair, V
 /// key and as [`crate::cloud_init`] requires of the rendered `user-data` seed.
 ///
 /// No-op on non-unix platforms — file mode bits have no equivalent there.
-#[cfg(unix)]
-pub(crate) fn set_owner_only_file(path: &Path) -> Result<(), VmError> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
-        VmError::BuildFailed(format!(
-            "failed to restrict {} to owner-only: {e}",
-            path.display()
-        ))
-    })
-}
-
-#[cfg(not(unix))]
-pub(crate) fn set_owner_only_file(_path: &Path) -> Result<(), VmError> {
-    Ok(())
+pub(crate) fn set_owner_only_file(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), VmError> {
+    #[cfg(unix)]
+    {
+        fs.set_mode(path, 0o600).map_err(|e| {
+            VmError::BuildFailed(format!(
+                "failed to restrict {} to owner-only: {e}",
+                path.display()
+            ))
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fs, path);
+        Ok(())
+    }
 }
 
 /// Lock `path` read-only (chmod `0o444`). Used to protect files placed into
 /// `images/01-base` and `images/02-prepared-base` from accidental mutation.
 ///
 /// No-op on non-unix platforms — file mode bits have no equivalent there.
-#[cfg(unix)]
 pub fn set_readonly_file(path: &Path) -> Result<(), VmError> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o444)).map_err(|e| {
-        VmError::BuildFailed(format!("failed to lock {} read-only: {e}", path.display()))
-    })
+    set_readonly_file_on(&tddy_fs::DiskFs, path)
 }
 
-#[cfg(not(unix))]
-pub fn set_readonly_file(_path: &Path) -> Result<(), VmError> {
-    Ok(())
+/// [`set_readonly_file`] through the filesystem port.
+pub fn set_readonly_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), VmError> {
+    #[cfg(unix)]
+    {
+        fs.set_mode(path, 0o444).map_err(|e| {
+            VmError::BuildFailed(format!("failed to lock {} read-only: {e}", path.display()))
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fs, path);
+        Ok(())
+    }
 }
 
 /// Whether `path` is a **finished** library layer: present, and locked read-only by
@@ -476,18 +523,16 @@ pub fn set_readonly_file(_path: &Path) -> Result<(), VmError> {
 /// or the OOM killer leaves a half-provisioned file at the layer's published path. The seal
 /// is applied once the guest has signalled completion, so it is the only mark on disk that
 /// says the bake finished.
-#[cfg(unix)]
 pub fn is_sealed_file(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o222 == 0)
-        .unwrap_or(false)
+    is_sealed_file_on(&tddy_fs::DiskFs, path)
 }
 
-#[cfg(not(unix))]
-pub fn is_sealed_file(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .map(|m| m.is_file() && m.permissions().readonly())
+/// [`is_sealed_file`] through the filesystem port.
+pub fn is_sealed_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    fs.metadata_follow(path)
+        .map(|m| {
+            m.kind == tddy_fs::FsKind::File && m.mode.map(|mode| mode & 0o222 == 0).unwrap_or(false)
+        })
         .unwrap_or(false)
 }
 

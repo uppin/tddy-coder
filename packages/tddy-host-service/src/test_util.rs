@@ -25,8 +25,13 @@ const USERS_YAML: &str = "- github_user: \"testuser\"\n  os_user: \"testdev\"\n"
 pub fn test_config() -> DaemonConfig {
     let dir = tempfile::tempdir().expect("create temp dir for test config");
     let path = dir.path().join("config.yaml");
-    std::fs::write(&path, CONFIG_YAML).expect("write test config");
-    std::fs::write(dir.path().join("users.yaml"), USERS_YAML).expect("write test users");
+    tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, CONFIG_YAML.as_bytes()).expect("write test config");
+    tddy_fs::Fs::write(
+        &tddy_fs::DiskFs,
+        &dir.path().join("users.yaml"),
+        USERS_YAML.as_bytes(),
+    )
+    .expect("write test users");
     DaemonConfig::load(&path).expect("load test config")
 }
 

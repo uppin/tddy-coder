@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Asking the host's `gh`, as an OS user, who it is logged in as for one GitHub host, and its token.
 //!
 //! `gh` is a stub answering only the exact argv a real `gh` logged in to one host would

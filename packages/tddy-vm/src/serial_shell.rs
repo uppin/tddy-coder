@@ -15,7 +15,6 @@
 //! That is what makes output containing prompt- or login-shaped lines (a `cat` of `/etc/issue`,
 //! say) harmless: once a command is running, nothing in its output can move the state machine.
 
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -617,20 +616,11 @@ impl SerialConsole {
     /// booted this VM, so a symlink standing where the log belongs must be an error rather
     /// than a way to have this process read out a file on the reader's behalf.
     fn emulator_stderr_tail(&self) -> String {
-        use std::io::Read;
 
         let Some(path) = &self.stderr_log_path else {
             return String::new();
         };
-        let stderr = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(path)
-            .and_then(|mut log| {
-                let mut contents = String::new();
-                log.read_to_string(&mut contents)?;
-                Ok(contents)
-            });
+        let stderr = read_stderr_log(path);
         match stderr {
             Ok(stderr) if !stderr.trim().is_empty() => {
                 format!("; the emulator reported: {}", stderr.trim())
@@ -745,4 +735,36 @@ fn decode_utf8_prefix(bytes: &mut Vec<u8>) -> String {
             }
         }
     }
+}
+
+/// Read the emulator's stderr log back, refusing to follow a symlink at its path —
+/// the same `O_NOFOLLOW` discipline [`create_stderr_log`] writes it under, kept on
+/// `libc` because the refusal is the open flag, not the read.
+#[cfg(unix)]
+fn read_stderr_log(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::Read;
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    use std::os::fd::FromRawFd;
+    let mut log = crate::image_import::FdReader {
+        fd: unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) },
+    };
+    let mut contents = String::new();
+    log.read_to_string(&mut contents)?;
+    Ok(contents)
+}
+
+#[cfg(not(unix))]
+fn read_stderr_log(path: &std::path::Path) -> std::io::Result<String> {
+    tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, path)
 }

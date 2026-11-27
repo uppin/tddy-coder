@@ -43,7 +43,6 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tddy_core::atomic_file::write_atomic_labelled;
 
 use crate::host_registry::sightings::apply_departure;
 use crate::host_registry::sightings::apply_sighting;
@@ -230,6 +229,7 @@ pub trait HostRegistry: Send + Sync {
 /// registry that silently fails to persist is indistinguishable from a working one until the
 /// restart that loses everything.
 pub struct FileHostRegistry {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     registry_path: PathBuf,
     /// The document, once loaded, and the lock serialising every read-modify-write.
     ///
@@ -252,7 +252,13 @@ pub struct FileHostRegistry {
 impl FileHostRegistry {
     /// Keep the registry in `REGISTRY_FILE` under `storage_dir`.
     pub fn new(storage_dir: impl AsRef<Path>) -> Self {
+        Self::with_fs(storage_dir, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`FileHostRegistry::new`] with the filesystem port the registry file runs through.
+    pub fn with_fs(storage_dir: impl AsRef<Path>, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
         Self {
+            fs,
             registry_path: storage_dir.as_ref().join(REGISTRY_FILE),
             document: Mutex::new(None),
         }
@@ -275,7 +281,7 @@ impl FileHostRegistry {
 
     /// Every recorded host, or none when the file is absent, unreadable or unparseable.
     fn read_from_disk(&self) -> Vec<KnownHost> {
-        let bytes = match std::fs::read(&self.registry_path) {
+        let bytes = match self.fs.read(&self.registry_path) {
             Ok(bytes) => bytes,
             // No file is the ordinary state of a daemon that has not seen anyone yet.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
@@ -307,7 +313,9 @@ impl FileHostRegistry {
                 self.registry_path.display()
             )
         })?;
-        write_atomic_labelled(&self.registry_path, json)
+        self.fs
+            .write_atomic(&self.registry_path, &json, None)
+            .map_err(|e| e.to_string())
     }
 }
 

@@ -53,12 +53,22 @@ pub struct VmManager {
     storage: Storage,
     backend: Arc<dyn Vm>,
     vms: Mutex<HashMap<String, (VmSpec, VmHandle)>>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl VmManager {
     pub fn new(state_file: &Path, backend: Box<dyn Vm>) -> Self {
-        let vms = if state_file.exists() {
-            if let Ok(json) = std::fs::read_to_string(state_file) {
+        Self::with_fs(state_file, backend, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`VmManager::new`] with the filesystem port the state file runs through.
+    pub fn with_fs(
+        state_file: &Path,
+        backend: Box<dyn Vm>,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> Self {
+        let vms = if fs.exists(state_file) {
+            if let Ok(json) = fs.read_to_string(state_file) {
                 if let Ok(specs) = serde_json::from_str::<Vec<VmSpec>>(&json) {
                     specs
                         .into_iter()
@@ -88,6 +98,7 @@ impl VmManager {
             storage: Storage::Json(state_file.to_path_buf()),
             backend: Arc::from(backend),
             vms: Mutex::new(vms),
+            fs,
         }
     }
 
@@ -98,6 +109,7 @@ impl VmManager {
     pub fn from_library(library: VmLibrary, backend: Box<dyn Vm>) -> Self {
         let vms = Self::load_from_library(&library);
         Self {
+            fs: library.fs_handle(),
             storage: Storage::Library(library),
             backend: Arc::from(backend),
             vms: Mutex::new(vms),
@@ -421,7 +433,7 @@ impl VmManager {
     fn persist_json(&self, state_file: &Path, vms: &HashMap<String, (VmSpec, VmHandle)>) {
         let specs: Vec<&VmSpec> = vms.values().map(|(spec, _)| spec).collect();
         if let Ok(json) = serde_json::to_string_pretty(&specs) {
-            if let Err(e) = std::fs::write(state_file, json) {
+            if let Err(e) = self.fs.write(state_file, json.as_bytes()) {
                 log::error!(
                     "VmManager: failed to persist state to {}: {e}",
                     state_file.display()

@@ -60,14 +60,14 @@ fn random_suffix(attempt: u32) -> String {
 
 /// A name beside `destination` that nothing holds yet. Every attempt taken is a refusal, never a
 /// name that might already be someone else's.
-fn partial_sibling(destination: &Path) -> Result<PathBuf, Refusal> {
+fn partial_sibling(fs: &dyn tddy_fs::Fs, destination: &Path) -> Result<PathBuf, Refusal> {
     (0..PARTIAL_NAME_ATTEMPTS)
         .map(|attempt| {
             let mut name: OsString = destination.as_os_str().to_owned();
             name.push(format!(".partial-{}", random_suffix(attempt)));
             PathBuf::from(name)
         })
-        .find(|partial| std::fs::symlink_metadata(partial).is_err())
+        .find(|partial| fs.metadata(partial).is_err())
         .ok_or_else(|| {
             Refusal::said(format!(
                 "no free partial directory name beside {} after {PARTIAL_NAME_ATTEMPTS} attempts",
@@ -76,13 +76,13 @@ fn partial_sibling(destination: &Path) -> Result<PathBuf, Refusal> {
         })
 }
 
-fn remove_partial(partial: &Path) {
-    match std::fs::symlink_metadata(partial) {
-        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-            let _ = std::fs::remove_dir_all(partial);
+fn remove_partial(fs: &dyn tddy_fs::Fs, partial: &Path) {
+    match fs.metadata(partial) {
+        Ok(metadata) if metadata.kind == tddy_fs::FsKind::Dir => {
+            let _ = fs.remove_dir_all(partial);
         }
         Ok(_) => {
-            let _ = std::fs::remove_file(partial);
+            let _ = fs.remove_file(partial);
         }
         Err(_) => {}
     }
@@ -108,8 +108,8 @@ fn parse_args(args: Vec<OsString>) -> Result<Invocation, String> {
     }
 }
 
-fn refuse_an_existing(destination: &Path) -> Result<(), Refusal> {
-    match std::fs::symlink_metadata(destination) {
+fn refuse_an_existing(fs: &dyn tddy_fs::Fs, destination: &Path) -> Result<(), Refusal> {
+    match fs.metadata(destination) {
         Ok(_) => Err(Refusal::said(format!(
             "destination already exists: {}",
             destination.display()
@@ -141,14 +141,14 @@ fn git_clone(git: &Path, url: &OsString, partial: &Path) -> Result<(), Refusal> 
 
 /// Clone into a fresh partial sibling and move it into place; the partial directory is removed on
 /// every path that does not end in the rename.
-fn clone_into_place(invocation: &Invocation) -> Result<(), Refusal> {
+fn clone_into_place(fs: &dyn tddy_fs::Fs, invocation: &Invocation) -> Result<(), Refusal> {
     let destination = &invocation.destination;
-    refuse_an_existing(destination)?;
-    let partial = partial_sibling(destination)?;
+    refuse_an_existing(fs, destination)?;
+    let partial = partial_sibling(fs, destination)?;
     let placed = git_clone(&invocation.git, &invocation.url, &partial)
-        .and_then(|()| refuse_an_existing(destination))
+        .and_then(|()| refuse_an_existing(fs, destination))
         .and_then(|()| {
-            std::fs::rename(&partial, destination).map_err(|error| {
+            fs.rename(&partial, destination).map_err(|error| {
                 Refusal::said(format!(
                     "failed to rename {} to {}: {error}",
                     partial.display(),
@@ -157,7 +157,7 @@ fn clone_into_place(invocation: &Invocation) -> Result<(), Refusal> {
             })
         });
     if placed.is_err() {
-        remove_partial(&partial);
+        remove_partial(fs, &partial);
     }
     placed
 }
@@ -170,7 +170,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match clone_into_place(&invocation) {
+    match clone_into_place(&tddy_fs::DiskFs, &invocation) {
         Ok(()) => ExitCode::SUCCESS,
         Err(refusal) => {
             if let Some(message) = refusal.message {

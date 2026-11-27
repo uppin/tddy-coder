@@ -9,6 +9,7 @@ name = "tddy_host_service"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 # `test_util` is ungated, as `tddy-daemon`'s is, so the integration suites can reach it.
 tempfile = "3"
 anyhow = "1"

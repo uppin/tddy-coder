@@ -43,10 +43,7 @@ pub fn load_harness_profiles(dir: &Path) -> Vec<HarnessProfile> {
 }
 
 /// [`load_harness_profiles`] through the filesystem port.
-pub fn load_harness_profiles_on(
-    fs: &dyn tddy_fs::Fs,
-    dir: &Path,
-) -> Vec<HarnessProfile> {
+pub fn load_harness_profiles_on(fs: &dyn tddy_fs::Fs, dir: &Path) -> Vec<HarnessProfile> {
     let entries = match fs.read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return Vec::new(),

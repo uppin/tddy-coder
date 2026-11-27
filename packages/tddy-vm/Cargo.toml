@@ -5,6 +5,7 @@ edition = "2021"
 description = "General-purpose VM build and lifecycle management (QEMU)"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs", features = ["tokio"] }
 async-trait = "0.1"
 bytes = "1"
 libc = "0.2"

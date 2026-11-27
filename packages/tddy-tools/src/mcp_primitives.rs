@@ -59,7 +59,7 @@ pub(crate) fn exec_conversation_from_env() -> Option<String> {
 fn subagent_codebase_access_from_env(conversation: Option<&str>) -> CodebaseAccess {
     match subagent_access_is_managed() {
         true => managed_codebase_access(conversation.map(str::to_string)),
-        false => CodebaseAccess::Local,
+        false => CodebaseAccess::local(),
     }
 }
 

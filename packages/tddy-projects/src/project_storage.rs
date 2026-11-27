@@ -173,11 +173,20 @@ fn projects_file_path(projects_dir: &Path) -> std::path::PathBuf {
 
 /// Read all projects. Returns empty vec if file is missing.
 pub fn read_projects(projects_dir: &Path) -> anyhow::Result<Vec<ProjectData>> {
+    read_projects_on(&tddy_fs::DiskFs, projects_dir)
+}
+
+/// [`read_projects`] through the filesystem port.
+pub fn read_projects_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+) -> anyhow::Result<Vec<ProjectData>> {
     let path = projects_file_path(projects_dir);
-    if !path.exists() {
+    if !fs.exists(&path) {
         return Ok(Vec::new());
     }
-    let contents = std::fs::read_to_string(&path)
+    let contents = fs
+        .read_to_string(&path)
         .map_err(|e| anyhow::anyhow!("read {}: {}", path.display(), e))?;
     let file: ProjectsFile = serde_yaml::from_str(&contents)
         .map_err(|e| anyhow::anyhow!("parse {}: {}", path.display(), e))?;
@@ -186,7 +195,16 @@ pub fn read_projects(projects_dir: &Path) -> anyhow::Result<Vec<ProjectData>> {
 
 /// Write the full project list (replace).
 pub fn write_projects(projects_dir: &Path, projects: &[ProjectData]) -> anyhow::Result<()> {
-    std::fs::create_dir_all(projects_dir)
+    write_projects_on(&tddy_fs::DiskFs, projects_dir, projects)
+}
+
+/// [`write_projects`] through the filesystem port.
+pub fn write_projects_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+    projects: &[ProjectData],
+) -> anyhow::Result<()> {
+    fs.create_dir_all(projects_dir)
         .map_err(|e| anyhow::anyhow!("create {}: {}", projects_dir.display(), e))?;
     let path = projects_file_path(projects_dir);
     let file = ProjectsFile {
@@ -194,20 +212,29 @@ pub fn write_projects(projects_dir: &Path, projects: &[ProjectData]) -> anyhow::
     };
     let contents =
         serde_yaml::to_string(&file).map_err(|e| anyhow::anyhow!("serialize projects: {}", e))?;
-    tddy_core::atomic_file::write_atomic(&path, contents)
+    fs.write_atomic(&path, contents.as_bytes(), None)
         .map_err(|e| anyhow::anyhow!("write {}: {}", path.display(), e))
 }
 
 /// Append one project after reading existing.
 pub fn add_project(projects_dir: &Path, project: ProjectData) -> anyhow::Result<()> {
+    add_project_on(&tddy_fs::DiskFs, projects_dir, project)
+}
+
+/// [`add_project`] through the filesystem port.
+pub fn add_project_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+    project: ProjectData,
+) -> anyhow::Result<()> {
     log::info!("add_project: project_id={}", project.project_id);
     if let Some(ref r) = project.main_branch_ref {
         tddy_core::validate_chain_pr_integration_base_ref(r)
             .map_err(|e| anyhow::anyhow!("invalid main_branch_ref: {}", e))?;
     }
-    let mut projects = read_projects(projects_dir)?;
+    let mut projects = read_projects_on(fs, projects_dir)?;
     projects.push(project);
-    write_projects(projects_dir, &projects)
+    write_projects_on(fs, projects_dir, &projects)
 }
 
 /// Append `project` only if its `project_id` is not already registered.
@@ -220,20 +247,38 @@ pub fn add_or_get_project(
     projects_dir: &Path,
     project: ProjectData,
 ) -> anyhow::Result<(ProjectData, bool)> {
-    if let Some(existing) = find_project(projects_dir, &project.project_id)? {
+    add_or_get_project_on(&tddy_fs::DiskFs, projects_dir, project)
+}
+
+/// [`add_or_get_project`] through the filesystem port.
+pub fn add_or_get_project_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+    project: ProjectData,
+) -> anyhow::Result<(ProjectData, bool)> {
+    if let Some(existing) = find_project_on(fs, projects_dir, &project.project_id)? {
         log::info!(
             "add_or_get_project: project_id={} already present, returning existing row",
             existing.project_id
         );
         return Ok((existing, false));
     }
-    add_project(projects_dir, project.clone())?;
+    add_project_on(fs, projects_dir, project.clone())?;
     Ok((project, true))
 }
 
 /// Find project by id.
 pub fn find_project(projects_dir: &Path, project_id: &str) -> anyhow::Result<Option<ProjectData>> {
-    let projects = read_projects(projects_dir)?;
+    find_project_on(&tddy_fs::DiskFs, projects_dir, project_id)
+}
+
+/// [`find_project`] through the filesystem port.
+pub fn find_project_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+    project_id: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    let projects = read_projects_on(fs, projects_dir)?;
     Ok(projects.into_iter().find(|p| p.project_id == project_id))
 }
 
@@ -245,7 +290,16 @@ pub fn find_project_by_ref(
     projects_dir: &Path,
     project_ref: &str,
 ) -> anyhow::Result<Option<ProjectData>> {
-    let projects = read_projects(projects_dir)?;
+    find_project_by_ref_on(&tddy_fs::DiskFs, projects_dir, project_ref)
+}
+
+/// [`find_project_by_ref`] through the filesystem port.
+pub fn find_project_by_ref_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+    project_ref: &str,
+) -> anyhow::Result<Option<ProjectData>> {
+    let projects = read_projects_on(fs, projects_dir)?;
     Ok(projects
         .iter()
         .find(|p| p.project_id == project_ref)

@@ -219,13 +219,68 @@ pub(crate) fn files_have_identical_content(a: &Path, b: &Path) -> Result<bool, V
 }
 
 fn file_len(path: &Path) -> Result<u64, VmError> {
-    std::fs::metadata(path)
-        .map(|m| m.len())
+    tddy_fs::Fs::metadata_follow(&tddy_fs::DiskFs, path)
+        .map(|m| m.len)
         .map_err(|e| read_failed(path, &e.to_string()))
 }
 
-fn open_for_read(path: &Path) -> Result<std::fs::File, VmError> {
-    std::fs::File::open(path).map_err(|e| read_failed(path, &e.to_string()))
+/// Open `path` as a raw descriptor for a streamed read.
+///
+/// The images this streams are hundreds of megabytes and are compared and probed in
+/// chunks; the Fs port has no ranged or streaming read, so this stays a descriptor act
+/// on `libc` (recorded in the node changeset as missing port surface for n1), while
+/// every whole-file operation goes through the port.
+/// A streamed reader over a raw descriptor: the chunked reads this module does
+/// (image headers, whole-image comparisons) without naming a filesystem type.
+#[cfg(unix)]
+pub(crate) struct FdReader {
+    pub(crate) fd: std::os::fd::OwnedFd,
+}
+
+#[cfg(unix)]
+impl std::io::Read for FdReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::os::fd::AsRawFd;
+        let n = unsafe {
+            libc::read(
+                self.fd.as_raw_fd(),
+                buf.as_mut_ptr() as *mut libc::c_void,
+                buf.len(),
+            )
+        };
+        if n < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(n as usize)
+    }
+}
+
+#[cfg(unix)]
+pub(crate) fn open_for_read(path: &Path) -> Result<FdReader, VmError> {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| read_failed(path, &e.to_string()))?;
+    let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
+    if fd < 0 {
+        return Err(read_failed(
+            path,
+            &std::io::Error::last_os_error().to_string(),
+        ));
+    }
+    Ok(FdReader {
+        fd: unsafe {
+            use std::os::fd::FromRawFd;
+            std::os::fd::OwnedFd::from_raw_fd(fd)
+        },
+    })
+}
+
+#[cfg(not(unix))]
+pub(crate) fn open_for_read(path: &Path) -> Result<impl std::io::Read, VmError> {
+    use std::io::Read as _;
+    let bytes =
+        tddy_fs::Fs::read(&tddy_fs::DiskFs, path).map_err(|e| read_failed(path, &e.to_string()))?;
+    Ok(std::io::Cursor::new(bytes))
 }
 
 fn read_failed(path: &Path, reason: &str) -> VmError {

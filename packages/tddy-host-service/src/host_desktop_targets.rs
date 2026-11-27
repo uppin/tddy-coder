@@ -83,6 +83,7 @@ struct TargetsFile {
 /// A [`HostDesktopTargetStore`] persisted under one directory, alongside — never inside — the
 /// credential store a session's own desktops live in.
 pub struct FileHostDesktopTargetStore {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     targets_path: PathBuf,
     /// Held across each read-modify-write. Two RPCs attaching a desktop at the same moment both
     /// read, both write, and the second silently drops the first's target without it.
@@ -91,7 +92,13 @@ pub struct FileHostDesktopTargetStore {
 
 impl FileHostDesktopTargetStore {
     pub fn new(storage_dir: impl AsRef<Path>) -> Self {
+        Self::with_fs(storage_dir, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`FileHostDesktopTargetStore::new`] with the filesystem port the store runs through.
+    pub fn with_fs(storage_dir: impl AsRef<Path>, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
         Self {
+            fs,
             targets_path: storage_dir.as_ref().join("host-desktop-targets.json"),
             rewrite: Mutex::new(()),
         }
@@ -103,7 +110,7 @@ impl FileHostDesktopTargetStore {
     /// go on to write would otherwise replace a damaged file with a file holding one target, and
     /// every other host's desktops would be gone with no way back.
     fn read_file(&self) -> Result<TargetsFile, String> {
-        match std::fs::read(&self.targets_path) {
+        match self.fs.read(&self.targets_path) {
             Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
                 format!(
                     "{} is not readable as host desktop targets: {e}",
@@ -126,7 +133,9 @@ impl FileHostDesktopTargetStore {
     fn write_file(&self, contents: &TargetsFile) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(contents)
             .map_err(|e| format!("encoding host desktop targets: {e}"))?;
-        tddy_core::atomic_file::write_atomic_labelled(&self.targets_path, json)
+        self.fs
+            .write_atomic(&self.targets_path, &json, None)
+            .map_err(|e| e.to_string())
     }
 
     fn locked(&self) -> std::sync::MutexGuard<'_, ()> {

@@ -39,7 +39,8 @@ pub fn create_worktree_on(
         start_point
     );
     let worktrees = worktree_dir(repo_root);
-    fs.create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
+    fs.create_dir_all(&worktrees)
+        .map_err(|e| format!("create worktrees dir: {}", e))?;
 
     let worktree_path = worktrees.join(name);
     if fs.exists(&worktree_path) {
@@ -281,7 +282,8 @@ pub fn add_worktree_for_existing_branch_on(
         branch
     );
     let worktrees = worktree_dir(repo_root);
-    fs.create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
+    fs.create_dir_all(&worktrees)
+        .map_err(|e| format!("create worktrees dir: {}", e))?;
     let worktree_path = worktrees.join(name);
     if fs.exists(&worktree_path) {
         match try_reuse_linked_worktree_at_path(repo_root, &worktree_path, branch) {

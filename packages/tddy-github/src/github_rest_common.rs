@@ -54,7 +54,8 @@ fn run_curl_json_body(
     require_token(&format!("GitHub {method}"), token)?;
     let body_path = temp_github_path("tddy-gh-req-body");
     let out_path = temp_github_path("tddy-gh-resp");
-    fs.write(&body_path, body.as_bytes()).map_err(|e| curl_err(e.to_string()))?;
+    fs.write(&body_path, body.as_bytes())
+        .map_err(|e| curl_err(e.to_string()))?;
 
     let out = std::process::Command::new("curl")
         .arg("-sS")
@@ -94,7 +95,9 @@ fn run_curl_json_body(
         .trim()
         .parse()
         .map_err(|e| curl_err(format!("curl: invalid HTTP status {code_str:?}: {e}")))?;
-    let body_raw = fs.read_to_string(&out_path).map_err(|e| curl_err(e.to_string()))?;
+    let body_raw = fs
+        .read_to_string(&out_path)
+        .map_err(|e| curl_err(e.to_string()))?;
     let _ = fs.remove_file(&out_path);
     if !(200..300).contains(&http_code) {
         return Err(curl_err(format!(
@@ -136,7 +139,12 @@ pub fn curl_github_get_json_with_token(
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    run_curl_get(&tddy_fs::DiskFs, &github_api_url(api_base, repo, path), query, token)
+    run_curl_get(
+        &tddy_fs::DiskFs,
+        &github_api_url(api_base, repo, path),
+        query,
+        token,
+    )
 }
 
 /// HTTP GET against an API path that is **not** under `/repos/{owner}/{repo}/` — `/search/issues`
@@ -205,7 +213,9 @@ fn run_curl_get(
         .trim()
         .parse()
         .map_err(|e| curl_err(format!("curl: invalid HTTP status {code_str:?}: {e}")))?;
-    let body = fs.read_to_string(&out_path).map_err(|e| curl_err(e.to_string()))?;
+    let body = fs
+        .read_to_string(&out_path)
+        .map_err(|e| curl_err(e.to_string()))?;
     let _ = fs.remove_file(&out_path);
     if !(200..300).contains(&http_code) {
         return Err(curl_err(format!(

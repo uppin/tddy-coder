@@ -9,6 +9,7 @@ name = "tddy_projects"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 tddy-core = { path = "../tddy-core" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }

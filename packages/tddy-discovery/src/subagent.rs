@@ -406,13 +406,33 @@ impl CodebaseAccess {
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
             CodebaseAccess::Local(fs) => {
+                // Matched against the walk of the pattern's static prefix, as
+                // `ToolExecutor::glob` does: `glob::glob` would walk the disk itself.
+                let matcher = glob::Pattern::new(pattern)
+                    .map_err(|e| SubagentError(format!("GLOB pattern error: {e}")))?;
                 let mut paths: Vec<serde_json::Value> = Vec::new();
-                for entry in glob::glob(pattern)
-                    .map_err(|e| SubagentError(format!("GLOB pattern error: {e}")))?
-                    .flatten()
-                {
-                    if let Some(s) = entry.to_str() {
-                        paths.push(serde_json::Value::String(s.to_string()));
+                let mut pending = vec![static_prefix(pattern)];
+                while let Some(dir) = pending.pop() {
+                    if matcher.matches_path(&dir) {
+                        if let Some(s) = dir.to_str() {
+                            paths.push(serde_json::Value::String(s.to_string()));
+                        }
+                    }
+                    let Ok(entries) = fs.read_dir(&dir) else {
+                        continue;
+                    };
+                    for entry in entries {
+                        match fs.metadata(&entry).map(|m| m.kind) {
+                            Ok(tddy_fs::FsKind::Dir) => pending.push(entry),
+                            Ok(_) => {
+                                if matcher.matches_path(&entry) {
+                                    if let Some(s) = entry.to_str() {
+                                        paths.push(serde_json::Value::String(s.to_string()));
+                                    }
+                                }
+                            }
+                            Err(_) => continue,
+                        }
                     }
                 }
                 Ok(capped_results(
@@ -500,7 +520,8 @@ impl CodebaseAccess {
             CodebaseAccess::Local(fs) => {
                 let re = Regex::new(pattern)
                     .map_err(|e| SubagentError(format!("GREP invalid regex {pattern:?}: {e}")))?;
-                let matches = grep_context::with_local_windows(scan_local(&**fs, &re, path), context);
+                let matches =
+                    grep_context::with_local_windows(scan_local(&**fs, &re, path), context);
                 Ok(capped_results(
                     matches,
                     limit,
@@ -742,11 +763,24 @@ fn window_content(content: &str, offset: Option<u64>, limit: Option<u64>) -> ser
 /// was named — for `re`, as the raw rg-shaped match events [`grep_file`] pushes. The same scan
 /// `grep_limited`'s Local arm runs; [`grep_context::with_local_windows`] decorates its
 /// output when the call asked for context.
-fn scan_local(
-    fs: &dyn tddy_fs::Fs,
-    re: &Regex,
-    path: Option<&str>,
-) -> Vec<serde_json::Value> {
+/// The longest leading run of `pattern`'s components that names a place rather than a
+/// pattern: where a port-driven glob walk starts.
+fn static_prefix(pattern: &str) -> std::path::PathBuf {
+    let mut prefix = std::path::PathBuf::new();
+    for component in std::path::Path::new(pattern).components() {
+        let text = component.as_os_str().to_string_lossy();
+        if text.contains(['*', '?', '[', ']', '{', '}']) {
+            break;
+        }
+        prefix.push(component.as_os_str());
+    }
+    if prefix.as_os_str().is_empty() {
+        prefix.push(".");
+    }
+    prefix
+}
+
+fn scan_local(fs: &dyn tddy_fs::Fs, re: &Regex, path: Option<&str>) -> Vec<serde_json::Value> {
     let mut matches: Vec<serde_json::Value> = Vec::new();
     let search_path = path.unwrap_or(".");
     let is_file = fs
@@ -761,12 +795,7 @@ fn scan_local(
     matches
 }
 
-fn grep_file(
-    fs: &dyn tddy_fs::Fs,
-    re: &Regex,
-    path: &str,
-    matches: &mut Vec<serde_json::Value>,
-) {
+fn grep_file(fs: &dyn tddy_fs::Fs, re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
     let Ok(content) = fs.read_to_string(std::path::Path::new(path)) else {
         return;
     };
@@ -784,12 +813,7 @@ fn grep_file(
     }
 }
 
-fn grep_dir(
-    fs: &dyn tddy_fs::Fs,
-    re: &Regex,
-    dir: &str,
-    matches: &mut Vec<serde_json::Value>,
-) {
+fn grep_dir(fs: &dyn tddy_fs::Fs, re: &Regex, dir: &str, matches: &mut Vec<serde_json::Value>) {
     let Ok(entries) = fs.read_dir(std::path::Path::new(dir)) else {
         return;
     };

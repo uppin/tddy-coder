@@ -36,15 +36,23 @@ pub struct X11Display {
 /// A directory that does not exist is a host with no X server, and lists nothing. Entries whose
 /// name is not `X` followed by a number, and sockets nothing answers on, are skipped.
 pub fn list_x11_displays(socket_dir: &Path) -> std::io::Result<Vec<X11Display>> {
-    let entries = match std::fs::read_dir(socket_dir) {
+    list_x11_displays_on(&tddy_fs::DiskFs, socket_dir)
+}
+
+/// [`list_x11_displays`] through the filesystem port (the connection probe itself
+/// stays a socket act).
+pub fn list_x11_displays_on(
+    fs: &dyn tddy_fs::Fs,
+    socket_dir: &Path,
+) -> std::io::Result<Vec<X11Display>> {
+    let entries = match fs.read_dir(socket_dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
 
     let mut displays = Vec::new();
-    for entry in entries {
-        let socket = entry?.path();
+    for socket in entries {
         let Some(number) = socket
             .file_name()
             .and_then(|name| name.to_str())

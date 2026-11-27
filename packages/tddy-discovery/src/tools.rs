@@ -98,8 +98,8 @@ impl ToolExecutor {
             ToolExecutor::Local(fs) => {
                 // The pattern is matched against the walk of its static prefix, both
                 // through the port: `glob::glob` would have walked the disk itself.
-                let matcher = glob::Pattern::new(pattern)
-                    .map_err(|e| format!("GLOB pattern error: {e}"))?;
+                let matcher =
+                    glob::Pattern::new(pattern).map_err(|e| format!("GLOB pattern error: {e}"))?;
                 let prefix = static_prefix(pattern);
                 let mut paths: Vec<String> = Vec::new();
                 let mut pending = vec![prefix];
@@ -238,12 +238,7 @@ impl ToolExecutor {
         }
     }
 
-    fn grep_dir(
-        fs: &dyn tddy_fs::Fs,
-        re: &Regex,
-        dir: &str,
-        matches: &mut Vec<serde_json::Value>,
-    ) {
+    fn grep_dir(fs: &dyn tddy_fs::Fs, re: &Regex, dir: &str, matches: &mut Vec<serde_json::Value>) {
         let Ok(entries) = fs.read_dir(std::path::Path::new(dir)) else {
             return;
         };
