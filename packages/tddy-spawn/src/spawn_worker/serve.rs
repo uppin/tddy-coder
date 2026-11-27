@@ -4,7 +4,6 @@
 //!
 //! The forked worker's child and `spawn_worker_over` both run this loop.
 
-use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +14,7 @@ use crate::git_progress::GitProgress;
 
 /// Serve requests until the request pipe closes, then return once every request still running has
 /// written its result.
-pub(super) fn serve(request_reader: File, response_writer: File) {
+pub(super) fn serve(request_reader: super::PipeEnd, response_writer: super::PipeEnd) {
     log::info!("spawn_worker: started, waiting for requests");
     let response_writer = Arc::new(Mutex::new(response_writer));
     std::thread::scope(|scope| {
@@ -34,7 +33,7 @@ pub(super) fn serve(request_reader: File, response_writer: File) {
     });
 }
 
-fn serve_line(line: &str, out: &Arc<Mutex<File>>) {
+fn serve_line(line: &str, out: &Arc<Mutex<super::PipeEnd>>) {
     let envelope: WorkerEnvelope = match serde_json::from_str(line) {
         Ok(envelope) => envelope,
         Err(e) => {
@@ -119,7 +118,7 @@ fn signal_child(pid: u32, signal: i32) -> WorkerResponse {
 }
 
 /// Report that the child spawned for request `id` ended, from the thread that reaped it.
-fn report_exit(out: &Mutex<File>, id: RequestId, pid: u32, exit: ChildExit) {
+fn report_exit(out: &Mutex<super::PipeEnd>, id: RequestId, pid: u32, exit: ChildExit) {
     write_event(
         out,
         id,
@@ -132,7 +131,7 @@ fn report_exit(out: &Mutex<File>, id: RequestId, pid: u32, exit: ChildExit) {
 }
 
 /// Report an event of request `id`, ahead of its result.
-fn write_event(out: &Mutex<File>, id: RequestId, event: WorkerEvent) {
+fn write_event(out: &Mutex<super::PipeEnd>, id: RequestId, event: WorkerEvent) {
     write_line(out, &WorkerLine::Event { id, event });
 }
 
@@ -145,7 +144,7 @@ fn line_id(line: &str) -> Option<RequestId> {
 }
 
 /// Write one line and flush it, holding the response pipe's write lock for the whole line.
-fn write_line(out: &Mutex<File>, line: &WorkerLine) {
+fn write_line(out: &Mutex<super::PipeEnd>, line: &WorkerLine) {
     let json = serde_json::to_string(line).expect("a worker line always serializes");
     let mut writer = out.lock().expect("the response pipe's write lock");
     let written = writer

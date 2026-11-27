@@ -73,6 +73,7 @@ fn a_clone_reports_progress_and_lands_at_its_destination() {
 
     // When
     clone_with_progress(
+        &tddy_fs::DiskFs,
         &the_current_os_user(),
         &url,
         &destination,
@@ -107,6 +108,7 @@ fn a_failed_clone_leaves_no_destination_and_carries_gits_message() {
 
     // When
     let error = clone_with_progress(
+        &tddy_fs::DiskFs,
         &the_current_os_user(),
         "file:///nonexistent/tddy-no-such-repository",
         &destination,
@@ -161,6 +163,7 @@ fn a_stopped_clone_ends_its_git_process_and_leaves_no_destination() {
         handle.pid()
     });
     let result = clone_with_progress(
+        &tddy_fs::DiskFs,
         &the_current_os_user(),
         "https://example.invalid/slow.git",
         &destination,

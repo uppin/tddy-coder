@@ -11,7 +11,6 @@
 //! PRD: docs/ft/daemon/session-liveness.md
 #![cfg(unix)]
 
-use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,15 +26,11 @@ const EXIT_CODE: i32 = 3;
 /// A safety net for a released child's end to be reported, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(10);
 
-fn a_pipe() -> (std::fs::File, std::fs::File) {
-    let mut fds = [0; 2];
-    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "pipe(2)");
-    unsafe {
-        (
-            std::fs::File::from_raw_fd(fds[0]),
-            std::fs::File::from_raw_fd(fds[1]),
-        )
-    }
+fn a_pipe() -> (
+    tddy_spawn::spawn_worker::PipeEnd,
+    tddy_spawn::spawn_worker::PipeEnd,
+) {
+    tddy_spawn::spawn_worker::PipeEnd::pair().expect("a pipe")
 }
 
 fn current_username() -> String {

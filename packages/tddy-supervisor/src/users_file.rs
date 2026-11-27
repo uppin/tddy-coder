@@ -41,33 +41,36 @@ impl UsersFile {
     /// anybody but the supervisor's own identity could write — the check
     /// [`crate::config::SupervisorConfig::load`] makes.
     pub fn load(path: &Path) -> Result<UsersFile, ConfigError> {
-        let file = std::fs::File::open(path).map_err(|error| ConfigError {
-            message: format!("could not read {}: {error}", path.display()),
-        })?;
-        let metadata = file.metadata().map_err(|error| ConfigError {
-            message: format!("could not inspect {}: {error}", path.display()),
+        Self::load_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`UsersFile::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<UsersFile, ConfigError> {
+        // Stat before reading, as the opened-then-`fstat`ed file this replaces did: the
+        // ownership check precedes the read, and a missing file is reported as unreadable
+        // rather than uninspectable.
+        let metadata = fs.metadata_follow(path).map_err(|error| ConfigError {
+            message: if error.kind() == std::io::ErrorKind::NotFound {
+                format!("could not read {}: {error}", path.display())
+            } else {
+                format!("could not inspect {}: {error}", path.display())
+            },
         })?;
         crate::config::trust::require_trustworthy_config_file(path, &metadata)?;
-        let resolved = std::fs::canonicalize(path).map_err(|error| ConfigError {
+        let resolved = fs.canonicalize(path).map_err(|error| ConfigError {
             message: format!("could not resolve {}: {error}", path.display()),
         })?;
         let mut ancestor = resolved.parent();
         while let Some(directory) = ancestor {
-            let metadata = std::fs::metadata(directory).map_err(|error| ConfigError {
+            let metadata = fs.metadata_follow(directory).map_err(|error| ConfigError {
                 message: format!("could not inspect {}: {error}", directory.display()),
             })?;
             crate::config::trust::require_trustworthy_config_directory(directory, &metadata)?;
             ancestor = directory.parent();
         }
-        let mut yaml = String::new();
-        {
-            use std::io::Read;
-            let mut file = file;
-            file.read_to_string(&mut yaml)
-                .map_err(|error| ConfigError {
-                    message: format!("could not read {}: {error}", path.display()),
-                })?;
-        }
+        let yaml = fs.read_to_string(path).map_err(|error| ConfigError {
+            message: format!("could not read {}: {error}", path.display()),
+        })?;
         UsersFile::from_yaml(&yaml)
     }
 

@@ -18,8 +18,7 @@
 //! follow. For the same reason every directory *above* it must be writable by nobody but root —
 //! somebody who could replace one could aim the supervisor's `chown` at any file on the host.
 
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 
@@ -34,6 +33,15 @@ const SOCKET_MODE: u32 = 0o600;
 
 /// Create `socket`'s directory and socket for its user, bound and listening. See the module docs.
 pub fn bind_host_socket(service: &str, socket: &HostSocket) -> anyhow::Result<UnixListener> {
+    bind_host_socket_on(&tddy_fs::DiskFs, service, socket)
+}
+
+/// [`bind_host_socket`] through the filesystem port.
+pub fn bind_host_socket_on(
+    fs: &dyn tddy_fs::Fs,
+    service: &str,
+    socket: &HostSocket,
+) -> anyhow::Result<UnixListener> {
     let target = accounts::resolve_target_user(&socket.user).map_err(|error| {
         anyhow::anyhow!(
             "service `{service}`: host socket user `{}`: {error}",
@@ -50,26 +58,25 @@ pub fn bind_host_socket(service: &str, socket: &HostSocket) -> anyhow::Result<Un
     // SAFETY: read this process's own credentials.
     let (euid, egid) = unsafe { (libc::geteuid(), libc::getegid()) };
 
-    std::fs::create_dir_all(above).with_context(|| format!("create {}", above.display()))?;
-    require_only_ours_can_write(above, euid)?;
-    let created = match std::fs::DirBuilder::new()
-        .mode(DIRECTORY_MODE)
-        .create(directory)
-    {
-        Ok(()) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
-        Err(error) => {
-            return Err(anyhow::Error::new(error).context(format!("create {}", directory.display())))
-        }
-    };
+    fs.create_dir_all(above)
+        .with_context(|| format!("create {}", above.display()))?;
+    require_only_ours_can_write(fs, above, euid)?;
+    // Created at exactly `DIRECTORY_MODE`: the port's mode-riding creation, where the
+    // `DirBuilder` this replaces put the mode.
+    let created = !fs.exists(directory);
+    if created {
+        fs.create_dir_all_with_mode(directory, DIRECTORY_MODE)
+            .with_context(|| format!("create {}", directory.display()))?;
+    }
     let result = prepare(
+        fs,
         &socket.path,
         directory,
         (euid, egid),
         (target.uid, target.gid),
     );
     if result.is_err() && created {
-        let _ = std::fs::remove_dir(directory);
+        let _ = fs.remove_dir(directory);
     }
     let listener = result.with_context(|| {
         format!(
@@ -89,19 +96,37 @@ pub fn bind_host_socket(service: &str, socket: &HostSocket) -> anyhow::Result<Un
 
 /// Everything after the directory exists: reclaim it, bind inside it, give both to the user.
 fn prepare(
+    fs: &dyn tddy_fs::Fs,
     path: &Path,
     directory: &Path,
     (euid, egid): (u32, u32),
     (uid, gid): (u32, u32),
 ) -> anyhow::Result<UnixListener> {
     // By descriptor, not by path: `O_NOFOLLOW | O_DIRECTORY` refuses a link or a file standing in
-    // for the directory, and every change below goes to the object that was checked.
-    let handle = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
-        .open(directory)
+    // for the directory, and every change below goes to the object that was checked. The port
+    // has no descriptor operation, so the descriptor is opened and held directly, and its
+    // owner is read by `fstat` on that same descriptor.
+    let c_dir = std::ffi::CString::new(directory.as_os_str().as_encoded_bytes())
         .with_context(|| format!("{} is not a plain directory", directory.display()))?;
-    let owner = handle.metadata()?.uid();
+    let fd = unsafe {
+        libc::open(
+            c_dir.as_ptr(),
+            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        )
+    };
+    if fd == -1 {
+        return Err(anyhow::Error::new(std::io::Error::last_os_error())
+            .context(format!("{} is not a plain directory", directory.display())));
+    }
+    let handle = unsafe { OwnedFd::from_raw_fd(fd) };
+    let owner = {
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(handle.as_raw_fd(), &mut stat) } != 0 {
+            return Err(anyhow::Error::new(std::io::Error::last_os_error())
+                .context(format!("stat {}", directory.display())));
+        }
+        stat.st_uid
+    };
     if owner != euid && owner != uid {
         anyhow::bail!(
             "{} is owned by uid {owner}, who is neither the supervisor nor the socket's user",
@@ -110,21 +135,22 @@ fn prepare(
     }
     // Take it back first: while it is the user's they could be racing the steps below.
     change_owner(&handle, euid, egid)?;
-    handle
-        .set_permissions(std::fs::Permissions::from_mode(DIRECTORY_MODE))
-        .context("restrict the directory to its owner")?;
+    if unsafe { libc::fchmod(handle.as_raw_fd(), DIRECTORY_MODE) } != 0 {
+        return Err(anyhow::Error::new(std::io::Error::last_os_error())
+            .context("restrict the directory to its owner"));
+    }
 
-    clear_stale_socket(path)?;
+    clear_stale_socket(fs, path)?;
     let listener = UnixListener::bind(path).with_context(|| format!("bind {}", path.display()))?;
     let finish = || -> anyhow::Result<()> {
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE))
+        fs.set_mode(path, SOCKET_MODE)
             .context("restrict the socket to its owner")?;
         lchown(path, uid, gid)?;
         // Last: the user gets the directory only once everything in it is theirs.
         change_owner(&handle, uid, gid)
     };
     if let Err(error) = finish() {
-        let _ = std::fs::remove_file(path);
+        let _ = fs.remove_file(path);
         return Err(error);
     }
     Ok(listener)
@@ -132,26 +158,32 @@ fn prepare(
 
 /// Refuse a directory — and any above it — that somebody other than this process's own account
 /// could write to, unless it is sticky (the kernel's own `/tmp` rule).
-fn require_only_ours_can_write(directory: &Path, euid: u32) -> anyhow::Result<()> {
-    let resolved = std::fs::canonicalize(directory)
+fn require_only_ours_can_write(
+    fs: &dyn tddy_fs::Fs,
+    directory: &Path,
+    euid: u32,
+) -> anyhow::Result<()> {
+    let resolved = fs
+        .canonicalize(directory)
         .with_context(|| format!("resolve {}", directory.display()))?;
     for ancestor in resolved.ancestors() {
-        let meta =
-            std::fs::metadata(ancestor).with_context(|| format!("stat {}", ancestor.display()))?;
-        let sticky = meta.mode() & 0o1000 != 0;
-        if meta.uid() != 0 && meta.uid() != euid {
+        let meta = fs
+            .metadata_follow(ancestor)
+            .with_context(|| format!("stat {}", ancestor.display()))?;
+        let sticky = meta.mode.unwrap_or(0) & 0o1000 != 0;
+        if meta.uid != Some(0) && meta.uid != Some(euid) {
             anyhow::bail!(
                 "{} is owned by uid {}, who could replace the path the supervisor chowns through",
                 ancestor.display(),
-                meta.uid()
+                meta.uid.unwrap_or(u32::MAX)
             );
         }
-        if meta.mode() & 0o022 != 0 && !sticky {
+        if meta.mode.unwrap_or(0) & 0o022 != 0 && !sticky {
             anyhow::bail!(
                 "{} is writable by its group or by everyone (mode {:o}), so the path to the host \
                  socket could be redirected",
                 ancestor.display(),
-                meta.mode() & 0o7777
+                meta.mode.unwrap_or(0) & 0o7777
             );
         }
     }
@@ -159,9 +191,11 @@ fn require_only_ours_can_write(directory: &Path, euid: u32) -> anyhow::Result<()
 }
 
 /// Remove a file a previous run left at the socket's path — and only a socket.
-fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_socket() => std::fs::remove_file(path)
+fn clear_stale_socket(fs: &dyn tddy_fs::Fs, path: &Path) -> anyhow::Result<()> {
+    // `metadata`, as before: the question stays about the name itself.
+    match fs.metadata(path) {
+        Ok(meta) if meta.kind == tddy_fs::FsKind::Socket => fs
+            .remove_file(path)
             .with_context(|| format!("remove the stale {}", path.display())),
         Ok(_) => anyhow::bail!(
             "{} exists and is not a socket; not removing it",
@@ -172,7 +206,7 @@ fn clear_stale_socket(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-fn change_owner(handle: &std::fs::File, uid: u32, gid: u32) -> anyhow::Result<()> {
+fn change_owner(handle: &OwnedFd, uid: u32, gid: u32) -> anyhow::Result<()> {
     // SAFETY: `handle` is an open descriptor for the duration of the call.
     if unsafe { libc::fchown(handle.as_raw_fd(), uid, gid) } != 0 {
         return Err(anyhow::Error::new(std::io::Error::last_os_error())
@@ -197,6 +231,7 @@ fn lchown(path: &Path, uid: u32, gid: u32) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _, PermissionsExt as _};
     use std::path::PathBuf;
 
     /// The account the tests run as — the one user whose ownership a non-root test can assert.

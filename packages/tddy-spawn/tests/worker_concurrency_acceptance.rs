@@ -11,7 +11,6 @@
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
-use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,15 +20,11 @@ use tddy_spawn::spawn_worker::{
     client_over, spawn_worker_over, CloneRequest, SpawnClient, WorkerEvent,
 };
 
-fn a_pipe() -> (std::fs::File, std::fs::File) {
-    let mut fds = [0; 2];
-    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0, "pipe(2)");
-    unsafe {
-        (
-            std::fs::File::from_raw_fd(fds[0]),
-            std::fs::File::from_raw_fd(fds[1]),
-        )
-    }
+fn a_pipe() -> (
+    tddy_spawn::spawn_worker::PipeEnd,
+    tddy_spawn::spawn_worker::PipeEnd,
+) {
+    tddy_spawn::spawn_worker::PipeEnd::pair().expect("a pipe")
 }
 
 fn the_current_os_user() -> String {

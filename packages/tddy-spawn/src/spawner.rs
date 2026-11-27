@@ -12,7 +12,6 @@ pub use tddy_daemon_kernel::spawn_as_user::{
     run_output_as_user, start_output_as_user, CaptureAsUser, SpawnedAsUser,
 };
 
-use std::fs::File;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -24,6 +23,7 @@ use tddy_core::{default_log_config, resolve_logger, LogConfig};
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::user_paths;
+use tddy_fs::Fs as _;
 
 #[cfg(unix)]
 use tddy_daemon_kernel::pre_exec_stages::StagedCommand;
@@ -113,8 +113,16 @@ pub fn child_log_yaml_tuning(daemon_log: Option<&LogConfig>) -> (String, String)
 /// verbatim (as `serde_yaml::Value`) so it doesn't depend on `LogConfig` implementing `Serialize`.
 /// File paths inside it resolve against the child's cwd (the session repo root).
 pub fn coder_log_config_yaml(coder_config_path: Option<&Path>) -> Option<String> {
+    coder_log_config_yaml_on(&tddy_fs::DiskFs, coder_config_path)
+}
+
+/// [`coder_log_config_yaml`] through the filesystem port.
+pub fn coder_log_config_yaml_on(
+    fs: &dyn tddy_fs::Fs,
+    coder_config_path: Option<&Path>,
+) -> Option<String> {
     let path = coder_config_path?;
-    let text = match std::fs::read_to_string(path) {
+    let text = match fs.read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
             log::warn!(
@@ -296,12 +304,13 @@ struct ChildProcessLogFiles {
     stderr_path: PathBuf,
     stdout_path: PathBuf,
     app_log_path: PathBuf,
-    stderr: File,
-    stdout: File,
+    stderr: std::os::fd::OwnedFd,
+    stdout: std::os::fd::OwnedFd,
 }
 
 #[cfg(unix)]
 fn create_child_log_config_and_streams(
+    fs: &dyn tddy_fs::Fs,
     repo_path: &Path,
     session_id: &str,
     child_log_level: &str,
@@ -309,7 +318,7 @@ fn create_child_log_config_and_streams(
     coder_log_config_yaml: Option<&str>,
 ) -> anyhow::Result<ChildProcessLogFiles> {
     let child_logs_dir = repo_path.join("tmp").join("logs").join("child");
-    std::fs::create_dir_all(&child_logs_dir).map_err(|e| {
+    fs.create_dir_all(&child_logs_dir).map_err(|e| {
         anyhow::anyhow!(
             "failed to create child logs dir {}: {}",
             child_logs_dir.display(),
@@ -319,11 +328,13 @@ fn create_child_log_config_and_streams(
 
     let log_file = repo_path.join("tmp").join("logs").join("coder");
     if let Some(parent) = log_file.parent() {
-        std::fs::create_dir_all(parent)
+        fs.create_dir_all(parent)
             .map_err(|e| anyhow::anyhow!("failed to create log dir {}: {}", parent.display(), e))?;
     }
     // Absolute path avoids duplicate FILE_OUTPUTS keys and matches the repo the child uses as cwd.
-    let log_file_abs = log_file.canonicalize().unwrap_or_else(|_| log_file.clone());
+    let log_file_abs = fs
+        .canonicalize(&log_file)
+        .unwrap_or_else(|_| log_file.clone());
 
     let config_path = child_logs_dir.join(format!("{}.yaml", session_id));
 
@@ -352,7 +363,7 @@ fn create_child_log_config_and_streams(
         )
     };
 
-    std::fs::write(&config_path, yaml).map_err(|e| {
+    fs.write(&config_path, yaml.as_bytes()).map_err(|e| {
         anyhow::anyhow!(
             "failed to write child config {}: {}",
             config_path.display(),
@@ -360,23 +371,34 @@ fn create_child_log_config_and_streams(
         )
     })?;
 
+    // The child's stdio is an fd, not file content: opened with `libc::open` and held as an
+    // `OwnedFd`, which `Stdio` takes as it took the `File`.
+    fn open_stdio(path: &Path) -> anyhow::Result<std::os::fd::OwnedFd> {
+        use std::os::fd::{FromRawFd as _, OwnedFd};
+        let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
+            .map_err(|_| anyhow::anyhow!("path {} is not a C string", path.display()))?;
+        let fd = unsafe {
+            libc::open(
+                c_path.as_ptr(),
+                libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC,
+                0o644,
+            )
+        };
+        if fd == -1 {
+            return Err(anyhow::anyhow!(
+                "failed to create {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    }
+
     let stderr_path = child_logs_dir.join(format!("{}_stderr", session_id));
-    let stderr_file = File::create(&stderr_path).map_err(|e| {
-        anyhow::anyhow!(
-            "failed to create child stderr {}: {}",
-            stderr_path.display(),
-            e
-        )
-    })?;
+    let stderr_file = open_stdio(&stderr_path)?;
 
     let stdout_path = child_logs_dir.join(format!("{}_stdout", session_id));
-    let stdout_file = File::create(&stdout_path).map_err(|e| {
-        anyhow::anyhow!(
-            "failed to create child stdout {}: {}",
-            stdout_path.display(),
-            e
-        )
-    })?;
+    let stdout_file = open_stdio(&stdout_path)?;
 
     Ok(ChildProcessLogFiles {
         config_path,
@@ -627,7 +649,15 @@ pub fn clone_as_user_with_env(
     destination: &Path,
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
-    crate::clone_run::clone_with_progress(os_user, git_url, destination, extra_env, |_| {}, |_| {})
+    crate::clone_run::clone_with_progress(
+        &tddy_fs::DiskFs,
+        os_user,
+        git_url,
+        destination,
+        extra_env,
+        |_| {},
+        |_| {},
+    )
 }
 
 #[cfg(not(unix))]
@@ -710,8 +740,19 @@ pub fn write_provider_route_file(
     route_json: &str,
     os_user: &str,
 ) -> anyhow::Result<PathBuf> {
+    write_provider_route_file_on(&tddy_fs::DiskFs, session_dir, route_json, os_user)
+}
+
+/// [`write_provider_route_file`] through the filesystem port.
+pub fn write_provider_route_file_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    route_json: &str,
+    os_user: &str,
+) -> anyhow::Result<PathBuf> {
     let target = resolve_target_account(os_user)?;
     write_owner_only_session_file(
+        fs,
         session_dir,
         tddy_core::provider_route_file::PROVIDER_ROUTE_FILENAME,
         route_json,
@@ -735,11 +776,13 @@ pub fn write_provider_route_file(
 /// looser permissions.
 #[cfg(unix)]
 fn write_agent_def_file(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     def_json: &str,
     target: &TargetAccount,
 ) -> anyhow::Result<PathBuf> {
     write_owner_only_session_file(
+        fs,
         session_dir,
         AGENT_DEF_FILENAME,
         def_json,
@@ -753,16 +796,14 @@ fn write_agent_def_file(
 /// route both carry a credential, so both go through here.
 #[cfg(unix)]
 fn write_owner_only_session_file(
+    fs: &dyn tddy_fs::Fs,
     session_dir: &Path,
     file_name: &str,
     contents: &str,
     target: &TargetAccount,
     what: &str,
 ) -> anyhow::Result<PathBuf> {
-    use std::io::Write as _;
-    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
-
-    std::fs::create_dir_all(session_dir).map_err(|e| {
+    fs.create_dir_all(session_dir).map_err(|e| {
         anyhow::anyhow!(
             "failed to create session dir {}: {}",
             session_dir.display(),
@@ -770,18 +811,16 @@ fn write_owner_only_session_file(
         )
     })?;
     let path = session_dir.join(file_name);
-    // `mode` applies only when the file is created, so an existing file (a resumed session) is
-    // re-permissioned explicitly below rather than trusted to be what a previous run left.
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)
-        .map_err(|e| anyhow::anyhow!("failed to write {what} {}: {}", path.display(), e))?;
-    file.write_all(contents.as_bytes())
-        .map_err(|e| anyhow::anyhow!("failed to write {what} {}: {}", path.display(), e))?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+    // Created at exactly `0600` when new; an existing file (a resumed session) is rewritten
+    // and re-permissioned explicitly below rather than trusted to be what a previous run left.
+    if fs.exists(&path) {
+        fs.write(&path, contents.as_bytes())
+            .map_err(|e| anyhow::anyhow!("failed to write {what} {}: {}", path.display(), e))?;
+    } else {
+        fs.create_new_with_mode(&path, contents.as_bytes(), 0o600)
+            .map_err(|e| anyhow::anyhow!("failed to write {what} {}: {}", path.display(), e))?;
+    }
+    fs.set_mode(&path, 0o600)
         .map_err(|e| anyhow::anyhow!("failed to secure {what} {}: {}", path.display(), e))?;
 
     if !target.is_this_process() {
@@ -822,6 +861,34 @@ pub fn plan_session_child(
     child_log_format: &str,
     coder_log_config_yaml: Option<&str>,
 ) -> anyhow::Result<SessionChildPlan> {
+    plan_session_child_on(
+        &tddy_fs::DiskFs,
+        os_user,
+        tool_path,
+        tddy_data_dir,
+        repo_path,
+        livekit,
+        opts,
+        child_log_level,
+        child_log_format,
+        coder_log_config_yaml,
+    )
+}
+
+/// [`plan_session_child`] through the filesystem port.
+#[allow(clippy::too_many_arguments)]
+pub fn plan_session_child_on(
+    fs: &dyn tddy_fs::Fs,
+    os_user: &str,
+    tool_path: &str,
+    tddy_data_dir: &Path,
+    repo_path: &Path,
+    livekit: &LiveKitCreds,
+    opts: SpawnOptions<'_>,
+    child_log_level: &str,
+    child_log_format: &str,
+    coder_log_config_yaml: Option<&str>,
+) -> anyhow::Result<SessionChildPlan> {
     require_commit_identity_only(opts.git_environment)?;
     let target = resolve_target_account(os_user)?;
 
@@ -842,6 +909,7 @@ pub fn plan_session_child(
     let identity = livekit_server_identity_for_session(instance, &session_id);
 
     let logs = create_child_log_config_and_streams(
+        fs,
         repo_path,
         &session_id,
         child_log_level,
@@ -917,7 +985,7 @@ pub fn plan_session_child(
                 &resolved_tddy_data_dir,
                 &session_id,
             );
-            let path = write_agent_def_file(&session_dir, def, &target)?;
+            let path = write_agent_def_file(fs, &session_dir, def, &target)?;
             push_flag(&mut args, "--agent-def-path", &path.display().to_string());
         }
     }
@@ -929,7 +997,7 @@ pub fn plan_session_child(
             &resolved_tddy_data_dir,
             &session_id,
         );
-        let path = write_provider_route_file(&session_dir, route_json, os_user)?;
+        let path = write_provider_route_file_on(fs, &session_dir, route_json, os_user)?;
         push_flag(
             &mut args,
             "--provider-route-path",
@@ -937,7 +1005,14 @@ pub fn plan_session_child(
         );
     }
 
-    record_workflow_usage_context(&resolved_tddy_data_dir, &session_id, home, repo_path, &opts)?;
+    record_workflow_usage_context(
+        fs,
+        &resolved_tddy_data_dir,
+        &session_id,
+        home,
+        repo_path,
+        &opts,
+    )?;
 
     if opts.mouse {
         args.push("--mouse".to_string());
@@ -997,6 +1072,7 @@ pub fn plan_session_child(
 // this crate naming an agent
 // (docs/dev/todo/2026-11-11-workflow-spawn-without-agent-records-no-usage-context.md).
 fn record_workflow_usage_context(
+    fs: &dyn tddy_fs::Fs,
     tddy_data_dir: &Path,
     session_id: &str,
     home: &Path,
@@ -1008,7 +1084,7 @@ fn record_workflow_usage_context(
     };
     let session_dir =
         tddy_core::session_lifecycle::unified_session_dir_path(tddy_data_dir, session_id);
-    std::fs::create_dir_all(&session_dir).map_err(|e| {
+    fs.create_dir_all(&session_dir).map_err(|e| {
         anyhow::anyhow!(
             "failed to create session dir {}: {}",
             session_dir.display(),
@@ -1217,7 +1293,8 @@ pub(crate) fn spawn_as_user_reporting(
     };
 
     if let Some(status) = early_exit {
-        let stderr_tail = std::fs::read_to_string(&logs.stderr_path)
+        let stderr_tail = tddy_fs::DiskFs
+            .read_to_string(&logs.stderr_path)
             .map(|s| tail_lines(&s, 20))
             .unwrap_or_default();
         log::warn!(
@@ -1636,117 +1713,8 @@ mod work_queue_parent_spawn_tests {
 }
 
 #[cfg(all(test, unix))]
-mod startup_grace_period_tests {
-    use super::{spawn_as_user, LiveKitCreds, SpawnOptions, StartupWatch};
-    use std::time::Duration;
-
-    /// Long enough that a loaded machine's fork/exec/exit never looks like a healthy start.
-    /// Costs a crashing child nothing: `try_wait` breaks out the moment it is gone, so this is a
-    /// ceiling on how long we would wait, not on how long we do.
-    const LONG_ENOUGH_TO_SEE_A_CRASH: StartupWatch = StartupWatch {
-        grace: Duration::from_secs(10),
-        poll: Duration::from_millis(25),
-    };
-
-    /// A watch a healthy spawn pays in full — kept short, because what is asserted is that a live
-    /// child is reported as started, not how long it was watched.
-    const A_BRIEF_WATCH: StartupWatch = StartupWatch {
-        grace: Duration::from_millis(100),
-        poll: Duration::from_millis(25),
-    };
-
-    fn current_username() -> String {
-        std::env::var("USER").expect("USER env var must be set to run this test")
-    }
-
-    fn a_livekit_creds() -> LiveKitCreds {
-        LiveKitCreds {
-            url: "ws://127.0.0.1:7880".to_string(),
-            api_key: "test-key".to_string(),
-            api_secret: "test-secret".to_string(),
-            common_room: None,
-            daemon_instance_id: None,
-        }
-    }
-
-    /// Returns the path to the `false` binary — `/usr/bin/false` on macOS, `/bin/false` on Linux.
-    fn false_bin() -> &'static str {
-        if cfg!(target_os = "macos") {
-            "/usr/bin/false"
-        } else {
-            "/bin/false"
-        }
-    }
-
-    #[test]
-    fn spawning_a_binary_that_exits_immediately_returns_an_error_with_its_stderr() {
-        // Given — `false` ignores every argument (including the --daemon/--grpc/... flags
-        // spawn_as_user appends) and exits 1 immediately, simulating a child that crashes on
-        // startup (e.g. an unknown --recipe value) rather than becoming a running session
-        let tmp = tempfile::tempdir().unwrap();
-        let tddy_data_dir = tempfile::tempdir().unwrap();
-        let os_user = current_username();
-
-        // When
-        let result = spawn_as_user(
-            &os_user,
-            false_bin(),
-            tddy_data_dir.path(),
-            tmp.path(),
-            &a_livekit_creds(),
-            SpawnOptions::default(),
-            "info",
-            super::CHILD_LOG_FORMAT_FALLBACK,
-            None,
-            LONG_ENOUGH_TO_SEE_A_CRASH,
-        );
-
-        // Then — a startup crash is reported as an error, not a fake-success SpawnResult
-        let err = result.expect_err("a child that exits immediately must not report success");
-        assert!(
-            err.to_string().contains("exited immediately"),
-            "expected the error to explain the child exited during startup, got: {err}"
-        );
-    }
-
-    /// A script that ignores every argument (spawn_as_user appends `--daemon --grpc ...`) and
-    /// just sleeps, standing in for a `tddy-coder` process that starts up successfully.
-    fn a_script_that_outlives_the_grace_period(dir: &std::path::Path) -> std::path::PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let path = dir.join("fake-long-running-tddy-coder.sh");
-        std::fs::write(&path, "#!/bin/sh\nsleep 2\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        path
-    }
-
-    #[test]
-    fn spawning_a_process_that_outlives_the_grace_period_returns_ok() {
-        // Given — a process that stays alive well past the startup grace period
-        let tmp = tempfile::tempdir().unwrap();
-        let tddy_data_dir = tempfile::tempdir().unwrap();
-        let os_user = current_username();
-        let script = a_script_that_outlives_the_grace_period(tmp.path());
-
-        // When
-        let result = spawn_as_user(
-            &os_user,
-            script.to_str().unwrap(),
-            tddy_data_dir.path(),
-            tmp.path(),
-            &a_livekit_creds(),
-            SpawnOptions::default(),
-            "info",
-            super::CHILD_LOG_FORMAT_FALLBACK,
-            None,
-            A_BRIEF_WATCH,
-        );
-
-        // Then — spawn_as_user does not wait for the child to exit; it only guards against an
-        // immediate crash, so a long-running child is reported as a successful spawn
-        let spawned = result.expect("a long-running child must be reported as a successful spawn");
-        assert!(spawned.pid > 0);
-    }
-}
+#[path = "startup_grace_period_tests.rs"]
+mod startup_grace_period_tests;
 
 #[cfg(test)]
 mod resolve_tool_path_tests {
@@ -1798,176 +1766,12 @@ mod resolve_tool_path_tests {
 }
 
 #[cfg(all(test, unix))]
-mod daemon_toolchain_resolution_tests {
-    use super::{spawn_as_user, LiveKitCreds, SpawnOptions, StartupWatch};
-    use serial_test::serial;
-    use std::path::{Path, PathBuf};
-    use std::time::Duration;
-
-    /// These tests assert what argv the child received, not how long it was watched — so the
-    /// startup watch is kept to the minimum that still proves the child did not die on its
-    /// arguments.
-    const A_BRIEF_STARTUP_WATCH: StartupWatch = StartupWatch {
-        grace: Duration::from_millis(100),
-        poll: Duration::from_millis(25),
-    };
-
-    fn current_username() -> String {
-        std::env::var("USER").expect("USER env var must be set to run this test")
-    }
-
-    fn a_livekit_creds() -> LiveKitCreds {
-        LiveKitCreds {
-            url: "ws://127.0.0.1:7880".to_string(),
-            api_key: "test-key".to_string(),
-            api_secret: "test-secret".to_string(),
-            common_room: None,
-            daemon_instance_id: None,
-        }
-    }
-
-    /// Writes an executable script at `<dir>/target/debug/tddy-coder`, mirroring the relative
-    /// layout every real `dev.daemon.yaml` `allowed_tools` entry points at. Sleeps rather than
-    /// exiting immediately so it survives `spawn_as_user`'s startup grace-period check — this
-    /// test is about *locating* the binary, not about post-spawn liveness.
-    fn a_fake_tddy_coder_build_under(dir: &Path) {
-        use std::os::unix::fs::PermissionsExt;
-        let script_dir = dir.join("target").join("debug");
-        std::fs::create_dir_all(&script_dir).unwrap();
-        let script_path = script_dir.join("tddy-coder");
-        std::fs::write(&script_path, "#!/bin/sh\nsleep 2\n").unwrap();
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    /// RAII guard: switches the test process's cwd for the duration of the test (simulating
-    /// "wherever `./web-dev` launched the daemon from") and restores the original cwd on drop —
-    /// including when the test panics — so a failing assertion never corrupts the cwd for
-    /// whichever test `#[serial]` runs next.
-    struct CwdGuard(PathBuf);
-    impl CwdGuard {
-        fn switch_to(dir: &Path) -> Self {
-            let original = std::env::current_dir().expect("read current_dir");
-            std::env::set_current_dir(dir).expect("switch current_dir for test");
-            Self(original)
-        }
-    }
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn spawn_as_user_locates_a_relative_tool_path_against_the_daemons_own_cwd_not_the_target_repo()
-    {
-        // Given — the daemon's own toolchain root (simulated here by the process's cwd, matching
-        // "wherever ./web-dev launched the daemon from") contains a tddy-coder build; the target
-        // session's repo_path is a *completely unrelated* directory that contains no such build
-        // at all — like the TODO-app project this recipe is meant to work against
-        let daemon_toolchain_root = tempfile::tempdir().unwrap();
-        a_fake_tddy_coder_build_under(daemon_toolchain_root.path());
-        let target_repo = tempfile::tempdir().unwrap();
-        let tddy_data_dir = tempfile::tempdir().unwrap();
-        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
-
-        let os_user = current_username();
-
-        // When — spawn_as_user receives the *relative* tool_path every real `allowed_tools`
-        // entry actually uses ("target/debug/tddy-coder"), and a repo_path pointing at the
-        // unrelated target project
-        let result = spawn_as_user(
-            &os_user,
-            "target/debug/tddy-coder",
-            tddy_data_dir.path(),
-            target_repo.path(),
-            &a_livekit_creds(),
-            SpawnOptions::default(),
-            "info",
-            super::CHILD_LOG_FORMAT_FALLBACK,
-            None,
-            A_BRIEF_STARTUP_WATCH,
-        );
-
-        // Then — it finds and runs the daemon's own toolchain build, even though target_repo
-        // has no tddy-coder build of its own; project selection must never change which binary
-        // gets executed
-        result.expect(
-            "spawn_as_user must locate a relative tool_path against the daemon's own toolchain \
-             root, not against the target session's repo_path",
-        );
-    }
-}
+#[path = "daemon_toolchain_resolution_tests.rs"]
+mod daemon_toolchain_resolution_tests;
 
 #[cfg(all(test, unix))]
-mod run_capture_as_user_tests {
-    use super::run_capture_as_user;
-    use serial_test::serial;
-    use std::path::{Path, PathBuf};
-
-    fn current_username() -> String {
-        std::env::var("USER").expect("USER env var must be set to run this test")
-    }
-
-    /// Writes an executable script at `<dir>/target/debug/tddy-tools` that prints a fixed marker
-    /// to stdout and exits immediately — `run_capture_as_user` waits for full completion
-    /// (`Command::output`), unlike `spawn_as_user`'s liveness-checked long-running child.
-    fn a_fake_tddy_tools_probe_under(dir: &Path) {
-        use std::os::unix::fs::PermissionsExt;
-        let script_dir = dir.join("target").join("debug");
-        std::fs::create_dir_all(&script_dir).unwrap();
-        let script_path = script_dir.join("tddy-tools");
-        std::fs::write(&script_path, "#!/bin/sh\necho probe-output-marker\n").unwrap();
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-
-    /// RAII guard: switches the test process's cwd for the duration of the test (simulating
-    /// "wherever `./web-dev` launched the daemon from") and restores the original cwd on drop —
-    /// including when the test panics. Duplicated from `daemon_toolchain_resolution_tests` above
-    /// rather than shared, since Rust module privacy would otherwise require widening visibility
-    /// just for this small test-only helper.
-    struct CwdGuard(PathBuf);
-    impl CwdGuard {
-        fn switch_to(dir: &Path) -> Self {
-            let original = std::env::current_dir().expect("read current_dir");
-            std::env::set_current_dir(dir).expect("switch current_dir for test");
-            Self(original)
-        }
-    }
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn run_capture_as_user_locates_a_relative_program_path_against_the_daemons_own_cwd_not_the_target_users_home(
-    ) {
-        // Given — the daemon's own toolchain root (simulated by the process's cwd, matching
-        // "wherever ./web-dev launched the daemon from") contains a tddy-tools build; the target
-        // OS user's home directory (whatever it really is on this machine) contains no such
-        // build at all, since `run_capture_as_user` internally `.current_dir()`s there
-        let daemon_toolchain_root = tempfile::tempdir().unwrap();
-        a_fake_tddy_tools_probe_under(daemon_toolchain_root.path());
-        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
-
-        let os_user = current_username();
-
-        // When — run_capture_as_user receives the *relative* program path exactly as
-        // `DaemonSessionHost::resolve_tddy_tools_path` produces it ("target/debug/tddy-tools")
-        let result = run_capture_as_user(&os_user, Path::new("target/debug/tddy-tools"), &[]);
-
-        // Then — it locates and runs the daemon's own toolchain build via the daemon's own cwd,
-        // even though it chdirs into the target user's home before exec-ing; a relative program
-        // path must never be silently re-resolved against wherever this function happens to chdir
-        let output = result.expect(
-            "run_capture_as_user must locate a relative program path against the daemon's own \
-             cwd, not against the target OS user's home directory",
-        );
-        assert_eq!(output.trim(), "probe-output-marker");
-    }
-}
+#[path = "run_capture_as_user_tests.rs"]
+mod run_capture_as_user_tests;
 #[cfg(test)]
 mod resolve_tddy_data_dir_tests {
     use super::resolve_tddy_data_dir;
@@ -2018,162 +1822,5 @@ mod resolve_tddy_data_dir_tests {
 }
 
 #[cfg(all(test, unix))]
-mod daemon_data_dir_passthrough_tests {
-    use super::{spawn_as_user, LiveKitCreds, SpawnOptions, StartupWatch};
-    use serial_test::serial;
-    use std::path::{Path, PathBuf};
-    use std::time::Duration;
-    use tddy_testing_commons::stub_scripts::{a_stub_agent_script, read_recorded_argv_value_after};
-    use tddy_testing_commons::wait::eventually_blocking;
-
-    /// These tests assert what argv the child received, not how long it was watched — so the
-    /// startup watch is kept to the minimum that still proves the child did not die on its
-    /// arguments.
-    const A_BRIEF_STARTUP_WATCH: StartupWatch = StartupWatch {
-        grace: Duration::from_millis(100),
-        poll: Duration::from_millis(25),
-    };
-
-    /// Safety net, not a prediction: a stub that has not recorded its argv within this window is
-    /// a stub that was never spawned. The wait costs nothing when the record is already there.
-    const A_STUB_RECORDS_ITS_ARGV_WITHIN: Duration = Duration::from_secs(10);
-
-    fn current_username() -> String {
-        std::env::var("USER").expect("USER env var must be set to run this test")
-    }
-
-    fn a_livekit_creds() -> LiveKitCreds {
-        LiveKitCreds {
-            url: "ws://127.0.0.1:7880".to_string(),
-            api_key: "test-key".to_string(),
-            api_secret: "test-secret".to_string(),
-            common_room: None,
-            daemon_instance_id: None,
-        }
-    }
-
-    /// Writes an executable script at `<dir>/target/debug/tddy-coder` that records the argv it
-    /// was actually invoked with to `argv_file`, then sleeps rather than exiting immediately so it
-    /// survives `spawn_as_user`'s startup grace-period check — these tests are about what argv the
-    /// child *received*, not about post-spawn liveness.
-    fn a_fake_tddy_coder_build_that_records_its_argv(dir: &Path, argv_file: &Path) {
-        let script_dir = dir.join("target").join("debug");
-        std::fs::create_dir_all(&script_dir).unwrap();
-        a_stub_agent_script(&script_dir, "tddy-coder")
-            .recording_argv_to(argv_file)
-            .then_sleeping_secs(2)
-            .build();
-    }
-
-    /// The value the child received after `flag` (e.g. `--tddy-data-dir`).
-    ///
-    /// `spawn_as_user` returns once the child has survived its startup grace period, which says
-    /// nothing about whether the child's *first* statement has run yet — under a loaded machine
-    /// the shell can still be starting up. Poll for the record rather than reading once.
-    fn recorded_argv_value_after(argv_file: &Path, flag: &str) -> String {
-        eventually_blocking(
-            &format!("the spawned child to record {flag} in its argv"),
-            A_STUB_RECORDS_ITS_ARGV_WITHIN,
-            || read_recorded_argv_value_after(argv_file, flag),
-        )
-    }
-
-    /// RAII guard: switches the test process's cwd for the duration of the test (simulating
-    /// "wherever `./web-dev` launched the daemon from") and restores the original cwd on drop —
-    /// including when the test panics — so a failing assertion never corrupts the cwd for
-    /// whichever test `#[serial]` runs next.
-    struct CwdGuard(PathBuf);
-    impl CwdGuard {
-        fn switch_to(dir: &Path) -> Self {
-            let original = std::env::current_dir().expect("read current_dir");
-            std::env::set_current_dir(dir).expect("switch current_dir for test");
-            Self(original)
-        }
-    }
-    impl Drop for CwdGuard {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.0);
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn spawn_as_user_passes_the_daemons_tddy_data_dir_to_the_child_as_an_absolute_path_argument() {
-        // Given — an absolute tddy_data_dir (an operator override, or the daemon's already-
-        // resolved home) that is distinct from both the daemon's own toolchain root and the
-        // target session's repo_path
-        let daemon_toolchain_root = tempfile::tempdir().unwrap();
-        let target_repo = tempfile::tempdir().unwrap();
-        let tddy_data_dir = tempfile::tempdir().unwrap();
-        let argv_file = target_repo.path().join("captured-argv.txt");
-        a_fake_tddy_coder_build_that_records_its_argv(daemon_toolchain_root.path(), &argv_file);
-        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
-
-        let os_user = current_username();
-
-        // When
-        let result = spawn_as_user(
-            &os_user,
-            "target/debug/tddy-coder",
-            tddy_data_dir.path(),
-            target_repo.path(),
-            &a_livekit_creds(),
-            SpawnOptions::default(),
-            "info",
-            super::CHILD_LOG_FORMAT_FALLBACK,
-            None,
-            A_BRIEF_STARTUP_WATCH,
-        );
-        result.expect("spawn_as_user must succeed");
-
-        // Then — the child receives the daemon's own tddy_data_dir verbatim, regardless of
-        // repo_path; it must never fall back to deriving session storage from its own cwd
-        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir");
-        assert_eq!(received, tddy_data_dir.path().to_str().unwrap());
-    }
-
-    #[test]
-    #[serial]
-    fn spawn_as_user_resolves_a_relative_tddy_data_dir_against_the_daemons_own_cwd_not_the_target_repo(
-    ) {
-        // Given — the shape `default_tddy_data_dir()` actually returns for a debug build
-        // ("tmp/.tddy", relative) when no operator override is configured; the target session's
-        // repo_path is a completely unrelated directory the child's cwd gets set to
-        let daemon_toolchain_root = tempfile::tempdir().unwrap();
-        let target_repo = tempfile::tempdir().unwrap();
-        let argv_file = target_repo.path().join("captured-argv.txt");
-        a_fake_tddy_coder_build_that_records_its_argv(daemon_toolchain_root.path(), &argv_file);
-        let _cwd_guard = CwdGuard::switch_to(daemon_toolchain_root.path());
-
-        let os_user = current_username();
-
-        // When
-        let result = spawn_as_user(
-            &os_user,
-            "target/debug/tddy-coder",
-            Path::new("tmp/.tddy"),
-            target_repo.path(),
-            &a_livekit_creds(),
-            SpawnOptions::default(),
-            "info",
-            super::CHILD_LOG_FORMAT_FALLBACK,
-            None,
-            A_BRIEF_STARTUP_WATCH,
-        );
-        result.expect("spawn_as_user must succeed");
-
-        // Then — resolved against the daemon's own cwd, never against repo_path (which would
-        // silently split session storage between the daemon and the child it spawned).
-        // Canonicalize the expected side too: production resolves the daemon's cwd via
-        // `std::env::current_dir()`, which returns the OS-canonicalized path (e.g. macOS
-        // resolves `/tmp` to `/private/tmp`), while `daemon_toolchain_root.path()` here is the
-        // raw, uncanonicalized `tempfile::TempDir` path — both name the same directory.
-        let received = recorded_argv_value_after(&argv_file, "--tddy-data-dir");
-        let expected = daemon_toolchain_root
-            .path()
-            .canonicalize()
-            .expect("canonicalize daemon toolchain root")
-            .join("tmp/.tddy");
-        assert_eq!(received, expected.to_str().unwrap());
-    }
-}
+#[path = "daemon_data_dir_passthrough_tests.rs"]
+mod daemon_data_dir_passthrough_tests;

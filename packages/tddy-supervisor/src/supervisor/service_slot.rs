@@ -82,6 +82,7 @@ impl Slot {
 // TODO(supervisor): fold both into one helper owned by `socket.rs`, so ownership and mode are
 // applied by exactly one piece of code.
 pub(super) fn bind_service_listener(
+    fs: &dyn tddy_fs::Fs,
     service: &ManagedService,
     socket: &ServiceSocket,
 ) -> anyhow::Result<UnixListener> {
@@ -90,7 +91,7 @@ pub(super) fn bind_service_listener(
         .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
 
     if let Some(parent) = socket.path.parent() {
-        std::fs::create_dir_all(parent).map_err(|error| {
+        fs.create_dir_all(parent).map_err(|error| {
             anyhow::anyhow!(
                 "service `{}`: create socket directory {}: {error}",
                 service.name,
@@ -99,7 +100,7 @@ pub(super) fn bind_service_listener(
         })?;
     }
     // A socket left behind by a previous run would make `bind` fail with EADDRINUSE.
-    let _ = std::fs::remove_file(&socket.path);
+    let _ = fs.remove_file(&socket.path);
     let listener = UnixListener::bind(&socket.path).map_err(|error| {
         anyhow::anyhow!(
             "service `{}`: bind {}: {error}",
@@ -107,7 +108,7 @@ pub(super) fn bind_service_listener(
             socket.path.display()
         )
     })?;
-    apply_socket_ownership(&socket.path, socket.group.as_deref(), mode)
+    apply_socket_ownership(fs, &socket.path, socket.group.as_deref(), mode)
         .map_err(|error| anyhow::anyhow!("service `{}`: {error}", service.name))?;
 
     log::info!(
@@ -124,12 +125,12 @@ pub(super) fn bind_service_listener(
 /// The socket stays owned by root, so a group that cannot be resolved is an error rather than
 /// something to shrug at: it is the grant.
 fn apply_socket_ownership(
+    fs: &dyn tddy_fs::Fs,
     path: &std::path::Path,
     group: Option<&str>,
     mode: u32,
 ) -> anyhow::Result<()> {
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::PermissionsExt;
 
     if let Some(group) = group {
         let gid = accounts::resolve_group_gid(group)
@@ -147,6 +148,6 @@ fn apply_socket_ownership(
         }
     }
 
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    fs.set_mode(path, mode)
         .map_err(|error| anyhow::anyhow!("chmod {}: {error}", path.display()))
 }

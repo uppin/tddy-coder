@@ -48,6 +48,8 @@ const SCOPE_REMOVAL_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Starts, reaps, restarts and shuts down the declared services.
 pub struct Supervisor {
+    /// The filesystem services and sessions read and write through — `DiskFs` in production.
+    pub fs: Arc<dyn tddy_fs::Fs>,
     slots: Mutex<Vec<Slot>>,
     /// Sessions spawned on a caller's behalf. They have no restart policy and no state machine —
     /// they are tracked so shutdown can take them with it, and so a caller can be told what became
@@ -87,8 +89,10 @@ impl Supervisor {
                 .map_err(|error| anyhow::anyhow!("users.yaml {}: {error}", users.file.display()))?,
             None => crate::users_file::UsersFile::default(),
         };
-        let slots = build_service_slots(config, &initial_users)?;
+        let fs: Arc<dyn tddy_fs::Fs> = Arc::new(tddy_fs::DiskFs);
+        let slots = build_service_slots(&*fs, config, &initial_users)?;
         Ok(Arc::new(Supervisor {
+            fs,
             slots: Mutex::new(slots),
             sessions: Mutex::new(SessionTable::default()),
             forks,
@@ -326,6 +330,7 @@ impl Supervisor {
 }
 
 fn build_service_slots(
+    fs: &dyn tddy_fs::Fs,
     config: &SupervisorConfig,
     initial_users: &crate::users_file::UsersFile,
 ) -> anyhow::Result<Vec<Slot>> {
@@ -357,7 +362,7 @@ fn build_service_slots(
         // Before the service exists, so a client that races its startup finds a socket that
         // queues rather than a path that is about to work.
         let listener = match &service.socket {
-            Some(socket) => Some(Arc::new(bind_service_listener(service, socket)?)),
+            Some(socket) => Some(Arc::new(bind_service_listener(fs, service, socket)?)),
             None => None,
         };
         let (user_listeners, users_file) = if service.serves_users {

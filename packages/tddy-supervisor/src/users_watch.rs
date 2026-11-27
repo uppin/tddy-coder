@@ -12,7 +12,9 @@
 //! editor's write-to-temporary-then-rename is seen as the change it is.
 
 use std::path::{Path, PathBuf};
+
 use std::sync::{Arc, Mutex};
+use tddy_fs::Fs as _;
 
 use crate::error::ConfigError;
 use crate::users_file::UsersFile;
@@ -44,7 +46,7 @@ impl UsersWatch {
         let current = Arc::new(Mutex::new(initial));
         // Canonical, so the paths events carry (which the OS resolves) compare equal to it. The
         // file was just loaded, so failing to resolve it is an error, not a path to guess at.
-        let watched_path = std::fs::canonicalize(path).map_err(|error| {
+        let watched_path = tddy_fs::DiskFs.canonicalize(path).map_err(|error| {
             anyhow::anyhow!("cannot resolve users.yaml at {}: {error}", path.display())
         })?;
         let callback_path = watched_path.clone();
