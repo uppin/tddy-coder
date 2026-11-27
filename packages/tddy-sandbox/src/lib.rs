@@ -49,7 +49,10 @@ pub use log::{
     SANDBOX_EXEC_STDERR_LOG, SANDBOX_EXEC_STDOUT_LOG, SANDBOX_RUNNER_FAILURE, SANDBOX_RUNNER_LOG,
     SANDBOX_SPAWN_MANIFEST,
 };
-pub use materialize::{materialize_copies, materialize_secrets, materialize_symlinks};
+pub use materialize::{
+    materialize_copies, materialize_copies_on, materialize_secrets, materialize_secrets_on,
+    materialize_symlinks, materialize_symlinks_on,
+};
 pub use network::{EgressPolicy, EgressPolicyArgError, HostPattern};
 pub use runner_env::{process_jail_env, scratch_runner_env};
 pub use spec::{SandboxHandle, SandboxSpec};

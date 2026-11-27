@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+
+use tddy_fs::Fs as _;
 use std::path::PathBuf;
 use std::process::Child;
 
@@ -36,7 +38,7 @@ impl SandboxSpec {
     /// temp (`std::env::temp_dir()`, canonicalized) with a short session-derived name.
     pub fn short_ipc_socket_path(session_id: &str) -> PathBuf {
         let tmp =
-            std::fs::canonicalize(std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+            tddy_fs::DiskFs.canonicalize(&std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
         // FNV-1a 64 of the whole id: the first characters of a UUIDv7 are its millisecond
         // timestamp, which two sessions can share, and no hashing crate is needed for this.
         let hash = session_id

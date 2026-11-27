@@ -5,8 +5,10 @@ edition = "2021"
 description = "Cross-platform sandbox abstraction for running confined agent processes"
 
 [dependencies]
-# `#fs-port`: the filesystem port every disk read and write goes through.
+# `#fs-port`: production disk I/O goes through the port.
 tddy-fs = { path = "../tddy-fs" }
+libc = "0.2"
+# `#fs-port`: the filesystem port every disk read and write goes through.
 anyhow = "1"
 glob = "0.3"
 log = "0.4"
