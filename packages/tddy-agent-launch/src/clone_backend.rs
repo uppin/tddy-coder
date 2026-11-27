@@ -104,6 +104,7 @@ impl CloneBackend {
                 let pairs: Vec<(&str, &str)> =
                     env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
                 clone_run::clone_with_progress(
+                    &tddy_fs::DiskFs,
                     &self.os_user,
                     git_url,
                     dest,
