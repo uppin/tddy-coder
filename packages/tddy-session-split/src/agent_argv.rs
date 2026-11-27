@@ -258,12 +258,20 @@ fn tddy_tools_server(
 
 /// Write each of `files` — the registration the slots rendered — at its path.
 fn write_registrations(files: &mut Vec<(PathBuf, Vec<u8>)>) -> Result<(), Status> {
+    write_registrations_on(&tddy_fs::DiskFs, files)
+}
+
+/// [`write_registrations`] through the filesystem port.
+pub fn write_registrations_on(
+    fs: &dyn tddy_fs::Fs,
+    files: &mut Vec<(PathBuf, Vec<u8>)>,
+) -> Result<(), Status> {
     for (path, contents) in files.drain(..) {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)
+            fs.create_dir_all(dir)
                 .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
         }
-        tddy_core::atomic_file::write_atomic(&path, contents)
+        fs.write_atomic(path.as_path(), &contents, None)
             .map_err(|e| Status::internal(format!("failed to write MCP config: {e}")))?;
     }
     Ok(())

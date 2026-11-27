@@ -20,6 +20,8 @@ tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
+# `#fs-port`: registrations, context dirs and session dirs go through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-github = { path = "../tddy-github" }
 # `PeerRouting` — which daemon serves an addressed request, and the common room a forward travels.
 tddy-host-service = { path = "../tddy-host-service" }

@@ -62,6 +62,35 @@ pub async fn start_workspace_session(
     tddy_data_dir: &Path,
     orchestrator: Option<&crate::service_util::OrchestratorLink>,
 ) -> Result<Response<StartSessionResponse>, Status> {
+    start_workspace_session_on(
+        &tddy_fs::DiskFs,
+        os_user,
+        session_id,
+        sessions_base,
+        project_id,
+        branch,
+        paired_agent,
+        sandbox,
+        tddy_data_dir,
+        orchestrator,
+    )
+    .await
+}
+
+/// [`start_workspace_session`] through the filesystem port.
+#[allow(clippy::too_many_arguments)]
+pub async fn start_workspace_session_on(
+    fs: &dyn tddy_fs::Fs,
+    os_user: &str,
+    session_id: &str,
+    sessions_base: PathBuf,
+    project_id: &str,
+    branch: &WorkspaceBranchIntent<'_>,
+    paired_agent: Option<&PairedAgentSession>,
+    sandbox: bool,
+    tddy_data_dir: &Path,
+    orchestrator: Option<&crate::service_util::OrchestratorLink>,
+) -> Result<Response<StartSessionResponse>, Status> {
     let project_id = project_id.trim();
     if project_id.is_empty() {
         return Err(Status::invalid_argument(
@@ -92,7 +121,7 @@ pub async fn start_workspace_session(
 
     // Create session directory.
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    std::fs::create_dir_all(&session_dir)
+    fs.create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
 
     // Write a minimal changeset so `setup_worktree_for_session_with_optional_chain_base` can read it.
@@ -190,6 +219,26 @@ pub async fn start_agent_clone_session(
     project_id: &str,
     tddy_data_dir: &Path,
 ) -> Result<Response<StartSessionResponse>, Status> {
+    start_agent_clone_session_on(
+        &tddy_fs::DiskFs,
+        os_user,
+        session_id,
+        sessions_base,
+        project_id,
+        tddy_data_dir,
+    )
+    .await
+}
+
+/// [`start_agent_clone_session`] through the filesystem port.
+pub async fn start_agent_clone_session_on(
+    fs: &dyn tddy_fs::Fs,
+    os_user: &str,
+    session_id: &str,
+    sessions_base: PathBuf,
+    project_id: &str,
+    tddy_data_dir: &Path,
+) -> Result<Response<StartSessionResponse>, Status> {
     let project_id = project_id.trim();
     if project_id.is_empty() {
         return Err(Status::invalid_argument(
@@ -201,7 +250,7 @@ pub async fn start_agent_clone_session(
     let repo_root = crate::service_util::project_repo_root(&project)?;
 
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-    std::fs::create_dir_all(&session_dir)
+    fs.create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
     // Named after the session rather than a fixed `clone`, because git names a worktree by its
     // final path component and refuses a second one under a name it already holds — two sessions
