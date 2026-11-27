@@ -181,7 +181,12 @@ pub fn agents_skills_scan_cache_token_on(fs: &dyn tddy_fs::Fs, project_root: &Pa
     Some(secs)
 }
 
-fn scan_one_skill_dir(fs: &dyn tddy_fs::Fs, skills_root: &Path, folder_name: String, report: &mut SkillScanReport) {
+fn scan_one_skill_dir(
+    fs: &dyn tddy_fs::Fs,
+    skills_root: &Path,
+    folder_name: String,
+    report: &mut SkillScanReport,
+) {
     let skill_dir = skills_root.join(&folder_name);
     let skill_md_path = skill_dir.join("SKILL.md");
     // `metadata_follow`, as before: `is_file` follows a link.
@@ -265,7 +270,10 @@ pub fn scan_skills_at_project_root(project_root: &Path) -> SkillScanReport {
 }
 
 /// [`scan_skills_at_project_root`] through the filesystem port.
-pub fn scan_skills_at_project_root_on(fs: &dyn tddy_fs::Fs, project_root: &Path) -> SkillScanReport {
+pub fn scan_skills_at_project_root_on(
+    fs: &dyn tddy_fs::Fs,
+    project_root: &Path,
+) -> SkillScanReport {
     let skills_root = project_root.join(AGENTS_SKILLS_DIR);
     log::debug!(
         "scan_skills_at_project_root: root={} skills_dir={}",
@@ -369,7 +377,9 @@ pub fn read_skill_markdown_body_for_compose_on(
         .join(AGENTS_SKILLS_DIR)
         .join(skill_name)
         .join("SKILL.md");
-    let raw = fs.read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let raw = fs
+        .read_to_string(&path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
     let (_yaml, body) = split_skill_frontmatter_blocks(&raw).map_err(|e| format!("{e:?}"))?;
     Ok(body.to_string())
 }

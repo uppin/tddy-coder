@@ -314,7 +314,8 @@ pub(crate) async fn start_cli_harness_session(
         &mut slots,
     )
     .await?;
-    let on_exit = removing_session_pointer_on_exit(std::sync::Arc::clone(&fs), on_exit, pointer, run_in_tmux);
+    let on_exit =
+        removing_session_pointer_on_exit(std::sync::Arc::clone(&fs), on_exit, pointer, run_in_tmux);
     env.extend(std::mem::take(&mut wiring.env));
     env.extend(carried_effort.env);
     env.extend(route.env);

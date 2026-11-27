@@ -357,7 +357,12 @@ async fn resume_cli_harness_session(
         &mut slots,
     )
     .await?;
-    let on_exit = removing_session_pointer_on_exit(std::sync::Arc::clone(&fs), on_exit, pointer, meta.tmux_session.is_some());
+    let on_exit = removing_session_pointer_on_exit(
+        std::sync::Arc::clone(&fs),
+        on_exit,
+        pointer,
+        meta.tmux_session.is_some(),
+    );
     let mut env = git_environment;
     env.extend(split_env);
     env.extend(wiring.env);

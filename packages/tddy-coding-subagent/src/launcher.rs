@@ -53,7 +53,10 @@ pub fn claim_headless_conversation_dir_on(
     daemon_instance_id: &str,
 ) -> std::io::Result<()> {
     fs.create_dir_all(dir)?;
-    fs.write(&dir.join(HEADLESS_OWNER_FILE), daemon_instance_id.as_bytes())
+    fs.write(
+        &dir.join(HEADLESS_OWNER_FILE),
+        daemon_instance_id.as_bytes(),
+    )
 }
 
 /// The file in a headless conversation's directory listing, one absolute path per line, every file
@@ -70,7 +73,11 @@ pub fn record_written_files(dir: &Path, files: &[PathBuf]) -> std::io::Result<()
 }
 
 /// [`record_written_files`] through the filesystem port.
-pub fn record_written_files_on(fs: &dyn tddy_fs::Fs, dir: &Path, files: &[PathBuf]) -> std::io::Result<()> {
+pub fn record_written_files_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &Path,
+    files: &[PathBuf],
+) -> std::io::Result<()> {
     let lines: String = files
         .iter()
         .map(|file| format!("{}\n", file.display()))

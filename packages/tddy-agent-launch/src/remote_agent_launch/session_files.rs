@@ -7,7 +7,6 @@ use tddy_coding_agent_specs::slots::RenderedSlots;
 use tddy_remote_shell::{FileMode, RemoteShell};
 
 pub(super) async fn plan_the_launch(
-    fs: &dyn tddy_fs::Fs,
     agent: &HostAgent,
     params: &TemplateParams,
     slots: &RenderedSlots,
@@ -29,11 +28,11 @@ pub(super) async fn plan_the_launch(
     let params = params.clone().with_flag("on_target", true);
     let plan =
         plan_host_pty(&on_the_target, &params, &render_slots).map_err(RemoteLaunchError::Plan)?;
-    write_slot_files(fs, remote, &slot_files).await?;
+    write_slot_files(remote, &slot_files).await?;
     Ok((slot_files, plan))
 }
 
-async fn write_slot_files(fs: &dyn tddy_fs::Fs, 
+async fn write_slot_files(
     remote: &RemoteLaunch<'_>,
     slot_files: &[(std::path::PathBuf, Vec<u8>)],
 ) -> Result<(), RemoteLaunchError> {
@@ -89,7 +88,9 @@ pub(super) async fn write_rendered_session_files(
             continue;
         };
         // `metadata_follow`, as before: `is_file` follows a link.
-        if !matches!(fs.metadata_follow(path), Ok(m) if m.kind == tddy_fs::FsKind::File) || slot_files.iter().any(|(written, _)| written == path) {
+        if !matches!(fs.metadata_follow(path), Ok(m) if m.kind == tddy_fs::FsKind::File)
+            || slot_files.iter().any(|(written, _)| written == path)
+        {
             continue;
         }
         let bytes = fs.read(path).map_err(|error| {

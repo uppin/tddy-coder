@@ -43,7 +43,11 @@ impl TurnFiles {
     }
 
     /// [`TurnFiles::write`] through the filesystem port.
-    pub fn write_on(fs: std::sync::Arc<dyn tddy_fs::Fs>, files: &[(PathBuf, Vec<u8>)], workdir: &Path) -> Result<Self, BackendError> {
+    pub fn write_on(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        files: &[(PathBuf, Vec<u8>)],
+        workdir: &Path,
+    ) -> Result<Self, BackendError> {
         let mut turn_files = Self {
             fs,
             written: Vec::new(),
@@ -99,19 +103,24 @@ impl TurnFiles {
         contents: &[u8],
         workdir: &Path,
     ) -> Result<(), BackendError> {
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| path.starts_with(workdir) && *parent != workdir && !self.fs.exists(parent))
-        {
+        if let Some(parent) = path.parent().filter(|parent| {
+            path.starts_with(workdir) && *parent != workdir && !self.fs.exists(parent)
+        }) {
             self.created_dirs.push(parent.to_path_buf());
         }
         if let Ok(relative) = path.strip_prefix(workdir) {
             // Excluded before it is written, so it is never an untracked file git would offer.
-            exclude_from_git_on(&*self.fs, workdir, &format!("/{}", relative.to_string_lossy()))?;
+            exclude_from_git_on(
+                &*self.fs,
+                workdir,
+                &format!("/{}", relative.to_string_lossy()),
+            )?;
         }
-        self.fs.write_atomic(path, contents, Some(OWNER_ONLY_FILE)).map_err(
-            |e| BackendError::InvocationFailed(format!("could not write {}: {e}", path.display())),
-        )?;
+        self.fs
+            .write_atomic(path, contents, Some(OWNER_ONLY_FILE))
+            .map_err(|e| {
+                BackendError::InvocationFailed(format!("could not write {}: {e}", path.display()))
+            })?;
         self.written.push(path.to_path_buf());
         Ok(())
     }
@@ -141,7 +150,11 @@ impl Drop for TurnFiles {
 /// The pointer at `path` when it is held for a session other than `incoming`'s: it names another
 /// socket, and its owner is running on this host. A file that is missing, unreadable, ownerless,
 /// owned elsewhere or by a process that has exited is not held.
-fn held_pointer(fs: &dyn tddy_fs::Fs, path: &Path, incoming: &SessionPointer) -> Option<SessionPointerHeld> {
+fn held_pointer(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    incoming: &SessionPointer,
+) -> Option<SessionPointerHeld> {
     let existing: SessionPointer = serde_json::from_slice(&fs.read(path).ok()?).ok()?;
     let owner = existing
         .owner
@@ -161,7 +174,11 @@ pub fn exclude_from_git(worktree: &Path, pattern: &str) -> Result<(), BackendErr
 }
 
 /// [`exclude_from_git`] through the filesystem port.
-pub fn exclude_from_git_on(fs: &dyn tddy_fs::Fs, worktree: &Path, pattern: &str) -> Result<(), BackendError> {
+pub fn exclude_from_git_on(
+    fs: &dyn tddy_fs::Fs,
+    worktree: &Path,
+    pattern: &str,
+) -> Result<(), BackendError> {
     let not_a_checkout = |detail: String| {
         BackendError::InvocationFailed(format!(
             "its worktree {} is not a git checkout, so nothing would keep {pattern} out of a commit: {detail}",
@@ -201,7 +218,8 @@ pub fn exclude_from_git_on(fs: &dyn tddy_fs::Fs, worktree: &Path, pattern: &str)
     } else {
         "\n"
     };
-    fs.create_dir_all(&common_dir.join("info")).map_err(io_error)?;
+    fs.create_dir_all(&common_dir.join("info"))
+        .map_err(io_error)?;
     fs.append(&exclude, format!("{separator}{pattern}\n").as_bytes())
         .map_err(io_error)
 }

@@ -40,7 +40,8 @@ pub fn forwarded_start_request(
 }
 /// Record the GitHub source a start named in the new session's directory, so its resumes act the
 /// same way; a start that named none records nothing, and its resumes read this host's row again.
-pub(crate) fn record_requested_github_source(fs: &dyn tddy_fs::Fs, 
+pub(crate) fn record_requested_github_source(
+    fs: &dyn tddy_fs::Fs,
     req: &StartSessionRequest,
     session_dir: &Path,
 ) -> Result<(), Status> {

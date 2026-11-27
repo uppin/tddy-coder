@@ -83,7 +83,8 @@ impl LaunchSessions {
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
-        crate::start_request_checks::record_requested_github_source(&*self.fs, 
+        crate::start_request_checks::record_requested_github_source(
+            &*self.fs,
             req,
             &tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, &session_id),
         )?;

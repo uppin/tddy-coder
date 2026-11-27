@@ -344,7 +344,8 @@ async fn remote_worktree_through(
     })?;
     let base = remote_cut_base(shell, &checkout.worktree).await?;
     record_the_cut_branch(start.session_dir, &checkout.branch)?;
-    crate::remote_attachments::copy_attachments_to_target(fs, 
+    crate::remote_attachments::copy_attachments_to_target(
+        fs,
         shell,
         start.session_dir,
         &checkout.worktree,

@@ -114,11 +114,16 @@ async fn a_placed_pointer_is_found_from_the_worktree_owner_only_and_kept_out_of_
     let pointer = the_pointer_in(checkout.path());
 
     // When
-    let placed = place_session_pointer(&tddy_fs::DiskFs, Some(&pointer), checkout.path(), &PointerHost::Local)
-        .await
-        .expect("the pointer is written")
-        .expect("a local pointer is the launch's to remove")
-        .path;
+    let placed = place_session_pointer(
+        &tddy_fs::DiskFs,
+        Some(&pointer),
+        checkout.path(),
+        &PointerHost::Local,
+    )
+    .await
+    .expect("the pointer is written")
+    .expect("a local pointer is the launch's to remove")
+    .path;
 
     // Then
     let found = find_session_pointer(&checkout.path().join("src/deep")).unwrap();
@@ -145,10 +150,15 @@ async fn a_worktree_that_is_no_git_checkout_gets_its_pointer_with_nothing_to_exc
     let pointer = the_pointer_in(not_a_checkout.path());
 
     // When
-    let placed = place_session_pointer(&tddy_fs::DiskFs, Some(&pointer), not_a_checkout.path(), &PointerHost::Local)
-        .await
-        .expect("the pointer is written")
-        .map(|placed| placed.path);
+    let placed = place_session_pointer(
+        &tddy_fs::DiskFs,
+        Some(&pointer),
+        not_a_checkout.path(),
+        &PointerHost::Local,
+    )
+    .await
+    .expect("the pointer is written")
+    .map(|placed| placed.path);
 
     // Then
     assert_eq!(
@@ -161,7 +171,8 @@ async fn a_worktree_that_is_no_git_checkout_gets_its_pointer_with_nothing_to_exc
 async fn the_agents_exit_removes_the_pointer_then_runs_the_launchs_own_hook() {
     // Given
     let checkout = a_checkout();
-    let placed = place_session_pointer(&tddy_fs::DiskFs, 
+    let placed = place_session_pointer(
+        &tddy_fs::DiskFs,
         Some(&the_pointer_in(checkout.path())),
         checkout.path(),
         &PointerHost::Local,
@@ -177,8 +188,13 @@ async fn the_agents_exit_removes_the_pointer_then_runs_the_launchs_own_hook() {
     });
 
     // When
-    let hook =
-        removing_session_pointer_on_exit(std::sync::Arc::new(tddy_fs::DiskFs), Some(own), placed.clone(), false).expect("an exit hook");
+    let hook = removing_session_pointer_on_exit(
+        std::sync::Arc::new(tddy_fs::DiskFs),
+        Some(own),
+        placed.clone(),
+        false,
+    )
+    .expect("an exit hook");
     hook(Arc::new(Mutex::new(tddy_task::TerminalCapture::new()))).await;
 
     // Then
@@ -197,8 +213,18 @@ fn a_tmux_agent_without_an_exit_hook_is_given_none_for_the_pointer() {
     });
 
     // When
-    let in_tmux = removing_session_pointer_on_exit(std::sync::Arc::new(tddy_fs::DiskFs), None, pointer.clone(), true);
-    let as_pty_child = removing_session_pointer_on_exit(std::sync::Arc::new(tddy_fs::DiskFs), None, pointer, false);
+    let in_tmux = removing_session_pointer_on_exit(
+        std::sync::Arc::new(tddy_fs::DiskFs),
+        None,
+        pointer.clone(),
+        true,
+    );
+    let as_pty_child = removing_session_pointer_on_exit(
+        std::sync::Arc::new(tddy_fs::DiskFs),
+        None,
+        pointer,
+        false,
+    );
 
     // Then
     assert_eq!((in_tmux.is_none(), as_pty_child.is_some()), (true, true));
@@ -309,10 +335,15 @@ async fn an_ssh_pointer_is_excluded_owner_only_and_bounded() {
     let pointer = the_pointer_in(target_checkout.path());
 
     // When — the pointer is placed, the agent starts and records its pid, and its owner is recorded
-    let placed = place_session_pointer(&tddy_fs::DiskFs, Some(&pointer), target_checkout.path(), &ssh.host())
-        .await
-        .expect("the pointer is written on the target")
-        .expect("an ssh pointer is the launch's to remove");
+    let placed = place_session_pointer(
+        &tddy_fs::DiskFs,
+        Some(&pointer),
+        target_checkout.path(),
+        &ssh.host(),
+    )
+    .await
+    .expect("the pointer is written on the target")
+    .expect("an ssh pointer is the launch's to remove");
     let pid_file = target_checkout.path().join(remote_agent_pid_file("s1"));
     std::fs::create_dir_all(pid_file.parent().unwrap()).unwrap();
     std::fs::write(&pid_file, REMOTE_AGENT_PID.to_string()).unwrap();
@@ -361,10 +392,15 @@ async fn the_owner_of_a_pointer_on_this_host_is_not_looked_up_over_ssh() {
     // Given — a pointer placed on this host
     let checkout = a_checkout();
     let pointer = the_pointer_in(checkout.path());
-    let placed = place_session_pointer(&tddy_fs::DiskFs, Some(&pointer), checkout.path(), &PointerHost::Local)
-        .await
-        .unwrap()
-        .expect("a local pointer");
+    let placed = place_session_pointer(
+        &tddy_fs::DiskFs,
+        Some(&pointer),
+        checkout.path(),
+        &PointerHost::Local,
+    )
+    .await
+    .unwrap()
+    .expect("a local pointer");
 
     // When
     let refused = record_remote_owner(&placed, &pointer, "s1")
@@ -382,22 +418,34 @@ async fn an_ssh_pointer_is_removed_when_the_agent_exits_and_when_the_session_is_
     let ssh = a_stub_ssh();
     let on_the_target = target_checkout.path().join(".tddy/session.json");
     let pointer = the_pointer_in(target_checkout.path());
-    let placed = place_session_pointer(&tddy_fs::DiskFs, Some(&pointer), target_checkout.path(), &ssh.host())
-        .await
-        .expect("the pointer is written on the target");
+    let placed = place_session_pointer(
+        &tddy_fs::DiskFs,
+        Some(&pointer),
+        target_checkout.path(),
+        &ssh.host(),
+    )
+    .await
+    .expect("the pointer is written on the target");
 
     // When — its agent exits
-    let on_exit = removing_session_pointer_on_exit(std::sync::Arc::new(tddy_fs::DiskFs), None, placed, false)
-        .expect("an ssh pointer is removed when its agent exits");
+    let on_exit =
+        removing_session_pointer_on_exit(std::sync::Arc::new(tddy_fs::DiskFs), None, placed, false)
+            .expect("an ssh pointer is removed when its agent exits");
     on_exit(Arc::new(Mutex::new(tddy_task::TerminalCapture::new()))).await;
     let after_the_exit = on_the_target.exists();
 
     // ...and, placed again by a resume, its session is deleted
-    place_session_pointer(&tddy_fs::DiskFs, Some(&pointer), target_checkout.path(), &ssh.host())
-        .await
-        .expect("the pointer is written again");
+    place_session_pointer(
+        &tddy_fs::DiskFs,
+        Some(&pointer),
+        target_checkout.path(),
+        &ssh.host(),
+    )
+    .await
+    .expect("the pointer is written again");
     let sessions = a_session_recording_an_ssh_worktree(target_checkout.path());
-    crate::svc_signal_delete_session::remove_recorded_session_pointer_through(&tddy_fs::DiskFs, 
+    crate::svc_signal_delete_session::remove_recorded_session_pointer_through(
+        &tddy_fs::DiskFs,
         &sessions.path().join("s1"),
         &ssh.dir.path().join("ssh"),
     )

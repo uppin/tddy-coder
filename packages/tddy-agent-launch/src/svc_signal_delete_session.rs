@@ -373,7 +373,11 @@ impl LaunchSessions {
     }
 }
 
-async fn remove_session_pointer(fs: &dyn tddy_fs::Fs, session_id: &str, sessions_base: &std::path::Path) {
+async fn remove_session_pointer(
+    fs: &dyn tddy_fs::Fs,
+    session_id: &str,
+    sessions_base: &std::path::Path,
+) {
     let session_dir = unified_session_dir_path(sessions_base, session_id);
     remove_recorded_session_pointer(fs, &session_dir).await;
 }
@@ -452,7 +456,11 @@ pub(crate) fn target_worktree_of(session_dir: &Path) -> Option<(tddy_core::Sessi
 
 /// [`remove_recorded_session_pointer`], reaching an ssh target through the ssh client `ssh`.
 #[allow(dead_code)]
-pub(crate) async fn remove_recorded_session_pointer_through(fs: &dyn tddy_fs::Fs, session_dir: &Path, ssh: &Path) {
+pub(crate) async fn remove_recorded_session_pointer_through(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    ssh: &Path,
+) {
     let Ok(metadata) = read_session_metadata(session_dir) else {
         return;
     };

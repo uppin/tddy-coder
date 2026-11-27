@@ -7,7 +7,7 @@ use crate::backend::turn_process::STDERR_GRACE;
 use crate::backend::{InvokeRequest, InvokeResponse};
 use crate::error::BackendError;
 use crate::stream::{self, ProgressEvent};
-use std::io::{BufReader, Write as _};
+use std::io::BufReader;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 

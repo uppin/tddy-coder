@@ -93,7 +93,10 @@ pub fn agent_notify_launch(launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyW
 }
 
 /// [`agent_notify_launch`] through the filesystem port.
-pub fn agent_notify_launch_on(fs: &dyn tddy_fs::Fs, launch: AgentNotifyLaunch<'_>) -> Result<AgentNotifyWiring, Status> {
+pub fn agent_notify_launch_on(
+    fs: &dyn tddy_fs::Fs,
+    launch: AgentNotifyLaunch<'_>,
+) -> Result<AgentNotifyWiring, Status> {
     let AgentNotifyLaunch {
         config,
         agent_tool_socket,
@@ -131,7 +134,8 @@ pub fn agent_notify_launch_on(fs: &dyn tddy_fs::Fs, launch: AgentNotifyLaunch<'_
 
 /// The notify guidance, then the back-channel guidance when there is one, followed by the managed
 /// recipe's prompt read from `managed_prompt_file`.
-fn composed_system_prompt_on(fs: &dyn tddy_fs::Fs,
+fn composed_system_prompt_on(
+    fs: &dyn tddy_fs::Fs,
     managed_prompt_file: Option<&Path>,
     back_channel_guidance: Option<&str>,
 ) -> Result<String, Status> {

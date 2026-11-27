@@ -165,7 +165,10 @@ pub(crate) fn project_home_wiring(launch: ProjectHomeLaunch<'_>) -> Result<RoleW
 }
 
 /// [`project_home_wiring`] through the filesystem port.
-pub(crate) fn project_home_wiring_on(fs: &dyn tddy_fs::Fs, launch: ProjectHomeLaunch<'_>) -> Result<RoleWiring, Status> {
+pub(crate) fn project_home_wiring_on(
+    fs: &dyn tddy_fs::Fs,
+    launch: ProjectHomeLaunch<'_>,
+) -> Result<RoleWiring, Status> {
     let ProjectHomeLaunch {
         role,
         config,
@@ -176,12 +179,13 @@ pub(crate) fn project_home_wiring_on(fs: &dyn tddy_fs::Fs, launch: ProjectHomeLa
         tddy_tools_path,
     } = launch;
     let prompt_file = session_dir.join(PROJECT_HOME_PROMPT_BASENAME);
-    fs.write(&prompt_file, project_home_prompt(role).as_bytes()).map_err(|e| {
-        Status::internal(format!(
-            "failed to write the main's role prompt {}: {e}",
-            prompt_file.display()
-        ))
-    })?;
+    fs.write(&prompt_file, project_home_prompt(role).as_bytes())
+        .map_err(|e| {
+            Status::internal(format!(
+                "failed to write the main's role prompt {}: {e}",
+                prompt_file.display()
+            ))
+        })?;
 
     // The main's own id: its record holds the home worktree, so the daemon runs its tools there
     // under the project-home role guard.

@@ -59,7 +59,8 @@ fn exclude_pattern() -> String {
     format!("/{SESSION_HOOKS_DIR}/")
 }
 
-fn prepare_locally(fs: &dyn tddy_fs::Fs, 
+fn prepare_locally(
+    fs: &dyn tddy_fs::Fs,
     worktree: &Path,
     legacy: Option<&Path>,
     release: impl Fn(&[u8]) -> LegacyRelease,

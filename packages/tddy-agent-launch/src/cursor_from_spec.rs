@@ -34,7 +34,8 @@ pub fn node_launcher_of_on(fs: &dyn tddy_fs::Fs, resolved_binary: &Path) -> Opti
     let node = install_dir.join("node");
     let entry = install_dir.join("index.js");
     // `metadata_follow`, as before: `is_file` follows a link.
-    let is_entry_file = matches!(fs.metadata_follow(&entry), Ok(m) if m.kind == tddy_fs::FsKind::File);
+    let is_entry_file =
+        matches!(fs.metadata_follow(&entry), Ok(m) if m.kind == tddy_fs::FsKind::File);
     (is_executable_file(fs, &node) && is_entry_file).then_some(NodeLauncher { node, entry })
 }
 

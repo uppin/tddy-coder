@@ -112,7 +112,8 @@ impl LaunchSessions {
         // request error, never silently ignored.
         let managed_recipe = managed_recipe_for(req)?;
         let session_dir = start.sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        self.fs.create_dir_all(&session_dir)
+        self.fs
+            .create_dir_all(&session_dir)
             .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
 
         // The roster and its endpoints are resolved and warmed before anything is cut or spawned, as

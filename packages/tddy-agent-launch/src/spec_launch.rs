@@ -409,7 +409,8 @@ fn write_slot_file(fs: &dyn tddy_fs::Fs, path: &Path, bytes: &[u8]) -> Result<()
         message,
     };
     if let Some(parent) = path.parent() {
-        fs.create_dir_all(parent).map_err(|e| slot_file(e.to_string()))?;
+        fs.create_dir_all(parent)
+            .map_err(|e| slot_file(e.to_string()))?;
     }
     tddy_core::atomic_file::write_atomic(path, bytes).map_err(|e| slot_file(e.to_string()))
 }

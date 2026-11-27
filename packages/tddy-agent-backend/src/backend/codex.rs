@@ -127,7 +127,10 @@ pub(crate) fn merge_codex_prompt(request: &InvokeRequest) -> Result<String, Back
 }
 
 /// [`merge_codex_prompt`] through the filesystem port.
-pub(crate) fn merge_codex_prompt_on(fs: &dyn tddy_fs::Fs, request: &InvokeRequest) -> Result<String, BackendError> {
+pub(crate) fn merge_codex_prompt_on(
+    fs: &dyn tddy_fs::Fs,
+    request: &InvokeRequest,
+) -> Result<String, BackendError> {
     let system_content: Option<String> = if let Some(ref path) = request.system_prompt_path {
         Some(fs.read_to_string(path).map_err(|e| {
             BackendError::InvocationFailed(format!(

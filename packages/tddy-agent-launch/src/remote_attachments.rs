@@ -14,7 +14,8 @@ use crate::remote_hook_follower::shell_quote;
 /// Copy every attachment of the session in `session_dir` into `worktree` on `shell`'s target, under
 /// [`TARGET_ATTACHMENTS_DIR`], readable by its owner alone and kept out of the checkout's git status
 /// (`info/exclude`, as the hook log is). A session with no attachment copies nothing.
-pub(crate) async fn copy_attachments_to_target(fs: &dyn tddy_fs::Fs,
+pub(crate) async fn copy_attachments_to_target(
+    fs: &dyn tddy_fs::Fs,
     shell: &dyn RemoteShell,
     session_dir: &Path,
     worktree: &str,

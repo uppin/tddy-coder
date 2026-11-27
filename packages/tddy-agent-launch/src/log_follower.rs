@@ -188,7 +188,9 @@ impl FollowOffset {
         let Some(path) = &self.persisted else {
             return;
         };
-        if let Err(error) = write_atomically(&*self.fs, path, format!("{offset}\t{followed}").as_bytes()) {
+        if let Err(error) =
+            write_atomically(&*self.fs, path, format!("{offset}\t{followed}").as_bytes())
+        {
             log::warn!("follow offset {}: {error}", path.display());
         }
     }
@@ -203,7 +205,11 @@ impl FollowOffset {
     }
 }
 
-fn write_atomically(fs: &dyn tddy_fs::Fs, path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+fn write_atomically(
+    fs: &dyn tddy_fs::Fs,
+    path: &std::path::Path,
+    contents: &[u8],
+) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)?;
     }

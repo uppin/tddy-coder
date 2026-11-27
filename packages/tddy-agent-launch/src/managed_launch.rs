@@ -19,7 +19,8 @@ pub(crate) struct ManagedLaunch {
 /// Free-function form of [`LaunchSessions::prepare_managed_workflow`](super::launch_ports::LaunchSessions::prepare_managed_workflow) so the shared
 /// claude-cli spawn logic ([`spawn_claude_cli_session_inner`]) — which has no `self` — can reuse it.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn prepare_managed_workflow_inner(fs: &dyn tddy_fs::Fs,
+pub(crate) fn prepare_managed_workflow_inner(
+    fs: &dyn tddy_fs::Fs,
     tddy_data_dir: &Path,
     session_id: &str,
     recipe: Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,

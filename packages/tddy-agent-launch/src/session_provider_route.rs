@@ -263,7 +263,8 @@ pub fn sandboxed_start_route(
 }
 
 /// [`sandboxed_start_route`] through the filesystem port.
-pub fn sandboxed_start_route_on(fs: &dyn tddy_fs::Fs,
+pub fn sandboxed_start_route_on(
+    fs: &dyn tddy_fs::Fs,
     access: &SessionAccountAccess,
     agent: RouteAgent<'_>,
     sources: &RouteSources,

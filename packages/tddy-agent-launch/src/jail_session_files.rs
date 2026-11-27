@@ -12,7 +12,10 @@ use crate::svc_start_sandboxed_claude_cli_session::JailDirs;
 
 use std::path::Path;
 
-pub(super) fn prepare_jail_dirs(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Result<JailDirs, Status> {
+pub(super) fn prepare_jail_dirs(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<JailDirs, Status> {
     let sandbox_root = session_dir.join("sandbox");
     let egress_dir = session_dir.join("egress");
     fs.create_dir_all(&sandbox_root.join(".work").join("home"))

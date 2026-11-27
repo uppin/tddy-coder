@@ -40,7 +40,7 @@ pub(super) fn refresh_relaunch_context_dir(
     fs: &dyn tddy_fs::Fs,
     worktree_path: &Path,
     agents: &[tddy_core::SessionAgentRecord],
-    context_dir: &PathBuf,
+    context_dir: &Path,
     // The context-file allow-list the jail is served: its agent's spec `context_globs`,
     // resolved by the caller from the session's agent.
     globs: &[String],
