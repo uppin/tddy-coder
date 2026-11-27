@@ -150,7 +150,7 @@ impl RemoteConfig {
 
 /// Load a config file from the given path.
 pub fn load_config(path: &Path) -> anyhow::Result<Config> {
-    let contents = std::fs::read_to_string(path)
+    let contents = tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, path)
         .map_err(|e| anyhow::anyhow!("failed to read config file {}: {}", path.display(), e))?;
     let config: Config = serde_yaml::from_str(&contents)
         .map_err(|e| anyhow::anyhow!("failed to parse config file {}: {}", path.display(), e))?;

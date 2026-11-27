@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! Unit tests for `SessionConnectionService` — list_exec_tools returns a non-empty catalog;
 //! execute_tool records a tool-call entry; claim_terminal_control grants the session's own
 //! terminal.
