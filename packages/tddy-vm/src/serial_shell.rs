@@ -616,7 +616,6 @@ impl SerialConsole {
     /// booted this VM, so a symlink standing where the log belongs must be an error rather
     /// than a way to have this process read out a file on the reader's behalf.
     fn emulator_stderr_tail(&self) -> String {
-
         let Some(path) = &self.stderr_log_path else {
             return String::new();
         };
