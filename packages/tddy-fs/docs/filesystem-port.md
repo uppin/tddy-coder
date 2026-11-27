@@ -11,7 +11,10 @@ it.
 
 - reads: `read`, `read_to_string`
 - writes: `write` (truncating), `append`, `write_atomic` / `write_atomic_with_mode` (below),
-  `hard_link` (never replaces an existing link, so a first-boot race keeps one winner)
+  `hard_link` (never replaces an existing link, so a first-boot race keeps one winner),
+  `create_new` (exclusive create: fails with `AlreadyExists` when anything is already there, so
+  the check and the creation are one atomic step), `copy` (file copy, `IsADirectory` on a directory
+  source on both adapters)
 - directories: `create_dir_all`, `create_dir_all_with_mode` (mode rides on the creation, never
   wider, not even briefly), `remove_dir` (empty only), `remove_dir_all`, `read_dir` (full
   paths, sorted), `rename`
@@ -64,3 +67,12 @@ and `tddy-daemon-livekit` do their disk I/O through the port: guards plus one `M
 test per crate in each crate's `tests/fs_port.rs`. A socket file in a directory listing is an
 endpoint, not a manifest — consumers matching on `FsKind` handle `Socket` beside files and
 symlinks (for example the session listing skips it the way it skips unreadable entries).
+
+`tddy-session-files`, `tddy-session-sync`, `tddy-subagent-worktree`, `tddy-session-worktree` and
+`tddy-worktree-service` do theirs through the port too: guards in each crate's `tests/fs_port.rs`,
+`MemFs` behaviour tests where the contract names them, and the readers, listings, measurements and
+mirrors behind `<fn>_on` seams with `DiskFs` only at composition roots (service constructors,
+request handlers, and backward-compat wrappers for callers outside the migrated crates). Async
+call sites go through `AsyncFs` (including the new `copy` facade); git-subprocess-bound paths
+(mirror, conversation worktrees, scratch-index seeding) inject the handle but bind `DiskFs`, since
+a `MemFs` could never back the repositories git itself reads and writes.
