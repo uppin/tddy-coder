@@ -8,6 +8,8 @@ description = "Agent skills discovered under a project, composed into prompts, a
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 
 [dev-dependencies]
 # `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
