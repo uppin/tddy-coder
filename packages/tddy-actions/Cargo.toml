@@ -9,6 +9,8 @@ name = "tddy_actions"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 bytes = "1"
 log = "0.4"

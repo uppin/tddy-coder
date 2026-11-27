@@ -50,8 +50,13 @@ impl ToolRegistry {
     /// fresh `<tddyhome>` has none). Refuses an unknown field, a duplicate id among the overrides,
     /// an unknown dep and a dep cycle — across the merged set.
     pub fn load(builtin: Self, overrides_dir: &Path) -> Result<Self, ToolError> {
+        Self::load_on(&tddy_fs::DiskFs, builtin, overrides_dir)
+    }
+
+    /// [`ToolRegistry::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, builtin: Self, overrides_dir: &Path) -> Result<Self, ToolError> {
         let mut tools = builtin.tools;
-        tools.extend(read_overrides(overrides_dir)?);
+        tools.extend(read_overrides(fs, overrides_dir)?);
         Self { tools }.validated()
     }
 
@@ -81,7 +86,7 @@ impl ToolRegistry {
     /// [`ExtensionOwner::name`]s is [`ToolError::UnknownExtension`], a section its owner refuses is
     /// [`ToolError::ExtensionRejected`] — both naming the file the tool came from (an override, or
     /// the built-in's embedded path).
-    pub fn load_with_owners(
+    pub fn load_with_owners_on(fs: &dyn tddy_fs::Fs,
         builtin: Self,
         overrides_dir: &Path,
         owners: &[&dyn ExtensionOwner],
@@ -266,10 +271,10 @@ fn insert_unique(
 }
 
 /// The override files in `dir`, keyed by id. A missing directory has none.
-fn read_overrides(dir: &Path) -> Result<BTreeMap<String, Entry>, ToolError> {
+fn read_overrides(fs: &dyn tddy_fs::Fs, dir: &Path) -> Result<BTreeMap<String, Entry>, ToolError> {
     let mut overrides = BTreeMap::new();
-    for file in yaml_files_in(dir)? {
-        let yaml = std::fs::read_to_string(&file).map_err(|e| ToolError::Parse {
+    for file in yaml_files_in(fs, dir)? {
+        let yaml = fs.read_to_string(&file).map_err(|e| ToolError::Parse {
             file: file.clone(),
             message: format!("cannot be read: {e}"),
         })?;
@@ -281,16 +286,16 @@ fn read_overrides(dir: &Path) -> Result<BTreeMap<String, Entry>, ToolError> {
 
 /// The `*.yaml` and `*.yml` files directly in `dir`, sorted by name so that a duplicate id is always
 /// reported against the same pair of files.
-fn yaml_files_in(dir: &Path) -> Result<Vec<PathBuf>, ToolError> {
-    let entries = match std::fs::read_dir(dir) {
+fn yaml_files_in(fs: &dyn tddy_fs::Fs, dir: &Path) -> Result<Vec<PathBuf>, ToolError> {
+    let entries = match fs.read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(dir_error(dir, &e)),
     };
     let mut files = Vec::new();
-    for entry in entries {
-        let path = entry.map_err(|e| dir_error(dir, &e))?.path();
-        if is_yaml(&path) && path.is_file() {
+    for path in entries {
+        // `metadata_follow`, as before: `is_file` follows a link.
+        if is_yaml(&path) && matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::File) {
             files.push(path);
         }
     }

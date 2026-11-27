@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_fs::Fs as _;
+
 use super::{NetworkSection, TargetBinary, ToolBinary, ToolDef, ToolError};
 
 /// The environment a tool resolves against. Production uses the daemon's own process
@@ -47,24 +49,20 @@ impl ToolHost for ProcessToolHost {
     }
 
     fn is_executable_file(&self, path: &Path) -> bool {
-        is_executable(path)
+        is_executable(&tddy_fs::DiskFs, path)
     }
 
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {
-        std::fs::canonicalize(path)
+        tddy_fs::DiskFs.canonicalize(path)
     }
 }
 
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
+fn is_executable(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    // `metadata_follow`, as before: the question stays about the file itself. Off Unix the
+    // port reports no mode, and the old answer there was simply that the file exists.
+    fs.metadata_follow(path).is_ok_and(|meta| {
+        meta.kind == tddy_fs::FsKind::File && meta.mode.map_or(true, |mode| mode & 0o111 != 0)
+    })
 }
 
 /// A tool as this host satisfies it.
