@@ -12,6 +12,8 @@ path = "src/lib.rs"
 # `tddy-agent-backend` for the ACP driver. New subagent code does not go into `tddy-discovery`
 # (docs/dev/todo/2026-10-08-drain-tddy-discovery-into-purpose-named-crates-and-remove-it.md).
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 log = "0.4"
 serde_json = "1"
