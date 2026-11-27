@@ -78,7 +78,8 @@ pub struct BuildImageArgs {
 
 /// Read the spec file and build the image at `args.output`, printing progress to stderr.
 pub async fn run_build_image(args: BuildImageArgs) -> anyhow::Result<PathBuf> {
-    let spec = tokio::fs::read_to_string(&args.spec)
+    let spec = tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+        .read_to_string(&args.spec)
         .await
         .map_err(|e| anyhow::anyhow!("failed to read spec {}: {e}", args.spec.display()))?;
 
@@ -227,7 +228,8 @@ pub fn resolve_layer_parent(
 ///    `images/02-prepared-base/<name>/`, instead of cluttering `02-prepared-base/` with
 ///    non-image files.
 pub async fn run_cloud_init_build(args: CloudInitBuildArgs) -> anyhow::Result<PathBuf> {
-    let user_data_yaml = tokio::fs::read_to_string(&args.user_data)
+    let user_data_yaml = tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+        .read_to_string(&args.user_data)
         .await
         .map_err(|e| {
             anyhow::anyhow!("failed to read user-data {}: {e}", args.user_data.display())

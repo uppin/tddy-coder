@@ -153,6 +153,7 @@ fn mapping_file_version() -> u32 {
 
 /// Persistent store for Telegram → GitHub login associations (daemon data directory).
 pub struct TelegramGithubMappingStore {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     path: PathBuf,
 }
 
@@ -164,7 +165,21 @@ impl TelegramGithubMappingStore {
             "TelegramGithubMappingStore::open path={}",
             path.display()
         );
-        Ok(Self { path })
+        Ok(Self {
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
+            path,
+        })
+    }
+
+    /// [`TelegramGithubMappingStore::open`] with the filesystem port the file runs through.
+    pub fn open_on(
+        path: impl AsRef<Path>,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            fs,
+            path: path.as_ref().to_path_buf(),
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -172,17 +187,17 @@ impl TelegramGithubMappingStore {
     }
 
     fn load(&self) -> anyhow::Result<TelegramGithubMappingFile> {
-        if !self.path.exists() {
+        if !self.fs.exists(&self.path) {
             return Ok(TelegramGithubMappingFile::default());
         }
-        let bytes = std::fs::read(&self.path)?;
+        let bytes = self.fs.read(&self.path)?;
         let parsed: TelegramGithubMappingFile = serde_json::from_slice(&bytes)?;
         Ok(parsed)
     }
 
     fn save_atomic(&self, file: &TelegramGithubMappingFile) -> anyhow::Result<()> {
         let json = serde_json::to_vec_pretty(file)?;
-        tddy_core::atomic_file::write_atomic(&self.path, &json)?;
+        self.fs.write_atomic(&self.path, &json, None)?;
         log::debug!(
             target: "tddy_daemon::telegram_github_link",
             "TelegramGithubMappingStore: wrote {} bytes atomically to {}",

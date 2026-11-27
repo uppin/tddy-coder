@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs", features = ["tokio"] }
 async-trait = "0.1"
 dashmap = "6"
 indexmap = "2"

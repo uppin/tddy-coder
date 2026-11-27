@@ -12,6 +12,7 @@ name = "tddy-tools"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"

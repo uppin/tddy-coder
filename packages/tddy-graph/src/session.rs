@@ -59,11 +59,20 @@ pub trait SessionStorage: Send + Sync {
 /// File-based session storage (JSON on disk).
 pub struct FileSessionStorage {
     base_dir: PathBuf,
+    fs: tddy_fs::AsyncFs,
 }
 
 impl FileSessionStorage {
     pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+        Self::with_fs(
+            base_dir,
+            tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        )
+    }
+
+    /// [`FileSessionStorage::new`] with the filesystem port the sessions run through.
+    pub fn with_fs(base_dir: PathBuf, fs: tddy_fs::AsyncFs) -> Self {
+        Self { base_dir, fs }
     }
 
     fn path(&self, session_id: &str) -> PathBuf {
@@ -78,9 +87,9 @@ impl SessionStorage for FileSessionStorage {
         session: &Session,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path(&session.id);
-        tokio::fs::create_dir_all(path.parent().unwrap()).await?;
+        self.fs.create_dir_all(path.parent().unwrap()).await?;
         let json = serde_json::to_string_pretty(session)?;
-        tokio::fs::write(path, json).await?;
+        self.fs.write(path, json.into_bytes()).await?;
         Ok(())
     }
 
@@ -89,10 +98,10 @@ impl SessionStorage for FileSessionStorage {
         session_id: &str,
     ) -> Result<Option<Session>, Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path(session_id);
-        if !path.exists() {
+        if !self.fs.exists(&path).await {
             return Ok(None);
         }
-        let json = tokio::fs::read_to_string(path).await?;
+        let json = self.fs.read_to_string(path).await?;
         let session: Session = serde_json::from_str(&json)?;
         Ok(Some(session))
     }
@@ -102,8 +111,8 @@ impl SessionStorage for FileSessionStorage {
         session_id: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let path = self.path(session_id);
-        if path.exists() {
-            tokio::fs::remove_file(path).await?;
+        if self.fs.exists(&path).await {
+            self.fs.remove_file(path).await?;
         }
         Ok(())
     }

@@ -15,11 +15,28 @@
 //! writes those events to `rpc-traffic.log` inside the given directory and
 //! forwards **all** events (including traffic) to the inner logger.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Write};
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
+
+/// The traffic log's writer: each record appended through the filesystem port
+/// (one append per record), instead of a held-open buffered file.
+struct TrafficLog {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    path: PathBuf,
+}
+
+impl Write for TrafficLog {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.fs.append(&self.path, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 
 /// Log target used by the [`rpc_trace!`] macro.
 pub const TARGET: &str = "rpc_traffic";
@@ -28,7 +45,7 @@ pub const TARGET: &str = "rpc_traffic";
 /// and writes them to a file while forwarding all events to an inner logger.
 pub struct RpcTrafficCollector {
     inner: Box<dyn log::Log>,
-    file: Mutex<BufWriter<File>>,
+    file: Mutex<TrafficLog>,
     start: Instant,
 }
 
@@ -36,13 +53,27 @@ impl RpcTrafficCollector {
     /// Wrap an existing logger, adding RPC traffic file output.
     /// Creates `rpc-traffic.log` inside `log_dir`.
     pub fn wrap(log_dir: impl AsRef<Path>, inner: Box<dyn log::Log>) -> std::io::Result<Self> {
+        Self::wrap_on(
+            log_dir,
+            inner,
+            std::sync::Arc::new(tddy_fs::DiskFs),
+        )
+    }
+
+    /// [`RpcTrafficCollector::wrap`] with the filesystem port the traffic log runs through.
+    pub fn wrap_on(
+        log_dir: impl AsRef<Path>,
+        inner: Box<dyn log::Log>,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> std::io::Result<Self> {
         let dir = log_dir.as_ref();
-        fs::create_dir_all(dir)?;
+        fs.create_dir_all(dir)?;
         let path = dir.join("rpc-traffic.log");
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        // Opening is what proves the file can be appended to.
+        fs.append(&path, b"")?;
         Ok(Self {
             inner,
-            file: Mutex::new(BufWriter::new(file)),
+            file: Mutex::new(TrafficLog { fs, path }),
             start: Instant::now(),
         })
     }

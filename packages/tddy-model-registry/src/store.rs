@@ -98,6 +98,7 @@ pub struct ModelRegistryStore {
     /// written after this daemon started is resolvable the moment the file lands, so a snapshot
     /// taken at open time would admit exactly the collision this guard exists to refuse.
     agents_dir: PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl ModelRegistryStore {
@@ -114,9 +115,27 @@ impl ModelRegistryStore {
         daemon_instance_id: &str,
         agents_dir: &Path,
     ) -> Result<Self, ModelRegistryError> {
+        Self::open_on(
+            db_path,
+            daemon_instance_id,
+            agents_dir,
+            std::sync::Arc::new(tddy_fs::DiskFs),
+        )
+        .await
+    }
+
+    /// [`ModelRegistryStore::open`] with the filesystem port the store's own files
+    /// (everything but the SQLite database itself, which is SQLite's to open) run
+    /// through.
+    pub async fn open_on(
+        db_path: &Path,
+        daemon_instance_id: &str,
+        agents_dir: &Path,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> Result<Self, ModelRegistryError> {
         if let Some(parent) = db_path.parent() {
             if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent).map_err(|e| {
+                fs.create_dir_all(parent).map_err(|e| {
                     io_failure(&format!("model registry directory {}", parent.display()), e)
                 })?;
             }
@@ -125,7 +144,7 @@ impl ModelRegistryStore {
         // and so the `-wal`/`-shm` files SQLite derives from the database's own mode start there
         // too. An existing database keeps its contents and is re-restricted below, which is what
         // repairs one an earlier daemon left at 0644.
-        precreate_owner_only(db_path)?;
+        precreate_owner_only(&*fs, db_path)?;
 
         let options = SqliteConnectOptions::new()
             .filename(db_path)
@@ -141,13 +160,14 @@ impl ModelRegistryStore {
             .connect_with(options)
             .await?;
         ensure_schema(&pool).await?;
-        restrict_to_owner(db_path)?;
+        restrict_to_owner(&*fs, db_path)?;
         Ok(Self {
             pool,
             daemon_instance_id: daemon_instance_id.to_string(),
             reserved_agent_ids: Vec::new(),
             reserved_coding_agent_ids: Vec::new(),
             agents_dir: agents_dir.to_path_buf(),
+            fs: fs.clone(),
         })
     }
 
@@ -726,7 +746,7 @@ impl ModelRegistryStore {
     /// ordinary case. A directory that exists but cannot be read is not: the guard has no answer,
     /// and an unanswerable guard refuses the write rather than admitting a name it never checked.
     fn agent_def_named(&self, name: &str) -> Result<Option<PathBuf>, ModelRegistryError> {
-        match std::fs::read_dir(&self.agents_dir) {
+        match self.fs.read_dir(&self.agents_dir) {
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => {
@@ -736,7 +756,7 @@ impl ModelRegistryStore {
                 ))
             }
         }
-        if !load_agent_defs(&self.agents_dir)
+        if !tddy_discovery::agent_def::load_agent_defs_on(&*self.fs, &self.agents_dir)
             .iter()
             .any(|def| def.name == name)
         {
@@ -753,15 +773,14 @@ impl ModelRegistryStore {
     /// so a file renamed between the two reads still refuses the name and points at the directory
     /// holding it.
     fn agent_def_file_named(&self, name: &str) -> PathBuf {
-        let Ok(entries) = std::fs::read_dir(&self.agents_dir) else {
+        let Ok(entries) = self.fs.read_dir(&self.agents_dir) else {
             return self.agents_dir.clone();
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in entries {
             if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
                 continue;
             }
-            let Ok(contents) = std::fs::read_to_string(&path) else {
+            let Ok(contents) = self.fs.read_to_string(&path) else {
                 continue;
             };
             let names_it = serde_yaml::from_str::<SpecializedAgentDef>(&contents)
@@ -982,22 +1001,18 @@ fn io_failure(what: &str, e: std::io::Error) -> ModelRegistryError {
 /// (a zero-length file is a valid empty SQLite database, which is what `create_if_missing` would
 /// have made anyway).
 #[cfg(unix)]
-fn precreate_owner_only(db_path: &Path) -> Result<(), ModelRegistryError> {
-    use std::os::unix::fs::OpenOptionsExt;
-    match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(OWNER_ONLY_FILE)
-        .open(db_path)
-    {
-        Ok(_) => Ok(()),
+fn precreate_owner_only(fs: &dyn tddy_fs::Fs, db_path: &Path) -> Result<(), ModelRegistryError> {
+    // The port's exclusive create with a mode is exactly the `create_new` + `mode`
+    // open this rolled by hand.
+    match fs.create_new_with_mode(db_path, &[], OWNER_ONLY_FILE) {
+        Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(io_failure(&format!("creating {}", db_path.display()), e)),
     }
 }
 
 #[cfg(not(unix))]
-fn precreate_owner_only(_db_path: &Path) -> Result<(), ModelRegistryError> {
+fn precreate_owner_only(_fs: &dyn tddy_fs::Fs, _db_path: &Path) -> Result<(), ModelRegistryError> {
     Ok(())
 }
 
@@ -1008,9 +1023,7 @@ fn precreate_owner_only(_db_path: &Path) -> Result<(), ModelRegistryError> {
 /// alone deliberately: `models.db` lives in the shared `tddy-data-dir`, which session processes
 /// running as other uids read (`projects/`, the session bases), so tightening it to `0700` would
 /// break them — and a `0600` file inside a `0755` directory is already unreadable by them.
-#[cfg(unix)]
-fn restrict_to_owner(db_path: &Path) -> Result<(), ModelRegistryError> {
-    use std::os::unix::fs::PermissionsExt;
+fn restrict_to_owner(fs: &dyn tddy_fs::Fs, db_path: &Path) -> Result<(), ModelRegistryError> {
     let mut paths = vec![db_path.to_path_buf()];
     for suffix in SIBLING_SUFFIXES {
         let mut name = db_path.as_os_str().to_os_string();
@@ -1018,7 +1031,7 @@ fn restrict_to_owner(db_path: &Path) -> Result<(), ModelRegistryError> {
         paths.push(std::path::PathBuf::from(name));
     }
     for path in paths {
-        match std::fs::set_permissions(&path, std::fs::Permissions::from_mode(OWNER_ONLY_FILE)) {
+        match fs.set_mode(&path, OWNER_ONLY_FILE) {
             Ok(()) => {}
             // `-wal`/`-shm` exist only while a connection holds them; an absent one carries no
             // rows to protect.
@@ -1035,7 +1048,7 @@ fn restrict_to_owner(db_path: &Path) -> Result<(), ModelRegistryError> {
 }
 
 #[cfg(not(unix))]
-fn restrict_to_owner(_db_path: &Path) -> Result<(), ModelRegistryError> {
+fn restrict_to_owner(_fs: &dyn tddy_fs::Fs, _db_path: &Path) -> Result<(), ModelRegistryError> {
     Ok(())
 }
 

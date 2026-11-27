@@ -98,7 +98,7 @@ async fn main() {
     // The process environment first, then the repo-root `.env` for whatever it left unset. Read
     // from the working directory because that is where a developer running this from a checkout
     // keeps it; an absent file simply contributes nothing.
-    let env_file = match std::fs::read_to_string(ENV_FILENAME) {
+    let env_file = match tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, std::path::Path::new(ENV_FILENAME)) {
         Ok(contents) => Some(contents),
         // An absent `.env` is the normal case — it is gitignored and per-developer.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,

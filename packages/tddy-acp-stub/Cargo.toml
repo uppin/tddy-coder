@@ -9,6 +9,7 @@ name = "tddy-acp-stub"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 agent-client-protocol = { version = "=0.10.4", features = ["unstable"] }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

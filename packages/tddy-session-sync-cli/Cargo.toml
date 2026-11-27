@@ -12,6 +12,7 @@ name = "tddy-session-sync"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 tddy-livekit = { path = "../tddy-livekit" }

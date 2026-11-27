@@ -9,6 +9,7 @@ name = "tddy_livekit"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs", features = ["tokio"] }
 # The client-side ports this crate implements (`room_connector`).
 tddy-room-client = { path = "../tddy-room-client" }
 # `merge_participant_metadata_json`, re-exported so metadata publishers need not name this crate.

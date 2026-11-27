@@ -222,7 +222,10 @@ impl<S: crate::bridge::RpcService> LiveKitParticipant<S> {
         last_sent: &mut Option<String>,
         metadata_publish_lock: &Arc<Mutex<()>>,
     ) {
-        let Ok(raw) = tokio::fs::read_to_string(path).await else {
+        let Ok(raw) = tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+            .read_to_string(path)
+            .await
+        else {
             return;
         };
         let url = raw.trim().to_string();

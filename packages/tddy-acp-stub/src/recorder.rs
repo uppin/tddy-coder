@@ -26,11 +26,8 @@ impl Recorder {
 
     pub fn record(&self, line: serde_json::Value) {
         let Some(path) = &self.path else { return };
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        // Recorded through the port's append, one line per record.
+        tddy_fs::Fs::append(&tddy_fs::DiskFs, path, format!("{line}\n").as_bytes())
             .unwrap_or_else(|e| panic!("TDDY_ACP_STUB_RECORD {}: {e}", path.display()));
-        writeln!(file, "{line}").unwrap_or_else(|e| panic!("record {}: {e}", path.display()));
     }
 }

@@ -9,6 +9,7 @@ name = "tddy_telegram"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 async-trait = "0.1"
 log = "0.4"

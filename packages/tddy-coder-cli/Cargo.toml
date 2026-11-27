@@ -16,6 +16,7 @@ name = "tddy-coder"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
