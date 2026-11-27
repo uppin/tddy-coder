@@ -8,6 +8,84 @@
 use std::os::unix::io::FromRawFd;
 use std::path::Path;
 
+/// One end of a pipe between the daemon and its spawn worker: an owned fd the worker protocol
+/// reads lines from and writes lines to.
+///
+/// Not a `std::fs::File`: the crates on the filesystem port name no direct-disk type in
+/// production code, and a pipe end is an fd, not a file. Reads and writes go through `libc`
+/// on the owned fd, retrying on `EINTR`.
+#[derive(Debug)]
+pub struct PipeEnd(std::os::fd::OwnedFd);
+
+impl PipeEnd {
+    /// Take ownership of `fd`, as `File::from_raw_fd` did: the caller must know it is open
+    /// and not owned elsewhere.
+    ///
+    /// # Safety
+    /// `fd` must be a valid open descriptor, not owned by anything else.
+    pub unsafe fn from_raw_fd(fd: std::os::fd::RawFd) -> Self {
+        Self(unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+    }
+
+    /// A connected pair of pipe ends, as `pipe(2)` makes: what a test stands a worker over.
+    pub fn pair() -> std::io::Result<(Self, Self)> {
+        let mut fds = [0; 2];
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok((
+            unsafe { Self::from_raw_fd(fds[0]) },
+            unsafe { Self::from_raw_fd(fds[1]) },
+        ))
+    }
+}
+
+impl std::io::Read for PipeEnd {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        loop {
+            let read = unsafe {
+                libc::read(
+                    std::os::fd::AsRawFd::as_raw_fd(&self.0),
+                    buf.as_mut_ptr().cast(),
+                    buf.len(),
+                )
+            };
+            if read >= 0 {
+                return Ok(read as usize);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+}
+
+impl std::io::Write for PipeEnd {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        loop {
+            let written = unsafe {
+                libc::write(
+                    std::os::fd::AsRawFd::as_raw_fd(&self.0),
+                    buf.as_ptr().cast(),
+                    buf.len(),
+                )
+            };
+            if written >= 0 {
+                return Ok(written as usize);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 use serde::{Deserialize, Serialize};
 
 use crate::spawner::{self, LiveKitCreds, SpawnOptions, SpawnResult};
@@ -16,6 +94,7 @@ mod clone_request;
 pub use clone_request::CloneRequest;
 mod client;
 pub use client::{client_over, spawn_worker_over, SpawnClient};
+
 mod serve;
 mod wire;
 pub use wire::{RequestId, WorkerEnvelope, WorkerEvent, WorkerLine};
@@ -201,8 +280,8 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, libc::pid_t)>>
                 libc::close(request_pipe[1]);
                 libc::close(response_pipe[0]);
             }
-            let request_reader = unsafe { std::fs::File::from_raw_fd(request_pipe[0]) };
-            let response_writer = unsafe { std::fs::File::from_raw_fd(response_pipe[1]) };
+            let request_reader = unsafe { PipeEnd::from_raw_fd(request_pipe[0]) };
+            let response_writer = unsafe { PipeEnd::from_raw_fd(response_pipe[1]) };
             serve::serve(request_reader, response_writer);
             std::process::exit(0);
         }
@@ -212,8 +291,8 @@ pub fn fork_spawn_worker() -> anyhow::Result<Option<(SpawnClient, libc::pid_t)>>
                 libc::close(request_pipe[0]);
                 libc::close(response_pipe[1]);
             }
-            let request_tx = unsafe { std::fs::File::from_raw_fd(request_pipe[1]) };
-            let response_rx = unsafe { std::fs::File::from_raw_fd(response_pipe[0]) };
+            let request_tx = unsafe { PipeEnd::from_raw_fd(request_pipe[1]) };
+            let response_rx = unsafe { PipeEnd::from_raw_fd(response_pipe[0]) };
             let client = client_over(request_tx, response_rx, pid as u32);
             Ok(Some((client, pid)))
         }

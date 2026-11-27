@@ -9,6 +9,8 @@ name = "tddy_spawn"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }

@@ -109,6 +109,7 @@ fn group_exists(group: libc::pid_t) -> bool {
 /// Skips (Ok) when `destination` already exists.
 #[cfg(unix)]
 pub fn clone_with_progress(
+    fs: &dyn tddy_fs::Fs,
     os_user: &str,
     git_url: &str,
     destination: &Path,
@@ -132,8 +133,8 @@ pub fn clone_with_progress(
     let partial = partial_sibling(destination)?;
     let outcome = run_into(os_user, git_url, &partial, env, on_started, on_progress);
     match outcome {
-        Ok(()) => std::fs::rename(&partial, destination).map_err(|e| {
-            remove_partial(&partial);
+        Ok(()) => fs.rename(&partial, destination).map_err(|e| {
+            remove_partial(fs, &partial);
             anyhow::anyhow!(
                 "git clone: moving {} to {}: {}",
                 partial.display(),
@@ -142,7 +143,7 @@ pub fn clone_with_progress(
             )
         }),
         Err(error) => {
-            remove_partial(&partial);
+            remove_partial(fs, &partial);
             Err(error)
         }
     }
@@ -150,6 +151,7 @@ pub fn clone_with_progress(
 
 #[cfg(not(unix))]
 pub fn clone_with_progress(
+    _fs: &dyn tddy_fs::Fs,
     _os_user: &str,
     _git_url: &str,
     _destination: &Path,
@@ -171,8 +173,8 @@ fn partial_sibling(destination: &Path) -> anyhow::Result<PathBuf> {
 }
 
 #[cfg(unix)]
-fn remove_partial(partial: &Path) {
-    if let Err(e) = std::fs::remove_dir_all(partial) {
+fn remove_partial(fs: &dyn tddy_fs::Fs, partial: &Path) {
+    if let Err(e) = fs.remove_dir_all(partial) {
         if e.kind() != std::io::ErrorKind::NotFound {
             log::warn!(
                 "clone_with_progress: could not remove {}: {}",

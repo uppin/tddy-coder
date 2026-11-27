@@ -34,6 +34,7 @@ impl CloneRequest {
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect();
         clone_with_progress(
+            &tddy_fs::DiskFs,
             &self.os_user,
             &self.git_url,
             Path::new(&self.destination),
