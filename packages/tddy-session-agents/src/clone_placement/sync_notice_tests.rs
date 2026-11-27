@@ -4,6 +4,11 @@
 //! received: a recording fake stands in for the agent, and the conversation worktree is a real git
 //! checkout of a temporary session worktree.
 
+// Test-only: included via `mod` under `#[cfg(test)]`, so the filesystem-port guard reads
+// the whole file as test code and the real-disk fixtures below are the tests' fixtures, not
+// production I/O.
+#![cfg(test)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};

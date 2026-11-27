@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use prost::Message as _;
 use tddy_daemon_extensions::RoomTokenMinter;
+use tddy_fs::Fs as _;
 use tddy_daemon_kernel::peer_forwarding::{daemon_rpc_identity, session_room_name, CommonRoom};
 use tddy_room_client::{RoomConnector, RoomSession};
 
@@ -852,9 +853,11 @@ impl CloneMirror {
         let marker_path = spec
             .worktree_path
             .join(tddy_session_sync::mirror::MARKER_FILENAME);
-        std::fs::write(
+        // `DiskFs`, not a port parameter: the mirror below is opened on the real disk by
+        // `tddy-session-sync`, so the marker must land on the same filesystem it reads.
+        tddy_fs::DiskFs.write(
             &marker_path,
-            serde_json::to_vec_pretty(&marker)
+            &serde_json::to_vec_pretty(&marker)
                 .map_err(|e| Status::internal(format!("serialize the mirror marker: {e}")))?,
         )
         .map_err(|e| {

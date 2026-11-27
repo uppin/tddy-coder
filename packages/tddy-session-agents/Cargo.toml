@@ -24,6 +24,8 @@ tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `LiveAgentRoster`, node 5's — the roster as a *client* process sees it.
 tddy-discovery = { path = "../tddy-discovery" }
+# `#fs-port`: session-record checks and the clone mirror marker go through the port.
+tddy-fs = { path = "../tddy-fs" }
 tddy-coding-subagent = { path = "../tddy-coding-subagent" }
 # `RegisteredConversation`: a conversation this daemon opens is registered where the session's usage
 # stream finds it (`#usage-binding 3/5`).
