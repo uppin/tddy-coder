@@ -173,13 +173,13 @@ mod tests {
         // Given a tree, and then one file written, one rewritten and one removed
         let (_directory, root) = a_tree();
         write(&root, "src/gone.rs", "fn gone() {}\n");
-        let earlier = TreeSnapshot::read(&root).expect("the tree reads");
+        let earlier = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root).expect("the tree reads");
         write(&root, "src/a.rs", "pub fn a() {}\n");
         write(&root, "src/lib.rs", "pub mod a;\npub mod b;\n");
         std::fs::remove_file(root.join("src/gone.rs")).expect("removed");
 
         // When the tree is read again and compared
-        let changes = TreeSnapshot::read(&root)
+        let changes = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root)
             .expect("the tree reads")
             .changes_since(&earlier);
 
@@ -198,7 +198,7 @@ mod tests {
     fn reads_no_change_in_a_build_directory_a_hidden_one_or_a_file_that_is_not_source() {
         // Given a tree, and then files written where no server reads source
         let (_directory, root) = a_tree();
-        let earlier = TreeSnapshot::read(&root).expect("the tree reads");
+        let earlier = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root).expect("the tree reads");
         write(&root, "target/debug/build/out/generated.rs", "fn g() {}\n");
         write(&root, ".restructure/journal.rs", "fn j() {}\n");
         write(&root, ".worktrees/other/src/lib.rs", "fn o() {}\n");
@@ -206,7 +206,7 @@ mod tests {
         write(&root, "README.md", "# a crate\n");
 
         // When the tree is read again and compared
-        let changes = TreeSnapshot::read(&root)
+        let changes = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root)
             .expect("the tree reads")
             .changes_since(&earlier);
 
@@ -218,12 +218,12 @@ mod tests {
     fn reads_a_changed_manifest_and_lock_file() {
         // Given a tree, and then its manifest rewritten and a lock file written
         let (_directory, root) = a_tree();
-        let earlier = TreeSnapshot::read(&root).expect("the tree reads");
+        let earlier = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root).expect("the tree reads");
         write(&root, "Cargo.toml", "[package]\nname = \"a\"\n");
         write(&root, "Cargo.lock", "version = 4\n");
 
         // When the tree is read again and compared
-        let changes = TreeSnapshot::read(&root)
+        let changes = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root)
             .expect("the tree reads")
             .changes_since(&earlier);
 
