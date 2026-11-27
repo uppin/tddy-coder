@@ -20,7 +20,7 @@ pub(crate) async fn worktree_diff(worktree: &Path, base_ref: &str) -> Result<Str
     }
     let index = temp_index_path();
     let diff = diff_over_index(worktree, base_ref, &index).await;
-    let _ = std::fs::remove_file(&index);
+    let _ = tddy_fs::Fs::remove_file(&tddy_fs::DiskFs, &index);
     diff
 }
 

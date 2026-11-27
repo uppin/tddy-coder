@@ -67,18 +67,21 @@ pub struct ToolCallRecord {
 ///
 /// Callers **must not** treat a failure here as fatal — log it and continue.
 pub fn append_tool_call(session_dir: &Path, record: &ToolCallRecord) -> anyhow::Result<()> {
-    std::fs::create_dir_all(session_dir)
+    append_tool_call_on(&tddy_fs::DiskFs, session_dir, record)
+}
+
+/// [`append_tool_call`] through the filesystem port.
+pub fn append_tool_call_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    record: &ToolCallRecord,
+) -> anyhow::Result<()> {
+    fs.create_dir_all(session_dir)
         .map_err(|e| anyhow::anyhow!("create session dir {}: {}", session_dir.display(), e))?;
     let path = session_dir.join(TOOL_CALLS_FILENAME);
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| anyhow::anyhow!("open {}: {}", path.display(), e))?;
     let line = serde_json::to_string(record)
         .map_err(|e| anyhow::anyhow!("serialize ToolCallRecord: {}", e))?;
-    file.write_all(line.as_bytes())
-        .and_then(|_| file.write_all(b"\n"))
+    fs.append(&path, (line + "\n").as_bytes())
         .map_err(|e| anyhow::anyhow!("write {}: {}", path.display(), e))
 }
 
@@ -89,11 +92,20 @@ pub fn append_tool_call(session_dir: &Path, record: &ToolCallRecord) -> anyhow::
 /// still returned. When the file exceeds [`TOOL_CALLS_READ_CAP`] records, only
 /// the newest ones are returned.
 pub fn read_tool_calls(session_dir: &Path) -> anyhow::Result<Vec<ToolCallRecord>> {
+    read_tool_calls_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_tool_calls`] through the filesystem port.
+pub fn read_tool_calls_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> anyhow::Result<Vec<ToolCallRecord>> {
     let path = session_dir.join(TOOL_CALLS_FILENAME);
-    if !path.exists() {
+    if !fs.exists(&path) {
         return Ok(Vec::new());
     }
-    let contents = std::fs::read_to_string(&path)
+    let contents = fs
+        .read_to_string(&path)
         .map_err(|e| anyhow::anyhow!("read {}: {}", path.display(), e))?;
     let mut records = Vec::new();
     for (i, line) in contents.lines().enumerate() {

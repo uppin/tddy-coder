@@ -150,6 +150,16 @@ pub fn lsp_root_for(
     reach: &ReadReach,
     added_roots: &[PathBuf],
 ) -> Result<PathBuf, String> {
+    lsp_root_for_on(&tddy_fs::DiskFs, args, reach, added_roots)
+}
+
+/// [`lsp_root_for`] through the filesystem port.
+pub fn lsp_root_for_on(
+    fs: &dyn tddy_fs::Fs,
+    args: &serde_json::Value,
+    reach: &ReadReach,
+    added_roots: &[PathBuf],
+) -> Result<PathBuf, String> {
     let Some(named) = args.get("root").and_then(|root| root.as_str()) else {
         return Ok(reach.home().to_path_buf());
     };
@@ -158,9 +168,9 @@ pub fn lsp_root_for(
             "root {named} is not an absolute path; name the root in full"
         ));
     }
-    let root = std::fs::canonicalize(named).unwrap_or_else(|_| PathBuf::from(named));
+    let root = fs.canonicalize(Path::new(named)).unwrap_or_else(|_| PathBuf::from(named));
     let added = added_roots.iter().any(|added| {
-        let added = std::fs::canonicalize(added).unwrap_or_else(|_| added.clone());
+        let added = fs.canonicalize(added).unwrap_or_else(|_| added.clone());
         root.starts_with(added)
     });
     if reach.contains(&root) || added {

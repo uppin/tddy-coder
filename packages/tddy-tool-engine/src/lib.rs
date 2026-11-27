@@ -226,10 +226,10 @@ pub async fn execute_tool_with_env(
         _ => {
             // Sync tool — run inline, then register as a terminal task for observability.
             let mut outcome = match tool_name {
-                "Read" => tool_read(worktree_root, &args),
-                "Write" => tool_write(worktree_root, &args),
-                "StrReplace" => tool_str_replace(worktree_root, &args),
-                "Delete" => tool_delete(worktree_root, &args),
+                "Read" => tool_read(&tddy_fs::DiskFs, worktree_root, &args),
+                "Write" => tool_write(&tddy_fs::DiskFs, worktree_root, &args),
+                "StrReplace" => tool_str_replace(&tddy_fs::DiskFs, worktree_root, &args),
+                "Delete" => tool_delete(&tddy_fs::DiskFs, worktree_root, &args),
                 "Grep" => tool_grep(worktree_root, &args).await,
                 "Glob" => tool_glob(worktree_root, &args),
                 "SemanticSearch" => tool_semantic_search(worktree_root, &args, extra_env).await,
@@ -242,7 +242,7 @@ pub async fn execute_tool_with_env(
     }
 }
 
-fn tool_read(root: &Path, args: &serde_json::Value) -> ToolOutcome {
+fn tool_read(fs: &dyn tddy_fs::Fs, root: &Path, args: &serde_json::Value) -> ToolOutcome {
     let path_str = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("Read: missing 'path' argument"),
@@ -253,15 +253,19 @@ fn tool_read(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Err(e) => return ToolOutcome::err(format!("Read: {e}")),
     };
 
-    read_resolved(&resolved, args)
+    read_resolved(fs, &resolved, args)
 }
 
 /// `Read` of an already-contained `resolved` path, windowed by the call's `offset` and `limit`.
-pub(crate) fn read_resolved(resolved: &Path, args: &serde_json::Value) -> ToolOutcome {
+pub(crate) fn read_resolved(
+    fs: &dyn tddy_fs::Fs,
+    resolved: &Path,
+    args: &serde_json::Value,
+) -> ToolOutcome {
     let offset = args.get("offset").and_then(|v| v.as_u64());
     let limit = args.get("limit").and_then(|v| v.as_u64());
 
-    match std::fs::read_to_string(resolved) {
+    match fs.read_to_string(resolved) {
         Ok(content) => {
             ToolOutcome::ok(read_window::line_window(&content, offset, limit).to_string())
         }
@@ -276,7 +280,7 @@ pub(crate) fn read_resolved(resolved: &Path, args: &serde_json::Value) -> ToolOu
     }
 }
 
-fn tool_write(root: &Path, args: &serde_json::Value) -> ToolOutcome {
+fn tool_write(fs: &dyn tddy_fs::Fs, root: &Path, args: &serde_json::Value) -> ToolOutcome {
     let path_str = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("Write: missing 'path' argument"),
@@ -292,12 +296,12 @@ fn tool_write(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     };
 
     if let Some(parent) = resolved.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
+        if let Err(e) = fs.create_dir_all(parent) {
             return ToolOutcome::err(format!("Write: create_dir_all failed: {e}"));
         }
     }
 
-    match std::fs::write(&resolved, contents) {
+    match fs.write(&resolved, contents.as_bytes()) {
         Ok(()) => {
             let bytes = contents.len();
             ToolOutcome::ok(serde_json::json!({ "bytes_written": bytes }).to_string())
@@ -306,7 +310,7 @@ fn tool_write(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     }
 }
 
-fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
+fn tool_str_replace(fs: &dyn tddy_fs::Fs, root: &Path, args: &serde_json::Value) -> ToolOutcome {
     let path_str = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("StrReplace: missing 'path' argument"),
@@ -325,7 +329,7 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Err(e) => return ToolOutcome::err(format!("StrReplace: {e}")),
     };
 
-    let content = match std::fs::read_to_string(&resolved) {
+    let content = match fs.read_to_string(&resolved) {
         Ok(c) => c,
         Err(e) => return ToolOutcome::err(format!("StrReplace: read failed: {e}")),
     };
@@ -350,7 +354,7 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
 
     let new_content = content.replacen(old_string, new_string, 1);
     let region = edited_region::edited_region(&new_content, edit_offset);
-    match std::fs::write(&resolved, &new_content) {
+    match fs.write(&resolved, new_content.as_bytes()) {
         Ok(()) => ToolOutcome::ok(
             serde_json::json!({
                 "replaced": true,
@@ -365,7 +369,7 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     }
 }
 
-fn tool_delete(root: &Path, args: &serde_json::Value) -> ToolOutcome {
+fn tool_delete(fs: &dyn tddy_fs::Fs, root: &Path, args: &serde_json::Value) -> ToolOutcome {
     let path_str = match args.get("path").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("Delete: missing 'path' argument"),
@@ -376,7 +380,7 @@ fn tool_delete(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Err(e) => return ToolOutcome::err(format!("Delete: {e}")),
     };
 
-    match std::fs::remove_file(&resolved) {
+    match fs.remove_file(&resolved) {
         Ok(()) => ToolOutcome::ok(serde_json::json!({ "deleted": true }).to_string()),
         Err(e) => ToolOutcome::err(format!("Delete: {e}")),
     }
