@@ -226,6 +226,7 @@ fn run_post_workflow_elicitation_rounds(
 /// Handle an ElicitationNeeded result: show approval UI, handle refinement loop.
 /// Returns once the user approves the plan.
 fn handle_elicitation(
+    fs: &dyn tddy_fs::Fs,
     event: &ElicitationEvent,
     session_dir: &Path,
     ctx: &ElicitationContext<'_>,
@@ -271,7 +272,7 @@ fn handle_elicitation(
                     .unwrap_or_else(|| session_dir.to_path_buf());
                 let refine_storage =
                     crate::workflow::session::workflow_engine_storage_dir(session_dir);
-                std::fs::create_dir_all(&refine_storage).ok();
+                fs.create_dir_all(&refine_storage).ok();
                 let refine_hooks = ctx.recipe.create_hooks(Some(ctx.event_tx.clone()));
                 let refine_engine = WorkflowEngine::new(
                     ctx.recipe.clone(),
@@ -365,6 +366,7 @@ fn handle_elicitation(
 /// Returns Some(session_dir) on success, None when the caller should return.
 #[allow(clippy::too_many_arguments)]
 fn run_start_goal_without_output_dir(
+    fs: &dyn tddy_fs::Fs,
     recipe: Arc<dyn WorkflowRecipe>,
     backend: &SharedBackend,
     event_tx: &mpsc::Sender<WorkflowEvent>,
@@ -455,7 +457,7 @@ fn run_start_goal_without_output_dir(
         Some(dir) => crate::workflow::session::workflow_engine_storage_dir(dir),
         None => std::env::temp_dir().join(TUI_SESSION_FALLBACK_DIR),
     };
-    std::fs::create_dir_all(&storage_dir).ok();
+    fs.create_dir_all(&storage_dir).ok();
     let hooks = recipe.create_hooks(Some(event_tx.clone()));
     let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
     if let Some(ref dir) = session_dir {
@@ -501,7 +503,7 @@ fn run_start_goal_without_output_dir(
     if debug_output_path.is_none() {
         if let Some(ref dir) = session_dir {
             let logs = dir.join("logs");
-            let _ = std::fs::create_dir_all(&logs);
+            let _ = fs.create_dir_all(&logs);
             crate::redirect_debug_output(&logs.join("debug.log"));
             log::set_max_level(log::LevelFilter::Debug);
         }
@@ -510,13 +512,13 @@ fn run_start_goal_without_output_dir(
         if let Some(ref dir) = session_dir {
             let conv_path = dir.join("logs").join("conversation.jsonl");
             if let Some(parent) = conv_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                let _ = fs.create_dir_all(parent);
             }
             (None, Some(conv_path))
         } else {
             let p =
                 std::env::temp_dir().join(format!("tddy-plan-conv-{}.jsonl", std::process::id()));
-            let _ = std::fs::remove_file(&p);
+            let _ = fs.remove_file(&p);
             (Some(p), None)
         }
     } else {
@@ -612,11 +614,12 @@ fn run_start_goal_without_output_dir(
         if temp.exists() {
             if let Some(ref final_path) = conversation_output_resolved {
                 if let Some(parent) = final_path.parent() {
-                    let _ = std::fs::create_dir_all(parent);
+                    let _ = fs.create_dir_all(parent);
                 }
-                let _ = std::fs::rename(temp, final_path)
-                    .or_else(|_| std::fs::copy(temp, final_path).map(|_| ()));
-                let _ = std::fs::remove_file(temp);
+                let _ = fs
+                    .rename(temp, final_path)
+                    .or_else(|_| fs.copy(temp, final_path).map(|_| ()));
+                let _ = fs.remove_file(temp);
             }
         }
     }
@@ -635,7 +638,7 @@ fn run_start_goal_without_output_dir(
             socket_path,
             github_pr_tools_available,
         };
-        if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
+        if !handle_elicitation(fs, event, &session_dir, &elicitation_ctx) {
             return None;
         }
     }
@@ -646,6 +649,7 @@ fn run_start_goal_without_output_dir(
 /// Run the full workflow in a blocking thread. Sends events to event_tx, receives answers from answer_rx.
 #[allow(clippy::too_many_arguments)]
 pub fn run_workflow(
+    fs: &dyn tddy_fs::Fs,
     recipe: Arc<dyn WorkflowRecipe>,
     backend: SharedBackend,
     event_tx: mpsc::Sender<WorkflowEvent>,
@@ -696,6 +700,7 @@ pub fn run_workflow(
                 output_dir.as_path()
             };
             match run_start_goal_without_output_dir(
+                fs,
                 recipe.clone(),
                 &backend,
                 &event_tx,
@@ -791,7 +796,7 @@ pub fn run_workflow(
             .to_string();
         if !input.is_empty() {
             let storage_dir = crate::workflow::session::workflow_engine_storage_dir(&session_dir);
-            std::fs::create_dir_all(&storage_dir).ok();
+            fs.create_dir_all(&storage_dir).ok();
             let hooks = recipe.create_hooks(Some(event_tx.clone()));
             let engine =
                 WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
@@ -847,7 +852,7 @@ pub fn run_workflow(
                     socket_path: socket_path.as_ref(),
                     github_pr_tools_available,
                 };
-                if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
+                if !handle_elicitation(fs, event, &session_dir, &elicitation_ctx) {
                     return;
                 }
             }
@@ -900,7 +905,7 @@ pub fn run_workflow(
     });
 
     let storage_dir = crate::workflow::session::workflow_engine_storage_dir(&session_dir);
-    std::fs::create_dir_all(&storage_dir).ok();
+    fs.create_dir_all(&storage_dir).ok();
     let hooks = recipe.create_hooks(Some(event_tx.clone()));
     let backend_for_refine = backend.clone();
     let engine = WorkflowEngine::new(recipe.clone(), backend, storage_dir, Some(hooks));
@@ -994,7 +999,7 @@ pub fn run_workflow(
                     socket_path: socket_path.as_ref(),
                     github_pr_tools_available,
                 };
-                if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
+                if !handle_elicitation(fs, event, &session_dir, &elicitation_ctx) {
                     return;
                 }
                 result = match rt.block_on(engine.run_session(&result.session_id)) {

@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! What the coder stamps on every activity record it writes — AC1 and AC2 of
 //! `docs/ft/daemon/session-worktree-sync.md`.
 //!

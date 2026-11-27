@@ -50,7 +50,7 @@ impl Presenter {
                     // context via grill hooks reading this file in `after_task("grill")`.
                     if let Some(ref dir) = self.workflow.session_dir {
                         let wf = dir.join(".workflow");
-                        if let Err(e) = std::fs::create_dir_all(&wf) {
+                        if let Err(e) = self.fs.create_dir_all(&wf) {
                             log::warn!("grill ask answers: create_dir_all {}: {}", wf.display(), e);
                         } else {
                             let path = wf.join("grill_ask_answers.txt");

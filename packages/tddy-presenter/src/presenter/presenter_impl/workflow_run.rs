@@ -122,8 +122,10 @@ impl Presenter {
         let recipe = self.backend.recipe.clone();
         let tddy_data_dir = self.tddy_data_dir.clone();
         let github_pr_tools_available = self.workflow.github_pr_tools_available;
+        let fs = self.fs.clone();
         let handle = thread::spawn(move || {
             workflow_runner::run_workflow(
+                &*fs,
                 recipe,
                 backend,
                 event_tx,
