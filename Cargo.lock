@@ -12389,6 +12389,7 @@ dependencies = [
  "futures",
  "glob",
  "hex",
+ "libc",
  "log",
  "pretty_assertions",
  "prost 0.13.5",

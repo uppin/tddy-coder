@@ -9,6 +9,8 @@ name = "tddy_build"
 path = "src/lib.rs"
 
 [dependencies]
+libc = "0.2"
+tddy-fs = { path = "../tddy-fs" }
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"

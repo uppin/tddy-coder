@@ -4,8 +4,6 @@
 //! Atomic write mirrors `tddy-core`'s `flush_action_cache_document_atomic`
 //! (tmp + `sync_all` + `rename`).
 
-use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -154,15 +152,26 @@ pub fn lookup_cache(
     action_id: &str,
     expected_key: &str,
 ) -> Option<ActionCacheEntry> {
+    lookup_cache_on(&tddy_fs::DiskFs, repo_root, target_id, action_id, expected_key)
+}
+
+/// [`lookup_cache`] through the filesystem port.
+pub fn lookup_cache_on(
+    fs: &dyn tddy_fs::Fs,
+    repo_root: &Path,
+    target_id: &str,
+    action_id: &str,
+    expected_key: &str,
+) -> Option<ActionCacheEntry> {
     let path = cache_entry_path(repo_root, target_id, action_id);
-    let raw = fs::read_to_string(&path).ok()?;
+    let raw = fs.read_to_string(&path).ok()?;
     let entry: ActionCacheEntry = serde_json::from_str(&raw).ok()?;
 
     if entry.cache_key != expected_key {
         return None;
     }
     for output in &entry.output_paths {
-        if !repo_root.join(output).exists() {
+        if !fs.exists(&repo_root.join(output)) {
             return None;
         }
     }
@@ -175,26 +184,27 @@ pub fn persist_cache(
     target_id: &str,
     entry: &ActionCacheEntry,
 ) -> Result<(), BuildError> {
+    persist_cache_on(&tddy_fs::DiskFs, repo_root, target_id, entry)
+}
+
+/// [`persist_cache`] through the filesystem port: the port's atomic write is the
+/// same create-temp-then-rename this persisted with by hand.
+pub fn persist_cache_on(
+    fs: &dyn tddy_fs::Fs,
+    repo_root: &Path,
+    target_id: &str,
+    entry: &ActionCacheEntry,
+) -> Result<(), BuildError> {
     let path = cache_entry_path(repo_root, target_id, &entry.action_id);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| BuildError::Io(e.to_string()))?;
+        fs.create_dir_all(parent).map_err(|e| BuildError::Io(e.to_string()))?;
     }
 
-    let tmp_path = path.with_file_name(format!(
-        "{}.part{}.tmp",
-        sanitize(&entry.action_id),
-        uuid::Uuid::now_v7()
-    ));
     let serialized =
         serde_json::to_vec_pretty(entry).map_err(|e| BuildError::Manifest(e.to_string()))?;
 
-    {
-        let mut file = fs::File::create(&tmp_path).map_err(|e| BuildError::Io(e.to_string()))?;
-        file.write_all(&serialized)
-            .map_err(|e| BuildError::Io(e.to_string()))?;
-        file.sync_all().map_err(|e| BuildError::Io(e.to_string()))?;
-    }
-    fs::rename(&tmp_path, &path).map_err(|e| BuildError::Io(e.to_string()))?;
+    fs.write_atomic(&path, &serialized, None)
+        .map_err(|e| BuildError::Io(e.to_string()))?;
     Ok(())
 }
 

@@ -13,6 +13,7 @@ name = "tddy-sandbox-qemu"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs", features = ["tokio"] }
 tddy-sandbox = { path = "../tddy-sandbox" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 anyhow = "1"

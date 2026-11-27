@@ -18,6 +18,7 @@ name = "execute-tool-stdio-fixture"
 path = "tests/fixtures/execute_tool_fixture.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }

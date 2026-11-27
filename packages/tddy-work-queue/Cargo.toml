@@ -5,6 +5,7 @@ edition = "2021"
 description = "The PR-stack data model and its git/GitHub operations"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 tddy-core = { path = "../tddy-core" }
 tddy-git = { path = "../tddy-git" }
 tddy-github = { path = "../tddy-github" }

@@ -62,26 +62,39 @@ pub fn deserialize_frames(contents: &str) -> Vec<AcpAgentMessage> {
 
 /// Append one frame to the session's `acp-transcript.jsonl` (creating it if absent).
 pub fn append_acp_frame(session_dir: &Path, frame: &AcpAgentMessage) -> io::Result<()> {
-    std::fs::create_dir_all(session_dir)?;
+    append_acp_frame_on(&tddy_fs::DiskFs, session_dir, frame)
+}
+
+/// [`append_acp_frame`] through the filesystem port.
+pub fn append_acp_frame_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    frame: &AcpAgentMessage,
+) -> io::Result<()> {
+    fs.create_dir_all(session_dir)?;
     let path = session_dir.join(ACP_TRANSCRIPT_FILENAME);
     let mut line = serialize_frame(frame);
     line.push('\n');
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
-    file.write_all(line.as_bytes())
+    fs.append(&path, line.as_bytes())
 }
 
 /// Read the persisted transcript and return its frames in write order.
 ///
 /// Returns an empty `Vec` when the file does not exist (no transcript recorded yet).
 pub fn read_acp_transcript(session_dir: &Path) -> io::Result<Vec<AcpAgentMessage>> {
+    read_acp_transcript_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_acp_transcript`] through the filesystem port.
+pub fn read_acp_transcript_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> io::Result<Vec<AcpAgentMessage>> {
     let path = session_dir.join(ACP_TRANSCRIPT_FILENAME);
-    if !path.exists() {
+    if !fs.exists(&path) {
         return Ok(Vec::new());
     }
-    let contents = std::fs::read_to_string(&path)?;
+    let contents = fs.read_to_string(&path)?;
     Ok(deserialize_frames(&contents))
 }
 
