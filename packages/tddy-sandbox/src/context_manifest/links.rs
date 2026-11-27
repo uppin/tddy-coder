@@ -314,10 +314,12 @@ pub fn create_context_link_on(
         // `libc::symlink` directly: the port has no link-creation operation, and creating a
         // link is a name-space act, not file content.
         use std::os::unix::ffi::OsStrExt as _;
-        let c_target = std::ffi::CString::new(relative.as_os_str().as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL"))?;
-        let c_link = std::ffi::CString::new(link_path.as_os_str().as_bytes())
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL"))?;
+        let c_target = std::ffi::CString::new(relative.as_os_str().as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL")
+        })?;
+        let c_link = std::ffi::CString::new(link_path.as_os_str().as_bytes()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL")
+        })?;
         if unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) } != 0 {
             return Err(std::io::Error::last_os_error());
         }
@@ -356,7 +358,11 @@ pub fn prepare_context_write(context_dir: &Path, rel_path: &str) -> std::io::Res
 }
 
 /// [`prepare_context_write`] through the filesystem port.
-pub fn prepare_context_write_on(fs: &dyn tddy_fs::Fs, context_dir: &Path, rel_path: &str) -> std::io::Result<PathBuf> {
+pub fn prepare_context_write_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    rel_path: &str,
+) -> std::io::Result<PathBuf> {
     use std::io::{Error, ErrorKind};
 
     let rel = normalize_context_path(rel_path).ok_or_else(|| {

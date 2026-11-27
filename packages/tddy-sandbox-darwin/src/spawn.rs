@@ -35,13 +35,18 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
 }
 
 /// [`spawn_plan`] through the filesystem port.
-pub fn spawn_plan_on(fs: &dyn tddy_fs::Fs, plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+pub fn spawn_plan_on(
+    fs: &dyn tddy_fs::Fs,
+    plan: SandboxPlan,
+) -> Result<SandboxHandle, SandboxError> {
     plan.spec.validate()?;
 
     fs.create_dir_all(&plan.spec.project_root)
         .map_err(|e| SandboxError::Io(e.to_string()))?;
-    fs.create_dir_all(&plan.spec.scratch_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
-    fs.create_dir_all(&plan.spec.egress_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+    fs.create_dir_all(&plan.spec.scratch_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
+    fs.create_dir_all(&plan.spec.egress_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
 
     tddy_sandbox::materialize_copies_on(fs, &plan.copies).map_err(SandboxError::Io)?;
     tddy_sandbox::materialize_symlinks_on(fs, &plan.symlinks).map_err(SandboxError::Io)?;
@@ -135,14 +140,23 @@ pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
     plan.stdio
 }
 
-fn open_egress_log(fs: &dyn tddy_fs::Fs, egress_dir: &std::path::Path, name: &str) -> Result<std::os::fd::OwnedFd, SandboxError> {
-    fs.create_dir_all(egress_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+fn open_egress_log(
+    fs: &dyn tddy_fs::Fs,
+    egress_dir: &std::path::Path,
+    name: &str,
+) -> Result<std::os::fd::OwnedFd, SandboxError> {
+    fs.create_dir_all(egress_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
     let path = egress_log_path(egress_dir, name);
     // The child's stderr is an fd, not file content: opened with `libc::open` and held as
     // an `OwnedFd`, which `Stdio` takes as it took the `File`.
     use std::os::fd::{FromRawFd as _, OwnedFd};
-    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
-        .map_err(|_| SandboxError::Io(format!("open egress log {}: not a C string", path.display())))?;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
+        SandboxError::Io(format!(
+            "open egress log {}: not a C string",
+            path.display()
+        ))
+    })?;
     let fd = unsafe {
         libc::open(
             c_path.as_ptr(),

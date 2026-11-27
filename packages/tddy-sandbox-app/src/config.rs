@@ -70,7 +70,8 @@ impl SandboxAppConfig {
 
     /// [`SandboxAppConfig::load`] through the filesystem port.
     pub fn load_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<Self> {
-        let contents = fs.read_to_string(path)
+        let contents = fs
+            .read_to_string(path)
             .with_context(|| format!("read sandbox config {}", path.display()))?;
         serde_yaml::from_str(&contents)
             .with_context(|| format!("parse sandbox config {}", path.display()))

@@ -306,7 +306,10 @@ fn update_latest_session_symlink(session_base: &std::path::Path, session_id: &st
     #[cfg(unix)]
     {
         let sessions_dir = session_base.join(SESSIONS_SUBDIR);
-        if tddy_sandbox_app::app_fs().create_dir_all(&sessions_dir).is_err() {
+        if tddy_sandbox_app::app_fs()
+            .create_dir_all(&sessions_dir)
+            .is_err()
+        {
             return;
         }
         let link = sessions_dir.join("latest");
@@ -334,13 +337,15 @@ impl std::io::Write for AppLogWriter {
     }
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 fn symlink(target: &str, link: &Path) -> std::io::Result<()> {
     use std::os::unix::ffi::OsStrExt as _;
-    let c_target = std::ffi::CString::new(target.as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL"))?;
-    let c_link = std::ffi::CString::new(link.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL"))?;
+    let c_target = std::ffi::CString::new(target.as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL")
+    })?;
+    let c_link = std::ffi::CString::new(link.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL")
+    })?;
     if unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
@@ -1127,11 +1132,13 @@ mod tests {
     fn a_sandboxed_session_wires_in_a_named_specialized_agent() {
         // Given
         let agents_dir = tempfile::tempdir().expect("agents dir");
-        tddy_sandbox_app::app_fs().write(
-            &agents_dir.path().join("explorer.yaml"),
-            "name: explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n".as_bytes(),
-        )
-        .expect("write the def");
+        tddy_sandbox_app::app_fs()
+            .write(
+                &agents_dir.path().join("explorer.yaml"),
+                "name: explorer\nmodel: qwen2.5-coder:7b\nbase_url: http://localhost:11434\n"
+                    .as_bytes(),
+            )
+            .expect("write the def");
 
         // When
         let wired =

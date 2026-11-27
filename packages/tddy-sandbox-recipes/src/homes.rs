@@ -46,7 +46,11 @@ pub fn persistent_home(tddy_home: &Path, key: &str) -> Result<PathBuf, HomeError
 }
 
 /// [`persistent_home`] through the filesystem port.
-pub fn persistent_home_on(fs: &dyn tddy_fs::Fs, tddy_home: &Path, key: &str) -> Result<PathBuf, HomeError> {
+pub fn persistent_home_on(
+    fs: &dyn tddy_fs::Fs,
+    tddy_home: &Path,
+    key: &str,
+) -> Result<PathBuf, HomeError> {
     let home = tddy_home.join(HOMES_DIR).join(key);
     let legacy = legacy_home(tddy_home, key);
     let io_error = |path: &Path, e: std::io::Error| HomeError::Io {
@@ -58,8 +62,10 @@ pub fn persistent_home_on(fs: &dyn tddy_fs::Fs, tddy_home: &Path, key: &str) -> 
             return Err(HomeError::BothExist { legacy, home });
         }
         let homes_dir = tddy_home.join(HOMES_DIR);
-        fs.create_dir_all(&homes_dir).map_err(|e| io_error(&homes_dir, e))?;
-        fs.rename(&legacy, &home).map_err(|e| io_error(&legacy, e))?;
+        fs.create_dir_all(&homes_dir)
+            .map_err(|e| io_error(&homes_dir, e))?;
+        fs.rename(&legacy, &home)
+            .map_err(|e| io_error(&legacy, e))?;
     } else {
         fs.create_dir_all(&home).map_err(|e| io_error(&home, e))?;
     }

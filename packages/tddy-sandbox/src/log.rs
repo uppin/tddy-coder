@@ -43,7 +43,11 @@ pub fn format_sandbox_diagnostics(egress_dir: &Path, project_root: Option<&Path>
 }
 
 /// [`format_sandbox_diagnostics`] through the filesystem port.
-pub fn format_sandbox_diagnostics_on(fs: &dyn tddy_fs::Fs, egress_dir: &Path, project_root: Option<&Path>) -> String {
+pub fn format_sandbox_diagnostics_on(
+    fs: &dyn tddy_fs::Fs,
+    egress_dir: &Path,
+    project_root: Option<&Path>,
+) -> String {
     let mut out = String::new();
     for name in [
         SANDBOX_SPAWN_MANIFEST,
@@ -72,7 +76,9 @@ fn append_log_section(fs: &dyn tddy_fs::Fs, out: &mut String, path: &Path, name:
     if !fs.exists(path) {
         return;
     }
-    let body = fs.read_to_string(path).unwrap_or_else(|e| format!("<read error: {e}>"));
+    let body = fs
+        .read_to_string(path)
+        .unwrap_or_else(|e| format!("<read error: {e}>"));
     let _ = writeln!(out, "--- {name} ({}) ---\n{body}", path.display());
 }
 

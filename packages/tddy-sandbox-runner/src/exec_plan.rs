@@ -88,7 +88,8 @@ impl ExecPlan {
     }
 
     fn read(path: &Path) -> Result<Self> {
-        let json = crate::runner::runner_fs().read_to_string(path)
+        let json = crate::runner::runner_fs()
+            .read_to_string(path)
             .with_context(|| format!("read exec plan {}", path.display()))?;
         let plan: Self = serde_json::from_str(&json)
             .with_context(|| format!("parse exec plan {}", path.display()))?;

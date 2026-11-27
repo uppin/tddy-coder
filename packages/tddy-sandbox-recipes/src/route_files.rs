@@ -5,7 +5,6 @@
 //! directory is the scratch's own, so it is replaced when a plan is built again for the same
 //! session (a relaunch).
 
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use tddy_core::provider_route::HarnessRoute;
@@ -19,7 +18,8 @@ const OWNER_ONLY_FILE: u32 = 0o600;
 /// Write `route`'s files into `scratch_dir/provider-route` and return the path of the first one,
 /// which the launch's configuration variable names (`coding_agent.route.config_env`). `None` when the route has no files, and
 /// nothing is written.
-pub(crate) fn materialise_route_files(fs: &dyn tddy_fs::Fs,
+pub(crate) fn materialise_route_files(
+    fs: &dyn tddy_fs::Fs,
     scratch_dir: &Path,
     route: &HarnessRoute,
 ) -> Result<Option<PathBuf>, SandboxError> {
@@ -63,7 +63,8 @@ fn plain_file_name(name: &str) -> Result<&str, SandboxError> {
 fn remove_stale_dir(fs: &dyn tddy_fs::Fs, dir: &Path) -> Result<(), SandboxError> {
     // `metadata`, so a link is seen as a link rather than as whatever it points at.
     match fs.metadata(dir) {
-        Ok(_) => fs.remove_dir_all(dir)
+        Ok(_) => fs
+            .remove_dir_all(dir)
             .map_err(|e| io_error("replace the route files directory", dir, &e)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(io_error("inspect the route files directory", dir, &e)),

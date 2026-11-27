@@ -179,7 +179,11 @@ pub fn mark_context_stale(context_dir: &Path, guidance_files: &[PathBuf]) -> any
 }
 
 /// [`mark_context_stale`] through the filesystem port.
-pub fn mark_context_stale_on(fs: &dyn tddy_fs::Fs, context_dir: &Path, guidance_files: &[PathBuf]) -> anyhow::Result<()> {
+pub fn mark_context_stale_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    guidance_files: &[PathBuf],
+) -> anyhow::Result<()> {
     rewrite_preamble_files(fs, context_dir, guidance_files, with_stale_marker)
 }
 
@@ -189,7 +193,11 @@ pub fn clear_context_stale(context_dir: &Path, guidance_files: &[PathBuf]) -> an
 }
 
 /// [`clear_context_stale`] through the filesystem port.
-pub fn clear_context_stale_on(fs: &dyn tddy_fs::Fs, context_dir: &Path, guidance_files: &[PathBuf]) -> anyhow::Result<()> {
+pub fn clear_context_stale_on(
+    fs: &dyn tddy_fs::Fs,
+    context_dir: &Path,
+    guidance_files: &[PathBuf],
+) -> anyhow::Result<()> {
     rewrite_preamble_files(fs, context_dir, guidance_files, without_stale_marker)
 }
 
@@ -250,6 +258,7 @@ impl SandboxContextDir {
     }
 
     /// [`SandboxContextDir::create_with_subagent`] through the filesystem port.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_with_subagent_on(
         fs: &dyn tddy_fs::Fs,
         source_dir: &Path,
@@ -368,18 +377,15 @@ fn read_link(path: &Path) -> anyhow::Result<PathBuf> {
     let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
         .map_err(|_| anyhow::anyhow!("path contains NUL: {}", path.display()))?;
     let mut buffer = vec![0u8; 4096];
-    let length = unsafe {
-        libc::readlink(
-            c_path.as_ptr(),
-            buffer.as_mut_ptr().cast(),
-            buffer.len(),
-        )
-    };
+    let length =
+        unsafe { libc::readlink(c_path.as_ptr(), buffer.as_mut_ptr().cast(), buffer.len()) };
     if length < 0 {
         return Err(std::io::Error::last_os_error().into());
     }
     buffer.truncate(length as usize);
-    Ok(PathBuf::from(<std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(buffer)))
+    Ok(PathBuf::from(
+        <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(buffer),
+    ))
 }
 
 #[cfg(not(unix))]

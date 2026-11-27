@@ -40,7 +40,10 @@ pub fn materialize_symlinks(symlinks: &[SymlinkSpec]) -> Result<(), String> {
 }
 
 /// [`materialize_symlinks`] through the filesystem port.
-pub fn materialize_symlinks_on(fs: &dyn tddy_fs::Fs, symlinks: &[SymlinkSpec]) -> Result<(), String> {
+pub fn materialize_symlinks_on(
+    fs: &dyn tddy_fs::Fs,
+    symlinks: &[SymlinkSpec],
+) -> Result<(), String> {
     for s in symlinks {
         if let Some(parent) = s.link.parent() {
             fs.create_dir_all(parent)
@@ -65,7 +68,11 @@ pub fn materialize_secrets(secrets: &[SecretSpec], scratch_dir: &Path) -> Result
 }
 
 /// [`materialize_secrets`] through the filesystem port.
-pub fn materialize_secrets_on(fs: &dyn tddy_fs::Fs, secrets: &[SecretSpec], scratch_dir: &Path) -> Result<(), String> {
+pub fn materialize_secrets_on(
+    fs: &dyn tddy_fs::Fs,
+    secrets: &[SecretSpec],
+    scratch_dir: &Path,
+) -> Result<(), String> {
     if secrets.is_empty() {
         return Ok(());
     }
@@ -99,10 +106,12 @@ fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     // `libc::symlink` directly: the port has no link-creation operation, and creating a
     // link is a name-space act, not file content. Same call `std::os::unix::fs::symlink` made.
     use std::os::unix::ffi::OsStrExt as _;
-    let c_target = std::ffi::CString::new(target.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL"))?;
-    let c_link = std::ffi::CString::new(link.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL"))?;
+    let c_target = std::ffi::CString::new(target.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "target contains NUL")
+    })?;
+    let c_link = std::ffi::CString::new(link.as_os_str().as_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "link contains NUL")
+    })?;
     if unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) } != 0 {
         return Err(std::io::Error::last_os_error());
     }

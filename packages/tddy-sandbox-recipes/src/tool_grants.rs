@@ -104,7 +104,10 @@ fn linked_libraries(binary: &Path) -> Vec<PathBuf> {
 fn nearest_canonical_ancestor(fs: &dyn tddy_fs::Fs, dir: &Path) -> Option<PathBuf> {
     dir.ancestors()
         .take_while(|ancestor| *ancestor != Path::new("/"))
-        .find(|ancestor| fs.canonicalize(ancestor).is_ok_and(|real| real == *ancestor))
+        .find(|ancestor| {
+            fs.canonicalize(ancestor)
+                .is_ok_and(|real| real == *ancestor)
+        })
         .map(Path::to_path_buf)
 }
 
@@ -117,28 +120,18 @@ pub fn lower_tools(
     jail_bin_dir: &Path,
     libraries: &dyn BinaryLibraries,
 ) -> ToolGrants {
-    lower_tools_on(&tddy_fs::DiskFs, tools, jail_bin_dir, libraries)
-}
-
-/// [`lower_tools`] through the filesystem port.
-pub fn lower_tools_on(
-    fs: &dyn tddy_fs::Fs,
-    tools: &[ResolvedTool],
-    jail_bin_dir: &Path,
-    libraries: &dyn BinaryLibraries,
-) -> ToolGrants {
     let mut grants = ToolGrants {
         reads: Vec::new(),
         symlinks: Vec::new(),
         path_prefix: jail_bin_dir.to_path_buf(),
     };
     for tool in tools {
-        lower_tool(fs, &mut grants, tool, jail_bin_dir, libraries);
+        lower_tool(&mut grants, tool, jail_bin_dir, libraries);
     }
     grants
 }
 
-fn lower_tool(fs: &dyn tddy_fs::Fs, 
+fn lower_tool(
     grants: &mut ToolGrants,
     tool: &ResolvedTool,
     jail_bin_dir: &Path,
@@ -295,7 +288,8 @@ pub fn lower_files_on(
                 seed_once(fs, &paths.host_home.join(from_host), &home.join(to))?
             }
             FileItem::Mirror { from_host, to } => {
-                mirror(fs,
+                mirror(
+                    fs,
                     &paths.host_home.join(from_host),
                     &home.join(to),
                     &mut grants,
@@ -358,7 +352,9 @@ pub fn lower_policy(sections: &[PolicySection]) -> PolicySpec {
 /// Copy `host_file` to `dest` (mode `0600`) unless `dest` exists. A missing host file seeds nothing.
 fn seed_once(fs: &dyn tddy_fs::Fs, host_file: &Path, dest: &Path) -> std::io::Result<()> {
     // `metadata_follow`, as before: `is_file` follows a link.
-    if fs.exists(dest) || !matches!(fs.metadata_follow(host_file), Ok(m) if m.kind == tddy_fs::FsKind::File) {
+    if fs.exists(dest)
+        || !matches!(fs.metadata_follow(host_file), Ok(m) if m.kind == tddy_fs::FsKind::File)
+    {
         return Ok(());
     }
     if let Some(parent) = dest.parent() {
@@ -375,7 +371,12 @@ fn seed_once(fs: &dyn tddy_fs::Fs, host_file: &Path, dest: &Path) -> std::io::Re
 /// A home an older launch seeded holds a real directory of links where a mirror of a directory goes
 /// (a tool's versioned install directory). One that holds nothing but links is that older mirror, and is
 /// replaced; any other directory is the tool's own, is left alone and is not mirrored over.
-fn mirror(fs: &dyn tddy_fs::Fs, host_path: &Path, link: &Path, grants: &mut FileGrants) -> std::io::Result<()> {
+fn mirror(
+    fs: &dyn tddy_fs::Fs,
+    host_path: &Path,
+    link: &Path,
+    grants: &mut FileGrants,
+) -> std::io::Result<()> {
     let Ok(target) = fs.canonicalize(host_path) else {
         return Ok(());
     };
@@ -402,7 +403,8 @@ fn mirror(fs: &dyn tddy_fs::Fs, host_path: &Path, link: &Path, grants: &mut File
 /// Whether `path` is a directory itself, not a link to one.
 fn is_a_real_directory(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
     // `metadata`, as before: a link to a directory is not a real directory.
-    fs.metadata(path).is_ok_and(|meta| meta.kind == tddy_fs::FsKind::Dir)
+    fs.metadata(path)
+        .is_ok_and(|meta| meta.kind == tddy_fs::FsKind::Dir)
 }
 
 /// Whether every entry of the directory `dir` is a symbolic link.

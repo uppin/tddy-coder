@@ -56,7 +56,8 @@ fn relocates_the_daemon_process_into_the_supervisor_leaf() {
     let base = tempfile::tempdir().unwrap();
 
     // When
-    relocate_self_into_leaf(&tddy_fs::DiskFs, base.path(), 4242, "supervisor").expect("relocate into leaf");
+    relocate_self_into_leaf(&tddy_fs::DiskFs, base.path(), 4242, "supervisor")
+        .expect("relocate into leaf");
 
     // Then
     let procs = std::fs::read_to_string(base.path().join("supervisor").join("cgroup.procs"))

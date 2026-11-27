@@ -313,7 +313,9 @@ pub async fn provision_with_interrupt(
     }
 
     let session_dir = params.session_dir.clone();
-    crate::app_fs().create_dir_all(&session_dir).context("create session dir")?;
+    crate::app_fs()
+        .create_dir_all(&session_dir)
+        .context("create session dir")?;
 
     // The same tree `spawn_claude_sandbox` lays out, so a `sandboxed` session's artifacts are found
     // where every other session's are (PRD criterion 11).
@@ -336,20 +338,34 @@ pub async fn provision_with_interrupt(
     // `TMPDIR` stays inside the session tree. Scratch is exactly what should not outlive the
     // session, and keeping it there is what makes a finished session's directory the whole story.
     let build_home_dir = params.repo_build_home;
-    crate::app_fs().create_dir_all(sandbox_root.join(".work").join("tmp"))
+    crate::app_fs()
+        .create_dir_all(sandbox_root.join(".work").join("tmp"))
         .context("mkdir sandbox scratch tmp")?;
-    crate::app_fs().create_dir_all(&build_home_dir)
+    crate::app_fs()
+        .create_dir_all(&build_home_dir)
         .with_context(|| format!("mkdir build home {}", build_home_dir.display()))?;
-    crate::app_fs().create_dir_all(sandbox_root.join("context")).context("mkdir sandbox context")?;
-    crate::app_fs().create_dir_all(&egress_dir).context("mkdir sandbox egress")?;
-    crate::app_fs().create_dir_all(&host_dir).context("mkdir the session's host-only dir")?;
+    crate::app_fs()
+        .create_dir_all(sandbox_root.join("context"))
+        .context("mkdir sandbox context")?;
+    crate::app_fs()
+        .create_dir_all(&egress_dir)
+        .context("mkdir sandbox egress")?;
+    crate::app_fs()
+        .create_dir_all(&host_dir)
+        .context("mkdir the session's host-only dir")?;
 
     // Seatbelt matches its rules against fully symlink-resolved paths (`/var` → `/private/var`), so
     // every path the profile is built from is named the way the kernel will report it.
-    let sandbox_root = crate::app_fs().canonicalize(&sandbox_root).unwrap_or(sandbox_root);
-    let egress_dir = crate::app_fs().canonicalize(&egress_dir).unwrap_or(egress_dir);
+    let sandbox_root = crate::app_fs()
+        .canonicalize(&sandbox_root)
+        .unwrap_or(sandbox_root);
+    let egress_dir = crate::app_fs()
+        .canonicalize(&egress_dir)
+        .unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
-    let build_home = crate::app_fs().canonicalize(&build_home_dir).unwrap_or(build_home_dir);
+    let build_home = crate::app_fs()
+        .canonicalize(&build_home_dir)
+        .unwrap_or(build_home_dir);
     let scratch_tmp = scratch_dir.join("tmp");
     let context_dir = sandbox_root.join("context");
 
@@ -618,7 +634,9 @@ async fn finish_provisioning(
 /// the leading half is a millisecond timestamp, so two sessions started close together would
 /// otherwise pick the same path and the second would dispatch into the first one's jail.
 fn host_tool_ipc_socket_path(session_id: &str) -> PathBuf {
-    let tmp = crate::app_fs().canonicalize(&std::env::temp_dir()).unwrap_or_else(|_| std::env::temp_dir());
+    let tmp = crate::app_fs()
+        .canonicalize(&std::env::temp_dir())
+        .unwrap_or_else(|_| std::env::temp_dir());
     let mut tail: Vec<char> = session_id
         .chars()
         .filter(char::is_ascii_alphanumeric)
@@ -650,7 +668,8 @@ async fn serve_host_tool_ipc(
     // carries the process umask, and the window is the only one in which another account on the
     // host could have dialled it. A session that cannot narrow its own socket is a session whose
     // confinement claim is not true, so this is an error rather than a warning.
-    crate::app_fs().set_mode(path, TOOL_SOCKET_MODE)
+    crate::app_fs()
+        .set_mode(path, TOOL_SOCKET_MODE)
         .with_context(|| format!("restrict the host tool IPC socket at {}", path.display()))?;
 
     let session_dir = session_dir.to_path_buf();

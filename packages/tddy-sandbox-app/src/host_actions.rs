@@ -36,7 +36,8 @@ pub fn establish_action(session_dir: &Path, args: &Value) -> Result<Value, Strin
     ensure_action_architecture(&manifest.architecture).map_err(|e| e.to_string())?;
 
     let actions_dir = session_dir.join("actions");
-    crate::app_fs().create_dir_all(&actions_dir)
+    crate::app_fs()
+        .create_dir_all(&actions_dir)
         .map_err(|e| format!("create {}: {e}", actions_dir.display()))?;
     let path = actions_dir.join(format!("{}.yaml", manifest.id));
     match crate::app_fs().read_to_string(&path) {
@@ -114,7 +115,9 @@ pub fn invoke_action(session_dir: &Path, worktree: &Path, args: &Value) -> Resul
         Some(Value::String(s)) => s.clone(),
         Some(other) => other.to_string(),
     };
-    let canon_worktree = crate::app_fs().canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+    let canon_worktree = crate::app_fs()
+        .canonicalize(worktree)
+        .unwrap_or_else(|_| worktree.to_path_buf());
     let store_root = repo_actions_root(&resolve_tddy_data_dir(), &derive_repo_key(&canon_worktree));
     invoke_action_core(
         Some(session_dir),

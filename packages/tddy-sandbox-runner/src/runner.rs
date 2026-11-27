@@ -1703,7 +1703,8 @@ async fn serve_over_stdio(service: SandboxRunnerService, ready_marker: &Path) ->
         );
     }
     boot_log("INFO", "boot: serve sandbox SandboxService over stdio");
-    runner_fs().write(ready_marker, b"stdio")
+    runner_fs()
+        .write(ready_marker, b"stdio")
         .context("write ready marker")
         .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
     sandbox_log_line("INFO", "SandboxService serving over stdio");
@@ -2100,7 +2101,8 @@ pub(crate) async fn run_sandbox_runner_inner(
         let listener = tokio::net::UnixListener::bind(&uds_path)
             .context("bind sandbox grpc uds")
             .inspect_err(|e| boot_log_error("bind_sandbox_grpc_uds", format!("{e:#}")))?;
-        runner_fs().write(&args.ready_marker, b"uds")
+        runner_fs()
+            .write(&args.ready_marker, b"uds")
             .context("write ready marker")
             .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
         boot_log(
@@ -2189,7 +2191,8 @@ async fn serve_over_loopback_grpc(
         .context("grpc local addr")
         .inspect_err(|e| boot_log_error("grpc_local_addr", format!("{e:#}")))?
         .port();
-    runner_fs().write(ready_marker, port.to_string().as_bytes())
+    runner_fs()
+        .write(ready_marker, port.to_string().as_bytes())
         .context("write ready marker")
         .inspect_err(|e| boot_log_error("write_ready_marker", format!("{e:#}")))?;
     boot_log(
@@ -2260,7 +2263,9 @@ pub async fn connect_sandbox_client(
         tonic::transport::Channel,
     >,
 > {
-    let port_str = runner_fs().read_to_string(ready_marker).context("read ready marker")?;
+    let port_str = runner_fs()
+        .read_to_string(ready_marker)
+        .context("read ready marker")?;
     let port: u16 = port_str.trim().parse().context("parse grpc port")?;
     let endpoint = format!("http://127.0.0.1:{port}");
     // Prefer 127.0.0.1 for host-side dial; server may bind localhost (same loopback on macOS).

@@ -244,7 +244,8 @@ pub struct SpawnedSandbox {
 
 pub(crate) fn canonicalize_exec_path(path: &str) -> String {
     if path.contains('/') {
-        crate::app_fs().canonicalize(path)
+        crate::app_fs()
+            .canonicalize(path)
             .map(|c| c.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string())
     } else {
@@ -259,7 +260,9 @@ async fn wait_for_runner_failure_or_settle(egress_dir: &Path) -> Result<()> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     while tokio::time::Instant::now() < deadline {
         if failure_marker.exists() {
-            let message = crate::app_fs().read_to_string(&failure_marker).unwrap_or_default();
+            let message = crate::app_fs()
+                .read_to_string(&failure_marker)
+                .unwrap_or_default();
             let logs = tddy_sandbox::format_egress_logs(egress_dir);
             anyhow::bail!(
                 "sandbox runner failed to start claude inside the jail.\n{message}\n{logs}"
@@ -294,17 +297,28 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     }
 
     let session_dir = params.session_dir.clone();
-    crate::app_fs().create_dir_all(&session_dir).context("create session dir")?;
+    crate::app_fs()
+        .create_dir_all(&session_dir)
+        .context("create session dir")?;
 
     let sandbox_root = session_dir.join("sandbox");
     let egress_dir = session_dir.join("egress");
-    crate::app_fs().create_dir_all(sandbox_root.join(".work").join("tmp"))
+    crate::app_fs()
+        .create_dir_all(sandbox_root.join(".work").join("tmp"))
         .context("mkdir sandbox scratch tmp")?;
-    crate::app_fs().create_dir_all(sandbox_root.join("context")).context("mkdir sandbox context")?;
-    crate::app_fs().create_dir_all(&egress_dir).context("mkdir sandbox egress")?;
+    crate::app_fs()
+        .create_dir_all(sandbox_root.join("context"))
+        .context("mkdir sandbox context")?;
+    crate::app_fs()
+        .create_dir_all(&egress_dir)
+        .context("mkdir sandbox egress")?;
 
-    let sandbox_root = crate::app_fs().canonicalize(&sandbox_root).unwrap_or(sandbox_root);
-    let egress_dir = crate::app_fs().canonicalize(&egress_dir).unwrap_or(egress_dir);
+    let sandbox_root = crate::app_fs()
+        .canonicalize(&sandbox_root)
+        .unwrap_or(sandbox_root);
+    let egress_dir = crate::app_fs()
+        .canonicalize(&egress_dir)
+        .unwrap_or(egress_dir);
     let scratch_dir = sandbox_root.join(".work");
     let scratch_tmp = scratch_dir.join("tmp");
     let context_dir = sandbox_root.join("context");
@@ -687,7 +701,8 @@ mod tests {
         );
 
         // Then
-        let trace = crate::app_fs().read_to_string(&session_dir.path().join("spawn.trace.log"))
+        let trace = crate::app_fs()
+            .read_to_string(&session_dir.path().join("spawn.trace.log"))
             .expect("a quiet trace must still write the session's trace log");
         assert!(
             trace.contains("the host tool IPC socket could not accept"),

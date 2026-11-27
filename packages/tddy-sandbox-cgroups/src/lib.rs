@@ -15,8 +15,8 @@ use std::sync::OnceLock;
 
 use nix::mount::MsFlags;
 use nix::sched::{unshare, CloneFlags};
-use tddy_sandbox::{SandboxError, SandboxHandle, SandboxPlan, SandboxSpec};
 use tddy_fs::Fs as _;
+use tddy_sandbox::{SandboxError, SandboxHandle, SandboxPlan, SandboxSpec};
 
 /// Map a plan's read grants to read-only bind-mount operations applied inside the rootless jail.
 ///
@@ -92,14 +92,18 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
 }
 
 /// [`spawn_plan`] through the filesystem port.
-pub fn spawn_plan_on(fs: &dyn tddy_fs::Fs, plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+pub fn spawn_plan_on(
+    fs: &dyn tddy_fs::Fs,
+    plan: SandboxPlan,
+) -> Result<SandboxHandle, SandboxError> {
     plan.spec.validate()?;
     for dir in [
         &plan.spec.project_root,
         &plan.spec.scratch_dir,
         &plan.spec.egress_dir,
     ] {
-        fs.create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+        fs.create_dir_all(dir)
+            .map_err(|e| SandboxError::Io(e.to_string()))?;
     }
 
     if !unprivileged_userns_available() {
@@ -123,7 +127,8 @@ pub fn spawn_plan_on(fs: &dyn tddy_fs::Fs, plan: SandboxPlan) -> Result<SandboxH
     // writable cgroup v2 subtree is available — never a silent degrade to an unconfined process.
     let base = detect_and_prepare_base(fs, &plan.cgroup)?;
     let scope = scope_dir_in(&base, &session_name_from(&plan.spec), next_seq());
-    fs.create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+    fs.create_dir_all(&scope)
+        .map_err(|e| cgroup_unsupported_error(&scope, &e))?;
 
     let uid = nix::unistd::geteuid().as_raw();
     let gid = nix::unistd::getegid().as_raw();
@@ -271,7 +276,8 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
 pub fn spawn_on(fs: &dyn tddy_fs::Fs, spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
     spec.validate()?;
     for dir in [&spec.project_root, &spec.scratch_dir, &spec.egress_dir] {
-        fs.create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+        fs.create_dir_all(dir)
+            .map_err(|e| SandboxError::Io(e.to_string()))?;
     }
 
     if !unprivileged_userns_available() {
@@ -290,7 +296,8 @@ pub fn spawn_on(fs: &dyn tddy_fs::Fs, spec: SandboxSpec) -> Result<SandboxHandle
     // is prepared (and the daemon relocated) before the child is forked.
     let base = detect_and_prepare_base(fs, &tddy_sandbox::CgroupConfig::default())?;
     let scope = scope_dir_in(&base, &session_name_from(&spec), next_seq());
-    fs.create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+    fs.create_dir_all(&scope)
+        .map_err(|e| cgroup_unsupported_error(&scope, &e))?;
 
     let uid = nix::unistd::geteuid().as_raw();
     let gid = nix::unistd::getegid().as_raw();
@@ -548,14 +555,26 @@ pub fn scope_dir_in(base: &Path, session_name: &str, seq: u64) -> PathBuf {
 
 /// Seam: create `base/<leaf>` and move the daemon's own thread group into it by writing `self_pid`
 /// (the TGID) to `base/<leaf>/cgroup.procs`, satisfying cgroup v2's no-internal-processes rule.
-pub fn relocate_self_into_leaf(fs: &dyn tddy_fs::Fs, base: &Path, self_pid: u32, leaf: &str) -> std::io::Result<()> {
+pub fn relocate_self_into_leaf(
+    fs: &dyn tddy_fs::Fs,
+    base: &Path,
+    self_pid: u32,
+    leaf: &str,
+) -> std::io::Result<()> {
     let leaf_dir = base.join(leaf);
     fs.create_dir_all(&leaf_dir)?;
-    fs.write(&leaf_dir.join("cgroup.procs"), self_pid.to_string().as_bytes())
+    fs.write(
+        &leaf_dir.join("cgroup.procs"),
+        self_pid.to_string().as_bytes(),
+    )
 }
 
 /// Seam: enable the given controllers in `base/cgroup.subtree_control`.
-pub fn enable_controllers(fs: &dyn tddy_fs::Fs, base: &Path, controllers: &[String]) -> std::io::Result<()> {
+pub fn enable_controllers(
+    fs: &dyn tddy_fs::Fs,
+    base: &Path,
+    controllers: &[String],
+) -> std::io::Result<()> {
     fs.write(
         &base.join("cgroup.subtree_control"),
         subtree_control_line(controllers).as_bytes(),
@@ -570,7 +589,10 @@ pub fn move_pid_into_scope(fs: &dyn tddy_fs::Fs, scope: &Path, pid: u32) -> std:
 /// Host-touching orchestrator (one-time per daemon process, `OnceLock`-guarded): resolve the
 /// delegated base, relocate self into the supervisor leaf, and enable controllers. Caches the base
 /// or the error so every later spawn is fail-fast and never re-degrades.
-fn detect_and_prepare_base(fs: &dyn tddy_fs::Fs, cfg: &tddy_sandbox::CgroupConfig) -> Result<PathBuf, SandboxError> {
+fn detect_and_prepare_base(
+    fs: &dyn tddy_fs::Fs,
+    cfg: &tddy_sandbox::CgroupConfig,
+) -> Result<PathBuf, SandboxError> {
     static PREPARED_BASE: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     let result = PREPARED_BASE.get_or_init(|| {
         // `/proc` is the host's process table, not sandbox disk: read through the port on the
@@ -729,9 +751,16 @@ pub fn detect_allow_read_paths() -> Vec<PathBuf> {
 
 /// Write cgroup v2 limit files (`memory.max`, `cpu.max`, `pids.max`) into the delegated scope dir.
 /// Only fields that are `Some` are written.
-pub fn write_cgroup_limits(fs: &dyn tddy_fs::Fs, scope_dir: &Path, limits: &CgroupLimits) -> std::io::Result<()> {
+pub fn write_cgroup_limits(
+    fs: &dyn tddy_fs::Fs,
+    scope_dir: &Path,
+    limits: &CgroupLimits,
+) -> std::io::Result<()> {
     if let Some(memory_max) = limits.memory_max {
-        fs.write(&scope_dir.join("memory.max"), memory_max.to_string().as_bytes())?;
+        fs.write(
+            &scope_dir.join("memory.max"),
+            memory_max.to_string().as_bytes(),
+        )?;
     }
     if let Some(cpu_max) = &limits.cpu_max {
         fs.write(&scope_dir.join("cpu.max"), cpu_max.as_bytes())?;

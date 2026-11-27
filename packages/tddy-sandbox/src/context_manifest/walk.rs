@@ -97,7 +97,8 @@ struct ContextTree {
 /// ignores; drop the links [`is_withheld_through_a_link`] withholds; withhold the listed files it
 /// withholds; pull in what the surviving links reach; drop the pulled-in files git ignores or the
 /// predicate withholds.
-fn context_tree(fs: &dyn tddy_fs::Fs, 
+fn context_tree(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     globs: &[&str],
     guidance_files: &[std::path::PathBuf],
@@ -241,6 +242,7 @@ pub fn context_reach_on(
 /// The allow-listed tree: ordinary files the globs name, followed preamble links, and the links
 /// whose own path is allow-listed. `links` collects each travelling link's canonical target beside
 /// the link itself.
+#[allow(clippy::too_many_arguments)]
 fn collect_allow_listed(
     fs: &dyn tddy_fs::Fs,
     dir: &Path,
@@ -253,7 +255,11 @@ fn collect_allow_listed(
 ) -> anyhow::Result<()> {
     for entry_path in fs.read_dir(dir)? {
         // A name no glob could ever spell cannot be allow-listed.
-        let Some(name) = entry_path.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+        let Some(name) = entry_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
         let entry = entry_path.clone();
@@ -353,7 +359,11 @@ fn pull_in_link_target(
             });
     } else if file_type == tddy_fs::FsKind::Dir {
         for entry in fs.read_dir(target)? {
-            let Some(name) = entry.file_name().and_then(|n| n.to_str()).map(str::to_string) else {
+            let Some(name) = entry
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
             let rel_path = format!("{target_rel}/{name}");
@@ -409,7 +419,11 @@ pub fn root_relative(path: &Path, root: &Path) -> Option<String> {
 /// propagated, because treating it as "skip" would quietly drop a link the project still ships, and
 /// a dropped manifest entry is a *delete* in the agent's context directory: a transient error would
 /// withdraw guidance with nothing anywhere saying so.
-fn resolve_within_root(fs: &dyn tddy_fs::Fs, entry: &Path, root: &Path) -> anyhow::Result<Option<(PathBuf, String)>> {
+fn resolve_within_root(
+    fs: &dyn tddy_fs::Fs,
+    entry: &Path,
+    root: &Path,
+) -> anyhow::Result<Option<(PathBuf, String)>> {
     let target = match fs.canonicalize(entry) {
         Ok(target) => target,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
