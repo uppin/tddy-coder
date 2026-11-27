@@ -56,37 +56,41 @@ impl TreeSnapshot {
     /// what it became. Any other failure to read the tree is returned, because a server told nothing
     /// about a directory this could not read would be served a tree nobody can vouch for.
     pub(crate) fn read(root: &Path) -> io::Result<Self> {
+        Self::read_on(&tddy_fs::DiskFs, root)
+    }
+
+    /// [`TreeSnapshot::read`] through the filesystem port.
+    pub(crate) fn read_on(fs: &dyn tddy_fs::Fs, root: &Path) -> io::Result<Self> {
         let mut files = BTreeMap::new();
         let mut pending = vec![root.to_path_buf()];
         while let Some(directory) = pending.pop() {
-            let entries = match std::fs::read_dir(&directory) {
+            let entries = match fs.read_dir(&directory) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             };
-            for entry in entries {
-                let entry = entry?;
-                let kind = entry.file_type()?;
-                let name = entry.file_name();
+            for path in entries {
+                let kind = fs.metadata(&path)?.kind;
+                let name = path.file_name().unwrap_or_default();
                 let name = name.to_string_lossy();
-                if kind.is_dir() {
+                if kind == tddy_fs::FsKind::Dir {
                     if !is_skipped_directory(&name) {
-                        pending.push(entry.path());
+                        pending.push(path);
                     }
                     continue;
                 }
-                if !kind.is_file() || !is_source_file(&name) {
+                if kind != tddy_fs::FsKind::File || !is_source_file(&name) {
                     continue;
                 }
-                match entry.metadata() {
+                match fs.metadata_follow(&path) {
                     Ok(metadata) => {
-                        files.insert(
-                            entry.path(),
-                            Stamp {
-                                modified: metadata.modified()?,
-                                len: metadata.len(),
-                            },
-                        );
+                        let modified = metadata.modified.ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "filesystem port reports no modification time",
+                            )
+                        })?;
+                        files.insert(path, Stamp { modified, len: metadata.len });
                     }
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                     Err(error) => return Err(error),

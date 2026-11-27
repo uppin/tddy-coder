@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::complexity_cache::{cached_file_complexity, ComplexityCache};
-use crate::coverage::{load_per_test_meta, load_rust_final, TestMeta};
+use crate::coverage::TestMeta;
 use crate::crap::{join_rust_function_metrics, FunctionMetric, JoinResult};
 use crate::duplicate_tests::{analyze_coverage_dir, DuplicateAnalysis};
 use crate::error::Result;
@@ -20,30 +20,45 @@ pub fn generate_report(
     crate_root: &Path,
     cache: &dyn ComplexityCache,
 ) -> Result<JoinResult> {
-    let rust_final = load_rust_final(coverage_dir)?;
-    let _metas = load_per_test_meta(coverage_dir)?;
+    generate_report_on(&tddy_fs::DiskFs, coverage_dir, crate_root, cache)
+}
+
+/// [`generate_report`] through the filesystem port.
+pub fn generate_report_on(
+    fs: &dyn tddy_fs::Fs,
+    coverage_dir: &Path,
+    crate_root: &Path,
+    cache: &dyn ComplexityCache,
+) -> Result<JoinResult> {
+    let rust_final = crate::coverage::load_rust_final_on(fs, coverage_dir)?;
+    let _metas = crate::coverage::load_per_test_meta_on(fs, coverage_dir)?;
 
     let mut complexity_by_file = BTreeMap::new();
-    for entry in walkdir::WalkDir::new(crate_root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
+    let mut pending = vec![crate_root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for path in fs.read_dir(&dir)? {
+            match fs.metadata(&path)?.kind {
+                tddy_fs::FsKind::Dir => pending.push(path),
+                tddy_fs::FsKind::File => {
+                    if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                        continue;
+                    }
+                    if path.to_string_lossy().contains("/target/") {
+                        continue;
+                    }
+                    let text = fs.read_to_string(&path)?;
+                    let abs = fs.canonicalize(&path).unwrap_or_else(|_| path.to_path_buf());
+                    let measured = cached_file_complexity(cache, &text)?;
+                    complexity_by_file.insert(abs.display().to_string(), measured);
+                }
+                _ => continue,
+            }
         }
-        if path.to_string_lossy().contains("/target/") {
-            continue;
-        }
-        let text = std::fs::read_to_string(path)?;
-        let abs = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        let measured = cached_file_complexity(cache, &text)?;
-        complexity_by_file.insert(abs.display().to_string(), measured);
     }
 
     let joined = join_rust_function_metrics(&rust_final, &complexity_by_file);
     let html = render_coverage_html(&joined);
-    std::fs::write(report_path(coverage_dir), html)?;
+    fs.write(&report_path(coverage_dir), html.as_bytes())?;
 
     // What the join amounted to is returned rather than printed: a front end renders it (the
     // command line to stderr, the daemon into its response), and a library that printed it would
@@ -95,8 +110,30 @@ pub fn generate_duplicate_tests_report(
     include_test_sources: bool,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<DuplicateAnalysis> {
-    std::fs::create_dir_all(out_dir)?;
-    let analysis = analyze_coverage_dir(
+    generate_duplicate_tests_report_on(
+        &tddy_fs::DiskFs,
+        coverage_dir,
+        out_dir,
+        min_signature,
+        subset_ratio,
+        include_test_sources,
+        cancelled,
+    )
+}
+
+/// [`generate_duplicate_tests_report`] through the filesystem port.
+pub fn generate_duplicate_tests_report_on(
+    fs: &dyn tddy_fs::Fs,
+    coverage_dir: &Path,
+    out_dir: &Path,
+    min_signature: usize,
+    subset_ratio: f64,
+    include_test_sources: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<DuplicateAnalysis> {
+    fs.create_dir_all(out_dir)?;
+    let analysis = crate::duplicate_tests::analyze_coverage_dir_on(
+        fs,
         coverage_dir,
         min_signature,
         subset_ratio,
@@ -105,10 +142,10 @@ pub fn generate_duplicate_tests_report(
     )?;
 
     let identical_html = render_duplicate_html("Identical test signatures", &analysis.identical);
-    std::fs::write(out_dir.join("duplicate-tests.html"), identical_html)?;
+    fs.write(&out_dir.join("duplicate-tests.html"), identical_html.as_bytes())?;
 
     let subset_html = render_subset_html(&analysis.subsets);
-    std::fs::write(out_dir.join("subset-tests.html"), subset_html)?;
+    fs.write(&out_dir.join("subset-tests.html"), subset_html.as_bytes())?;
 
     Ok(analysis)
 }

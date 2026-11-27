@@ -199,16 +199,22 @@ async fn scored_file(
     request: ComplexityRequest,
 ) -> Result<ComplexityResponse, Status> {
     let file = under(&root, &request.file, "file")?;
-    if !file.is_file() {
+    if index
+        .fs()
+        .metadata_follow(&file)
+        .map(|m| m.kind != tddy_fs::FsKind::File)
+        .unwrap_or(true)
+    {
         return Err(Status::failed_precondition(format!(
             "{} is not a file this process can read",
             file.display()
         )));
     }
     let scores = index.complexity_scores();
+    let fs = index.fs_arc();
 
     let scored = tokio::task::spawn_blocking(move || {
-        let source = std::fs::read_to_string(&file)?;
+        let source = fs.read_to_string(&file)?;
         cached_file_complexity(scores.as_ref(), &source)
     })
     .await

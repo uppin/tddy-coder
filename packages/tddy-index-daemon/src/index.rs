@@ -113,6 +113,8 @@ pub struct WorkspaceIndex {
     /// (`#reshape` extension-code-actions, R5). Empty unless [`WorkspaceIndex::with_verified_languages`]
     /// says otherwise: `verify` compares Rust files only, as before.
     verified_languages: Arc<Vec<tddy_zed_extensions::ExtensionSupport>>,
+    /// The filesystem port tree snapshots and file reads run through.
+    fs: Arc<dyn tddy_fs::Fs>,
 }
 
 impl WorkspaceIndex {
@@ -128,7 +130,15 @@ impl WorkspaceIndex {
             signals: RootSignals::default(),
             supports: Arc::new(SupportRegistry::new()),
             verified_languages: Arc::new(Vec::new()),
+            fs: Arc::new(tddy_fs::DiskFs),
         }
+    }
+
+    /// The same index, running its file I/O through `fs` instead of the disk.
+    #[must_use]
+    pub fn with_fs(mut self, fs: Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     /// Verify the changed files of `languages` by what each language knows of them: its server's
@@ -243,6 +253,16 @@ impl WorkspaceIndex {
     /// Handed out as an `Arc` because every caller of it scores on a blocking thread — `syn` is
     /// synchronous — and a borrow could not cross into one.
     #[must_use]
+    /// The filesystem port this index runs its file I/O through.
+    pub fn fs(&self) -> &dyn tddy_fs::Fs {
+        &*self.fs
+    }
+
+    /// The index's filesystem port as a shareable handle (for `spawn_blocking` closures).
+    pub fn fs_arc(&self) -> Arc<dyn tddy_fs::Fs> {
+        self.fs.clone()
+    }
+
     pub fn complexity_scores(&self) -> Arc<InMemoryComplexityCache> {
         Arc::clone(&self.scores)
     }
@@ -253,7 +273,7 @@ impl WorkspaceIndex {
     /// is no process directory to resolve it against — which is the whole reason every request
     /// carries a root. A path that is not a reachable directory is a `FailedPrecondition`, because
     /// the tree is wrong rather than the request.
-    pub fn workspace_root_of(requested: &str) -> Result<PathBuf, Status> {
+    pub fn workspace_root_of(fs: &dyn tddy_fs::Fs, requested: &str) -> Result<PathBuf, Status> {
         if requested.trim().is_empty() {
             return Err(Status::invalid_argument(
                 "the request names no workspace_root",
@@ -266,12 +286,16 @@ impl WorkspaceIndex {
                  has no directory of its own to resolve it against"
             )));
         }
-        if !named.is_dir() {
+        if fs
+            .metadata_follow(named)
+            .map(|m| m.kind != tddy_fs::FsKind::Dir)
+            .unwrap_or(true)
+        {
             return Err(Status::failed_precondition(format!(
                 "workspace_root `{requested}` is not a directory this process can reach"
             )));
         }
-        workspace_root_for(named).map_err(|err| {
+        tddy_lsp::registry::workspace_root_for_on(fs, named).map_err(|err| {
             Status::failed_precondition(format!(
                 "workspace_root `{requested}` has a manifest this process cannot read: {err}"
             ))
@@ -460,7 +484,7 @@ impl WorkspaceIndex {
 /// The source tree under `root`, read off the async runtime since it walks the whole tree.
 async fn read_tree(root: &Path) -> Result<TreeSnapshot, Status> {
     let walked = root.to_path_buf();
-    tokio::task::spawn_blocking(move || TreeSnapshot::read(&walked))
+    tokio::task::spawn_blocking(move || TreeSnapshot::read_on(&tddy_fs::DiskFs, &walked))
         .await
         .map_err(|join| Status::internal(format!("the tree walk did not finish: {join}")))?
         .map_err(|error| {
@@ -504,7 +528,7 @@ mod tests {
         let requested = "/nonexistent/workspace/root";
 
         // When it is read as a workspace root
-        let outcome = WorkspaceIndex::workspace_root_of(requested);
+        let outcome = WorkspaceIndex::workspace_root_of(&tddy_fs::DiskFs, requested);
 
         // Then the tree is named as the thing that is wrong, not the request
         assert_eq!(
@@ -521,7 +545,7 @@ mod tests {
         let requested = "packages/tddy-index-daemon";
 
         // When it is read as a workspace root
-        let outcome = WorkspaceIndex::workspace_root_of(requested);
+        let outcome = WorkspaceIndex::workspace_root_of(&tddy_fs::DiskFs, requested);
 
         // Then the request is named as the thing that is wrong
         assert_eq!(
@@ -547,7 +571,7 @@ mod tests {
             .expect("the worktree's .git file");
 
         // When the worktree is named as a request's root
-        let root = WorkspaceIndex::workspace_root_of(worktree.to_str().expect("a UTF-8 path"));
+        let root = WorkspaceIndex::workspace_root_of(&tddy_fs::DiskFs, worktree.to_str().expect("a UTF-8 path"));
 
         // Then the worktree is served, not the checkout around it
         assert_eq!(root.expect("the worktree is a root"), worktree);
@@ -559,7 +583,7 @@ mod tests {
         let requested = "   ";
 
         // When it is read as a workspace root
-        let outcome = WorkspaceIndex::workspace_root_of(requested);
+        let outcome = WorkspaceIndex::workspace_root_of(&tddy_fs::DiskFs, requested);
 
         // Then the request is named as the thing that is wrong
         assert_eq!(

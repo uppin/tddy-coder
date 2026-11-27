@@ -190,7 +190,9 @@ async fn synced_in(
     file: &str,
     route: &Route,
 ) -> Result<(ServedFile, String), Status> {
-    let text = std::fs::read_to_string(path)
+    let text = index
+        .fs()
+        .read_to_string(path)
         .map_err(|err| Status::not_found(format!("`{file}` cannot be read: {err}")))?;
     let uri = uri_of_path(path)?;
     let served = index.client_for_route(root, route).await?;

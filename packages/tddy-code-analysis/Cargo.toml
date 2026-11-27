@@ -9,6 +9,7 @@ name = "tddy_code_analysis"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 md5 = "0.7"

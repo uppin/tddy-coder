@@ -136,21 +136,33 @@ pub fn capture_coverage(
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(CaptureProgress<'_>),
 ) -> Result<()> {
+    capture_coverage_on(&tddy_fs::DiskFs, crate_path, coverage_dir, cancelled, progress)
+}
+
+/// [`capture_coverage`] through the filesystem port.
+pub fn capture_coverage_on(
+    fs: &dyn tddy_fs::Fs,
+    crate_path: &Path,
+    coverage_dir: &Path,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(CaptureProgress<'_>),
+) -> Result<()> {
     let manifest_dir = cargo_manifest_dir(crate_path)?;
     if cancelled() {
         return Err(capture_cancelled(0));
     }
     let per_test = coverage_dir.join("per-test");
-    std::fs::create_dir_all(&per_test)?;
+    fs.create_dir_all(&per_test)?;
 
     let context = CaptureContext {
         manifest_dir: &manifest_dir,
         per_test: &per_test,
+        fs,
     };
     let mut denominator: BTreeMap<String, DenominatorFile> = BTreeMap::new();
 
     progress(CaptureProgress::BuildStarted);
-    let harnesses = build_instrumented_tests(&manifest_dir)?;
+    let harnesses = build_instrumented_tests(fs, &manifest_dir)?;
     progress(CaptureProgress::BuildFinished {
         harnesses: harnesses.len(),
     });
@@ -182,7 +194,7 @@ pub fn capture_coverage(
         }
     }
 
-    write_denominator(coverage_dir, &denominator)?;
+    write_denominator(fs, coverage_dir, &denominator)?;
     progress(CaptureProgress::Finished {
         tests: captured,
         files: denominator.len(),
@@ -207,6 +219,7 @@ fn capture_cancelled(captured: usize) -> AnalysisError {
 struct CaptureContext<'a> {
     manifest_dir: &'a Path,
     per_test: &'a Path,
+    fs: &'a dyn tddy_fs::Fs,
 }
 
 /// Run one test under its own profile, export it, and write its two artifacts.
@@ -243,17 +256,19 @@ fn capture_one_test(
         lang: "rust".to_string(),
     };
 
-    std::fs::write(
-        context.per_test.join(format!("{id}.meta.json")),
-        serde_json::to_string_pretty(&meta)?,
-    )?;
-    std::fs::write(
-        context.per_test.join(format!("{id}.rust.json")),
-        serde_json::to_string_pretty(&executed)?,
+    context
+        .fs
+        .write(
+            &context.per_test.join(format!("{id}.meta.json")),
+            serde_json::to_string_pretty(&meta)?.as_bytes(),
+        )?;
+    context.fs.write(
+        &context.per_test.join(format!("{id}.rust.json")),
+        serde_json::to_string_pretty(&executed)?.as_bytes(),
     )?;
 
-    let _ = std::fs::remove_file(&profraw);
-    let _ = std::fs::remove_file(&profdata);
+    let _ = context.fs.remove_file(&profraw);
+    let _ = context.fs.remove_file(&profdata);
     Ok(status)
 }
 
@@ -348,16 +363,19 @@ exec "$rustc" "$@"
 ///
 /// Cargo folds the wrapper's mtime into its fingerprint, so rewriting an
 /// identical script would force a full rebuild on every capture.
-fn ensure_rustc_wrapper(build_dir: &Path, crate_name: &str) -> Result<PathBuf> {
+fn ensure_rustc_wrapper(
+    fs: &dyn tddy_fs::Fs,
+    build_dir: &Path,
+    crate_name: &str,
+) -> Result<PathBuf> {
     let script = rustc_wrapper_script(crate_name);
     let path = build_dir.join(format!("rustc-wrapper-{crate_name}.sh"));
-    if std::fs::read_to_string(&path).ok().as_deref() != Some(script.as_str()) {
-        std::fs::write(&path, &script)?;
+    if fs.read_to_string(&path).ok().as_deref() != Some(script.as_str()) {
+        fs.write(&path, script.as_bytes())?;
+        // The wrapper is executed by cargo, so it needs its execute bit (unix only in
+        // practice: the port reports no mode elsewhere and `set_mode` is the same act).
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
-        }
+        fs.set_mode(&path, 0o755)?;
     }
     Ok(path)
 }
@@ -441,11 +459,14 @@ fn test_harnesses_from_cargo_json(stdout: &str) -> Vec<TestHarness> {
         .collect()
 }
 
-fn build_instrumented_tests(manifest_dir: &Path) -> Result<Vec<TestHarness>> {
+fn build_instrumented_tests(
+    fs: &dyn tddy_fs::Fs,
+    manifest_dir: &Path,
+) -> Result<Vec<TestHarness>> {
     let crate_name = crate_name_for(manifest_dir);
     let build_dir = instrumented_build_dir(&crate_name);
-    std::fs::create_dir_all(&build_dir)?;
-    let wrapper = ensure_rustc_wrapper(&build_dir, &crate_name)?;
+    fs.create_dir_all(&build_dir)?;
+    let wrapper = ensure_rustc_wrapper(fs, &build_dir, &crate_name)?;
 
     let output = Command::new("cargo")
         .current_dir(manifest_dir)
@@ -693,6 +714,7 @@ fn split_executed(
 }
 
 fn write_denominator(
+    fs: &dyn tddy_fs::Fs,
     coverage_dir: &Path,
     denominator: &BTreeMap<String, DenominatorFile>,
 ) -> Result<()> {
@@ -709,34 +731,56 @@ fn write_denominator(
         })
         .collect();
     let path = coverage_dir.join("rust-coverage-final.json");
-    std::fs::write(path, serde_json::to_string_pretty(&final_map)?)?;
+    fs.write(&path, serde_json::to_string_pretty(&final_map)?.as_bytes())?;
     Ok(())
 }
 
 /// Load `rust-coverage-final.json` or fail if missing.
 pub fn load_rust_final(coverage_dir: &Path) -> Result<BTreeMap<String, RustFileCoverage>> {
+    load_rust_final_on(&tddy_fs::DiskFs, coverage_dir)
+}
+
+/// [`load_rust_final`] through the filesystem port.
+pub fn load_rust_final_on(
+    fs: &dyn tddy_fs::Fs,
+    coverage_dir: &Path,
+) -> Result<BTreeMap<String, RustFileCoverage>> {
     let path = coverage_dir.join("rust-coverage-final.json");
-    if !path.is_file() {
+    if fs
+        .metadata_follow(&path)
+        .map(|m| m.kind != tddy_fs::FsKind::File)
+        .unwrap_or(true)
+    {
         return Err(AnalysisError::MissingCoverage {
             path: path.display().to_string(),
         });
     }
-    let contents = std::fs::read_to_string(&path)?;
+    let contents = fs.read_to_string(&path)?;
     Ok(serde_json::from_str(&contents)?)
 }
 
 /// Load per-test meta files from `coverage_dir/per-test/*.meta.json`.
 pub fn load_per_test_meta(coverage_dir: &Path) -> Result<Vec<TestMeta>> {
+    load_per_test_meta_on(&tddy_fs::DiskFs, coverage_dir)
+}
+
+/// [`load_per_test_meta`] through the filesystem port.
+pub fn load_per_test_meta_on(
+    fs: &dyn tddy_fs::Fs,
+    coverage_dir: &Path,
+) -> Result<Vec<TestMeta>> {
     let per_test = coverage_dir.join("per-test");
-    if !per_test.is_dir() {
+    if fs
+        .metadata_follow(&per_test)
+        .map(|m| m.kind != tddy_fs::FsKind::Dir)
+        .unwrap_or(true)
+    {
         return Err(AnalysisError::MissingCoverage {
             path: per_test.display().to_string(),
         });
     }
     let mut metas = Vec::new();
-    for entry in std::fs::read_dir(&per_test).map_err(AnalysisError::Io)? {
-        let entry = entry.map_err(AnalysisError::Io)?;
-        let path = entry.path();
+    for path in fs.read_dir(&per_test).map_err(AnalysisError::Io)? {
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
             continue;
         }
@@ -744,7 +788,7 @@ pub fn load_per_test_meta(coverage_dir: &Path) -> Result<Vec<TestMeta>> {
         if !name.ends_with(".meta.json") {
             continue;
         }
-        let contents = std::fs::read_to_string(&path)?;
+        let contents = fs.read_to_string(&path)?;
         metas.push(serde_json::from_str(&contents)?);
     }
     if metas.is_empty() {
@@ -763,7 +807,7 @@ mod tests {
     /// arguments it was handed, so these assert real shell behaviour.
     fn wrapper_output(crate_name: &str, args: &[&str]) -> String {
         let dir = tempfile::tempdir().expect("tempdir");
-        let wrapper = ensure_rustc_wrapper(dir.path(), crate_name).expect("wrapper");
+        let wrapper = ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), crate_name).expect("wrapper");
         let fake_rustc = dir.path().join("fake-rustc");
         std::fs::write(
             &fake_rustc,
@@ -862,11 +906,11 @@ mod tests {
     #[test]
     fn rewriting_an_unchanged_wrapper_keeps_its_mtime_so_cargo_does_not_rebuild() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let first = ensure_rustc_wrapper(dir.path(), "tddy_daemon").expect("first");
+        let first = ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), "tddy_daemon").expect("first");
         let stamp = std::fs::metadata(&first)
             .and_then(|m| m.modified())
             .expect("mtime");
-        let second = ensure_rustc_wrapper(dir.path(), "tddy_daemon").expect("second");
+        let second = ensure_rustc_wrapper(&tddy_fs::DiskFs, dir.path(), "tddy_daemon").expect("second");
         assert_eq!(first, second);
         assert_eq!(
             std::fs::metadata(&second)
