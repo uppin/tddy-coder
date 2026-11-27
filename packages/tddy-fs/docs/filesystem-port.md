@@ -124,3 +124,10 @@ too: guards in each crate's `tests/fs_port.rs`, held handles on the VM library/m
 the host stores and the discovery executors, the async build pipelines over an
 `AsyncFs`. Descriptor acts (the `/dev/kvm` probe, `O_NOFOLLOW` log opens) and streamed
 reads of large images stay on `libc` and are recorded in the changeset.
+
+Every remaining production crate does its disk I/O through the port too — held handles
+on `Presenter`, the telegram harness and the model registry store, `<fn>_on` seams on
+the file formats, an `AsyncFs` in the async paths, `DiskFs` only at composition roots
+and old-name wrappers. One crate is not there yet: `tddy-zed-extensions` still reaches
+disk directly, with its guard red and a follow-up recorded in
+`docs/dev/todo/2026-12-02-fs-port-zed-extensions-follow-up.md`.
