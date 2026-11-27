@@ -75,19 +75,20 @@ impl ExecPlan {
 
     /// Write [`Self::files`], creating the directories above each.
     fn write_files(&self) -> Result<()> {
+        let fs = crate::runner::runner_fs();
         for file in &self.files {
             if let Some(parent) = file.path.parent() {
-                std::fs::create_dir_all(parent)
+                fs.create_dir_all(parent)
                     .with_context(|| format!("create {}", parent.display()))?;
             }
-            std::fs::write(&file.path, &file.contents)
+            fs.write(&file.path, &file.contents)
                 .with_context(|| format!("write plan file {}", file.path.display()))?;
         }
         Ok(())
     }
 
     fn read(path: &Path) -> Result<Self> {
-        let json = std::fs::read_to_string(path)
+        let json = crate::runner::runner_fs().read_to_string(path)
             .with_context(|| format!("read exec plan {}", path.display()))?;
         let plan: Self = serde_json::from_str(&json)
             .with_context(|| format!("parse exec plan {}", path.display()))?;
