@@ -9,6 +9,8 @@ name = "tddy_sandbox_recipes"
 path = "src/lib.rs"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 # The declared-tool vocabulary `tool_grants` lowers (`#agent-tools 1/12`). The generic
 # `tddy-sandbox` never depends on it; only this recipes layer does.
 tddy-actions = { path = "../tddy-actions" }
