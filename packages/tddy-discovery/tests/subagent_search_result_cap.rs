@@ -133,7 +133,7 @@ async fn an_unwindowed_glob_returns_at_most_the_default_number_of_paths() {
     let dir = a_directory_of_files(MORE_FILES_THAN_THE_CAP);
 
     // When every file is globbed with no limit
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .glob(&every_file_in(&dir))
         .await
         .expect("a glob over a readable directory succeeds");
@@ -152,7 +152,7 @@ async fn a_glob_within_the_cap_returns_every_path_and_reports_nothing_left_out()
     let dir = a_directory_of_files(FEWER_FILES_THAN_THE_CAP);
 
     // When every file is globbed
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .glob(&every_file_in(&dir))
         .await
         .expect("a glob over a readable directory succeeds");
@@ -171,7 +171,7 @@ async fn an_unwindowed_grep_returns_at_most_the_default_number_of_matches() {
     let dir = a_directory_with_matching_lines(MORE_LINES_THAN_THE_CAP);
 
     // When it is searched with no limit
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .grep(A_NEEDLE, Some(&dir.path().to_string_lossy()))
         .await
         .expect("a grep over a readable directory succeeds");
@@ -192,7 +192,7 @@ async fn an_explicit_limit_narrows_a_glob_below_the_default() {
     let dir = a_directory_of_files(MORE_FILES_THAN_THE_CAP);
 
     // When only five are asked for
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .glob_limited(&every_file_in(&dir), Some(5))
         .await
         .expect("a glob over a readable directory succeeds");

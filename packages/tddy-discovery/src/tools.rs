@@ -21,8 +21,8 @@ pub struct ToolOutput {
 
 /// Read/Glob/Grep executor with local and remote modes.
 pub enum ToolExecutor {
-    /// Execute against the local filesystem.
-    Local,
+    /// Execute against the local filesystem, through the filesystem port.
+    Local(std::sync::Arc<dyn tddy_fs::Fs>),
     /// Execute via the relay → `ExecuteTool` RPC against a remote worktree.
     ///
     /// Boxed: `RemoteToolEnv` carries eight optional strings and is far larger than the dataless
@@ -30,6 +30,23 @@ pub enum ToolExecutor {
     /// case. It crossed clippy's `large_enum_variant` threshold when the embedded daemon's socket
     /// path joined the struct.
     Remote(Box<RemoteToolEnv>),
+}
+
+/// The longest leading run of `pattern`'s components that names a place rather than a
+/// pattern: where a port-driven glob walk starts.
+fn static_prefix(pattern: &str) -> std::path::PathBuf {
+    let mut prefix = std::path::PathBuf::new();
+    for component in std::path::Path::new(pattern).components() {
+        let text = component.as_os_str().to_string_lossy();
+        if text.contains(['*', '?', '[', ']', '{', '}']) {
+            break;
+        }
+        prefix.push(component.as_os_str());
+    }
+    if prefix.as_os_str().is_empty() {
+        prefix.push(".");
+    }
+    prefix
 }
 
 /// Response body from `ExecuteTool` RPC.
@@ -45,7 +62,7 @@ impl ToolExecutor {
     pub fn from_invoke_request(req: &InvokeRequest) -> Self {
         match req.remote.clone() {
             Some(env) => ToolExecutor::Remote(Box::new(env)),
-            None => ToolExecutor::Local,
+            None => ToolExecutor::Local(std::sync::Arc::new(tddy_fs::DiskFs)),
         }
     }
 
@@ -57,9 +74,10 @@ impl ToolExecutor {
         _limit: Option<u64>,
     ) -> Result<ToolOutput, Box<dyn std::error::Error + Send + Sync>> {
         match self {
-            ToolExecutor::Local => {
-                let content =
-                    std::fs::read_to_string(path).map_err(|e| format!("READ {path}: {e}"))?;
+            ToolExecutor::Local(fs) => {
+                let content = fs
+                    .read_to_string(std::path::Path::new(path))
+                    .map_err(|e| format!("READ {path}: {e}"))?;
                 Ok(ToolOutput {
                     value: serde_json::json!({ "content": content }),
                 })
@@ -77,14 +95,35 @@ impl ToolExecutor {
         pattern: &str,
     ) -> Result<ToolOutput, Box<dyn std::error::Error + Send + Sync>> {
         match self {
-            ToolExecutor::Local => {
+            ToolExecutor::Local(fs) => {
+                // The pattern is matched against the walk of its static prefix, both
+                // through the port: `glob::glob` would have walked the disk itself.
+                let matcher = glob::Pattern::new(pattern)
+                    .map_err(|e| format!("GLOB pattern error: {e}"))?;
+                let prefix = static_prefix(pattern);
                 let mut paths: Vec<String> = Vec::new();
-                for entry in glob::glob(pattern)
-                    .map_err(|e| format!("GLOB pattern error: {e}"))?
-                    .flatten()
-                {
-                    if let Some(s) = entry.to_str() {
-                        paths.push(s.to_string());
+                let mut pending = vec![prefix];
+                while let Some(dir) = pending.pop() {
+                    if matcher.matches_path(&dir) {
+                        if let Some(s) = dir.to_str() {
+                            paths.push(s.to_string());
+                        }
+                    }
+                    let Ok(entries) = fs.read_dir(&dir) else {
+                        continue;
+                    };
+                    for entry in entries {
+                        match fs.metadata(&entry).map(|m| m.kind) {
+                            Ok(tddy_fs::FsKind::Dir) => pending.push(entry),
+                            Ok(_) => {
+                                if matcher.matches_path(&entry) {
+                                    if let Some(s) = entry.to_str() {
+                                        paths.push(s.to_string());
+                                    }
+                                }
+                            }
+                            Err(_) => continue,
+                        }
                     }
                 }
                 Ok(ToolOutput {
@@ -105,20 +144,22 @@ impl ToolExecutor {
         path: Option<&str>,
     ) -> Result<ToolOutput, Box<dyn std::error::Error + Send + Sync>> {
         match self {
-            ToolExecutor::Local => {
+            ToolExecutor::Local(fs) => {
                 let re = Regex::new(pattern)
                     .map_err(|e| format!("GREP invalid regex {pattern:?}: {e}"))?;
                 let mut matches: Vec<serde_json::Value> = Vec::new();
 
                 let search_path = path.unwrap_or(".");
-                let metadata = std::fs::metadata(search_path);
-                let is_file = metadata.as_ref().map(|m| m.is_file()).unwrap_or(false);
+                let is_file = fs
+                    .metadata_follow(std::path::Path::new(search_path))
+                    .map(|m| m.kind == tddy_fs::FsKind::File)
+                    .unwrap_or(false);
 
                 if is_file {
-                    Self::grep_file(&re, search_path, &mut matches);
+                    Self::grep_file(&**fs, &re, search_path, &mut matches);
                 } else {
                     // Walk directory tree
-                    Self::grep_dir(&re, search_path, &mut matches);
+                    Self::grep_dir(&**fs, &re, search_path, &mut matches);
                 }
 
                 Ok(ToolOutput {
@@ -174,8 +215,13 @@ impl ToolExecutor {
         Ok(ToolOutput { value })
     }
 
-    fn grep_file(re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
-        let Ok(content) = std::fs::read_to_string(path) else {
+    fn grep_file(
+        fs: &dyn tddy_fs::Fs,
+        re: &Regex,
+        path: &str,
+        matches: &mut Vec<serde_json::Value>,
+    ) {
+        let Ok(content) = fs.read_to_string(std::path::Path::new(path)) else {
             return;
         };
         for (i, line) in content.lines().enumerate() {
@@ -192,19 +238,23 @@ impl ToolExecutor {
         }
     }
 
-    fn grep_dir(re: &Regex, dir: &str, matches: &mut Vec<serde_json::Value>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
+    fn grep_dir(
+        fs: &dyn tddy_fs::Fs,
+        re: &Regex,
+        dir: &str,
+        matches: &mut Vec<serde_json::Value>,
+    ) {
+        let Ok(entries) = fs.read_dir(std::path::Path::new(dir)) else {
             return;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in entries {
             let Some(path_str) = path.to_str() else {
                 continue;
             };
-            if path.is_file() {
-                Self::grep_file(re, path_str, matches);
-            } else if path.is_dir() {
-                Self::grep_dir(re, path_str, matches);
+            match fs.metadata(&path).map(|m| m.kind) {
+                Ok(tddy_fs::FsKind::File) => Self::grep_file(fs, re, path_str, matches),
+                Ok(tddy_fs::FsKind::Dir) => Self::grep_dir(fs, re, path_str, matches),
+                _ => continue,
             }
         }
     }
@@ -251,7 +301,7 @@ mod tests {
         let path_str = tmp.to_str().unwrap();
 
         // When
-        let output = ToolExecutor::Local
+        let output = ToolExecutor::Local(std::sync::Arc::new(tddy_fs::DiskFs))
             .read(path_str, None, None)
             .await
             .expect("local READ must succeed for an existing file");
@@ -278,7 +328,7 @@ mod tests {
         let pattern = format!("{}/*.txt", dir.display());
 
         // When
-        let output = ToolExecutor::Local
+        let output = ToolExecutor::Local(std::sync::Arc::new(tddy_fs::DiskFs))
             .glob(&pattern)
             .await
             .expect("local GLOB must succeed");
@@ -312,7 +362,7 @@ mod tests {
         let path_str = tmp.to_str().unwrap();
 
         // When
-        let output = ToolExecutor::Local
+        let output = ToolExecutor::Local(std::sync::Arc::new(tddy_fs::DiskFs))
             .grep("fn authenticate", Some(path_str))
             .await
             .expect("local GREP must succeed");
@@ -531,7 +581,7 @@ mod tests {
 
         // Then — variant is Local
         assert!(
-            matches!(executor, ToolExecutor::Local),
+            matches!(executor, ToolExecutor::Local(_)),
             "ToolExecutor must be Local when InvokeRequest.remote is None"
         );
     }

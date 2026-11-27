@@ -39,21 +39,28 @@ pub struct HarnessProfile {
 /// skipped silently, and a malformed profile is skipped with a warning naming it.
 #[must_use]
 pub fn load_harness_profiles(dir: &Path) -> Vec<HarnessProfile> {
-    let entries = match std::fs::read_dir(dir) {
+    load_harness_profiles_on(&tddy_fs::DiskFs, dir)
+}
+
+/// [`load_harness_profiles`] through the filesystem port.
+pub fn load_harness_profiles_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &Path,
+) -> Vec<HarnessProfile> {
+    let entries = match fs.read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return Vec::new(),
     };
 
     let mut paths: Vec<PathBuf> = entries
-        .flatten()
-        .map(|entry| entry.path())
+        .into_iter()
         .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("yaml"))
         .collect();
     paths.sort();
 
     let mut profiles = Vec::new();
     for path in paths {
-        let contents = match std::fs::read_to_string(&path) {
+        let contents = match fs.read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) => {
                 log::warn!("harness_profile: failed to read {}: {e}", path.display());

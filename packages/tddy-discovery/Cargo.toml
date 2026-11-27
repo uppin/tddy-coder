@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 tddy-rpc = { path = "../tddy-rpc" }
 # `WorktreeChange`: what a mutating tool call did to its conversation's worktree, read off the
 # result at the append site. A leaf crate — git CLI, serde, tokio.

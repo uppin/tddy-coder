@@ -82,7 +82,7 @@ async fn read_window_returns_the_requested_line_range() {
     let (_dir, path) = a_file_containing(&numbered_lines_range(0, 500));
 
     // When — ask for 50 lines starting at line 100
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .read_window(&path, Some(100), Some(50))
         .await
         .expect("windowed READ must succeed");
@@ -102,7 +102,7 @@ async fn read_window_reaching_end_of_file_is_not_truncated() {
     let (_dir, path) = a_file_containing(&numbered_lines_range(0, 500));
 
     // When — ask for 50 lines starting at line 480 (only 20 remain)
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .read_window(&path, Some(480), Some(50))
         .await
         .expect("windowed READ must succeed");

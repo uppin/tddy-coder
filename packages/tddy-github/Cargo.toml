@@ -9,6 +9,7 @@ name = "tddy_github"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 base64 = "0.22"
 ed25519-dalek = { version = "2.2", features = ["pkcs8"] }

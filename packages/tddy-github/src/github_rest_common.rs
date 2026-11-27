@@ -45,6 +45,7 @@ fn curl_err(msg: impl Into<String>) -> tddy_core::WorkflowError {
 }
 
 fn run_curl_json_body(
+    fs: &dyn tddy_fs::Fs,
     url: &str,
     method: &str,
     body: &str,
@@ -53,7 +54,7 @@ fn run_curl_json_body(
     require_token(&format!("GitHub {method}"), token)?;
     let body_path = temp_github_path("tddy-gh-req-body");
     let out_path = temp_github_path("tddy-gh-resp");
-    std::fs::write(&body_path, body.as_bytes()).map_err(|e| curl_err(e.to_string()))?;
+    fs.write(&body_path, body.as_bytes()).map_err(|e| curl_err(e.to_string()))?;
 
     let out = std::process::Command::new("curl")
         .arg("-sS")
@@ -80,9 +81,9 @@ fn run_curl_json_body(
         .output()
         .map_err(|e| curl_err(format!("curl ({method}): {e}")))?;
 
-    std::fs::remove_file(&body_path).ok();
+    let _ = fs.remove_file(&body_path);
     if !out.status.success() {
-        std::fs::remove_file(&out_path).ok();
+        let _ = fs.remove_file(&out_path);
         return Err(curl_err(format!(
             "curl ({method}) process failed: {}",
             String::from_utf8_lossy(&out.stderr)
@@ -93,8 +94,8 @@ fn run_curl_json_body(
         .trim()
         .parse()
         .map_err(|e| curl_err(format!("curl: invalid HTTP status {code_str:?}: {e}")))?;
-    let body_raw = std::fs::read_to_string(&out_path).map_err(|e| curl_err(e.to_string()))?;
-    std::fs::remove_file(&out_path).ok();
+    let body_raw = fs.read_to_string(&out_path).map_err(|e| curl_err(e.to_string()))?;
+    let _ = fs.remove_file(&out_path);
     if !(200..300).contains(&http_code) {
         return Err(curl_err(format!(
             "GitHub API {method} {url} returned HTTP {http_code}: {body_raw}"
@@ -112,7 +113,7 @@ pub fn curl_github_patch_json_with_token(
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(api_base, repo, path);
-    run_curl_json_body(&url, "PATCH", body, token)
+    run_curl_json_body(&tddy_fs::DiskFs, &url, "PATCH", body, token)
 }
 
 /// HTTP POST with a JSON body string (see [`curl_github_patch_json_with_token`]).
@@ -124,7 +125,7 @@ pub fn curl_github_post_json_with_token(
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(api_base, repo, path);
-    run_curl_json_body(&url, "POST", body, token)
+    run_curl_json_body(&tddy_fs::DiskFs, &url, "POST", body, token)
 }
 
 /// HTTP GET with query parameters (see [`curl_github_patch_json_with_token`]).
@@ -135,7 +136,7 @@ pub fn curl_github_get_json_with_token(
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    run_curl_get(&github_api_url(api_base, repo, path), query, token)
+    run_curl_get(&tddy_fs::DiskFs, &github_api_url(api_base, repo, path), query, token)
 }
 
 /// HTTP GET against an API path that is **not** under `/repos/{owner}/{repo}/` — `/search/issues`
@@ -156,10 +157,11 @@ pub fn curl_github_get_json_absolute_path(
         api_base.trim_end_matches('/'),
         path.trim_start_matches('/')
     );
-    run_curl_get(&url, query, token)
+    run_curl_get(&tddy_fs::DiskFs, &url, query, token)
 }
 
 fn run_curl_get(
+    fs: &dyn tddy_fs::Fs,
     url: &str,
     query: &[(&str, &str)],
     token: &str,
@@ -192,7 +194,7 @@ fn run_curl_get(
         .output()
         .map_err(|e| curl_err(format!("curl (GET): {e}")))?;
     if !out.status.success() {
-        std::fs::remove_file(&out_path).ok();
+        let _ = fs.remove_file(&out_path);
         return Err(curl_err(format!(
             "curl (GET) process failed: {}",
             String::from_utf8_lossy(&out.stderr)
@@ -203,8 +205,8 @@ fn run_curl_get(
         .trim()
         .parse()
         .map_err(|e| curl_err(format!("curl: invalid HTTP status {code_str:?}: {e}")))?;
-    let body = std::fs::read_to_string(&out_path).map_err(|e| curl_err(e.to_string()))?;
-    std::fs::remove_file(&out_path).ok();
+    let body = fs.read_to_string(&out_path).map_err(|e| curl_err(e.to_string()))?;
+    let _ = fs.remove_file(&out_path);
     if !(200..300).contains(&http_code) {
         return Err(curl_err(format!(
             "GitHub API GET {url} returned HTTP {http_code}: {body}"
@@ -222,7 +224,7 @@ pub fn curl_github_put_json_with_token(
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
     let url = github_api_url(api_base, repo, path);
-    run_curl_json_body(&url, "PUT", body, token)
+    run_curl_json_body(&tddy_fs::DiskFs, &url, "PUT", body, token)
 }
 
 #[cfg(test)]

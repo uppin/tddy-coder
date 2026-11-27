@@ -90,7 +90,7 @@ async fn an_unwindowed_read_returns_the_whole_file_however_long_it_is() {
     let (_dir, path) = a_file_containing(&numbered_lines(500));
 
     // When
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .read(&path)
         .await
         .expect("READ of an existing file must succeed");
@@ -110,7 +110,7 @@ async fn a_read_windowed_by_the_model_returns_that_window_and_reports_the_rest()
     let (_dir, path) = a_file_containing(&numbered_lines(500));
 
     // When
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .read_window(&path, Some(0), Some(A_WINDOW as u64))
         .await
         .expect("READ of an existing file must succeed");
@@ -130,7 +130,7 @@ async fn read_returns_a_file_within_the_cap_verbatim_and_not_truncated() {
     let (_dir, path) = a_file_containing(body);
 
     // When
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .read(&path)
         .await
         .expect("READ of a small file must succeed");

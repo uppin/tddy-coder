@@ -152,7 +152,7 @@ async fn local_codebase_access_reads_a_file_from_the_local_filesystem() {
     std::fs::write(&file_path, "fn hello() {}\n").expect("write temp file");
 
     // When
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .read(file_path.to_str().unwrap())
         .await
         .expect("local READ must succeed for an existing file");
@@ -171,7 +171,7 @@ async fn local_codebase_access_globs_matching_paths_from_the_local_filesystem() 
     let pattern = format!("{}/*.rs", dir.path().display());
 
     // When
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .glob(&pattern)
         .await
         .expect("local GLOB must succeed");
@@ -196,7 +196,7 @@ async fn local_codebase_access_greps_matching_lines_from_the_local_filesystem() 
     std::fs::write(&file_path, "fn authenticate() {\n    let x = 1;\n}\n").expect("write auth.rs");
 
     // When
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .grep("fn authenticate", Some(file_path.to_str().unwrap()))
         .await
         .expect("local GREP must succeed");

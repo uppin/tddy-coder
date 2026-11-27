@@ -73,7 +73,15 @@ impl VaultTransportKey {
     /// explain why. Written mode `0600`, and any file of the wrong length is reported rather than
     /// silently regenerated — regenerating would mint a new identity nobody asked for.
     pub fn load_or_generate(path: &std::path::Path) -> std::io::Result<Self> {
-        match std::fs::read(path) {
+        Self::load_or_generate_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`VaultTransportKey::load_or_generate`] through the filesystem port.
+    pub fn load_or_generate_on(
+        fs: &dyn tddy_fs::Fs,
+        path: &std::path::Path,
+    ) -> std::io::Result<Self> {
+        match fs.read(path) {
             Ok(bytes) => {
                 let bytes: [u8; 32] = bytes.try_into().map_err(|bytes: Vec<u8>| {
                     std::io::Error::new(
@@ -89,7 +97,7 @@ impl VaultTransportKey {
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let key = Self::generate();
-                write_owner_only(path, key._secret.expose())?;
+                write_owner_only(fs, path, key._secret.expose())?;
                 Ok(key)
             }
             Err(e) => Err(e),
@@ -118,27 +126,21 @@ impl VaultTransportKey {
 
 /// Write `bytes` to `path`, mode `0600` on unix, by writing a sibling staging file and renaming it
 /// into place — a crash mid-write leaves the old key, never a truncated one.
-fn write_owner_only(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-    if let Some(dir) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)?;
-    }
-    let staging = path.with_extension("new");
+fn write_owner_only(
+    fs: &dyn tddy_fs::Fs,
+    path: &std::path::Path,
+    bytes: &[u8],
+) -> std::io::Result<()> {
+    // The port's atomic write is the same write-then-rename beside the file (creating
+    // parents) this helper rolled by hand, with the owner-only mode carried through.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&staging)?;
-        std::io::Write::write_all(&mut file, bytes)?;
+        fs.write_atomic(path, bytes, Some(0o600))
     }
     #[cfg(not(unix))]
     {
-        std::fs::write(&staging, bytes)?;
+        fs.write_atomic(path, bytes, None)
     }
-    std::fs::rename(&staging, path)
 }
 
 impl std::fmt::Debug for VaultTransportKey {

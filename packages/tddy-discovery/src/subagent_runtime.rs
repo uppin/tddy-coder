@@ -615,7 +615,7 @@ pub fn write_accounting_file(conversations: &SubagentConversations) {
     };
     let payload = serde_json::json!({ "conversations": conversation_records(conversations) });
     if let Ok(text) = serde_json::to_string_pretty(&payload) {
-        let _ = std::fs::write(&path, text);
+        let _ = tddy_fs::Fs::write(&tddy_fs::DiskFs, std::path::Path::new(&path), text.as_bytes());
     }
 }
 
