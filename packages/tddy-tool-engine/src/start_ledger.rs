@@ -163,10 +163,7 @@ impl Eq for StartLedger {}
 impl StartLedger {
     /// The ledger kept in `session_dir` (`artifacts/session-starts/`).
     pub fn in_session_dir(session_dir: &Path) -> Self {
-        Self::in_session_dir_on(
-            session_dir,
-            std::sync::Arc::new(tddy_fs::DiskFs),
-        )
+        Self::in_session_dir_on(session_dir, std::sync::Arc::new(tddy_fs::DiskFs))
     }
 
     /// [`StartLedger::in_session_dir`] with the filesystem port the records run through.
@@ -228,8 +225,10 @@ impl StartLedger {
             if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
-            let bytes =
-                self.fs.read(&path).with_context(|| format!("reading {}", path.display()))?;
+            let bytes = self
+                .fs
+                .read(&path)
+                .with_context(|| format!("reading {}", path.display()))?;
             let mut record: StartLedgerRecord = serde_json::from_slice(&bytes)
                 .with_context(|| format!("{} is not a start record", path.display()))?;
             if record.state != StartState::Running {

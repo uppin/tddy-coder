@@ -54,7 +54,11 @@ impl ToolRegistry {
     }
 
     /// [`ToolRegistry::load`] through the filesystem port.
-    pub fn load_on(fs: &dyn tddy_fs::Fs, builtin: Self, overrides_dir: &Path) -> Result<Self, ToolError> {
+    pub fn load_on(
+        fs: &dyn tddy_fs::Fs,
+        builtin: Self,
+        overrides_dir: &Path,
+    ) -> Result<Self, ToolError> {
         let mut tools = builtin.tools;
         tools.extend(read_overrides(fs, overrides_dir)?);
         Self { tools }.validated()
@@ -95,7 +99,8 @@ impl ToolRegistry {
     }
 
     /// [`ToolRegistry::load_with_owners`] through the filesystem port.
-    pub fn load_with_owners_on(fs: &dyn tddy_fs::Fs,
+    pub fn load_with_owners_on(
+        fs: &dyn tddy_fs::Fs,
         builtin: Self,
         overrides_dir: &Path,
         owners: &[&dyn ExtensionOwner],
@@ -304,7 +309,9 @@ fn yaml_files_in(fs: &dyn tddy_fs::Fs, dir: &Path) -> Result<Vec<PathBuf>, ToolE
     let mut files = Vec::new();
     for path in entries {
         // `metadata_follow`, as before: `is_file` follows a link.
-        if is_yaml(&path) && matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::File) {
+        if is_yaml(&path)
+            && matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::File)
+        {
             files.push(path);
         }
     }

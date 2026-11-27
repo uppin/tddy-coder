@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use tddy_core::changeset::{
-    get_session_for_tag, read_changeset, read_changeset_on, resolve_model, update_state,
+    get_session_for_tag, read_changeset_on, resolve_model, update_state,
     write_changeset_on, Changeset,
 };
 use tddy_core::presenter::WorkflowEvent;
@@ -211,7 +211,9 @@ pub(crate) fn before_green(
         .read_to_string(&session_dir.join("progress.md"))
         .map_err(|e| format!("read progress.md: {}", e))?;
     let prd = read_primary_session_document_optional(fs, session_dir, manifest);
-    let at = fs.read_to_string(&session_dir.join("acceptance-tests.md")).ok();
+    let at = fs
+        .read_to_string(&session_dir.join("acceptance-tests.md"))
+        .ok();
     let changeset = read_changeset_on(fs, session_dir).ok();
     let new_agent_session = context
         .get_sync::<bool>("new_agent_session")

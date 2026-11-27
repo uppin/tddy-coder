@@ -357,8 +357,14 @@ mod relocation_tests {
         fs::write(staging.join("SessionDoc.md"), "# Doc").unwrap();
 
         // When
-        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "docs/plans/", dir_name, &output_dir)
-            .expect("valid suggestion should succeed");
+        let result = relocate_session_dir(
+            &tddy_fs::DiskFs,
+            &staging,
+            "docs/plans/",
+            dir_name,
+            &output_dir,
+        )
+        .expect("valid suggestion should succeed");
 
         // Then
         let expected = root.join("docs/plans").join(dir_name);
@@ -387,8 +393,14 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "/tmp/evil", dir_name, &output_dir)
-            .expect("absolute path should fall back, not error");
+        let result = relocate_session_dir(
+            &tddy_fs::DiskFs,
+            &staging,
+            "/tmp/evil",
+            dir_name,
+            &output_dir,
+        )
+        .expect("absolute path should fall back, not error");
 
         // Then
         assert_eq!(result, staging, "should fall back to staging path");
@@ -408,8 +420,14 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "../../outside", dir_name, &output_dir)
-            .expect("dotdot path should fall back, not error");
+        let result = relocate_session_dir(
+            &tddy_fs::DiskFs,
+            &staging,
+            "../../outside",
+            dir_name,
+            &output_dir,
+        )
+        .expect("dotdot path should fall back, not error");
 
         // Then
         assert_eq!(result, staging, "dotdot path should fall back to staging");
@@ -454,8 +472,9 @@ mod relocation_tests {
         fs::create_dir_all(&staging).unwrap();
 
         // When
-        let result = relocate_session_dir(&tddy_fs::DiskFs, &staging, "output/", dir_name, &output_dir)
-            .expect("same-path suggestion should be a noop, not error");
+        let result =
+            relocate_session_dir(&tddy_fs::DiskFs, &staging, "output/", dir_name, &output_dir)
+                .expect("same-path suggestion should be a noop, not error");
 
         // Then
         assert_eq!(result, staging, "same-path should return staging unchanged");

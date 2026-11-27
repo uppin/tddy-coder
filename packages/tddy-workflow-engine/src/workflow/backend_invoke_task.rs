@@ -178,12 +178,8 @@ impl Task for BackendInvokeTask {
                         action_key,
                         digest.len()
                     );
-                    if let Some(cached_output) = lookup_cached_completed_submit(
-                        &*self.fs,
-                        sd.as_path(),
-                        &action_key,
-                        digest,
-                    )
+                    if let Some(cached_output) =
+                        lookup_cached_completed_submit(&*self.fs, sd.as_path(), &action_key, digest)
                     {
                         log::info!(
                             target: "tddy_core::workflow::backend_invoke_task",

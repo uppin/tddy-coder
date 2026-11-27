@@ -129,7 +129,8 @@ pub fn apply_bugfix_interview_handoff_to_analyze_context_on(
         );
         return Ok(());
     }
-    let text = fs.read_to_string(&path)
+    let text = fs
+        .read_to_string(&path)
         .map_err(|e| format!("read bugfix interview handoff {}: {}", path.display(), e))?;
     let trimmed = text.trim();
     if trimmed.is_empty() {

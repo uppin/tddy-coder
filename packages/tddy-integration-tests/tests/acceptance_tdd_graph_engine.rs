@@ -221,7 +221,11 @@ async fn flow_runner_chains_two_tasks() {
 async fn build_tdd_workflow_graph_creates_graph() {
     // Given
     let backend = Arc::new(MockBackend::new());
-    let graph = build_tdd_workflow_graph(backend.clone(), common::tdd_recipe(), std::sync::Arc::new(tddy_fs::DiskFs));
+    let graph = build_tdd_workflow_graph(
+        backend.clone(),
+        common::tdd_recipe(),
+        std::sync::Arc::new(tddy_fs::DiskFs),
+    );
 
     // Then
     assert_eq!(graph.id, "tdd_workflow");

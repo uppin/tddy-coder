@@ -158,9 +158,10 @@ impl SessionWorkQueues {
     ) -> Result<SessionWorkQueueRecord, SessionWorkQueueError> {
         let path = self.queue_path(session_id)?;
         with_record_lock(&path, || {
-            let mut record = read_record(&*self.fs, &path)?.ok_or_else(|| SessionWorkQueueError::NoQueue {
-                session_id: session_id.to_string(),
-            })?;
+            let mut record =
+                read_record(&*self.fs, &path)?.ok_or_else(|| SessionWorkQueueError::NoQueue {
+                    session_id: session_id.to_string(),
+                })?;
             let before = record.queue.clone();
             change(&mut record.queue);
             record.queue.revision = before.revision;
@@ -251,7 +252,10 @@ pub fn drop_old_project_stack_records_on(
     let mut dropped = 0;
     for entry_path in entries {
         let stacks = entry_path.join("stacks");
-        if matches!(fs.metadata_follow(&stacks).map(|m| m.kind), Ok(tddy_fs::FsKind::Dir)) {
+        if matches!(
+            fs.metadata_follow(&stacks).map(|m| m.kind),
+            Ok(tddy_fs::FsKind::Dir)
+        ) {
             fs.remove_dir_all(&stacks)?;
             dropped += 1;
         }

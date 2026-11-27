@@ -138,7 +138,11 @@ pub fn read_session_artifact_utf8(session_dir: &Path, basename: &str) -> Option<
 }
 
 /// [`read_session_artifact_utf8`] through the filesystem port.
-pub fn read_session_artifact_utf8_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, basename: &str) -> Option<String> {
+pub fn read_session_artifact_utf8_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    basename: &str,
+) -> Option<String> {
     resolve_existing_session_artifact_on(fs, session_dir, basename)
         .and_then(|p| fs.read_to_string(&p).ok())
 }
@@ -166,7 +170,10 @@ pub fn list_session_attachments(session_dir: &Path) -> Vec<SessionAttachmentFile
 }
 
 /// [`list_session_attachments`] through the filesystem port.
-pub fn list_session_attachments_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Vec<SessionAttachmentFile> {
+pub fn list_session_attachments_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Vec<SessionAttachmentFile> {
     let attachments_dir = session_attachments_root(session_dir);
     let Ok(entries) = fs.read_dir(&attachments_dir) else {
         log::debug!(

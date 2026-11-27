@@ -225,7 +225,11 @@ mod tests {
         fn name(&self) -> &str {
             "controller_test"
         }
-        fn build_graph(&self, _backend: Arc<dyn CodingBackend>, _fs: Arc<dyn tddy_fs::Fs>) -> Graph {
+        fn build_graph(
+            &self,
+            _backend: Arc<dyn CodingBackend>,
+            _fs: Arc<dyn tddy_fs::Fs>,
+        ) -> Graph {
             GraphBuilder::new("controller_test")
                 .add_task(Arc::new(EndTask::new("a")))
                 .add_task(Arc::new(EndTask::new("b")))

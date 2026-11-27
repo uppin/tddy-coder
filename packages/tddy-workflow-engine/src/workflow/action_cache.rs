@@ -500,7 +500,8 @@ mod tests {
         fs::write(&path, serde_json::to_string_pretty(&doc_on_disk).unwrap()).unwrap();
 
         // When
-        let got = lookup_cached_completed_submit(&tddy_fs::DiskFs, &dir, &action_key_full, fingerprint);
+        let got =
+            lookup_cached_completed_submit(&tddy_fs::DiskFs, &dir, &action_key_full, fingerprint);
 
         // Then
         assert_eq!(

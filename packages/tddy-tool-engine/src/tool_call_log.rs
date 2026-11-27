@@ -10,7 +10,6 @@
 //! comma). Malformed lines are skipped on read with a `log::warn!`; valid lines
 //! after them are still returned.
 
-use std::io::Write as _;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

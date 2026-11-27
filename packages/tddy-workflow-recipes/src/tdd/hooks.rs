@@ -9,7 +9,9 @@ use std::sync::mpsc;
 use std::sync::Arc;
 
 use tddy_core::backend::{AgentOutputSink, ProgressSink};
-use tddy_core::changeset::{read_changeset, update_state, write_changeset, SessionEntry, read_changeset_on};
+use tddy_core::changeset::{
+    read_changeset, read_changeset_on, update_state, write_changeset, SessionEntry,
+};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::stream::ProgressEvent as StreamProgressEvent;
 use tddy_core::workflow::context::Context;
@@ -125,7 +127,9 @@ impl TddWorkflowHooks {
                             });
                         }
                         cs.state.session_id = Some(session_id.clone());
-                        hooks_common::write_changeset_logged(&*fs_for_progress, dir,
+                        hooks_common::write_changeset_logged(
+                            &*fs_for_progress,
+                            dir,
                             &cs,
                             "progress_sink SessionStarted",
                         );
@@ -176,48 +180,64 @@ impl RunnerHooks for TddWorkflowHooks {
 
             match task_id {
                 "acceptance-tests" => {
-                    hooks_common::ensure_worktree_for_session(&*self.fs, 
+                    hooks_common::ensure_worktree_for_session(
+                        &*self.fs,
                         &session_dir,
                         context,
                         self.event_tx.as_ref(),
                         "[tddy-core] acceptance-tests",
                     )?;
-                    before::before_acceptance_tests(&*self.fs, 
+                    before::before_acceptance_tests(
+                        &*self.fs,
                         &session_dir,
                         context,
                         self.recipe.as_ref(),
                         self.manifest.as_ref(),
                     )?;
                 }
-                "red" => before::before_red(&*self.fs, 
+                "red" => before::before_red(
+                    &*self.fs,
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                 )?,
-                "green" => hooks_common::before_green(&*self.fs, 
+                "green" => hooks_common::before_green(
+                    &*self.fs,
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                     "tddy_workflow_recipes::tdd::hooks",
                 )?,
-                "demo" => before::before_demo(&*self.fs, &session_dir, context, self.manifest.as_ref())?,
-                "evaluate" => before::before_evaluate(&*self.fs, 
+                "demo" => {
+                    before::before_demo(&*self.fs, &session_dir, context, self.manifest.as_ref())?
+                }
+                "evaluate" => before::before_evaluate(
+                    &*self.fs,
                     &session_dir,
                     context,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                 )?,
-                "validate" => {
-                    before::before_validate(&*self.fs, &session_dir, context, self.manifest.as_ref())?
-                }
-                "refactor" => {
-                    before::before_refactor(&*self.fs, &session_dir, context, self.manifest.as_ref())?
-                }
-                "update-docs" => {
-                    before::before_update_docs(&*self.fs, self.manifest.as_ref(), &session_dir, context)?
-                }
+                "validate" => before::before_validate(
+                    &*self.fs,
+                    &session_dir,
+                    context,
+                    self.manifest.as_ref(),
+                )?,
+                "refactor" => before::before_refactor(
+                    &*self.fs,
+                    &session_dir,
+                    context,
+                    self.manifest.as_ref(),
+                )?,
+                "update-docs" => before::before_update_docs(
+                    &*self.fs,
+                    self.manifest.as_ref(),
+                    &session_dir,
+                    context,
+                )?,
                 _ => {}
             }
         }
@@ -308,13 +328,19 @@ impl RunnerHooks for TddWorkflowHooks {
                     .get_sync("session_dir")
                     .or_else(|| context.get_sync("output_dir"))
                     .ok_or("interview after_task requires session_dir or output_dir in context")?;
-                after::after_interview(&*self.fs, &session_dir, result, interview_handoff_snapshot)?;
+                after::after_interview(
+                    &*self.fs,
+                    &session_dir,
+                    result,
+                    interview_handoff_snapshot,
+                )?;
             }
             "plan" => {
                 let session_dir: PathBuf = context
                     .get_sync("session_dir")
                     .ok_or("plan after_task requires session_dir in context (set by PlanTask)")?;
-                after::after_plan(&*self.fs, 
+                after::after_plan(
+                    &*self.fs,
                     self.recipe.as_ref(),
                     self.manifest.as_ref(),
                     &session_dir,
@@ -373,7 +399,11 @@ impl RunnerHooks for TddWorkflowHooks {
             .get_sync("session_dir")
             .or_else(|| context.get_sync("output_dir"))?;
         let basename = self.manifest.primary_document_basename()?;
-        let prd_path = tddy_workflow::resolve_existing_session_artifact_on(&*self.fs, &session_dir, &basename)?;
+        let prd_path = tddy_workflow::resolve_existing_session_artifact_on(
+            &*self.fs,
+            &session_dir,
+            &basename,
+        )?;
         log::debug!(
             "[tdd hooks] elicitation DocumentApproval reading {:?}",
             prd_path

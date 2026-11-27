@@ -99,7 +99,8 @@ pub fn merge_open_pr_for_branch_on(
     );
 
     let merge_body_path = temp_response_path("tddy-gh-merge-body");
-    fs.write(&merge_body_path, br#"{"merge_method":"merge"}"#).map_err(|e| e.to_string())?;
+    fs.write(&merge_body_path, br#"{"merge_method":"merge"}"#)
+        .map_err(|e| e.to_string())?;
 
     let merge_http = curl_github_put_json(&merge_url, &merge_body_path, token, &merge_path)?;
     let _ = fs.remove_file(&merge_body_path);

@@ -11,7 +11,9 @@ use super::analyze::{
 use super::interview;
 use crate::tdd::hooks_common;
 use tddy_core::backend::AgentOutputSink;
-use tddy_core::changeset::{read_changeset, update_state, write_changeset, read_changeset_on, write_changeset_on};
+use tddy_core::changeset::{
+    read_changeset_on, update_state, write_changeset_on,
+};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;
@@ -73,7 +75,11 @@ fn set_interviewing_state(fs: &dyn tddy_fs::Fs, session_dir: &std::path::Path) {
 
 /// Prepend optional analyze summary (from `changeset.artifacts["analyze_summary"]`) to the
 /// reproduce prompt so the backend sees triage context.
-fn merge_analyze_summary_into_prompt(fs: &dyn tddy_fs::Fs, context: &Context, session_dir: &std::path::Path) {
+fn merge_analyze_summary_into_prompt(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+    session_dir: &std::path::Path,
+) {
     let Ok(cs) = read_changeset_on(fs, session_dir) else {
         return;
     };
@@ -101,7 +107,10 @@ fn merge_analyze_summary_into_prompt(fs: &dyn tddy_fs::Fs, context: &Context, se
 }
 
 /// `before_task` body for **`interview`** (TDD-shaped: prompts + optional session/changeset seed).
-fn before_bugfix_interview(fs: &dyn tddy_fs::Fs, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn before_bugfix_interview(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::info!("[bugfix hooks] before_bugfix_interview: set prompts (bugfix interview module)");
     let feature_input: String = context.get_sync("feature_input").unwrap_or_default();
     if let Some(answers) = context.get_sync::<String>("answers") {
@@ -139,7 +148,10 @@ fn before_bugfix_interview(fs: &dyn tddy_fs::Fs, context: &Context) -> Result<()
 }
 
 /// `before_task` body for **`analyze`**: merge interview relay, triage system prompt, changeset seed/state.
-fn before_bugfix_analyze(fs: &dyn tddy_fs::Fs, context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn before_bugfix_analyze(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::info!(
         "[bugfix hooks] before_bugfix_analyze: merge interview relay, set system prompt and state"
     );

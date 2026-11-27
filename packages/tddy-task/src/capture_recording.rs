@@ -99,7 +99,11 @@ impl CaptureRecording {
     }
 
     /// [`CaptureRecording::record`] through the filesystem port.
-    pub async fn record_on(fs: std::sync::Arc<dyn tddy_fs::Fs>, capture: &Mutex<TerminalCapture>, path: &Path) -> io::Result<()> {
+    pub async fn record_on(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        capture: &Mutex<TerminalCapture>,
+        path: &Path,
+    ) -> io::Result<()> {
         let snapshot = Self::of(&capture.lock().unwrap_or_else(PoisonError::into_inner));
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
@@ -177,5 +181,3 @@ fn take<const N: usize>(cursor: &mut &[u8]) -> io::Result<[u8; N]> {
 fn invalid(reason: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason.to_owned())
 }
-
-

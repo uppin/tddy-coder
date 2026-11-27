@@ -45,10 +45,13 @@ pub fn write_session_github_source_on(
     let yaml = serde_yaml::to_string(&source).map_err(|e| {
         crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
     })?;
-    fs.write(&session_dir.join(SESSION_GITHUB_SOURCE_FILENAME), yaml.as_bytes())
-        .map_err(|e| {
-            crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
-        })
+    fs.write(
+        &session_dir.join(SESSION_GITHUB_SOURCE_FILENAME),
+        yaml.as_bytes(),
+    )
+    .map_err(|e| {
+        crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
+    })
 }
 
 /// The source recorded for the session in `session_dir`; `None` when its start named none.

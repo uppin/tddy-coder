@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use tddy_core::backend::AgentOutputSink;
-use tddy_core::changeset::{read_changeset, BranchWorktreeIntent, read_changeset_on};
+use tddy_core::changeset::{read_changeset_on, BranchWorktreeIntent};
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::hooks::RunnerHooks;

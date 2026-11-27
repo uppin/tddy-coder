@@ -6,7 +6,9 @@ use std::error::Error;
 use std::path::Path;
 
 use tddy_core::changeset::{
-    append_session_and_update_state, read_changeset, update_state, BranchWorktreeIntent, Changeset, read_changeset_on};
+    append_session_and_update_state, read_changeset_on, update_state,
+    BranchWorktreeIntent, Changeset,
+};
 use tddy_core::error::WorkflowError;
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
@@ -237,7 +239,12 @@ pub(crate) fn after_validate(
     }
     if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("ValidateComplete"));
-        hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_validate ValidateComplete");
+        hooks_common::write_changeset_logged(
+            fs,
+            session_dir,
+            &cs,
+            "after_validate ValidateComplete",
+        );
     }
     Ok(())
 }
@@ -250,7 +257,12 @@ pub(crate) fn after_refactor(
     let _ = parse_refactor_response(output).map_err(WorkflowError::ParseError)?;
     if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("RefactorComplete"));
-        hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_refactor RefactorComplete");
+        hooks_common::write_changeset_logged(
+            fs,
+            session_dir,
+            &cs,
+            "after_refactor RefactorComplete",
+        );
     }
     Ok(())
 }
@@ -268,7 +280,10 @@ pub(crate) fn after_update_docs(
     Ok(())
 }
 
-pub(crate) fn after_demo(fs: &dyn tddy_fs::Fs,session_dir: &Path) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub(crate) fn after_demo(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("DemoComplete"));
         hooks_common::write_changeset_logged(fs, session_dir, &cs, "after_demo DemoComplete");

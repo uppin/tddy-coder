@@ -553,7 +553,7 @@ mod agent_activity_unit_tests {
         let good_b = a_completed_record("call-b", "Bash");
         let log_path = session_dir.join(AGENT_ACTIVITY_FILENAME);
         {
-                        let mut f = std::fs::File::create(&log_path).unwrap();
+            let mut f = std::fs::File::create(&log_path).unwrap();
             writeln!(f, "{}", serde_json::to_string(&good_a).unwrap()).unwrap();
             writeln!(f, "{{not valid json}}").unwrap();
             writeln!(f, "{}", serde_json::to_string(&good_b).unwrap()).unwrap();

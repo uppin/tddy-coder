@@ -183,10 +183,7 @@ pub fn read_tab_roster(session_dir: &Path) -> anyhow::Result<TabRoster> {
 }
 
 /// [`read_tab_roster`] through the filesystem port.
-pub fn read_tab_roster_on(
-    fs: &dyn tddy_fs::Fs,
-    session_dir: &Path,
-) -> anyhow::Result<TabRoster> {
+pub fn read_tab_roster_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> anyhow::Result<TabRoster> {
     let path = session_dir.join(TAB_ROSTER_FILENAME);
     let text = match fs.read_to_string(&path) {
         Ok(text) => text,

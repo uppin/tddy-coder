@@ -139,14 +139,16 @@ pub fn write_artifacts_on(
         ));
     }
 
-    fs.create_dir_all(output_dir).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs.create_dir_all(output_dir)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
 
     if let Some(ref demo) = planning.demo_plan {
         write_demo_plan_file_on(fs, output_dir, demo)?;
     }
 
     let artifacts_root = session_artifacts_root(output_dir);
-    fs.create_dir_all(&artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs.create_dir_all(&artifacts_root)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     log::info!(
         "[tddy-workflow-recipes] write_artifacts prd at {:?}/{}",
         artifacts_root,
@@ -189,7 +191,8 @@ pub fn write_exploration_file_on(
     artifacts_root: &Path,
     exploration: &str,
 ) -> Result<(), WorkflowError> {
-    fs.create_dir_all(artifacts_root).map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
+    fs.create_dir_all(artifacts_root)
+        .map_err(|e| WorkflowError::WriteFailed(e.to_string()))?;
     let path = artifacts_root.join(EXPLORATION_BASENAME);
     let content = inject_cross_references_on(fs, exploration, artifacts_root, EXPLORATION_BASENAME);
     fs.write_atomic(&path, content.as_bytes(), None)
@@ -286,8 +289,12 @@ pub fn write_acceptance_tests_file_on(
     output: &AcceptanceTestsOutput,
 ) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("acceptance-tests.md");
-    let content =
-        inject_cross_references_on(fs, &output.to_markdown(), session_dir, "acceptance-tests.md");
+    let content = inject_cross_references_on(
+        fs,
+        &output.to_markdown(),
+        session_dir,
+        "acceptance-tests.md",
+    );
     write_atomic_string(fs, &md_path, &content)
 }
 
@@ -303,7 +310,8 @@ pub fn write_red_output_file_on(
     output: &RedOutput,
 ) -> Result<(), WorkflowError> {
     let md_path = session_dir.join("red-output.md");
-    let content = inject_cross_references_on(fs, &output.to_markdown(), session_dir, "red-output.md");
+    let content =
+        inject_cross_references_on(fs, &output.to_markdown(), session_dir, "red-output.md");
     write_atomic_string(fs, &md_path, &content)
 }
 

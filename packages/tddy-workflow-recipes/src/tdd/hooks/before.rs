@@ -5,7 +5,7 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use tddy_core::changeset::{read_changeset, resolve_model, update_state, read_changeset_on};
+use tddy_core::changeset::{read_changeset_on, resolve_model, update_state};
 use tddy_core::workflow::context::Context;
 use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::prepend_context_header;
@@ -17,7 +17,10 @@ use crate::tdd::{
 };
 use crate::SessionArtifactManifest;
 
-pub(crate) fn before_interview(fs: &dyn tddy_fs::Fs,context: &Context) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub(crate) fn before_interview(
+    fs: &dyn tddy_fs::Fs,
+    context: &Context,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     log::debug!(
         target: "tddy_workflow_recipes::tdd::hooks",
         "before_interview: preparing prompts and session_dir"
@@ -73,7 +76,12 @@ pub(crate) fn before_interview(fs: &dyn tddy_fs::Fs,context: &Context) -> Result
     context.set_sync("model", model);
     if let Ok(mut cs) = read_changeset_on(fs, &session_dir) {
         update_state(&mut cs, WorkflowState::new("Interviewing"));
-        hooks_common::write_changeset_logged(fs, &session_dir, &cs, "before_interview Interviewing");
+        hooks_common::write_changeset_logged(
+            fs,
+            &session_dir,
+            &cs,
+            "before_interview Interviewing",
+        );
     }
     Ok(())
 }
@@ -140,7 +148,8 @@ pub(crate) fn before_acceptance_tests(
     context.set_sync("model", model);
     if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("AcceptanceTesting"));
-        hooks_common::write_changeset_logged(fs, 
+        hooks_common::write_changeset_logged(
+            fs,
             session_dir,
             &cs,
             "before_acceptance_tests AcceptanceTesting",
@@ -157,7 +166,8 @@ pub(crate) fn before_red(
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let prd = hooks_common::read_primary_session_document(fs, session_dir, manifest)?;
-    let at = fs.read_to_string(&(session_dir.join("acceptance-tests.md")))
+    let at = fs
+        .read_to_string(&(session_dir.join("acceptance-tests.md")))
         .map_err(|e| format!("read acceptance-tests.md: {}", e))?;
     let changeset = read_changeset_on(fs, session_dir).ok();
     let defaults = hooks_common::recipe_default_models_str(recipe);
@@ -212,7 +222,8 @@ pub(crate) fn before_demo(
     context: &Context,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let demo_plan = fs.read_to_string(&(session_dir.join("demo-plan.md")))
+    let demo_plan = fs
+        .read_to_string(&(session_dir.join("demo-plan.md")))
         .map_err(|e| format!("read demo-plan.md: {}", e))?;
     let prompt = format!(
         "Execute the demo described in demo-plan.md:\n\n{}",
@@ -249,7 +260,9 @@ pub(crate) fn before_evaluate(
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let prd = hooks_common::read_primary_session_document_optional(fs, session_dir, manifest);
-    let changeset_raw = fs.read_to_string(&(session_dir.join("changeset.yaml"))).ok();
+    let changeset_raw = fs
+        .read_to_string(&(session_dir.join("changeset.yaml")))
+        .ok();
     let prompt = evaluate::build_prompt(prd.as_deref(), changeset_raw.as_deref());
     let repo_dir: Option<PathBuf> = context
         .get_sync("worktree_dir")
@@ -280,7 +293,8 @@ pub(crate) fn before_validate(
     context: &Context,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let eval_report = fs.read_to_string(&(session_dir.join("evaluation-report.md")))
+    let eval_report = fs
+        .read_to_string(&(session_dir.join("evaluation-report.md")))
         .map_err(|e| format!("read evaluation-report.md: {}", e))?;
     let prompt = validate_subagents::build_prompt(&eval_report);
     let repo_dir: Option<PathBuf> = context
@@ -312,7 +326,8 @@ pub(crate) fn before_refactor(
     context: &Context,
     manifest: &dyn SessionArtifactManifest,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let refactor_plan = fs.read_to_string(&(session_dir.join("refactoring-plan.md")))
+    let refactor_plan = fs
+        .read_to_string(&(session_dir.join("refactoring-plan.md")))
         .map_err(|e| format!("read refactoring-plan.md: {}", e))?;
     let prompt = refactor::build_prompt(&refactor_plan);
     let repo_dir: Option<PathBuf> = context
@@ -387,7 +402,12 @@ pub(crate) fn before_update_docs(
     context.set_sync("is_resume", true);
     if let Ok(mut cs) = read_changeset_on(fs, session_dir) {
         update_state(&mut cs, WorkflowState::new("UpdatingDocs"));
-        hooks_common::write_changeset_logged(fs, session_dir, &cs, "before_update_docs UpdatingDocs");
+        hooks_common::write_changeset_logged(
+            fs,
+            session_dir,
+            &cs,
+            "before_update_docs UpdatingDocs",
+        );
     }
     Ok(())
 }

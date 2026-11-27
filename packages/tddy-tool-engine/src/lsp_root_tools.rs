@@ -168,7 +168,9 @@ pub fn lsp_root_for_on(
             "root {named} is not an absolute path; name the root in full"
         ));
     }
-    let root = fs.canonicalize(Path::new(named)).unwrap_or_else(|_| PathBuf::from(named));
+    let root = fs
+        .canonicalize(Path::new(named))
+        .unwrap_or_else(|_| PathBuf::from(named));
     let added = added_roots.iter().any(|added| {
         let added = fs.canonicalize(added).unwrap_or_else(|_| added.clone());
         root.starts_with(added)
