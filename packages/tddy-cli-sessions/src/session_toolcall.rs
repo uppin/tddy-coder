@@ -13,9 +13,9 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_fs::Fs as _;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+use tddy_fs::Fs as _;
 
 use tddy_core::backend::CodingBackend;
 use tddy_core::presenter::WorkflowEvent;

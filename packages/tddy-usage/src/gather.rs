@@ -33,7 +33,11 @@ pub fn account(section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRe
 }
 
 /// [`account`] through the filesystem port.
-pub fn account_on(fs: &dyn tddy_fs::Fs, section: &UsageSection, ctx: &UsageContext) -> Vec<ConversationRecord> {
+pub fn account_on(
+    fs: &dyn tddy_fs::Fs,
+    section: &UsageSection,
+    ctx: &UsageContext,
+) -> Vec<ConversationRecord> {
     merge_sources(
         section
             .sources
@@ -87,7 +91,11 @@ pub fn gather_session_usage(
 }
 
 /// [`gather_session_usage`] through the filesystem port.
-pub fn gather_session_usage_on(fs: &dyn tddy_fs::Fs, section: Option<&UsageSection>, ctx: &UsageContext) -> Vec<ConversationRecord> {
+pub fn gather_session_usage_on(
+    fs: &dyn tddy_fs::Fs,
+    section: Option<&UsageSection>,
+    ctx: &UsageContext,
+) -> Vec<ConversationRecord> {
     let mut records = section.map(|s| account_on(fs, s, ctx)).unwrap_or_default();
     records.extend(accounting_file_rows(fs, &ctx.session_dir));
     records

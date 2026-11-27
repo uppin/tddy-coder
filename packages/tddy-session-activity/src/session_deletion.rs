@@ -6,8 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
-use tddy_fs::Fs as _;
 use std::time::Duration;
+use tddy_fs::Fs as _;
 
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
@@ -121,7 +121,11 @@ pub fn signal_pid(pid: i32, sig: libc::c_int) -> Result<(), Status> {
 ///
 /// Best-effort: a missing file, an invalid pid, or a process already gone must not fail the delete.
 #[cfg(unix)]
-fn teardown_workspace_sandbox(fs: &dyn tddy_fs::Fs, session_dir: &Path, metadata: &tddy_core::SessionMetadata) {
+fn teardown_workspace_sandbox(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    metadata: &tddy_core::SessionMetadata,
+) {
     if metadata.sandbox != Some(true) {
         return;
     }
@@ -160,7 +164,12 @@ fn teardown_workspace_sandbox(fs: &dyn tddy_fs::Fs, session_dir: &Path, metadata
 }
 
 #[cfg(not(unix))]
-fn teardown_workspace_sandbox(_fs: &dyn tddy_fs::Fs, _session_dir: &Path, _metadata: &tddy_core::SessionMetadata) {}
+fn teardown_workspace_sandbox(
+    _fs: &dyn tddy_fs::Fs,
+    _session_dir: &Path,
+    _metadata: &tddy_core::SessionMetadata,
+) {
+}
 
 /// Reap `pid` when this process is its parent. A reparented orphan returns immediately with `ECHILD`.
 #[cfg(unix)]
@@ -254,7 +263,13 @@ pub fn delete_session_directory(
     projects_dir: Option<&Path>,
     agents: Option<&tddy_coding_agent_specs::CodingAgentRegistry>,
 ) -> Result<(), Status> {
-    delete_session_directory_on(&tddy_fs::DiskFs, sessions_base, session_id, projects_dir, agents)
+    delete_session_directory_on(
+        &tddy_fs::DiskFs,
+        sessions_base,
+        session_id,
+        projects_dir,
+        agents,
+    )
 }
 
 /// [`delete_session_directory`] through the filesystem port.

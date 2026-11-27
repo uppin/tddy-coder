@@ -52,7 +52,10 @@ impl SessionWatchStore {
             Err(e) => return Err(anyhow::anyhow!("read {}: {e}", dir.display())),
         };
         for entry in entries {
-            let Some(project_id) = entry.file_name().and_then(|n| n.to_str().map(str::to_string)) else {
+            let Some(project_id) = entry
+                .file_name()
+                .and_then(|n| n.to_str().map(str::to_string))
+            else {
                 continue;
             };
             let path = entry.join(SESSION_WATCHES_FILE);

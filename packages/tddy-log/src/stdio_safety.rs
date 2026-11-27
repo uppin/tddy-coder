@@ -52,9 +52,16 @@ pub fn redirect_fd_to_file(
 ) -> std::io::Result<()> {
     // `libc::open` directly: the port has no fd to hand `dup2`, and this file exists only to
     // become one. `O_TRUNC` is the create-or-truncate the `File::create` call performed.
-    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes())
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidFilename, "path contains NUL"))?;
-    let fd = unsafe { libc::open(c_path.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC, 0o644) };
+    let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidFilename, "path contains NUL")
+    })?;
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+            0o644,
+        )
+    };
     if fd == -1 {
         return Err(std::io::Error::last_os_error());
     }

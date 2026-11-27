@@ -35,7 +35,11 @@ pub fn register_conversation(
 }
 
 /// [`register_conversation`] through the filesystem port.
-pub fn register_conversation_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, conversation: &RegisteredConversation) -> std::io::Result<()> {
+pub fn register_conversation_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    conversation: &RegisteredConversation,
+) -> std::io::Result<()> {
     let mut line = serde_json::to_vec(conversation)?;
     line.push(b'\n');
     // `append` is the port's `O_APPEND` write: the kernel keeps concurrent lines whole.
@@ -49,7 +53,10 @@ pub fn registered_conversations(session_dir: &Path) -> Vec<RegisteredConversatio
 }
 
 /// [`registered_conversations`] through the filesystem port.
-pub fn registered_conversations_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Vec<RegisteredConversation> {
+pub fn registered_conversations_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> Vec<RegisteredConversation> {
     let path = session_dir.join(CONVERSATION_REGISTRY_FILE);
     let Ok(text) = fs.read_to_string(&path) else {
         return Vec::new();

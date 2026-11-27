@@ -160,7 +160,16 @@ fn identified_rows(
     )];
     let mut visited: HashSet<&str> = HashSet::from([main.id.as_str()]);
     if source.children_by.is_some() {
-        spawned_rows(fs, &main.id, &files, 1, &mut visited, source, ctx, &mut rows);
+        spawned_rows(
+            fs,
+            &main.id,
+            &files,
+            1,
+            &mut visited,
+            source,
+            ctx,
+            &mut rows,
+        );
     }
     Some(rows)
 }
@@ -345,7 +354,13 @@ fn row(
     source: &JsonlSource,
     ctx: &UsageContext,
 ) -> ConversationRecord {
-    record_of(agent, id, parent_id, fold_files(fs, files, &source.record), ctx)
+    record_of(
+        agent,
+        id,
+        parent_id,
+        fold_files(fs, files, &source.record),
+        ctx,
+    )
 }
 
 /// The record a conversation's folded figures make; its model is the fallback when none was seen.

@@ -33,7 +33,11 @@ fn rotation_state(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> RotationState {
     }
 }
 
-fn set_rotation_state(fs: &dyn tddy_fs::Fs, session_dir: &Path, state: RotationState) -> Result<(), Status> {
+fn set_rotation_state(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    state: RotationState,
+) -> Result<(), Status> {
     let marker = session_dir.join(ARMED_MARKER);
     let result = match state {
         RotationState::Armed => fs.write(&marker, b""),
@@ -75,8 +79,12 @@ impl ActivityServiceImpl {
         );
         match step {
             RotationStep::Unchanged => Ok(()),
-            RotationStep::Arm => set_rotation_state(&*self.ports.fs, session_dir, RotationState::Armed),
-            RotationStep::Disarm => set_rotation_state(&*self.ports.fs, session_dir, RotationState::Idle),
+            RotationStep::Arm => {
+                set_rotation_state(&*self.ports.fs, session_dir, RotationState::Armed)
+            }
+            RotationStep::Disarm => {
+                set_rotation_state(&*self.ports.fs, session_dir, RotationState::Idle)
+            }
             RotationStep::RotateTo(next) => {
                 set_rotation_state(&*self.ports.fs, session_dir, RotationState::Idle)?;
                 record_rotation(session_dir, &meta, next)

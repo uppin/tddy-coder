@@ -702,7 +702,11 @@ impl NotificationRelay {
     }
 }
 
-fn write_atomically(fs: &dyn tddy_fs::Fs, path: &Path, state: &PersistedState) -> anyhow::Result<()> {
+fn write_atomically(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    state: &PersistedState,
+) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)
             .map_err(|e| anyhow::anyhow!("create {}: {e}", parent.display()))?;

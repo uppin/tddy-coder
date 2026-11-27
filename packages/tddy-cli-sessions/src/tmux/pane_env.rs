@@ -9,7 +9,6 @@
 
 use std::path::{Path, PathBuf};
 
-
 use super::TmuxError;
 
 /// The directory, inside a session's directory, its pane environment files are written to. It is
@@ -74,7 +73,8 @@ pub fn write_pane_env_file_on(
     }
     let contents = shell_exports(env)?;
     let dir = session_dir.join(PANE_ENV_DIR);
-    fs.create_dir_all(&dir).map_err(|e| io_error("create", &dir, e))?;
+    fs.create_dir_all(&dir)
+        .map_err(|e| io_error("create", &dir, e))?;
     fs.set_mode(&dir, 0o700)
         .map_err(|e| io_error("restrict", &dir, e))?;
     hand_to(&dir, owner)?;
@@ -145,12 +145,24 @@ fn hand_to(path: &Path, owner: Option<PaneEnvOwner>) -> Result<(), TmuxError> {
             // `libc::chown` directly: the port has no ownership operation, and ownership is a
             // process-credential act, not filesystem content. Same call `std::os::unix::fs::chown`
             // performed.
-            let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
-                io_error("give", path, std::io::Error::new(std::io::ErrorKind::InvalidFilename, "path contains NUL"))
-            })?;
+            let c_path =
+                std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
+                    io_error(
+                        "give",
+                        path,
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidFilename,
+                            "path contains NUL",
+                        ),
+                    )
+                })?;
             let ret = unsafe { libc::chown(c_path.as_ptr(), uid, gid) };
             if ret == -1 {
-                Err(io_error(&format!("give uid {uid}"), path, std::io::Error::last_os_error()))
+                Err(io_error(
+                    &format!("give uid {uid}"),
+                    path,
+                    std::io::Error::last_os_error(),
+                ))
             } else {
                 Ok(())
             }

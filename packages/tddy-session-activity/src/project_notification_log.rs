@@ -253,11 +253,19 @@ impl ProjectNotificationLog {
     ///
     /// An unreadable file is an error: a log is not started over records it could not read.
     pub fn open(data_dir: &Path, sessions_base_for: SessionsBaseFor) -> anyhow::Result<Self> {
-        Self::open_on(std::sync::Arc::new(tddy_fs::DiskFs), data_dir, sessions_base_for)
+        Self::open_on(
+            std::sync::Arc::new(tddy_fs::DiskFs),
+            data_dir,
+            sessions_base_for,
+        )
     }
 
     /// [`ProjectNotificationLog::open`] through the filesystem port.
-    pub fn open_on(fs: std::sync::Arc<dyn tddy_fs::Fs>, data_dir: &Path, sessions_base_for: SessionsBaseFor) -> anyhow::Result<Self> {
+    pub fn open_on(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        data_dir: &Path,
+        sessions_base_for: SessionsBaseFor,
+    ) -> anyhow::Result<Self> {
         let projects = storage::replay_all(&*fs, data_dir)?
             .into_iter()
             .map(|replayed| {
@@ -418,7 +426,12 @@ impl ProjectNotificationLog {
 /// compacting the file once it has grown past twice the window. `state` is the locked project's,
 /// held across the append, so the file's lines are in `seq` order and a record is either recorded
 /// whole or not at all.
-fn append_held(fs: &dyn tddy_fs::Fs, path: &Path, state: &mut ProjectState, held: Held) -> anyhow::Result<()> {
+fn append_held(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    state: &mut ProjectState,
+    held: Held,
+) -> anyhow::Result<()> {
     storage::append(fs, path, &held)?;
     state.newest_seq = held.record.seq;
     state.lines_on_disk += 1;

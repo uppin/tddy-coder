@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::token_accounting::ConversationRecord;
 use crate::gather::{account_on, gather_session_usage_on};
 use crate::registry::registered_conversations_on;
+use crate::token_accounting::ConversationRecord;
 use crate::{RegisteredConversation, UsageContext, UsageSection};
 
 /// The file a launch writes next to the session's `.session.yaml`.
@@ -41,7 +41,11 @@ pub fn write_usage_context(session_dir: &Path, context: &UsageContextFile) -> st
 }
 
 /// [`write_usage_context`] through the filesystem port.
-pub fn write_usage_context_on(fs: &dyn tddy_fs::Fs, session_dir: &Path, context: &UsageContextFile) -> std::io::Result<()> {
+pub fn write_usage_context_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+    context: &UsageContextFile,
+) -> std::io::Result<()> {
     let json = serde_json::to_vec_pretty(context)?;
     let path = session_dir.join(USAGE_CONTEXT_FILE);
     let tmp = session_dir.join(format!("{USAGE_CONTEXT_FILE}.tmp"));

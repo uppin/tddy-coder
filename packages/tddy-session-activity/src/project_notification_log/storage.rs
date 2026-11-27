@@ -88,7 +88,10 @@ pub(super) fn replay_all(fs: &dyn tddy_fs::Fs, data_dir: &Path) -> anyhow::Resul
     };
     let mut replayed = Vec::new();
     for entry in entries {
-        let Some(project_id) = entry.file_name().and_then(|n| n.to_str().map(str::to_string)) else {
+        let Some(project_id) = entry
+            .file_name()
+            .and_then(|n| n.to_str().map(str::to_string))
+        else {
             continue;
         };
         let path = entry.join(NOTIFICATIONS_FILE);

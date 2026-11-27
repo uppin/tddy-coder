@@ -70,7 +70,9 @@ pub fn record_answer_wait_on(
 /// [`recorded_answer_wait`] through the filesystem port.
 #[must_use]
 pub fn recorded_answer_wait_on(fs: &dyn tddy_fs::Fs, session_dir: &Path) -> Option<Duration> {
-    let text = fs.read_to_string(&session_dir.join(ANSWER_WAIT_FILE)).ok()?;
+    let text = fs
+        .read_to_string(&session_dir.join(ANSWER_WAIT_FILE))
+        .ok()?;
     let millis: u64 = text.trim().parse().ok()?;
     Some(Duration::from_millis(millis))
 }
