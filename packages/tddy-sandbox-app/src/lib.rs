@@ -26,3 +26,20 @@ pub mod host_agent;
 pub mod sandboxed_session;
 #[cfg(target_os = "macos")]
 pub mod spawn;
+
+/// The filesystem the app reads and writes through: `DiskFs` until the composition root
+/// (this app's `main`) installs another via [`set_app_fs`].
+static APP_FS: std::sync::OnceLock<std::sync::Arc<dyn tddy_fs::Fs>> = std::sync::OnceLock::new();
+
+/// Install the filesystem app output goes through. Called once by `main` before run.
+pub fn set_app_fs(fs: std::sync::Arc<dyn tddy_fs::Fs>) {
+    let _ = APP_FS.set(fs);
+}
+
+/// The filesystem the app reads and writes through.
+pub fn app_fs() -> std::sync::Arc<dyn tddy_fs::Fs> {
+    APP_FS
+        .get()
+        .map(std::sync::Arc::clone)
+        .unwrap_or_else(|| std::sync::Arc::new(tddy_fs::DiskFs))
+}

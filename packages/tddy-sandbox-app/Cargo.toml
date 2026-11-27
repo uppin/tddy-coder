@@ -16,6 +16,8 @@ name = "tddy-sandbox-app"
 path = "src/main.rs"
 
 [dependencies]
+# `#fs-port`: production disk I/O goes through the port.
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
