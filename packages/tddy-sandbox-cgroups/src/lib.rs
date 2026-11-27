@@ -16,6 +16,7 @@ use std::sync::OnceLock;
 use nix::mount::MsFlags;
 use nix::sched::{unshare, CloneFlags};
 use tddy_sandbox::{SandboxError, SandboxHandle, SandboxPlan, SandboxSpec};
+use tddy_fs::Fs as _;
 
 /// Map a plan's read grants to read-only bind-mount operations applied inside the rootless jail.
 ///
@@ -87,13 +88,18 @@ pub(crate) fn stdio_mode_of(plan: &SandboxPlan) -> bool {
 /// FIXME(fs-confinement): the declared reads become read-only bind mounts, but the jail still shares
 /// the host filesystem root — full minimal-root `pivot_root` write-confinement is a follow-up.
 pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
+    spawn_plan_on(&tddy_fs::DiskFs, plan)
+}
+
+/// [`spawn_plan`] through the filesystem port.
+pub fn spawn_plan_on(fs: &dyn tddy_fs::Fs, plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     plan.spec.validate()?;
     for dir in [
         &plan.spec.project_root,
         &plan.spec.scratch_dir,
         &plan.spec.egress_dir,
     ] {
-        std::fs::create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+        fs.create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
     }
 
     if !unprivileged_userns_available() {
@@ -115,9 +121,9 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
     // Derive (and, once per daemon, prepare) the delegated cgroup base before spawning, so the
     // daemon is relocated into its supervisor leaf before it forks the child. Fails fast when no
     // writable cgroup v2 subtree is available — never a silent degrade to an unconfined process.
-    let base = detect_and_prepare_base(&plan.cgroup)?;
+    let base = detect_and_prepare_base(fs, &plan.cgroup)?;
     let scope = scope_dir_in(&base, &session_name_from(&plan.spec), next_seq());
-    std::fs::create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+    fs.create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
 
     let uid = nix::unistd::geteuid().as_raw();
     let gid = nix::unistd::getegid().as_raw();
@@ -169,7 +175,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
         }
     }
 
-    if let Err(e) = move_pid_into_scope(&scope, child.id()) {
+    if let Err(e) = move_pid_into_scope(fs, &scope, child.id()) {
         let _ = child.kill();
         return Err(cgroup_unsupported_error(&scope, &e));
     }
@@ -180,7 +186,7 @@ pub fn spawn_plan(plan: SandboxPlan) -> Result<SandboxHandle, SandboxError> {
         } else {
             limits
         };
-    if let Err(e) = write_cgroup_limits(&scope, &limits) {
+    if let Err(e) = write_cgroup_limits(fs, &scope, &limits) {
         log::warn!(
             target: "tddy_sandbox_cgroups",
             "some cgroup limits could not be applied in {}: {e}",
@@ -258,9 +264,14 @@ pub struct CgroupLimits {
 /// `pivot_root` into a minimal read-only root; full filesystem write-confinement via bind mounts is
 /// a follow-up. The network namespace (the egress guarantee) and cgroup limits are in place.
 pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
+    spawn_on(&tddy_fs::DiskFs, spec)
+}
+
+/// [`spawn`] through the filesystem port.
+pub fn spawn_on(fs: &dyn tddy_fs::Fs, spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
     spec.validate()?;
     for dir in [&spec.project_root, &spec.scratch_dir, &spec.egress_dir] {
-        std::fs::create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
+        fs.create_dir_all(dir).map_err(|e| SandboxError::Io(e.to_string()))?;
     }
 
     if !unprivileged_userns_available() {
@@ -277,9 +288,9 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
     // cgroup scope created before spawn so limits apply from the start. A host without a writable
     // cgroup v2 subtree fails fast (no silent degrade to an unlimited process). The delegated base
     // is prepared (and the daemon relocated) before the child is forked.
-    let base = detect_and_prepare_base(&tddy_sandbox::CgroupConfig::default())?;
+    let base = detect_and_prepare_base(fs, &tddy_sandbox::CgroupConfig::default())?;
     let scope = scope_dir_in(&base, &session_name_from(&spec), next_seq());
-    std::fs::create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
+    fs.create_dir_all(&scope).map_err(|e| cgroup_unsupported_error(&scope, &e))?;
 
     let uid = nix::unistd::geteuid().as_raw();
     let gid = nix::unistd::getegid().as_raw();
@@ -310,13 +321,13 @@ pub fn spawn(spec: SandboxSpec) -> Result<SandboxHandle, SandboxError> {
 
     // Move the jailed process into its scope so the limits bind it. A failure here means it would
     // run uncgrouped — kill it and fail rather than continue unconfined.
-    if let Err(e) = move_pid_into_scope(&scope, child.id()) {
+    if let Err(e) = move_pid_into_scope(fs, &scope, child.id()) {
         let _ = child.kill();
         return Err(cgroup_unsupported_error(&scope, &e));
     }
     // Per-controller limit writes are best-effort: the process is already confined to the scope,
     // and a missing controller (e.g. cpu not delegated) shouldn't tear down an otherwise valid jail.
-    if let Err(e) = write_cgroup_limits(&scope, &default_limits()) {
+    if let Err(e) = write_cgroup_limits(fs, &scope, &default_limits()) {
         log::warn!(
             target: "tddy_sandbox_cgroups",
             "some cgroup limits could not be applied in {}: {e}",
@@ -537,33 +548,35 @@ pub fn scope_dir_in(base: &Path, session_name: &str, seq: u64) -> PathBuf {
 
 /// Seam: create `base/<leaf>` and move the daemon's own thread group into it by writing `self_pid`
 /// (the TGID) to `base/<leaf>/cgroup.procs`, satisfying cgroup v2's no-internal-processes rule.
-pub fn relocate_self_into_leaf(base: &Path, self_pid: u32, leaf: &str) -> std::io::Result<()> {
+pub fn relocate_self_into_leaf(fs: &dyn tddy_fs::Fs, base: &Path, self_pid: u32, leaf: &str) -> std::io::Result<()> {
     let leaf_dir = base.join(leaf);
-    std::fs::create_dir_all(&leaf_dir)?;
-    std::fs::write(leaf_dir.join("cgroup.procs"), self_pid.to_string())
+    fs.create_dir_all(&leaf_dir)?;
+    fs.write(&leaf_dir.join("cgroup.procs"), self_pid.to_string().as_bytes())
 }
 
 /// Seam: enable the given controllers in `base/cgroup.subtree_control`.
-pub fn enable_controllers(base: &Path, controllers: &[String]) -> std::io::Result<()> {
-    std::fs::write(
-        base.join("cgroup.subtree_control"),
-        subtree_control_line(controllers),
+pub fn enable_controllers(fs: &dyn tddy_fs::Fs, base: &Path, controllers: &[String]) -> std::io::Result<()> {
+    fs.write(
+        &base.join("cgroup.subtree_control"),
+        subtree_control_line(controllers).as_bytes(),
     )
 }
 
 /// Seam: move `pid` into `scope` by writing it to `scope/cgroup.procs`.
-pub fn move_pid_into_scope(scope: &Path, pid: u32) -> std::io::Result<()> {
-    std::fs::write(scope.join("cgroup.procs"), pid.to_string())
+pub fn move_pid_into_scope(fs: &dyn tddy_fs::Fs, scope: &Path, pid: u32) -> std::io::Result<()> {
+    fs.write(&scope.join("cgroup.procs"), pid.to_string().as_bytes())
 }
 
 /// Host-touching orchestrator (one-time per daemon process, `OnceLock`-guarded): resolve the
 /// delegated base, relocate self into the supervisor leaf, and enable controllers. Caches the base
 /// or the error so every later spawn is fail-fast and never re-degrades.
-fn detect_and_prepare_base(cfg: &tddy_sandbox::CgroupConfig) -> Result<PathBuf, SandboxError> {
+fn detect_and_prepare_base(fs: &dyn tddy_fs::Fs, cfg: &tddy_sandbox::CgroupConfig) -> Result<PathBuf, SandboxError> {
     static PREPARED_BASE: OnceLock<Result<PathBuf, String>> = OnceLock::new();
     let result = PREPARED_BASE.get_or_init(|| {
-        let proc_self_cgroup = std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default();
-        let mountinfo = std::fs::read_to_string("/proc/self/mountinfo").unwrap_or_default();
+        // `/proc` is the host's process table, not sandbox disk: read through the port on the
+        // real disk, as the direct calls this replaces did.
+        let proc_self_cgroup = fs.read_to_string(Path::new("/proc/self/cgroup")).unwrap_or_default();
+        let mountinfo = fs.read_to_string(Path::new("/proc/self/mountinfo")).unwrap_or_default();
         let base = match resolve_cgroup_base(
             cfg,
             &proc_self_cgroup,
@@ -581,7 +594,7 @@ fn detect_and_prepare_base(cfg: &tddy_sandbox::CgroupConfig) -> Result<PathBuf, 
         // cgroup v2 forbids a cgroup from both holding processes and delegating controllers, so the
         // daemon moves its own thread group into a leaf before enabling controllers on the base.
         let leaf = cfg.supervisor_leaf.as_deref().unwrap_or("supervisor");
-        if let Err(e) = relocate_self_into_leaf(&base, std::process::id(), leaf) {
+        if let Err(e) = relocate_self_into_leaf(fs, &base, std::process::id(), leaf) {
             return Err(format!(
                 "cgroup v2 delegation unavailable for {} ({e}); the cgroups sandbox requires a \
                  writable cgroup v2 subtree. Run the daemon via systemd with `Delegate=yes` (or as \
@@ -591,7 +604,7 @@ fn detect_and_prepare_base(cfg: &tddy_sandbox::CgroupConfig) -> Result<PathBuf, 
         }
         // Best-effort: some hosts do not delegate every controller. The base is still usable for
         // scopes even if a controller can't be enabled, so warn rather than fail.
-        if let Err(e) = enable_controllers(&base, &controllers_or_default(cfg)) {
+        if let Err(e) = enable_controllers(fs, &base, &controllers_or_default(cfg)) {
             log::warn!(
                 target: "tddy_sandbox_cgroups",
                 "some cgroup controllers could not be enabled in {}: {e}",
@@ -632,10 +645,12 @@ fn enter_rootless_jail(uid_map: &str, gid_map: &str) -> std::io::Result<()> {
     let errno = |e: nix::Error| std::io::Error::from_raw_os_error(e as i32);
 
     unshare(CloneFlags::CLONE_NEWUSER).map_err(errno)?;
-    std::fs::write("/proc/self/uid_map", uid_map)?;
+    // Writing one's own uid/gid maps is a process act on `/proc/self`: through the port on
+    // the real disk, as the direct calls this replaces did.
+    tddy_fs::DiskFs.write(Path::new("/proc/self/uid_map"), uid_map.as_bytes())?;
     // setgroups must be denied before writing gid_map for an unprivileged single-id mapping.
-    let _ = std::fs::write("/proc/self/setgroups", "deny");
-    std::fs::write("/proc/self/gid_map", gid_map)?;
+    let _ = tddy_fs::DiskFs.write(Path::new("/proc/self/setgroups"), b"deny");
+    tddy_fs::DiskFs.write(Path::new("/proc/self/gid_map"), gid_map.as_bytes())?;
 
     unshare(CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWNET).map_err(errno)?;
 
@@ -714,15 +729,15 @@ pub fn detect_allow_read_paths() -> Vec<PathBuf> {
 
 /// Write cgroup v2 limit files (`memory.max`, `cpu.max`, `pids.max`) into the delegated scope dir.
 /// Only fields that are `Some` are written.
-pub fn write_cgroup_limits(scope_dir: &Path, limits: &CgroupLimits) -> std::io::Result<()> {
+pub fn write_cgroup_limits(fs: &dyn tddy_fs::Fs, scope_dir: &Path, limits: &CgroupLimits) -> std::io::Result<()> {
     if let Some(memory_max) = limits.memory_max {
-        std::fs::write(scope_dir.join("memory.max"), memory_max.to_string())?;
+        fs.write(&scope_dir.join("memory.max"), memory_max.to_string().as_bytes())?;
     }
     if let Some(cpu_max) = &limits.cpu_max {
-        std::fs::write(scope_dir.join("cpu.max"), cpu_max)?;
+        fs.write(&scope_dir.join("cpu.max"), cpu_max.as_bytes())?;
     }
     if let Some(pids_max) = limits.pids_max {
-        std::fs::write(scope_dir.join("pids.max"), pids_max.to_string())?;
+        fs.write(&scope_dir.join("pids.max"), pids_max.to_string().as_bytes())?;
     }
     Ok(())
 }
