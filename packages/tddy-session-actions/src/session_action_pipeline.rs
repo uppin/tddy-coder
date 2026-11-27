@@ -6,7 +6,7 @@ mod spawn;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use log::{debug, info};
 use serde_json::Value;
@@ -230,84 +230,4 @@ fn open_truncate_for_child(path: &Path) -> std::io::Result<Stdio> {
     ))
 }
 
-/// Spawn the primary action with explicit argv (no shell), merged env, and capture stdout/stderr
-/// to the requested paths (session defaults when unset).
-pub fn run_primary_action_with_capture_paths(
-    session_dir: &Path,
-    program: &Path,
-    args: &[String],
-    env: &HashMap<String, String>,
-    stdout_path: Option<&Path>,
-    stderr_path: Option<&Path>,
-) -> Result<(), SessionActionPipelineError> {
-    run_primary_action_with_capture_paths_on(
-        &tddy_fs::DiskFs,
-        session_dir,
-        program,
-        args,
-        env,
-        stdout_path,
-        stderr_path,
-    )
-}
-
-/// [`run_primary_action_with_capture_paths`] through the filesystem port: the capture directories
-/// are created through `fs` (the capture files themselves stay real files — the child process
-/// writes them, so they cannot live on a memory filesystem).
-pub fn run_primary_action_with_capture_paths_on(
-    fs: &dyn tddy_fs::Fs,
-    session_dir: &Path,
-    program: &Path,
-    args: &[String],
-    env: &HashMap<String, String>,
-    stdout_path: Option<&Path>,
-    stderr_path: Option<&Path>,
-) -> Result<(), SessionActionPipelineError> {
-    let capture = session_dir.join("capture");
-    fs.create_dir_all(&capture)?;
-
-    let default_stdout = capture.join("stdout.txt");
-    let default_stderr = capture.join("stderr.txt");
-
-    let resolved_stdout = stdout_path.unwrap_or(default_stdout.as_path());
-    let resolved_stderr = stderr_path.unwrap_or(default_stderr.as_path());
-
-    info!(
-        target: "tddy_core::session_action_pipeline",
-        "run_primary_action_with_capture_paths program={} capture_stdout={} capture_stderr={} env_keys={}",
-        program.display(),
-        resolved_stdout.display(),
-        resolved_stderr.display(),
-        env.len()
-    );
-
-    if let Some(p) = stdout_path {
-        if let Some(parent) = p.parent() {
-            fs.create_dir_all(parent)?;
-        }
-    }
-    if let Some(p) = stderr_path {
-        if let Some(parent) = p.parent() {
-            fs.create_dir_all(parent)?;
-        }
-    }
-
-    let stdout_file = open_truncate_for_child(resolved_stdout)?;
-    let stderr_file = open_truncate_for_child(resolved_stderr)?;
-
-    let mut cmd = Command::new(program);
-    cmd.args(args);
-    cmd.stdin(Stdio::null());
-    cmd.stdout(stdout_file);
-    cmd.stderr(stderr_file);
-    cmd.env_clear();
-    cmd.envs(env);
-
-    let status = cmd.status().map_err(SessionActionPipelineError::Io)?;
-    debug!(
-        target: "tddy_core::session_action_pipeline",
-        "run_primary_action_with_capture_paths exit={:?}",
-        status.code()
-    );
-    Ok(())
-}
+pub use crate::session_action_pipeline::spawn::run_primary_action_with_capture_paths;
