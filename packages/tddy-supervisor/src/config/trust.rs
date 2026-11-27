@@ -11,29 +11,28 @@ use std::path::Path;
 /// never permits is a policy file authored by a *third* party, which is the only case that matters.
 pub(crate) fn require_trustworthy_config_file(
     path: &Path,
-    metadata: &std::fs::Metadata,
+    metadata: &tddy_fs::FsMetadata,
 ) -> Result<(), ConfigError> {
-    use std::os::unix::fs::MetadataExt;
-
     // SAFETY: reads this process's own effective uid and nothing else.
     let enforcing_uid = unsafe { libc::geteuid() };
-    if metadata.uid() != ROOT_UID && metadata.uid() != enforcing_uid {
+    let uid = metadata.uid.unwrap_or(u32::MAX);
+    if uid != ROOT_UID && uid != enforcing_uid {
         return Err(ConfigError {
             message: format!(
                 "{} is owned by uid {} but only uid {ROOT_UID} or uid {enforcing_uid} may write the \
                  policy this supervisor enforces",
                 path.display(),
-                metadata.uid()
+                uid
             ),
         });
     }
-    if metadata.mode() & GROUP_OR_OTHER_WRITE != 0 {
+    if metadata.mode.unwrap_or(0) & GROUP_OR_OTHER_WRITE != 0 {
         return Err(ConfigError {
             message: format!(
                 "{} is writable by its group or by everyone (mode {:o}); anyone who can write it \
                  chooses what the supervisor permits",
                 path.display(),
-                metadata.mode() & 0o7777
+                metadata.mode.unwrap_or(0) & 0o7777
             ),
         });
     }
@@ -48,30 +47,29 @@ pub(crate) fn require_trustworthy_config_file(
 /// A `/etc/tddy` left at `0777` has no such protection, and that is precisely the case being caught.
 pub(crate) fn require_trustworthy_config_directory(
     path: &Path,
-    metadata: &std::fs::Metadata,
+    metadata: &tddy_fs::FsMetadata,
 ) -> Result<(), ConfigError> {
-    use std::os::unix::fs::MetadataExt;
-
     // SAFETY: reads this process's own effective uid and nothing else.
     let enforcing_uid = unsafe { libc::geteuid() };
-    if metadata.uid() != ROOT_UID && metadata.uid() != enforcing_uid {
+    let uid = metadata.uid.unwrap_or(u32::MAX);
+    if uid != ROOT_UID && uid != enforcing_uid {
         return Err(ConfigError {
             message: format!(
                 "{} is owned by uid {}, so uid {} could replace the supervisor's policy file",
                 path.display(),
-                metadata.uid(),
-                metadata.uid()
+                uid,
+                uid
             ),
         });
     }
-    let sticky = metadata.mode() & 0o1000 != 0;
-    if metadata.mode() & GROUP_OR_OTHER_WRITE != 0 && !sticky {
+    let sticky = metadata.mode.unwrap_or(0) & 0o1000 != 0;
+    if metadata.mode.unwrap_or(0) & GROUP_OR_OTHER_WRITE != 0 && !sticky {
         return Err(ConfigError {
             message: format!(
                 "{} is writable by its group or by everyone (mode {:o}) and is not sticky, so the \
                  supervisor's policy file could be replaced",
                 path.display(),
-                metadata.mode() & 0o7777
+                metadata.mode.unwrap_or(0) & 0o7777
             ),
         });
     }

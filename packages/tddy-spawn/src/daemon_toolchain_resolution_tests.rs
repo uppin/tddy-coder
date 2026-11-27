@@ -64,8 +64,7 @@ impl Drop for CwdGuard {
 
 #[test]
 #[serial]
-fn spawn_as_user_locates_a_relative_tool_path_against_the_daemons_own_cwd_not_the_target_repo()
-{
+fn spawn_as_user_locates_a_relative_tool_path_against_the_daemons_own_cwd_not_the_target_repo() {
     // Given — the daemon's own toolchain root (simulated here by the process's cwd, matching
     // "wherever ./web-dev launched the daemon from") contains a tddy-coder build; the target
     // session's repo_path is a *completely unrelated* directory that contains no such build

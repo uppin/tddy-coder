@@ -119,8 +119,8 @@ fn spawn_as_user_passes_the_daemons_tddy_data_dir_to_the_child_as_an_absolute_pa
 
 #[test]
 #[serial]
-fn spawn_as_user_resolves_a_relative_tddy_data_dir_against_the_daemons_own_cwd_not_the_target_repo(
-) {
+fn spawn_as_user_resolves_a_relative_tddy_data_dir_against_the_daemons_own_cwd_not_the_target_repo()
+{
     // Given — the shape `default_tddy_data_dir()` actually returns for a debug build
     // ("tmp/.tddy", relative) when no operator override is configured; the target session's
     // repo_path is a completely unrelated directory the child's cwd gets set to

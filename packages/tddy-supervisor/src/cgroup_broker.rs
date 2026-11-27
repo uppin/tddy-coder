@@ -5,8 +5,9 @@
 //! `CgroupPolicy::base_override`. There is one code path either way — the files a scope is made of
 //! are ordinary writes, and the kernel is what makes them mean something.
 
-use std::fs;
 use std::path::{Component, Path, PathBuf};
+
+use tddy_fs::Fs as _;
 
 use crate::config::CgroupPolicy;
 use crate::error::SupervisorError;
@@ -16,6 +17,7 @@ use crate::request::{CreateScopeRequest, ScopeHandle};
 /// Owns the delegated cgroup v2 subtree and carves per-session scopes out of it.
 #[derive(Debug, Clone)]
 pub struct CgroupBroker {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     base: PathBuf,
     policy: CgroupPolicy,
 }
@@ -23,7 +25,16 @@ pub struct CgroupBroker {
 impl CgroupBroker {
     /// Take ownership of `base`, applying `policy`'s ceilings to every scope created under it.
     pub fn new(base: PathBuf, policy: CgroupPolicy) -> CgroupBroker {
-        CgroupBroker { base, policy }
+        Self::new_on(std::sync::Arc::new(tddy_fs::DiskFs), base, policy)
+    }
+
+    /// [`CgroupBroker::new`] through the filesystem port.
+    pub fn new_on(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        base: PathBuf,
+        policy: CgroupPolicy,
+    ) -> CgroupBroker {
+        CgroupBroker { fs, base, policy }
     }
 
     pub fn base(&self) -> &Path {
@@ -55,7 +66,7 @@ impl CgroupBroker {
     /// and on the plain directory an operator's `base_override` may name.
     pub fn prepare_delegated_subtree(&self, self_pid: u32) -> Result<(), SupervisorError> {
         let leaf = self.leaf_dir()?;
-        fs::create_dir_all(&leaf).map_err(|error| {
+        self.fs.create_dir_all(&leaf).map_err(|error| {
             unprepared_subtree(format!(
                 "create the supervisor leaf {}: {error}",
                 leaf.display()
@@ -73,7 +84,7 @@ impl CgroupBroker {
 
         if let Some(line) = subtree_control_line(&self.policy.controllers) {
             let control = self.base.join("cgroup.subtree_control");
-            fs::write(&control, format!("{line}\n")).map_err(|error| {
+            self.fs.write(&control, format!("{line}\n").as_bytes()).map_err(|error| {
                 unprepared_subtree(format!(
                     "enable controllers `{line}` in {}: {error}. A scope cannot carry the limits this \
                      policy declares without them",
@@ -103,7 +114,9 @@ impl CgroupBroker {
         let path = scope_dir(&self.base, &request.name)?;
         let applied = clamp_limits(&self.policy, &request.limits)?;
 
-        fs::create_dir_all(&path).map_err(|error| self.failure("create scope directory", error))?;
+        self.fs
+            .create_dir_all(&path)
+            .map_err(|error| self.failure("create scope directory", error))?;
         if let Some(memory_max) = applied.memory_max {
             self.write_control(&path, "memory.max", &memory_max.to_string())?;
         }
@@ -138,7 +151,9 @@ impl CgroupBroker {
         let path = self.existing_scope_dir(scope)?;
         // `rmdir`, not a recursive delete: a cgroup's control files cannot be unlinked, and the
         // kernel removes them itself when the now-empty directory goes away.
-        fs::remove_dir(&path).map_err(|error| self.failure("remove scope directory", error))?;
+        self.fs
+            .remove_dir(&path)
+            .map_err(|error| self.failure("remove scope directory", error))?;
         log::info!(
             target: "tddy_supervisor::cgroup_broker",
             "destroyed scope {}",
@@ -163,11 +178,9 @@ impl CgroupBroker {
     /// different questions with it: one is a caller's request to place a session, the other is the
     /// supervisor placing *itself* while preparing the subtree.
     fn write_pid(&self, procs: &Path, pid: u32) -> std::io::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(procs)?;
-        write_one_pid(&mut file, pid)
+        // One `write` of the whole line through the port's append: the syscall count is the
+        // contract [`write_one_pid`] names, and the port's append is one `write_all`.
+        self.fs.append(procs, format!("{pid}\n").as_bytes())
     }
 
     /// The leaf the supervisor moves itself into, refused unless it names one ordinary directory
@@ -193,7 +206,8 @@ impl CgroupBroker {
 
     fn existing_scope_dir(&self, scope: &str) -> Result<PathBuf, SupervisorError> {
         let path = scope_dir(&self.base, scope)?;
-        if path.is_dir() {
+        // `metadata_follow`, as before: `is_dir` follows a link.
+        if matches!(self.fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::Dir) {
             Ok(path)
         } else {
             Err(SupervisorError::NotFound {
@@ -208,7 +222,8 @@ impl CgroupBroker {
         file: &str,
         contents: &str,
     ) -> Result<(), SupervisorError> {
-        fs::write(scope.join(file), format!("{contents}\n"))
+        self.fs
+            .write(&scope.join(file), format!("{contents}\n").as_bytes())
             .map_err(|error| self.failure(&format!("write {file}"), error))
     }
 
@@ -230,6 +245,7 @@ impl CgroupBroker {
 /// post-fork path, for the same reason.
 ///
 /// Free-standing and generic over the sink so the one-write property is assertable without a cgroupfs.
+#[cfg(test)]
 fn write_one_pid(sink: &mut impl std::io::Write, pid: u32) -> std::io::Result<()> {
     sink.write_all(format!("{pid}\n").as_bytes())
 }
@@ -271,7 +287,12 @@ pub enum ScopeRemoval {
 /// `rmdir`, not a recursive delete, for the reason [`CgroupBroker::destroy_scope`] gives: a cgroup's
 /// control files cannot be unlinked, and the kernel removes them itself with the directory.
 pub fn remove_scope_dir(scope: &Path) -> ScopeRemoval {
-    match fs::remove_dir(scope) {
+    remove_scope_dir_on(&tddy_fs::DiskFs, scope)
+}
+
+/// [`remove_scope_dir`] through the filesystem port.
+pub fn remove_scope_dir_on(fs: &dyn tddy_fs::Fs, scope: &Path) -> ScopeRemoval {
+    match fs.remove_dir(scope) {
         Ok(()) => ScopeRemoval::Removed,
         Err(error) => match classify_removal_failure(&error) {
             RemovalFailure::AlreadyGone => ScopeRemoval::Removed,
@@ -349,7 +370,10 @@ pub fn resolve_cgroup_base(policy: &CgroupPolicy) -> anyhow::Result<PathBuf> {
     if let Some(base) = &policy.base_override {
         return Ok(base.clone());
     }
-    let own = std::fs::read_to_string("/proc/self/cgroup")
+    // `/proc` is the host's process table, not supervisor disk: read through the port on
+    // the real disk, as the direct call this replaces did.
+    let own = tddy_fs::DiskFs
+        .read_to_string(Path::new("/proc/self/cgroup"))
         .map_err(|error| anyhow::anyhow!("read /proc/self/cgroup: {error}"))?;
     let relative = cgroup_v2_path(&own).ok_or_else(|| {
         anyhow::anyhow!(

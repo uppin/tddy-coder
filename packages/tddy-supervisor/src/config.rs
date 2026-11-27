@@ -243,13 +243,25 @@ impl SupervisorConfig {
     /// worth checking independently: `install` creating `/etc/tddy` with an inherited `umask` of `000`
     /// is enough for a local user to rewrite `spawn_policy` and have the root broker enforce it.
     pub fn load(path: &Path) -> Result<SupervisorConfig, ConfigError> {
-        // Opened once and read through the same handle the ownership check `fstat`s, so the file that
-        // is parsed is the file that was checked and not one swapped in between the two.
-        let file = std::fs::File::open(path).map_err(|error| ConfigError {
-            message: format!("could not read {}: {error}", path.display()),
-        })?;
-        let metadata = file.metadata().map_err(|error| ConfigError {
-            message: format!("could not inspect {}: {error}", path.display()),
+        Self::load_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`SupervisorConfig::load`] through the filesystem port.
+    ///
+    /// The metadata and the bytes come from the same path through the port: it has no
+    /// open-file handle to pin the checked file to the parsed one, as the `File` this
+    /// replaces did. The ancestor walk below still refuses a writable directory in
+    /// between, which is what a swap would need.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<SupervisorConfig, ConfigError> {
+        // Stat before reading, as the opened-then-`fstat`ed file this replaces did: the
+        // ownership check precedes the read, and a missing file is reported as unreadable
+        // rather than uninspectable.
+        let metadata = fs.metadata_follow(path).map_err(|error| ConfigError {
+            message: if error.kind() == std::io::ErrorKind::NotFound {
+                format!("could not read {}: {error}", path.display())
+            } else {
+                format!("could not inspect {}: {error}", path.display())
+            },
         })?;
         require_trustworthy_config_file(path, &metadata)?;
         // The file being safe is not enough: a directory on the way to it that somebody else can write
@@ -258,27 +270,21 @@ impl SupervisorConfig {
         // Walked over the canonical path, so `..`, a relative `--config`, and a symlinked component
         // are all checked as the directories they actually resolve to rather than as the ones the
         // operator typed.
-        let resolved = std::fs::canonicalize(path).map_err(|error| ConfigError {
+        let resolved = fs.canonicalize(path).map_err(|error| ConfigError {
             message: format!("could not resolve {}: {error}", path.display()),
         })?;
         let mut ancestor = resolved.parent();
         while let Some(directory) = ancestor {
-            let metadata = std::fs::metadata(directory).map_err(|error| ConfigError {
+            let metadata = fs.metadata_follow(directory).map_err(|error| ConfigError {
                 message: format!("could not inspect {}: {error}", directory.display()),
             })?;
             require_trustworthy_config_directory(directory, &metadata)?;
             ancestor = directory.parent();
         }
 
-        let mut yaml = String::new();
-        {
-            use std::io::Read;
-            let mut file = file;
-            file.read_to_string(&mut yaml)
-                .map_err(|error| ConfigError {
-                    message: format!("could not read {}: {error}", path.display()),
-                })?;
-        }
+        let yaml = fs.read_to_string(path).map_err(|error| ConfigError {
+            message: format!("could not read {}: {error}", path.display()),
+        })?;
         SupervisorConfig::from_yaml(&yaml)
     }
 

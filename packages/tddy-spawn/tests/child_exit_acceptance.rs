@@ -11,7 +11,6 @@
 //! PRD: docs/ft/daemon/session-liveness.md
 #![cfg(unix)]
 
-use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,7 +26,10 @@ const EXIT_CODE: i32 = 3;
 /// A safety net for a released child's end to be reported, not a prediction of how long it takes.
 const OBSERVE: Duration = Duration::from_secs(10);
 
-fn a_pipe() -> (tddy_spawn::spawn_worker::PipeEnd, tddy_spawn::spawn_worker::PipeEnd) {
+fn a_pipe() -> (
+    tddy_spawn::spawn_worker::PipeEnd,
+    tddy_spawn::spawn_worker::PipeEnd,
+) {
     tddy_spawn::spawn_worker::PipeEnd::pair().expect("a pipe")
 }
 

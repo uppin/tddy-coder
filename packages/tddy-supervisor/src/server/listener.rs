@@ -16,6 +16,14 @@ use tokio::net::UnixListener;
 /// When systemd handed over a listener it also owns the socket node's ownership and mode, so
 /// nothing here creates a directory, unlinks a stale file, or chmods anything.
 pub fn bind_privileged_listener(socket: &SocketConfig) -> anyhow::Result<UnixListener> {
+    bind_privileged_listener_on(&tddy_fs::DiskFs, socket)
+}
+
+/// [`bind_privileged_listener`] through the filesystem port.
+pub fn bind_privileged_listener_on(
+    fs: &dyn tddy_fs::Fs,
+    socket: &SocketConfig,
+) -> anyhow::Result<UnixListener> {
     let mode = socket
         .mode_bits()
         .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -43,15 +51,15 @@ pub fn bind_privileged_listener(socket: &SocketConfig) -> anyhow::Result<UnixLis
         }
         SocketSource::SelfBind(path) => {
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| {
+                fs.create_dir_all(parent).map_err(|error| {
                     anyhow::anyhow!("create socket directory {}: {error}", parent.display())
                 })?;
             }
             // A socket left behind by a previous run would make `bind` fail with EADDRINUSE.
-            let _ = std::fs::remove_file(&path);
+            let _ = fs.remove_file(&path);
             let listener = UnixListener::bind(&path)
                 .map_err(|error| anyhow::anyhow!("bind {}: {error}", path.display()))?;
-            apply_socket_ownership(&path, socket.group.as_deref(), mode)?;
+            apply_socket_ownership(fs, &path, socket.group.as_deref(), mode)?;
             log::info!(
                 target: "tddy_supervisor::server",
                 "listening on {} (mode {:o})",
@@ -272,12 +280,12 @@ pub(super) fn classify_accept_failure(error: &std::io::Error) -> AcceptFailure {
 /// The socket stays owned by root; the group is the entire grant, which is why a missing group is
 /// an error rather than something to shrug at.
 fn apply_socket_ownership(
+    fs: &dyn tddy_fs::Fs,
     path: &std::path::Path,
     group: Option<&str>,
     mode: u32,
 ) -> anyhow::Result<()> {
     use std::os::unix::ffi::OsStrExt;
-    use std::os::unix::fs::PermissionsExt;
 
     if let Some(group) = group {
         let gid = accounts::resolve_group_gid(group)
@@ -295,6 +303,6 @@ fn apply_socket_ownership(
         }
     }
 
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+    fs.set_mode(path, mode)
         .map_err(|error| anyhow::anyhow!("chmod {}: {error}", path.display()))
 }

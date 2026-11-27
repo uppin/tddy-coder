@@ -11,7 +11,6 @@
 #![cfg(unix)]
 
 use std::collections::BTreeMap;
-use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -21,7 +20,10 @@ use tddy_spawn::spawn_worker::{
     client_over, spawn_worker_over, CloneRequest, SpawnClient, WorkerEvent,
 };
 
-fn a_pipe() -> (tddy_spawn::spawn_worker::PipeEnd, tddy_spawn::spawn_worker::PipeEnd) {
+fn a_pipe() -> (
+    tddy_spawn::spawn_worker::PipeEnd,
+    tddy_spawn::spawn_worker::PipeEnd,
+) {
     tddy_spawn::spawn_worker::PipeEnd::pair().expect("a pipe")
 }
 

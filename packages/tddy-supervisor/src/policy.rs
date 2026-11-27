@@ -141,16 +141,26 @@ pub fn resolve_exec(
     policy: &SpawnPolicy,
     requested: &Path,
 ) -> Result<CheckedExecutable, SupervisorError> {
+    resolve_exec_on(&tddy_fs::DiskFs, policy, requested)
+}
+
+/// [`resolve_exec`] through the filesystem port.
+pub fn resolve_exec_on(
+    fs: &dyn tddy_fs::Fs,
+    policy: &SpawnPolicy,
+    requested: &Path,
+) -> Result<CheckedExecutable, SupervisorError> {
     let requested = plain_absolute_path(requested)?;
     // A symlink is judged by its target: the kernel resolves the whole path.
-    let target = std::fs::canonicalize(requested)
+    let target = fs
+        .canonicalize(requested)
         .map_err(|error| refused_exec(requested, &format!("it does not resolve ({error})")))?;
     // SAFETY: reads this process's own effective uid and nothing else.
     let enforcing_uid = unsafe { libc::geteuid() };
     if !policy
         .exec_roots
         .iter()
-        .any(|entry| exec_root_admits(entry, &target, enforcing_uid))
+        .any(|entry| exec_root_admits(fs, entry, &target, enforcing_uid))
     {
         return Err(refused_exec(
             requested,
@@ -169,11 +179,18 @@ pub fn resolve_exec(
 /// Whether `entry` names `target` (a file entry) or a directory above it, and the file, every
 /// directory above it and the entry itself are trusted — but for an operator-marked trusted
 /// prefix, the one entry not itself checked.
-fn exec_root_admits(entry: &ExecRoot, target: &Path, enforcing_uid: u32) -> bool {
-    let Ok(entry_target) = std::fs::canonicalize(&entry.path) else {
+fn exec_root_admits(
+    fs: &dyn tddy_fs::Fs,
+    entry: &ExecRoot,
+    target: &Path,
+    enforcing_uid: u32,
+) -> bool {
+    let Ok(entry_target) = fs.canonicalize(&entry.path) else {
         return false;
     };
-    let contained = if entry_target.is_file() {
+    // `metadata_follow`, as before: `is_file` follows a link.
+    let contained = if matches!(fs.metadata_follow(&entry_target), Ok(m) if m.kind == tddy_fs::FsKind::File)
+    {
         target == entry_target
     } else {
         target.starts_with(&entry_target)
@@ -181,15 +198,19 @@ fn exec_root_admits(entry: &ExecRoot, target: &Path, enforcing_uid: u32) -> bool
     contained
         && target.ancestors().all(|path| {
             (entry.trusted_prefix && path == entry_target)
-                || is_trusted_on_disk(path, enforcing_uid)
+                || is_trusted_on_disk(fs, path, enforcing_uid)
         })
 }
 
 /// [`is_trusted_exec_path_entry`] for what is on disk at `path`; a path that cannot be read is not.
-fn is_trusted_on_disk(path: &Path, enforcing_uid: u32) -> bool {
-    use std::os::unix::fs::MetadataExt;
-    std::fs::metadata(path).is_ok_and(|metadata| {
-        is_trusted_exec_path_entry(metadata.uid(), metadata.mode(), enforcing_uid)
+fn is_trusted_on_disk(fs: &dyn tddy_fs::Fs, path: &Path, enforcing_uid: u32) -> bool {
+    // `metadata_follow`, as before: the question stays about the file itself.
+    fs.metadata_follow(path).is_ok_and(|metadata| {
+        is_trusted_exec_path_entry(
+            metadata.uid.unwrap_or(u32::MAX),
+            metadata.mode.unwrap_or(0),
+            enforcing_uid,
+        )
     })
 }
 

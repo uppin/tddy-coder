@@ -33,10 +33,9 @@ impl PipeEnd {
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(std::io::Error::last_os_error());
         }
-        Ok((
-            unsafe { Self::from_raw_fd(fds[0]) },
-            unsafe { Self::from_raw_fd(fds[1]) },
-        ))
+        Ok((unsafe { Self::from_raw_fd(fds[0]) }, unsafe {
+            Self::from_raw_fd(fds[1])
+        }))
     }
 }
 

@@ -117,7 +117,10 @@ pub fn coder_log_config_yaml(coder_config_path: Option<&Path>) -> Option<String>
 }
 
 /// [`coder_log_config_yaml`] through the filesystem port.
-pub fn coder_log_config_yaml_on(fs: &dyn tddy_fs::Fs, coder_config_path: Option<&Path>) -> Option<String> {
+pub fn coder_log_config_yaml_on(
+    fs: &dyn tddy_fs::Fs,
+    coder_config_path: Option<&Path>,
+) -> Option<String> {
     let path = coder_config_path?;
     let text = match fs.read_to_string(path) {
         Ok(t) => t,
@@ -329,7 +332,9 @@ fn create_child_log_config_and_streams(
             .map_err(|e| anyhow::anyhow!("failed to create log dir {}: {}", parent.display(), e))?;
     }
     // Absolute path avoids duplicate FILE_OUTPUTS keys and matches the repo the child uses as cwd.
-    let log_file_abs = fs.canonicalize(&log_file).unwrap_or_else(|_| log_file.clone());
+    let log_file_abs = fs
+        .canonicalize(&log_file)
+        .unwrap_or_else(|_| log_file.clone());
 
     let config_path = child_logs_dir.join(format!("{}.yaml", session_id));
 
@@ -644,7 +649,15 @@ pub fn clone_as_user_with_env(
     destination: &Path,
     extra_env: &[(&str, &str)],
 ) -> anyhow::Result<()> {
-    crate::clone_run::clone_with_progress(&tddy_fs::DiskFs, os_user, git_url, destination, extra_env, |_| {}, |_| {})
+    crate::clone_run::clone_with_progress(
+        &tddy_fs::DiskFs,
+        os_user,
+        git_url,
+        destination,
+        extra_env,
+        |_| {},
+        |_| {},
+    )
 }
 
 #[cfg(not(unix))]
@@ -992,7 +1005,14 @@ pub fn plan_session_child_on(
         );
     }
 
-    record_workflow_usage_context(fs, &resolved_tddy_data_dir, &session_id, home, repo_path, &opts)?;
+    record_workflow_usage_context(
+        fs,
+        &resolved_tddy_data_dir,
+        &session_id,
+        home,
+        repo_path,
+        &opts,
+    )?;
 
     if opts.mouse {
         args.push("--mouse".to_string());
@@ -1273,7 +1293,8 @@ pub(crate) fn spawn_as_user_reporting(
     };
 
     if let Some(status) = early_exit {
-        let stderr_tail = tddy_fs::DiskFs.read_to_string(&logs.stderr_path)
+        let stderr_tail = tddy_fs::DiskFs
+            .read_to_string(&logs.stderr_path)
             .map(|s| tail_lines(&s, 20))
             .unwrap_or_default();
         log::warn!(

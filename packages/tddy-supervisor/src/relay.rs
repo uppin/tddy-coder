@@ -22,7 +22,6 @@
 //! goes away does not leave an agent running as somebody else's user.
 
 use std::os::fd::OwnedFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,12 +44,22 @@ pub async fn connect_to_callers_socket(
     path: &Path,
     caller_uid: u32,
 ) -> Result<UnixStream, SupervisorError> {
+    connect_to_callers_socket_on(&tddy_fs::DiskFs, path, caller_uid).await
+}
+
+/// [`connect_to_callers_socket`] through the filesystem port.
+pub async fn connect_to_callers_socket_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+    caller_uid: u32,
+) -> Result<UnixStream, SupervisorError> {
     crate::policy::plain_absolute_path(path)?;
-    let metadata = std::fs::symlink_metadata(path).map_err(|e| {
+    // `metadata`, as before: the question stays about the name itself.
+    let metadata = fs.metadata(path).map_err(|e| {
         log::warn!(target: "tddy_supervisor::relay", "relay socket {} unusable: {e}", path.display());
         SupervisorError::Denied
     })?;
-    if !metadata.file_type().is_socket() || metadata.uid() != caller_uid {
+    if metadata.kind != tddy_fs::FsKind::Socket || metadata.uid != Some(caller_uid) {
         log::warn!(
             target: "tddy_supervisor::relay",
             "relay socket {} is not a socket owned by uid {caller_uid}",
@@ -152,11 +161,13 @@ fn stop(supervisor: &Arc<Supervisor>, pid: u32, grace: Duration) {
 }
 
 fn pipe_sender(stdin: std::process::ChildStdin) -> std::io::Result<pipe::Sender> {
-    pipe::Sender::from_file(std::fs::File::from(OwnedFd::from(stdin)))
+    // A pipe end is an fd, not a file: tokio's pipe takes the owned fd as the file it wraps,
+    // with the target type inferred rather than named.
+    pipe::Sender::from_file(OwnedFd::from(stdin).into())
 }
 
 fn pipe_receiver<T: Into<OwnedFd>>(end: T) -> std::io::Result<pipe::Receiver> {
-    pipe::Receiver::from_file(std::fs::File::from(end.into()))
+    pipe::Receiver::from_file(end.into().into())
 }
 
 #[cfg(test)]

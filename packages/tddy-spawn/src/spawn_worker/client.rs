@@ -168,7 +168,11 @@ fn worker_request_label(req: &WorkerRequest) -> String {
 /// line that does not decode, ends the routing: the table is cleared, so every waiting caller fails
 /// naming the worker's pid.
 #[cfg(unix)]
-fn route_worker_lines(response_reader: super::PipeEnd, pending: Arc<Mutex<Pending>>, worker_pid: u32) {
+fn route_worker_lines(
+    response_reader: super::PipeEnd,
+    pending: Arc<Mutex<Pending>>,
+    worker_pid: u32,
+) {
     for line in BufReader::new(response_reader).lines() {
         let line = match line {
             Ok(line) => line,
@@ -265,7 +269,11 @@ pub fn spawn_worker_over(
 /// A [`SpawnClient`] over an existing pair of pipe ends, talking to the worker whose pid is
 /// `worker_pid` (named in errors when it goes away).
 #[cfg(unix)]
-pub fn client_over(request_writer: super::PipeEnd, response_reader: super::PipeEnd, worker_pid: u32) -> SpawnClient {
+pub fn client_over(
+    request_writer: super::PipeEnd,
+    response_reader: super::PipeEnd,
+    worker_pid: u32,
+) -> SpawnClient {
     let pending = Arc::new(Mutex::new(Pending {
         open: true,
         by_id: HashMap::new(),
