@@ -28,20 +28,25 @@ use std::path::{Path, PathBuf};
 /// looking for a repository, because every caller already holds the root it means and a search would
 /// answer for some enclosing repository instead of saying it does not know.
 pub fn read_head_commit(worktree_root: &Path) -> String {
-    let Some(git_dir) = git_dir_of(worktree_root) else {
+    read_head_commit_on(&tddy_fs::DiskFs, worktree_root)
+}
+
+/// [`read_head_commit`] through the filesystem port.
+pub fn read_head_commit_on(fs: &dyn tddy_fs::Fs, worktree_root: &Path) -> String {
+    let Some(git_dir) = git_dir_of(fs, worktree_root) else {
         return String::new();
     };
     // Where the shared refs live. For an ordinary checkout that is the git dir itself; for a linked
     // worktree it is the main repository's, which is the only place `refs/heads/*` and `packed-refs`
     // exist — a linked worktree has its own HEAD and shares everything HEAD points at.
-    let common_dir = common_dir_of(&git_dir);
+    let common_dir = common_dir_of(fs, &git_dir);
 
     let mut name = String::from("HEAD");
     // Bounded rather than looped until it resolves: a symbolic ref may point at another symbolic
     // ref, and a repository whose refs form a cycle — corrupt, or written by something that is not
     // git — must cost this a handful of file reads and not a hung tool call.
     for _ in 0..MAX_SYMBOLIC_REF_HOPS {
-        let Some(contents) = read_ref(&git_dir, &common_dir, &name) else {
+        let Some(contents) = read_ref(fs, &git_dir, &common_dir, &name) else {
             // An unborn branch lands here: HEAD names `refs/heads/main`, and no such ref exists
             // until the first commit creates it.
             return String::new();
@@ -78,12 +83,16 @@ const SYMBOLIC_REF_PREFIX: &str = "ref:";
 /// `.git` is a directory for an ordinary checkout and a *file* for a linked `git worktree`, which is
 /// what every session worktree is — so the file case is the common path here, not the exotic one.
 /// That file holds `gitdir: <path>`, absolute or relative to the checkout.
-fn git_dir_of(worktree_root: &Path) -> Option<PathBuf> {
+fn git_dir_of(fs: &dyn tddy_fs::Fs, worktree_root: &Path) -> Option<PathBuf> {
     let dot_git = worktree_root.join(".git");
-    if dot_git.is_dir() {
+    // `metadata_follow`, as before: `is_dir` follows a link.
+    if matches!(
+        fs.metadata_follow(&dot_git),
+        Ok(m) if m.kind == tddy_fs::FsKind::Dir
+    ) {
         return Some(dot_git);
     }
-    let pointer = std::fs::read_to_string(&dot_git).ok()?;
+    let pointer = fs.read_to_string(&dot_git).ok()?;
     let named = pointer.trim().strip_prefix("gitdir:")?.trim();
     if named.is_empty() {
         return None;
@@ -93,8 +102,8 @@ fn git_dir_of(worktree_root: &Path) -> Option<PathBuf> {
 
 /// The directory a linked worktree shares its refs with, named by `<git_dir>/commondir` — usually
 /// relative to the git dir. An ordinary checkout has no such file and is its own common dir.
-fn common_dir_of(git_dir: &Path) -> PathBuf {
-    match std::fs::read_to_string(git_dir.join("commondir")) {
+fn common_dir_of(fs: &dyn tddy_fs::Fs, git_dir: &Path) -> PathBuf {
+    match fs.read_to_string(&git_dir.join("commondir")) {
         Ok(named) if !named.trim().is_empty() => git_dir.join(named.trim()),
         _ => git_dir.to_path_buf(),
     }
@@ -106,20 +115,25 @@ fn common_dir_of(git_dir: &Path) -> PathBuf {
 /// resolve through one lookup. Per-worktree refs — HEAD itself, `refs/bisect/*`, `refs/worktree/*` —
 /// exist only in the git dir, and a linked worktree's shared refs exist only in the common dir; for
 /// an ordinary checkout the two are the same directory and the second read never happens.
-fn read_ref(git_dir: &Path, common_dir: &Path, name: &str) -> Option<String> {
+fn read_ref(
+    fs: &dyn tddy_fs::Fs,
+    git_dir: &Path,
+    common_dir: &Path,
+    name: &str,
+) -> Option<String> {
     if !is_plausible_ref_name(name) {
         return None;
     }
-    if let Ok(loose) = std::fs::read_to_string(git_dir.join(name)) {
+    if let Ok(loose) = fs.read_to_string(&git_dir.join(name)) {
         return Some(loose.trim().to_string());
     }
-    if let Ok(loose) = std::fs::read_to_string(common_dir.join(name)) {
+    if let Ok(loose) = fs.read_to_string(&common_dir.join(name)) {
         return Some(loose.trim().to_string());
     }
     // Packed last, and not skippable: `git gc` packs refs away routinely, so a reader that only
     // knew loose files would answer "" for every repository that has been collected once — which
     // is every long-lived one.
-    packed_ref(common_dir, name)
+    packed_ref(fs, common_dir, name)
 }
 
 /// The object id `packed-refs` records for `name`.
@@ -127,8 +141,8 @@ fn read_ref(git_dir: &Path, common_dir: &Path, name: &str) -> Option<String> {
 /// Each line is `<oid> <refname>`, with a `#` header and `^<oid>` lines carrying the commit a tag
 /// peels to. The peel line belongs to the ref above it and names no ref of its own, so taking it for
 /// one would answer some other ref's lookup with a tag's target.
-fn packed_ref(common_dir: &Path, name: &str) -> Option<String> {
-    let packed = std::fs::read_to_string(common_dir.join("packed-refs")).ok()?;
+fn packed_ref(fs: &dyn tddy_fs::Fs, common_dir: &Path, name: &str) -> Option<String> {
+    let packed = fs.read_to_string(&common_dir.join("packed-refs")).ok()?;
     packed.lines().find_map(|line| {
         let line = line.trim_end();
         if line.starts_with('#') || line.starts_with('^') {
