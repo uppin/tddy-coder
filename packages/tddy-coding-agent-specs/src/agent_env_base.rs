@@ -72,8 +72,13 @@ impl AgentEnvBase {
     /// [`AGENT_ENV_BASE_OVERRIDE`] when present, else [`Self::builtin`]. Refused, naming the file,
     /// when the override does not parse or an entry would admit a `TDDY_*` variable.
     pub fn load(overrides_dir: &Path) -> Result<Self, AgentEnvBaseError> {
+        Self::load_on(&tddy_fs::DiskFs, overrides_dir)
+    }
+
+    /// [`AgentEnvBase::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, overrides_dir: &Path) -> Result<Self, AgentEnvBaseError> {
         let file = overrides_dir.join(AGENT_ENV_BASE_OVERRIDE);
-        match std::fs::read_to_string(&file) {
+        match fs.read_to_string(&file) {
             Ok(yaml) => Self::parse(&file, &yaml),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::builtin()),
             Err(error) => Err(AgentEnvBaseError::Invalid {
