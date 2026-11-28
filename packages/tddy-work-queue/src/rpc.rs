@@ -10,22 +10,22 @@
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::work_queue::{
-    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, ClearWorkItemBadgeRequest,
-    GetPrStatusRequest, GetPrStatusResponse, GetWorkItemCommitFlowRequest,
-    GetWorkQueueGraphRequest, GetWorkQueueRequest, GetWorkQueueResponse, GetWorkQueueWavesRequest,
-    LandWorkQueueRequest, LandWorkQueueResponse, LinkWorkItemRequest, LinkWorkItemResponse,
-    LinkWorkItemSessionRequest, ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse,
-    ListWorkQueueSchedulesRequest, ListWorkQueueSchedulesResponse, PropagateWorkItemRequest,
-    PropagateWorkItemResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse, ResolveWorkItemBaseRequest,
-    ResolveWorkItemBaseResponse, ScheduleWorkItemRequest, ScheduleWorkItemResponse,
-    ScheduleWorkQueueWaveRequest, SetWorkItemBadgeRequest, SetWorkItemLabelsRequest,
-    SetWorkQueueDependenciesRequest, StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest,
-    UnlinkWorkItemSessionRequest, UnscheduleWorkItemRequest, WatchWorkQueueRequest,
-    WorkItemInboxResponse, WorkItemLinksResponse, WorkItemOutboxResponse,
-    WorkQueueCommitCountsResponse, WorkQueueGraphResponse, WorkQueueSnapshot, WorkQueueStatusView,
-    WorkQueueWavesResponse,
+    AddWorkItemRequest, AddWorkItemResponse, AssignWorkItemPrRequest, AttachWorkItemFileRequest,
+    ClearWorkItemBadgeRequest, DetachWorkItemFileRequest, GetPrStatusRequest, GetPrStatusResponse,
+    GetWorkItemCommitFlowRequest, GetWorkQueueGraphRequest, GetWorkQueueRequest,
+    GetWorkQueueResponse, GetWorkQueueWavesRequest, LandWorkQueueRequest, LandWorkQueueResponse,
+    LinkWorkItemRequest, LinkWorkItemResponse, LinkWorkItemSessionRequest,
+    ListProjectWorkQueuesRequest, ListProjectWorkQueuesResponse, ListWorkQueueSchedulesRequest,
+    ListWorkQueueSchedulesResponse, PropagateWorkItemRequest, PropagateWorkItemResponse,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReorderWorkItemRequest, ReorderWorkItemResponse, RepointWorkItemRequest,
+    RepointWorkItemResponse, ResolveWorkItemBaseRequest, ResolveWorkItemBaseResponse,
+    ScheduleWorkItemRequest, ScheduleWorkItemResponse, ScheduleWorkQueueWaveRequest,
+    SetWorkItemBadgeRequest, SetWorkItemLabelsRequest, SetWorkQueueDependenciesRequest,
+    StreamWorkQueueStatusRequest, UnassignWorkItemPrRequest, UnlinkWorkItemSessionRequest,
+    UnscheduleWorkItemRequest, WatchWorkQueueRequest, WorkItemInboxResponse, WorkItemLinksResponse,
+    WorkItemOutboxResponse, WorkQueueCommitCountsResponse, WorkQueueGraphResponse,
+    WorkQueueSnapshot, WorkQueueStatusView, WorkQueueWavesResponse,
 };
 
 /// The frames of a server stream: a channel the handler's task feeds, ended when either side goes
@@ -168,6 +168,22 @@ pub trait WorkQueueHandler: Send + Sync {
         _request: Request<ClearWorkItemBadgeRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         Err(Status::unimplemented("ClearWorkItemBadge"))
+    }
+
+    /// Work item files: promote one file into an item's durable store.
+    async fn attach_work_item_file(
+        &self,
+        _request: Request<AttachWorkItemFileRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        Err(Status::unimplemented("AttachWorkItemFile"))
+    }
+
+    /// Work item files: remove one file from an item's durable store.
+    async fn detach_work_item_file(
+        &self,
+        _request: Request<DetachWorkItemFileRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        Err(Status::unimplemented("DetachWorkItemFile"))
     }
 
     /// `#workqueue` 9/14: replace what an item needs (its stored dependency edges).

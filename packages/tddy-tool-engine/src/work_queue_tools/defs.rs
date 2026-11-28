@@ -141,6 +141,8 @@ pub fn stack_tool_defs() -> Vec<ToolDef> {
     defs.extend(crate::work_item_commit_flow_tools::work_item_commit_flow_tool_defs());
     // `#workqueue` 13/14: the schedule tools follow the commit-flow reads; the owner has them.
     defs.extend(crate::work_queue_schedule_tools::work_queue_schedule_tool_defs());
+    // The work item file tools: what an item carries, attached and detached on the queue.
+    defs.extend(crate::work_item_file_tools::work_item_file_tool_defs());
     defs
 }
 

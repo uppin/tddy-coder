@@ -3,6 +3,7 @@ syntax = "proto3";
 package work_queue;
 
 import "types.proto";
+import "session.proto";
 
 // Planning, querying and repointing a stack of dependent pull requests.
 //
@@ -115,6 +116,12 @@ service WorkQueueService {
   // propagating what sits on each landed item before the next.
   rpc PropagateWorkItem(PropagateWorkItemRequest) returns (PropagateWorkItemResponse);
   rpc LandWorkQueue(LandWorkQueueRequest) returns (LandWorkQueueResponse);
+  // Work item files: promote one uploaded or on-host file into an item's durable store, and remove
+  // one. Both are served by the daemon that holds the queue (forwarded there when the address names
+  // another host) and answer the queue after the change, so the queue view's attachment icon and
+  // list update live. See docs/ft/coder/work-item-files.md.
+  rpc AttachWorkItemFile(AttachWorkItemFileRequest) returns (WorkItemLinksResponse);
+  rpc DetachWorkItemFile(DetachWorkItemFileRequest) returns (WorkItemLinksResponse);
 }
 
 // Where a work queue lives: the project it belongs to, its id — **the id of the session that owns it**
@@ -622,6 +629,41 @@ message ClearWorkItemBadgeRequest {
   WorkQueueAddress queue = 2;
   string item_id = 3;
   string key = 4;
+}
+
+// Work item files — where the bytes of an attach come from.
+//
+// The staged arm is the web's: the browser uploaded the file to the staging host through
+// `UploadStagedAttachmentChunk`, and the attach promotes the completed upload into the item's
+// durable store (deleting the staged copy — consumed). The artifact and repo arms are the agent
+// tool's: files the queue-owner host can already read without an upload. See
+// docs/ft/coder/work-item-files.md.
+message WorkQueueFileSource {
+  oneof origin {
+    session.StagedAttachmentRef staged = 1;
+    // A path under the **queue owner's own session's** artifacts — the queue's id *is* the owner's
+    // session id, so no other session's files are reachable through this arm.
+    string artifact_relative_path = 2;
+    // A path inside the project's main repository, as `PROJECT_REPO` names one.
+    string repo_file_path = 3;
+  }
+}
+
+message AttachWorkItemFileRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  // The name the file carries inside the item — exactly one path segment; the item's store is one
+  // flat level deep. An existing same-named file is refused, never overwritten.
+  string basename = 4;
+  WorkQueueFileSource source = 5;
+}
+
+message DetachWorkItemFileRequest {
+  string session_token = 1;
+  WorkQueueAddress queue = 2;
+  string item_id = 3;
+  string basename = 4;
 }
 
 // `#workqueue` 9/14 — lineage.

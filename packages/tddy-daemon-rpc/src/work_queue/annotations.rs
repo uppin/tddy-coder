@@ -41,7 +41,7 @@ pub fn parse_tone(tone: &str) -> Result<BadgeTone, Status> {
 }
 
 impl WorkQueueRpcHandler {
-    async fn annotation_call<R: prost::Message>(
+    pub(super) async fn annotation_call<R: prost::Message>(
         &self,
         method: &str,
         session_token: &str,

@@ -77,16 +77,19 @@ pub fn is_stack_tool(name: &str) -> bool {
     WORK_QUEUE_TOOL_NAMES.contains(&name)
         || crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.contains(&name)
         || crate::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES.contains(&name)
+        || crate::work_item_file_tools::WORK_ITEM_FILE_TOOL_NAMES.contains(&name)
         || crate::work_queue_lineage_tools::WORK_QUEUE_LINEAGE_TOOL_NAMES.contains(&name)
         || crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.contains(&name)
         || crate::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.contains(&name)
         || crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULE_TOOL_NAMES.contains(&name)
 }
 
-/// Whether `name` is one of the two tools a node of a stack is offered for its own stack:
-/// `work_queue_status` and `work_pr_read`.
+/// Whether `name` is one of the tools a node of a stack is offered for its own stack:
+/// `work_queue_status` and `work_pr_read`, and — since work item files — the list of what its
+/// item carries.
 pub fn is_stack_read_tool(name: &str) -> bool {
     matches!(name, PR_STACK_STATUS | PR_READ)
+        || name == crate::work_item_file_tools::WORK_ITEM_LIST_FILES
 }
 
 /// The session calling a work tool, as the daemon read it from its own records. What it may do is
@@ -259,6 +262,30 @@ pub enum WorkQueueOp {
     },
     /// `work_queue_schedules` (`#workqueue` 13/14): the armed schedules with live conditions.
     Schedules,
+    /// `work_item_attach_file`: record one file on an item, from a source this host can read.
+    AttachFile {
+        item_id: String,
+        basename: String,
+        source: FileSource,
+    },
+    /// `work_item_detach_file`: drop one file from an item.
+    DetachFile {
+        item_id: String,
+        basename: String,
+    },
+    /// `work_item_list_files`: what an item carries.
+    ListFiles {
+        item_id: String,
+    },
+}
+
+/// Where an attach's bytes come from — a file the queue-owner host can already read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileSource {
+    /// A path under the queue owner's own session's artifacts.
+    ArtifactRelativePath(String),
+    /// A path inside the project's main repository.
+    RepoFilePath(String),
 }
 
 /// What the tools need from the daemon: this host's stacks of a project, and the operations on one.

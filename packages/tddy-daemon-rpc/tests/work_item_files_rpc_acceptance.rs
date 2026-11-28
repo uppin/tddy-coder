@@ -16,17 +16,18 @@ use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_core::session_work_queue::SessionWorkQueues;
 use tddy_rpc::{Code, Request};
 use tddy_service::proto::session::StagedAttachmentRef;
+use tddy_service::proto::work_queue::work_queue_file_source::Origin;
 use tddy_service::proto::work_queue::{
     AttachWorkItemFileRequest, DetachWorkItemFileRequest, WorkQueueAddress, WorkQueueFileSource,
     WorkQueueService,
 };
-use tddy_service::proto::work_queue::attach_work_item_file_request::Origin;
 use tddy_session_files::session_attachment_staging::{staging_root_for, write_staged_chunk};
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
 const OWNER: &str = "queue-owner-files";
+/// The OS user `TEST_TOKEN` maps to under the test config (`test_util::USERS_YAML`).
+const OS_USER: &str = "testdev";
 const ITEM: &str = "n1";
-const STAGING_ID: &str = "018f2222-cccc-7333-3333-000000000003";
 
 fn a_host_holding_a_queue_with_one_item() -> (Host, WorkQueueAddress) {
     let host = a_host(HOST_A, &std::sync::Arc::new(InProcessPeers::default()));
@@ -60,21 +61,24 @@ fn queue_address(host: &Host) -> WorkQueueAddress {
 }
 
 /// A staged upload exactly as the final chunk of `UploadStagedAttachmentChunk` leaves it —
-/// bytes and `.staged-complete` marker.
-fn a_completed_staged_upload(host: &Host, file_name: &str, bytes: &[u8]) {
+/// bytes and `.staged-complete` marker — under a staging batch id this test alone uses, and
+/// answers that id.
+fn a_completed_staged_upload(_host: &Host, file_name: &str, bytes: &[u8]) -> String {
+    let staging_id = format!("staging-{}", uuid::Uuid::new_v4());
     let root = staging_root_for(
-        &support::current_os_user(),
+        OS_USER,
         &tddy_session_files::session_attachment_staging::default_staging_base_dir(),
     );
-    write_staged_chunk(&root, STAGING_ID, file_name, bytes, true)
+    write_staged_chunk(&root, &staging_id, file_name, bytes, true)
         .expect("the final chunk writes the file and its marker");
+    staging_id
 }
 
-fn staged_source() -> Option<WorkQueueFileSource> {
+fn staged_source(staging_id: &str) -> Option<WorkQueueFileSource> {
     Some(WorkQueueFileSource {
         origin: Some(Origin::Staged(StagedAttachmentRef {
             daemon_instance_id: HOST_A.to_string(),
-            staging_id: STAGING_ID.to_string(),
+            staging_id: staging_id.to_string(),
             file_name: String::new(),
         })),
     })
@@ -98,7 +102,7 @@ async fn attach(
             queue: Some(address.clone()),
             item_id: item.to_string(),
             basename: basename.to_string(),
-            source,
+            source: Some(source),
         }))
         .await
         .map(|answer| answer.into_inner().work_queue_json)
@@ -139,13 +143,13 @@ fn stored_bytes(host: &Host, item: &str, basename: &str) -> Option<Vec<u8>> {
     .ok()
 }
 
-fn staged_copy(host: &Host, file_name: &str) -> Option<Vec<u8>> {
+fn staged_copy(staging_id: &str, file_name: &str) -> Option<Vec<u8>> {
     std::fs::read(
         staging_root_for(
-            &support::current_os_user(),
+            OS_USER,
             &tddy_session_files::session_attachment_staging::default_staging_base_dir(),
         )
-        .join(STAGING_ID)
+        .join(staging_id)
         .join(file_name),
     )
     .ok()
@@ -165,7 +169,7 @@ fn project_repo_of(host: &Host) -> std::path::PathBuf {
 async fn attaching_a_completed_staged_upload_records_the_file_and_consumes_the_staged_copy() {
     // Given
     let (host, address) = a_host_holding_a_queue_with_one_item();
-    a_completed_staged_upload(&host, "failure.log", b"# failure log\n");
+    let staging_id = a_completed_staged_upload(&host, "failure.log", b"# failure log\n");
 
     // When
     let answered = attach(
@@ -173,7 +177,7 @@ async fn attaching_a_completed_staged_upload_records_the_file_and_consumes_the_s
         &address,
         ITEM,
         "failure.log",
-        staged_source(),
+        staged_source(&staging_id),
         "failure.log",
     )
     .await
@@ -190,7 +194,7 @@ async fn attaching_a_completed_staged_upload_records_the_file_and_consumes_the_s
         b"# failure log\n".to_vec()
     );
     assert!(
-        staged_copy(&host, "failure.log").is_none(),
+        staged_copy(&staging_id, "failure.log").is_none(),
         "the consumed staged upload is deleted, not left to leak"
     );
 }
@@ -199,16 +203,30 @@ async fn attaching_a_completed_staged_upload_records_the_file_and_consumes_the_s
 async fn attaching_a_basename_the_item_already_carries_is_refused_and_writes_nothing() {
     // Given
     let (host, address) = a_host_holding_a_queue_with_one_item();
-    a_completed_staged_upload(&host, "spec.md", b"first");
-    attach(&host, &address, ITEM, "spec.md", staged_source(), "spec.md")
-        .await
-        .expect("first attach");
-    a_completed_staged_upload(&host, "spec.md", b"second");
+    let first = a_completed_staged_upload(&host, "spec.md", b"first");
+    attach(
+        &host,
+        &address,
+        ITEM,
+        "spec.md",
+        staged_source(&first),
+        "spec.md",
+    )
+    .await
+    .expect("first attach");
+    let second = a_completed_staged_upload(&host, "spec.md", b"second");
 
     // When
-    let refusal = attach(&host, &address, ITEM, "spec.md", staged_source(), "spec.md")
-        .await
-        .expect_err("the duplicate must be refused");
+    let refusal = attach(
+        &host,
+        &address,
+        ITEM,
+        "spec.md",
+        staged_source(&second),
+        "spec.md",
+    )
+    .await
+    .expect_err("the duplicate must be refused");
 
     // Then
     assert_eq!(refusal.code, Code::InvalidArgument);
@@ -223,12 +241,19 @@ async fn attaching_a_basename_the_item_already_carries_is_refused_and_writes_not
 async fn attaching_to_an_unknown_item_is_refused() {
     // Given
     let (host, address) = a_host_holding_a_queue_with_one_item();
-    a_completed_staged_upload(&host, "spec.md", b"x");
+    let staging_id = a_completed_staged_upload(&host, "spec.md", b"x");
 
     // When
-    let refusal = attach(&host, &address, "n9", "spec.md", staged_source(), "spec.md")
-        .await
-        .expect_err("an unknown item must be refused");
+    let refusal = attach(
+        &host,
+        &address,
+        "n9",
+        "spec.md",
+        staged_source(&staging_id),
+        "spec.md",
+    )
+    .await
+    .expect_err("an unknown item must be refused");
 
     // Then
     assert_eq!(refusal.code, Code::NotFound);
@@ -240,15 +265,23 @@ async fn an_upload_that_never_completed_is_refused_and_nothing_is_written() {
     // Given — chunks arrived but no final one: no `.staged-complete` marker
     let (host, address) = a_host_holding_a_queue_with_one_item();
     let root = staging_root_for(
-        &support::current_os_user(),
+        OS_USER,
         &tddy_session_files::session_attachment_staging::default_staging_base_dir(),
     );
-    write_staged_chunk(&root, STAGING_ID, "partial.md", b"half", false).expect("chunk");
+    let staging_id = format!("staging-{}", uuid::Uuid::new_v4());
+    write_staged_chunk(&root, &staging_id, "partial.md", b"half", false).expect("chunk");
 
     // When
-    let refusal = attach(&host, &address, ITEM, "partial.md", staged_source(), "partial.md")
-        .await
-        .expect_err("an incomplete upload must be refused");
+    let refusal = attach(
+        &host,
+        &address,
+        ITEM,
+        "partial.md",
+        staged_source(&staging_id),
+        "partial.md",
+    )
+    .await
+    .expect_err("an incomplete upload must be refused");
 
     // Then
     assert_eq!(refusal.code, Code::FailedPrecondition);
@@ -259,10 +292,17 @@ async fn an_upload_that_never_completed_is_refused_and_nothing_is_written() {
 async fn detaching_removes_the_entry_and_the_bytes() {
     // Given
     let (host, address) = a_host_holding_a_queue_with_one_item();
-    a_completed_staged_upload(&host, "spec.md", b"# the spec\n");
-    attach(&host, &address, ITEM, "spec.md", staged_source(), "spec.md")
-        .await
-        .expect("attached");
+    let staging_id = a_completed_staged_upload(&host, "spec.md", b"# the spec\n");
+    attach(
+        &host,
+        &address,
+        ITEM,
+        "spec.md",
+        staged_source(&staging_id),
+        "spec.md",
+    )
+    .await
+    .expect("attached");
 
     // When
     let answered = detach(&host, &address, ITEM, "spec.md")
@@ -270,7 +310,9 @@ async fn detaching_removes_the_entry_and_the_bytes() {
         .expect("detached");
 
     // Then
-    assert_eq!(item_json(&answered)["files"], serde_json::json!([]));
+    // An empty list is omitted from the queue JSON entirely (`skip_serializing_if`), so the field
+    // reads back absent rather than `[]`.
+    assert_eq!(item_json(&answered)["files"], serde_json::json!(null));
     assert!(stored_bytes(&host, ITEM, "spec.md").is_none());
 }
 
@@ -294,12 +336,19 @@ async fn the_file_after_the_cap_is_refused_naming_the_cap() {
     let (host, address) = a_host_holding_a_queue_with_one_item();
     for i in 0..20 {
         let name = format!("file-{i}.md");
-        a_completed_staged_upload(&host, &name, format!("file {i}").as_bytes());
-        attach(&host, &address, ITEM, &name, staged_source(), &name)
-            .await
-            .expect("within the cap");
+        let staging_id = a_completed_staged_upload(&host, &name, format!("file {i}").as_bytes());
+        attach(
+            &host,
+            &address,
+            ITEM,
+            &name,
+            staged_source(&staging_id),
+            &name,
+        )
+        .await
+        .expect("within the cap");
     }
-    a_completed_staged_upload(&host, "one-too-many.md", b"x");
+    let staging_id = a_completed_staged_upload(&host, "one-too-many.md", b"x");
 
     // When
     let refusal = attach(
@@ -307,7 +356,7 @@ async fn the_file_after_the_cap_is_refused_naming_the_cap() {
         &address,
         ITEM,
         "one-too-many.md",
-        staged_source(),
+        staged_source(&staging_id),
         "one-too-many.md",
     )
     .await
@@ -412,4 +461,3 @@ async fn a_path_that_escapes_its_source_root_is_refused() {
     assert_eq!(refusal.code, Code::InvalidArgument);
     assert!(stored_bytes(&host, ITEM, "spec.md").is_none());
 }
-
