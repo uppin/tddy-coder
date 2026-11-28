@@ -1175,6 +1175,55 @@ async fn spawn_child_from_main_starts_the_nodes_session_linked_to_main() {
     assert_eq!(a.orchestrator_of(&child), Some(world.main.clone()));
 }
 
+/// The item's files live under the queue owner's own session directory — the same tree
+/// `work-queue.yaml` sits in.
+fn a_files_store_of(host: &Host) -> tddy_core::session_work_queue_files::SessionWorkQueueFiles {
+    tddy_core::session_work_queue_files::SessionWorkQueueFiles::new(
+        host.sessions.path().join("sessions"),
+    )
+}
+
+#[tokio::test]
+async fn spawn_child_from_main_materializes_the_items_files_before_its_first_turn() {
+    // Given a stack on host-a whose planned node n1 carries a file, stored under main's own
+    // session directory on this host
+    let world = a_world().await;
+    let a = &world.a;
+    let queue_id = a.holds_a_stack(&world.main, vec![planned_on("n1", "feature/alpha/n1")]);
+    a.update_node(&queue_id, "n1", |node| {
+        node.files = vec![tddy_core::changeset::WorkItemFile {
+            basename: "failure.log".to_string(),
+            size_bytes: 14,
+        }];
+    });
+    a_files_store_of(a)
+        .store(&world.main, "n1", "failure.log", b"# failure log\n")
+        .expect("the item's bytes stored");
+
+    // When main starts n1's session
+    let spawned = world
+        .main_calls(
+            "work_item_spawn_session",
+            json!({ "queue_id": queue_id, "node_id": "n1", "session_type": "workspace" }),
+        )
+        .await;
+    let child = spawned.assert_answered()["session_id"]
+        .as_str()
+        .expect("the answer names the started session")
+        .to_string();
+
+    // Then the child holds the item's file among its attachments, materialized before the agent
+    // started — in its own artifacts, under the flat name the reference named
+    let materialized = unified_session_dir_path(a.sessions.path(), &child)
+        .join("artifacts")
+        .join("attachments")
+        .join("failure.log");
+    assert_eq!(
+        std::fs::read(&materialized).expect("the item's file materialized into the child"),
+        b"# failure log\n".to_vec()
+    );
+}
+
 #[tokio::test]
 async fn the_six_tools_naming_another_hosts_queue_are_decided_there_and_refused_to_a_session_it_only_addresses(
 ) {

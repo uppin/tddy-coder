@@ -81,7 +81,11 @@ impl LaunchSessions {
             .as_deref()
             .map(recipe_enables_conversation_spawn)
             .unwrap_or(false);
-        if enable_conversation_spawn || !req.attachments.is_empty() {
+        // The work item's files ride every start that names the item — appended below the surface,
+        // so the web dialog, the agent's spawn tool and any future one deliver the same child.
+        let req = self.start_request_with_work_item_files(&req).await?;
+        let attachments = req.attachments.clone();
+        if enable_conversation_spawn || !attachments.is_empty() {
             let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 &os_user,
                 Some(&self.tddy_data_dir),
@@ -92,7 +96,7 @@ impl LaunchSessions {
                 os_user: &os_user,
                 sessions_base: &sessions_base,
                 session_id: &tool_session_id,
-                attachments: &req.attachments,
+                attachments: &attachments,
                 progress,
             })
             .await?;

@@ -322,6 +322,10 @@ impl LaunchSessions {
                 }
                 None => Uuid::now_v7().to_string(),
             };
+            // The work item's files ride every start that names the item — appended below the
+            // surface, so the web dialog, the agent's spawn tool and any future one deliver the
+            // same child. One materialization pass then validates everything.
+            let req = self.start_request_with_work_item_files(&req).await?;
             self.prepare_session_attachments(&AttachmentMaterialization {
                 session_token: &req.session_token,
                 os_user,
