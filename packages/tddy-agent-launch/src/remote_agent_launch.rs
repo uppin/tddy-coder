@@ -73,8 +73,7 @@ pub use crate::remote_agent_launch::target_tmux_tab::{
 /// its `HOME`, `PATH` and `TMPDIR`, and the ssh agent socket a forwarded one left it
 /// (`SSH_AUTH_SOCK`, only when it is set and non-empty — `env -i` would otherwise wipe it, and
 /// the agent's git over SSH would have no keys to authenticate with), never the daemon host's.
-const TARGET_BASE_ENV: &str =
-    r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK"}"#;
+const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK"}"#;
 
 /// `argv` run through the target's login shell under `env -i`: the target expands its own base
 /// set ([`TARGET_BASE_ENV`]), the agent is told the terminal it draws on
