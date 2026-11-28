@@ -64,7 +64,7 @@ fn build_system_message(request: &InvokeRequest) -> Option<ChatMessage> {
             request
                 .system_prompt_path
                 .as_ref()
-                .and_then(|p| std::fs::read_to_string(p).ok())
+                .and_then(|p| tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, p).ok())
         });
     sp.map(ChatMessage::system)
 }

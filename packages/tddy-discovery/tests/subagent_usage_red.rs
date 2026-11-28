@@ -54,7 +54,7 @@ fn a_def(base_url: &str) -> SpecializedAgentDef {
 }
 
 fn a_local_config() -> SubagentConfig {
-    SubagentConfig::new(CodebaseAccess::Local)
+    SubagentConfig::new(CodebaseAccess::local())
 }
 
 async fn mount_always(server: &MockServer, body: serde_json::Value) {

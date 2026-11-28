@@ -54,15 +54,15 @@ fn production(text: &str) -> String {
     }
 }
 
-/// AC1 — `tddy-git` exists and depends on no workspace crate but the remote-shell port.
+/// AC1 — `tddy-git` exists and depends on no workspace crate but the two leaf ports.
 ///
 /// Plumbing that depends on (almost) nothing is plumbing anything can use. A `tddy-git` that
-/// reached back into `tddy-core` would have moved the lines without moving the coupling. The one
-/// workspace edge it carries is `tddy-remote-shell` (#remote-shell 1/7): the port its remote
-/// worktree setup runs through, itself dependent on no workspace crate, so the edge couples it to
-/// no session model and closes no cycle.
+/// reached back into `tddy-core` would have moved the lines without moving the coupling. The
+/// workspace edges it carries are `tddy-remote-shell` (#remote-shell 1/7) and `tddy-fs`
+/// (#fs-port): the ports its remote worktree setup and its disk I/O run through, each dependent
+/// on no workspace crate, so neither edge couples it to a session model or closes a cycle.
 #[test]
-fn tddy_git_depends_on_no_workspace_crate_but_the_remote_shell_port() {
+fn tddy_git_depends_on_no_workspace_crate_but_the_leaf_ports() {
     // Given the new crate's manifest
     let text = manifest("tddy-git");
 
@@ -72,16 +72,16 @@ fn tddy_git_depends_on_no_workspace_crate_but_the_remote_shell_port() {
         "`packages/tddy-git` has no manifest — the crate does not exist yet"
     );
 
-    // And names no workspace crate but the remote-shell port
+    // And names no workspace crate but the two leaf ports
     let workspace_deps: Vec<&str> = text
         .lines()
         .map(str::trim)
         .filter(|line| line.starts_with("tddy-"))
-        .filter(|line| !line.starts_with("tddy-remote-shell"))
+        .filter(|line| !line.starts_with("tddy-remote-shell") && !line.starts_with("tddy-fs"))
         .collect();
     assert!(
         workspace_deps.is_empty(),
-        "`tddy-git` depends on workspace crates other than the remote-shell port: {workspace_deps:?}"
+        "`tddy-git` depends on workspace crates other than the leaf ports: {workspace_deps:?}"
     );
 }
 

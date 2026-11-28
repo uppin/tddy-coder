@@ -464,32 +464,38 @@ pub async fn build_tddy_host_image(
 /// `daemon.yaml` — LiveKit `api_secret` included — as well as the generated SSH private key.
 /// None of that may be readable by other local accounts while the bake runs.
 fn create_private_scratch_dir(scratch_dir: &std::path::Path) -> Result<(), VmError> {
-    let mut builder = std::fs::DirBuilder::new();
-    builder.recursive(true);
+    create_private_scratch_dir_on(&tddy_fs::DiskFs, scratch_dir)
+}
+
+fn create_private_scratch_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    scratch_dir: &std::path::Path,
+) -> Result<(), VmError> {
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        builder.mode(0o700);
-    }
-    builder.create(scratch_dir).map_err(|e| {
+    fs.create_dir_all_with_mode(scratch_dir, 0o700)
+        .map_err(|e| {
+            VmError::BuildFailed(format!(
+                "failed to create the bake scratch directory {}: {e}",
+                scratch_dir.display()
+            ))
+        })?;
+    #[cfg(not(unix))]
+    fs.create_dir_all(scratch_dir).map_err(|e| {
         VmError::BuildFailed(format!(
             "failed to create the bake scratch directory {}: {e}",
             scratch_dir.display()
         ))
     })?;
-    // `mode` above applies only to a directory this call creates; an abandoned one from an
+    // The mode above applies only to a directory this call creates; an abandoned one from an
     // earlier bake may be more permissive.
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(scratch_dir, std::fs::Permissions::from_mode(0o700)).map_err(
-            |e| {
-                VmError::BuildFailed(format!(
-                    "failed to restrict the bake scratch directory {} to its owner: {e}",
-                    scratch_dir.display()
-                ))
-            },
-        )?;
+        fs.set_mode(scratch_dir, 0o700).map_err(|e| {
+            VmError::BuildFailed(format!(
+                "failed to restrict the bake scratch directory {} to its owner: {e}",
+                scratch_dir.display()
+            ))
+        })?;
     }
     Ok(())
 }
@@ -503,7 +509,10 @@ fn create_private_scratch_dir(scratch_dir: &std::path::Path) -> Result<(), VmErr
 async fn remove_scratch_dir(scratch_dir: &std::path::Path, progress: &(dyn Fn(&str) + Sync)) {
     // Async: on a failed bake this deletes a full copy of the base image plus the overlay,
     // which is tens of gigabytes and must not block the runtime.
-    if let Err(e) = tokio::fs::remove_dir_all(scratch_dir).await {
+    if let Err(e) = tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+        .remove_dir_all(scratch_dir)
+        .await
+    {
         progress(&format!(
             "Warning: failed to remove the bake scratch directory {} — it holds the guest \
              daemon config and the generated SSH key: {e}",

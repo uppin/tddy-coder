@@ -10,7 +10,6 @@ use tddy_build_qemu::QemuPlugin;
 use tddy_rpc::Status;
 use tddy_service::proto::vm::BuildVmImageProgress;
 use tddy_task::{TaskBody, TaskChannel, TaskContext, TaskStatus};
-use tokio::fs;
 use tokio_util::sync::CancellationToken;
 
 use async_trait::async_trait;
@@ -42,16 +41,32 @@ pub fn built_images_dir() -> PathBuf {
 /// Silently skips any build dirs that have no `images/` subdirectory or no `.qcow2` files.
 /// Returns an empty vec if `disks_dir` does not exist.
 pub async fn list_built_images_in(disks_dir: &Path) -> Vec<VmImageRecord> {
+    list_built_images_in_on(
+        &tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        disks_dir,
+    )
+    .await
+}
+
+/// [`list_built_images_in`] through the filesystem port.
+pub async fn list_built_images_in_on(
+    fs: &tddy_fs::AsyncFs,
+    disks_dir: &Path,
+) -> Vec<VmImageRecord> {
     let mut records = Vec::new();
 
-    let mut top = match fs::read_dir(disks_dir).await {
+    let top = match fs.read_dir(disks_dir).await {
         Ok(d) => d,
         Err(_) => return records, // dir doesn't exist or not readable — not an error
     };
 
-    while let Ok(Some(entry)) = top.next_entry().await {
-        let build_dir = entry.path();
-        if !build_dir.is_dir() {
+    for build_dir in top {
+        if fs
+            .metadata(&build_dir)
+            .await
+            .map(|m| m.kind != tddy_fs::FsKind::Dir)
+            .unwrap_or(true)
+        {
             continue;
         }
         let build_name = match build_dir.file_name().and_then(|n| n.to_str()) {
@@ -60,24 +75,22 @@ pub async fn list_built_images_in(disks_dir: &Path) -> Vec<VmImageRecord> {
         };
 
         let images_dir = build_dir.join("images");
-        let mut img_dir = match fs::read_dir(&images_dir).await {
+        let img_dir = match fs.read_dir(&images_dir).await {
             Ok(d) => d,
             Err(_) => continue, // no images/ subdir — skip
         };
 
-        while let Ok(Some(img_entry)) = img_dir.next_entry().await {
-            let img_path = img_entry.path();
+        for img_path in img_dir {
             if img_path.extension().and_then(|e| e.to_str()) != Some("qcow2") {
                 continue;
             }
-            let meta = match fs::metadata(&img_path).await {
+            let meta = match fs.metadata(&img_path).await {
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let size_bytes = meta.len();
+            let size_bytes = meta.len;
             let modified_unix_ms = meta
-                .modified()
-                .ok()
+                .modified
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
@@ -119,9 +132,11 @@ pub enum ImageFormat {
 /// shared folders — a bind mount sourced there silently becomes a disconnected, ephemeral
 /// mount inside the VM (writes appear to succeed but never reach the real host path).
 /// [`docker_cache_root`] is under `$HOME`, which is reliably shared.
-async fn create_scratch_build_dirs() -> Result<(tempfile::TempDir, PathBuf), VmError> {
+async fn create_scratch_build_dirs(
+    fs: &tddy_fs::AsyncFs,
+) -> Result<(tempfile::TempDir, PathBuf), VmError> {
     let docker_cache = docker_cache_root();
-    tokio::fs::create_dir_all(&docker_cache)
+    fs.create_dir_all(&docker_cache)
         .await
         .map_err(|e| VmError::BuildFailed(format!("failed to create docker cache dir: {e}")))?;
     let build_dir = tempfile::Builder::new()
@@ -129,7 +144,7 @@ async fn create_scratch_build_dirs() -> Result<(tempfile::TempDir, PathBuf), VmE
         .tempdir_in(&docker_cache)
         .map_err(|e| VmError::BuildFailed(format!("failed to create temp build dir: {e}")))?;
     let dl_dir = build_dir.path().join("dl");
-    tokio::fs::create_dir_all(&dl_dir)
+    fs.create_dir_all(&dl_dir)
         .await
         .map_err(|e| VmError::BuildFailed(format!("failed to create dl dir: {e}")))?;
     Ok((build_dir, dl_dir))
@@ -154,10 +169,28 @@ pub async fn build_image(
     format: ImageFormat,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<PathBuf, VmError> {
-    let (build_dir, dl_dir) = create_scratch_build_dirs().await?;
+    build_image_on(
+        &tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        spec,
+        output,
+        format,
+        progress,
+    )
+    .await
+}
+
+/// [`build_image`] through the filesystem port.
+pub async fn build_image_on(
+    fs: &tddy_fs::AsyncFs,
+    spec: &str,
+    output: &Path,
+    format: ImageFormat,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Result<PathBuf, VmError> {
+    let (build_dir, dl_dir) = create_scratch_build_dirs(fs).await?;
 
     let sink = ProgressSink::Sync(progress);
-    let rootfs_ext2 = run_buildroot_pipeline(spec, build_dir.path(), &dl_dir, &sink, None)
+    let rootfs_ext2 = run_buildroot_pipeline(fs, spec, build_dir.path(), &dl_dir, &sink, None)
         .await
         .map_err(|e| match e {
             PipelineError::Failed(msg) => VmError::BuildFailed(msg),
@@ -171,7 +204,7 @@ pub async fn build_image(
                 "Copying raw rootfs image to {}…",
                 output.display()
             ));
-            tokio::fs::copy(&rootfs_ext2, output).await.map_err(|e| {
+            fs.copy(&rootfs_ext2, output).await.map_err(|e| {
                 VmError::BuildFailed(format!(
                     "failed to copy raw image to {}: {e}",
                     output.display()
@@ -277,7 +310,7 @@ fn docker_toolchain_dir() -> PathBuf {
 /// bug this exists to prevent could recur without any signal.
 fn docker_toolchain_image_tag() -> Result<String, PipelineError> {
     let dockerfile = docker_toolchain_dir().join("Dockerfile");
-    let contents = std::fs::read(&dockerfile).map_err(|e| {
+    let contents = tddy_fs::Fs::read(&tddy_fs::DiskFs, &dockerfile).map_err(|e| {
         PipelineError::Failed(format!(
             "failed to read bundled Dockerfile {}: {e}",
             dockerfile.display()
@@ -365,14 +398,14 @@ fn docker_cache_root() -> PathBuf {
 
 /// Remove a stale mirror directory, first restoring write permission — mirrors inherit
 /// the Nix store's read-only permissions (via `cp`), which would otherwise block deletion.
-async fn clear_stale_mirror(mirror_dir: &Path) -> Result<(), PipelineError> {
+async fn clear_stale_mirror(fs: &tddy_fs::AsyncFs, mirror_dir: &Path) -> Result<(), PipelineError> {
     let _ = tokio::process::Command::new("chmod")
         .arg("-R")
         .arg("u+w")
         .arg(mirror_dir)
         .status()
         .await;
-    tokio::fs::remove_dir_all(mirror_dir)
+    fs.remove_dir_all(mirror_dir)
         .await
         .map_err(|e| PipelineError::Failed(format!("failed to clear stale buildroot mirror: {e}")))
 }
@@ -392,22 +425,25 @@ async fn clear_stale_mirror(mirror_dir: &Path) -> Result<(), PipelineError> {
 /// Nix store contents are also read-only, which `cp` preserves onto the mirror by
 /// default; `chmod -R u+w` afterward keeps the mirror removable so a later re-mirror
 /// (e.g. after a partial failure) doesn't get stuck on permission-denied deletes.
-async fn docker_shareable_buildroot_dir(buildroot_dir: &Path) -> Result<PathBuf, PipelineError> {
+async fn docker_shareable_buildroot_dir(
+    fs: &tddy_fs::AsyncFs,
+    buildroot_dir: &Path,
+) -> Result<PathBuf, PipelineError> {
     let key = buildroot_dir
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "buildroot".to_string());
     let mirror_dir = docker_cache_root().join("buildroot-mirror").join(&key);
     let marker = mirror_dir.join(".tddy-mirror-complete");
-    if marker.is_file() {
+    if fs.sync().exists(&marker) {
         return Ok(mirror_dir);
     }
 
-    if mirror_dir.exists() {
-        clear_stale_mirror(&mirror_dir).await?;
+    if fs.sync().exists(&mirror_dir) {
+        clear_stale_mirror(fs, &mirror_dir).await?;
     }
     if let Some(parent) = mirror_dir.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| {
+        fs.create_dir_all(parent).await.map_err(|e| {
             PipelineError::Failed(format!("failed to create buildroot mirror dir: {e}"))
         })?;
     }
@@ -440,7 +476,7 @@ async fn docker_shareable_buildroot_dir(buildroot_dir: &Path) -> Result<PathBuf,
         )));
     }
 
-    tokio::fs::write(&marker, b"")
+    fs.write(&marker, Vec::new())
         .await
         .map_err(|e| PipelineError::Failed(format!("failed to write mirror marker: {e}")))?;
 
@@ -576,11 +612,12 @@ fn make_command(
 /// finds `build_path/images/rootfs.ext2` exactly as it would under
 /// [`HostToolchain::Native`].
 async fn extract_docker_build_output(
+    fs: &tddy_fs::AsyncFs,
     image_tag: &str,
     build_volume: &str,
     build_path: &Path,
 ) -> Result<(), PipelineError> {
-    tokio::fs::create_dir_all(build_path)
+    fs.create_dir_all(build_path)
         .await
         .map_err(|e| PipelineError::Failed(format!("failed to create build output dir: {e}")))?;
     let output = tokio::process::Command::new("docker")
@@ -641,6 +678,7 @@ async fn fail_with_volume_cleanup(primary: String, build_volume: &str) -> Pipeli
 /// touches it. Returns `(toolchain, buildroot_dir, build_volume)`; `build_volume` is
 /// computed unconditionally (simply unused under `Native`) so callers don't re-derive it.
 async fn prepare_toolchain(
+    fs: &tddy_fs::AsyncFs,
     buildroot_dir: PathBuf,
     build_path: &Path,
     progress: &ProgressSink<'_>,
@@ -654,7 +692,7 @@ async fn prepare_toolchain(
         progress
             .report("Mirroring Buildroot source into a Docker-shareable cache…")
             .await;
-        docker_shareable_buildroot_dir(&buildroot_dir).await?
+        docker_shareable_buildroot_dir(fs, &buildroot_dir).await?
     } else {
         buildroot_dir
     };
@@ -933,6 +971,7 @@ async fn run_parallel_build(
 /// volume to the real host `build_path` and remove the volume. No-op under
 /// `HostToolchain::Native`.
 async fn finalize_docker_output(
+    fs: &tddy_fs::AsyncFs,
     toolchain: &HostToolchain,
     build_volume: &str,
     build_path: &Path,
@@ -943,7 +982,7 @@ async fn finalize_docker_output(
             .report("Extracting build output from Docker volume…")
             .await;
         if let Err(extract_err) =
-            extract_docker_build_output(image_tag, build_volume, build_path).await
+            extract_docker_build_output(fs, image_tag, build_volume, build_path).await
         {
             return Err(fail_with_volume_cleanup(extract_err.message(), build_volume).await);
         }
@@ -962,6 +1001,7 @@ async fn finalize_docker_output(
 /// [`inject_config_into_build_volume`]) — writing to `build_path` here only ever touches the
 /// host filesystem.
 async fn resolve_buildroot_source_and_write_config(
+    fs: &tddy_fs::AsyncFs,
     build_path: &Path,
     spec: &str,
 ) -> Result<PathBuf, PipelineError> {
@@ -979,14 +1019,14 @@ async fn resolve_buildroot_source_and_write_config(
         }
     };
 
-    tokio::fs::create_dir_all(build_path).await.map_err(|e| {
+    fs.create_dir_all(build_path).await.map_err(|e| {
         PipelineError::Failed(format!(
             "failed to create build dir {}: {e}",
             build_path.display()
         ))
     })?;
     let config_path = build_path.join(".config");
-    tokio::fs::write(&config_path, spec)
+    fs.write(&config_path, spec.as_bytes().to_vec())
         .await
         .map_err(|e| PipelineError::Failed(format!("failed to write .config: {e}")))?;
 
@@ -1004,6 +1044,7 @@ async fn resolve_buildroot_source_and_write_config(
 /// Shared by [`build_image`] and [`build_vm_image_from_spec`] so there is a single
 /// source of truth for the Buildroot configure/build steps.
 async fn run_buildroot_pipeline(
+    fs: &tddy_fs::AsyncFs,
     spec: &str,
     build_path: &Path,
     dl_dir: &Path,
@@ -1016,11 +1057,11 @@ async fn run_buildroot_pipeline(
         spec.len()
     );
 
-    let buildroot_dir = resolve_buildroot_source_and_write_config(build_path, spec).await?;
+    let buildroot_dir = resolve_buildroot_source_and_write_config(fs, build_path, spec).await?;
 
     // ── Select native vs. containerized make, per-OS default (macOS → docker) ────
     let (toolchain, buildroot_dir, build_volume) =
-        prepare_toolchain(buildroot_dir, build_path, progress).await?;
+        prepare_toolchain(fs, buildroot_dir, build_path, progress).await?;
 
     inject_config_into_build_volume(&toolchain, build_path, &build_volume).await?;
 
@@ -1051,7 +1092,7 @@ async fn run_buildroot_pipeline(
     )
     .await?;
 
-    finalize_docker_output(&toolchain, &build_volume, build_path, progress).await?;
+    finalize_docker_output(fs, &toolchain, &build_volume, build_path, progress).await?;
 
     Ok(build_path.join("images").join("rootfs.ext2"))
 }
@@ -1179,20 +1220,28 @@ pub async fn build_vm_image_from_spec(
         stage: std::sync::atomic::AtomicI32::new(STAGE_CONFIGURING),
     };
 
-    let rootfs_ext2 =
-        match run_buildroot_pipeline(spec, &build_path, &dl_dir, &sink, Some(&cancel)).await {
-            Ok(path) => path,
-            Err(PipelineError::Cancelled) => {
-                send_progress(&tx, STAGE_ERROR, "Build cancelled", "").await;
-                write_to_channel(&log_ch, "Build cancelled");
-                return false;
-            }
-            Err(PipelineError::Failed(msg)) => {
-                send_progress(&tx, STAGE_ERROR, &msg, "").await;
-                write_to_channel(&log_ch, &msg);
-                return false;
-            }
-        };
+    let rootfs_ext2 = match run_buildroot_pipeline(
+        &tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        spec,
+        &build_path,
+        &dl_dir,
+        &sink,
+        Some(&cancel),
+    )
+    .await
+    {
+        Ok(path) => path,
+        Err(PipelineError::Cancelled) => {
+            send_progress(&tx, STAGE_ERROR, "Build cancelled", "").await;
+            write_to_channel(&log_ch, "Build cancelled");
+            return false;
+        }
+        Err(PipelineError::Failed(msg)) => {
+            send_progress(&tx, STAGE_ERROR, &msg, "").await;
+            write_to_channel(&log_ch, &msg);
+            return false;
+        }
+    };
 
     // ── 3. Convert rootfs.ext2 → qcow2 ──────────────────────────────────────
     let qcow2_path = build_path.join("images").join("rootfs.qcow2");

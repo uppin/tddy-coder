@@ -153,7 +153,7 @@ async fn managed_delete_dispatches_the_exec_catalog_delete_shape() {
 #[tokio::test]
 async fn local_codebase_access_rejects_every_mutation_tool() {
     // Given
-    let access = CodebaseAccess::Local;
+    let access = CodebaseAccess::local();
 
     // When / Then
     let write_err = access

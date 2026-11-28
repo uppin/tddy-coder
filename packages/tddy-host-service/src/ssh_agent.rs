@@ -470,8 +470,12 @@ fn our_own_agent_socket(uid: u32) -> Option<PathBuf> {
 /// The socket a user-session agent publishes at a fixed name under `/run/user/<uid>`.
 #[cfg(unix)]
 fn runtime_dir_agent_socket(uid: u32) -> Option<PathBuf> {
-    use std::os::unix::fs::FileTypeExt;
+    runtime_dir_agent_socket_on(&tddy_fs::DiskFs, uid)
+}
 
+/// [`runtime_dir_agent_socket`] through the filesystem port.
+#[cfg(unix)]
+fn runtime_dir_agent_socket_on(fs: &dyn tddy_fs::Fs, uid: u32) -> Option<PathBuf> {
     let runtime_dir = PathBuf::from(format!("/run/user/{uid}"));
     let candidates = [
         // A systemd user unit, `ssh-agent.service`.
@@ -483,8 +487,8 @@ fn runtime_dir_agent_socket(uid: u32) -> Option<PathBuf> {
     ];
     let mut unreadable = None;
     for candidate in candidates {
-        match std::fs::metadata(&candidate) {
-            Ok(found) if found.file_type().is_socket() => return Some(candidate),
+        match fs.metadata(&candidate) {
+            Ok(found) if found.kind == tddy_fs::FsKind::Socket => return Some(candidate),
             Ok(_) => {}
             // Not allowed to look. The path is handed back anyway, so connecting to it reports the
             // permission error — which is the truth — where skipping it would report "no agent", a

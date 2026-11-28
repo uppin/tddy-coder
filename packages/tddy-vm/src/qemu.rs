@@ -11,7 +11,6 @@
 //! `QemuVmArgs` assembles the argv vector from a `VmConfig` so the arg-builder logic
 //! is unit-testable independently of process spawning.
 
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -120,21 +119,25 @@ pub fn resolve_uefi_code_path(arch: VmArch) -> Result<PathBuf, VmError> {
 /// Idempotent — an existing store is left untouched, so a VM keeps its boot entries across
 /// restarts.
 pub fn ensure_uefi_vars_file(path: &Path) -> Result<(), VmError> {
-    if path.exists() {
+    ensure_uefi_vars_file_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`ensure_uefi_vars_file`] through the filesystem port.
+///
+/// The port has no truncate, so the store is materialised as its zero bytes; the
+/// bytes QEMU reads are the same as a `set_len` on a fresh file leaves.
+pub fn ensure_uefi_vars_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), VmError> {
+    if fs.exists(path) {
         return Ok(());
     }
-    let file = std::fs::File::create(path).map_err(|e| {
-        VmError::BootFailed(format!(
-            "failed to create UEFI vars file {}: {e}",
-            path.display()
-        ))
-    })?;
-    file.set_len(UEFI_VARS_SIZE_BYTES).map_err(|e| {
-        VmError::BootFailed(format!(
-            "failed to size UEFI vars file {} to {UEFI_VARS_SIZE_BYTES} bytes: {e}",
-            path.display()
-        ))
-    })
+    fs.write(path, &vec![0u8; UEFI_VARS_SIZE_BYTES as usize])
+        .map_err(|e| {
+            VmError::BootFailed(format!(
+                "failed to create UEFI vars file {}: {e}",
+                path.display()
+            ))
+        })?;
+    Ok(())
 }
 
 /// The UEFI firmware pair a guest of `arch` boots through, with its writable variables store
@@ -151,7 +154,7 @@ pub fn uefi_firmware_for(
     if arch == VmArch::X86_64 {
         return Ok(None);
     }
-    std::fs::create_dir_all(dir).map_err(|e| {
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, dir).map_err(|e| {
         VmError::BootFailed(format!(
             "failed to create the UEFI variables directory {}: {e}",
             dir.display()
@@ -492,7 +495,7 @@ impl QemuVm {
         let console_log_path = QemuVmArgs::console_log_path(&config.qcow2_path);
         // QEMU will not create the directory, and refuses to start if it cannot open the log.
         if let Some(dir) = console_log_path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+            let _ = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, dir);
         }
         let args = QemuVmArgs::build_with_logged_stdio_serial(config, &console_log_path);
 
@@ -594,15 +597,28 @@ fn take_serial_pipes(
 /// `O_NOFOLLOW` rather than a plain create: a symlink standing where the log belongs would
 /// otherwise redirect this truncating write — and the read-back in
 /// [`crate::serial_shell::SerialConsole`] — at a file chosen by whoever planted it.
-fn create_stderr_log(path: &Path) -> Result<std::fs::File, VmError> {
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .mode(0o600)
-        .open(path)
-        .map_err(|e| VmError::BootFailed(format!("create {}: {e}", path.display())))
+fn create_stderr_log(path: &Path) -> Result<std::os::fd::OwnedFd, VmError> {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|e| VmError::BootFailed(format!("create {}: {e}", path.display())))?;
+    let fd = unsafe {
+        libc::open(
+            c_path.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(VmError::BootFailed(format!(
+            "create {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(unsafe {
+        use std::os::fd::FromRawFd;
+        std::os::fd::OwnedFd::from_raw_fd(fd)
+    })
 }
 
 /// A guest booted with its serial console routed to a pipe this process owns, rather than

@@ -9,6 +9,7 @@ name = "tddy_projects"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 tddy-core = { path = "../tddy-core" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
@@ -22,6 +23,8 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"

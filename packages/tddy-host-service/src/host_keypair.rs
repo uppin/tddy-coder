@@ -61,6 +61,7 @@ pub trait HostKeypair: Send + Sync {
 /// never adds a key never pays for an RSA keygen, and a daemon that cannot write its data directory
 /// fails at the prompt that needs the key rather than at boot.
 pub struct FileHostKeypair {
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     private_key_path: PathBuf,
     /// The parsed key, so a stream forwarding prompts does not re-read and re-parse a PEM per
     /// event. `None` until the first [`Self::published`] or [`Self::decrypt`].
@@ -70,7 +71,13 @@ pub struct FileHostKeypair {
 impl FileHostKeypair {
     /// Keep the private half in `storage_dir`, owner-only.
     pub fn new(storage_dir: impl AsRef<Path>) -> Self {
+        Self::with_fs(storage_dir, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`FileHostKeypair::new`] with the filesystem port the key file runs through.
+    pub fn with_fs(storage_dir: impl AsRef<Path>, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
         Self {
+            fs,
             private_key_path: storage_dir.as_ref().join(PRIVATE_KEY_FILE),
             loaded: Mutex::new(None),
         }
@@ -91,7 +98,7 @@ impl FileHostKeypair {
     }
 
     fn read_or_generate(&self) -> Result<RsaPrivateKey, String> {
-        match std::fs::read_to_string(&self.private_key_path) {
+        match self.fs.read_to_string(&self.private_key_path) {
             Ok(pem) => RsaPrivateKey::from_pkcs8_pem(&pem).map_err(|e| {
                 // Not regenerated on top of it: a key file that exists but does not parse is a
                 // damaged secret, and overwriting it would destroy the only copy of the identity
@@ -117,12 +124,13 @@ impl FileHostKeypair {
         // private key created at the process umask is a world-readable private key. The atomic half
         // matters too: a truncated key file reads as "no key", which would fail every prompt on this
         // host with nothing to say why.
-        tddy_core::atomic_file::write_atomic_with_mode(
-            &self.private_key_path,
-            pem.as_bytes(),
-            OWNER_ONLY_FILE,
-        )
-        .map_err(|e| format!("{}: {e}", self.private_key_path.display()))?;
+        self.fs
+            .write_atomic(
+                &self.private_key_path,
+                pem.as_bytes(),
+                Some(OWNER_ONLY_FILE),
+            )
+            .map_err(|e| format!("{}: {e}", self.private_key_path.display()))?;
         Ok(key)
     }
 }

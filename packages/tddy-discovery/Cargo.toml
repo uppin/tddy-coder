@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 tddy-rpc = { path = "../tddy-rpc" }
 # `WorktreeChange`: what a mutating tool call did to its conversation's worktree, read off the
 # result at the append site. A leaf crate — git CLI, serde, tokio.
@@ -35,6 +36,8 @@ prost = "0.13"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 wiremock = "0.6"

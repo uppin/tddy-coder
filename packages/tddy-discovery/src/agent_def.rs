@@ -176,18 +176,22 @@ impl std::fmt::Debug for SpecializedAgentDef {
 /// panic and not a silent empty result for the whole directory. A missing `dir` yields an empty
 /// list (not an error) — a fresh `<tddyhome>` with no user-defined agents is the common case.
 pub fn load_agent_defs(dir: &Path) -> Vec<SpecializedAgentDef> {
-    let entries = match std::fs::read_dir(dir) {
+    load_agent_defs_on(&tddy_fs::DiskFs, dir)
+}
+
+/// [`load_agent_defs`] through the filesystem port.
+pub fn load_agent_defs_on(fs: &dyn tddy_fs::Fs, dir: &Path) -> Vec<SpecializedAgentDef> {
+    let entries = match fs.read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return Vec::new(),
     };
 
     let mut defs = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for path in entries {
         if path.extension().and_then(|e| e.to_str()) != Some("yaml") {
             continue;
         }
-        let contents = match std::fs::read_to_string(&path) {
+        let contents = match fs.read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) => {
                 log::warn!("agent_def: failed to read {}: {e}", path.display());

@@ -9,6 +9,7 @@ name = "tddy_host_service"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 # `test_util` is ungated, as `tddy-daemon`'s is, so the integration suites can reach it.
 tempfile = "3"
 anyhow = "1"
@@ -51,6 +52,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `SecretString`: the token of the stand-in Coder account the listing's tests read.
 tddy-credentials = { path = "../tddy-credentials" }
 # `NoPeerForwarding`: a common room that is configured but carries nothing.
