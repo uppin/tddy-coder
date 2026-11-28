@@ -14,6 +14,11 @@ use tddy_lsp::{OperationContext, ProcessOutcome, ProcessStart, ProcessToken, Spa
 use super::purpose;
 use super::redact::redacted;
 
+/// How long an append may take before the record gives up on its sink: a line lands on a local
+/// file in milliseconds. A thread still stuck in a refused append past the deadline is left to
+/// the process's exit to collect.
+const A_LINE_LANDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// A [`SpawnObserver`] that appends what it is told to a file, applying the redaction policy
 /// before a byte is written.
 pub struct JsonlSpawnRecord {
@@ -35,10 +40,34 @@ impl JsonlSpawnRecord {
     }
 
     /// [`JsonlSpawnRecord::open`] through the filesystem port.
+    ///
+    /// The proving append runs on its own thread under a deadline: a record path whose write end
+    /// blocks — a pipe whose reader has not come, say — must be refused rather than hold the
+    /// caller forever, so past the deadline the open reports [`io::ErrorKind::WouldBlock`].
     pub fn open_on(path: &Path, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> io::Result<Self> {
         // Opening is what proves the file can be appended to, so the failure a caller sees
         // is the open's rather than the first line's.
-        fs.append(path, b"")?;
+        let (done, completed) = std::sync::mpsc::channel();
+        let opening = {
+            let fs = fs.clone();
+            let path = path.to_path_buf();
+            move || {
+                let _ = done.send(fs.append(&path, b""));
+            }
+        };
+        let _ = std::thread::spawn(opening);
+        match completed.recv_timeout(A_LINE_LANDS_WITHIN) {
+            Ok(result) => result?,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    format!(
+                        "the record at {} did not open within {A_LINE_LANDS_WITHIN:?}",
+                        path.display()
+                    ),
+                ));
+            }
+        }
         Ok(Self {
             sink: Mutex::new((fs, path.to_path_buf())),
             recording: AtomicBool::new(true),
@@ -47,6 +76,12 @@ impl JsonlSpawnRecord {
     }
 
     /// Append one line, and stop recording for good if the file will not take it.
+    ///
+    /// The append runs on its own thread under a deadline. A line lands on a local file in
+    /// milliseconds; an append that does not come back — a record path whose write end blocks,
+    /// such as a pipe whose only reader has gone — would otherwise hold the run it is observing
+    /// forever, so past the deadline the recording stops and the run carries on without it. The
+    /// mutex is held across the attempt, so lines still land in order while the record is healthy.
     pub(super) fn write_line(&self, line: &str) {
         if !self.recording.load(Ordering::Relaxed) {
             return;
@@ -54,9 +89,26 @@ impl JsonlSpawnRecord {
         let Ok(sink) = self.sink.lock() else {
             return;
         };
-        if let Err(error) = sink.0.append(&sink.1, line.as_bytes()) {
-            log::warn!("the spawn record could not be written; recording stops: {error}");
-            self.recording.store(false, Ordering::Relaxed);
+        let (fs, path) = (sink.0.clone(), sink.1.clone());
+        drop(sink);
+        let (done, completed) = std::sync::mpsc::channel();
+        let line = line.to_string();
+        std::thread::spawn(move || {
+            let _ = done.send(fs.append(&path, line.as_bytes()));
+        });
+        match completed.recv_timeout(A_LINE_LANDS_WITHIN) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                log::warn!("the spawn record could not be written; recording stops: {error}");
+                self.recording.store(false, Ordering::Relaxed);
+            }
+            Err(_) => {
+                log::warn!(
+                    "the spawn record did not take a line within {A_LINE_LANDS_WITHIN:?}; \
+                     recording stops"
+                );
+                self.recording.store(false, Ordering::Relaxed);
+            }
         }
     }
 }
