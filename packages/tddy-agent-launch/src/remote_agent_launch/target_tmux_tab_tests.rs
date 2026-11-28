@@ -171,6 +171,17 @@ esac
     .expect("the stand-in tmux is written");
     std::fs::set_permissions(&tmux, std::fs::Permissions::from_mode(0o755))
         .expect("the stand-in tmux is made executable");
+    // The target's login shell (`$SHELL -lc`), standing in without reading `/etc/profile`: on
+    // macOS that runs `path_helper`, which puts the system's directories (and Homebrew's real
+    // tmux) ahead of the stand-in's, so the recording tmux would never be called.
+    let login_shell = dir.path().join("login-shell");
+    std::fs::write(
+        &login_shell,
+        "#!/bin/sh\n[ \"$1\" = -lc ] || [ \"$1\" = -c ] || exit 64\nexec /bin/sh -c \"$2\"\n",
+    )
+    .expect("the stand-in login shell is written");
+    std::fs::set_permissions(&login_shell, std::fs::Permissions::from_mode(0o755))
+        .expect("the stand-in login shell is made executable");
     (dir, log)
 }
 
@@ -186,7 +197,8 @@ fn run_with_a_recording_tmux(
         .arg(command)
         .env_clear()
         .env("PATH", format!("{}:/usr/bin:/bin", fake.path().display()))
-        .env("FAKE_TMUX_LOG", &log);
+        .env("FAKE_TMUX_LOG", &log)
+        .env("SHELL", fake.path().join("login-shell"));
     for (key, value) in extra_env {
         run.env(key, value);
     }
