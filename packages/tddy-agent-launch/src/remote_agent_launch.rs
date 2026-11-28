@@ -70,8 +70,11 @@ pub use crate::remote_agent_launch::target_tmux_tab::{
 };
 
 /// The base set of the agent's environment on a target, expanded by the target's own login shell:
-/// its `HOME`, `PATH` and `TMPDIR`, never the daemon host's.
-const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}""#;
+/// its `HOME`, `PATH` and `TMPDIR`, and the ssh agent socket a forwarded one left it
+/// (`SSH_AUTH_SOCK`, only when it is set and non-empty — `env -i` would otherwise wipe it, and
+/// the agent's git over SSH would have no keys to authenticate with), never the daemon host's.
+const TARGET_BASE_ENV: &str =
+    r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK"}"#;
 
 /// `argv` run through the target's login shell under `env -i`: the target expands its own base
 /// set ([`TARGET_BASE_ENV`]), the agent is told the terminal it draws on
@@ -80,7 +83,7 @@ const TARGET_BASE_ENV: &str = r#"HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tm
 /// colour), then exactly `env`, then the agent is found by `argv[0]` on the target's `PATH`:
 ///
 /// ```text
-/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' K='\''V'\'' … '\''<agent>'\'' …'
+/// exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK"} TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' K='\''V'\'' … '\''<agent>'\'' …'
 /// ```
 pub fn target_login_exec(argv: &[String], env: &[(String, String)]) -> String {
     let mut inner = format!("exec env -i {TARGET_BASE_ENV}");
@@ -113,7 +116,8 @@ pub fn target_agent_one_shot(worktree: &Path, argv: &[String], env: &[(String, S
 /// shell's own pid to its [`remote_agent_pid_file`] there (`.tddy/agents/<session id>.pid`, so
 /// agents sharing a worktree never overwrite each other's), then `exec` the target's login shell,
 /// which `exec`s `argv`
-/// under `env -i` with the target's own `HOME`, `PATH` and `TMPDIR` and exactly `env` — so the
+/// under `env -i` with the target's own `HOME`, `PATH` and `TMPDIR`, its forwarded ssh agent
+/// socket (`SSH_AUTH_SOCK`, when the target's login holds one) and exactly `env` — so the
 /// recorded pid is the agent's, and the agent sees nothing of the remote login's other variables:
 ///
 /// ```text
@@ -487,7 +491,8 @@ fn remote_command(
         .chain(session.env.iter().cloned())
         .collect();
     // Only what the daemon passes on purpose travels: the spec's `pass_env` values and the launch's
-    // own. The base set (`HOME`, `PATH`, `TMPDIR`) is the target's, expanded there.
+    // own. The base set (`HOME`, `PATH`, `TMPDIR`, the target's forwarded agent socket) is the
+    // target's, expanded there.
     let mut passed = agent.spec.passed_env(std::env::vars_os());
     passed.extend(env);
     let env = passed;
@@ -825,11 +830,13 @@ mod tests {
         let command = remote_agent_command(worktree, "s1", &argv, &env);
 
         // Then the target's login shell runs `env -i` with the base set expanded there (`HOME`,
-        // `PATH`, `TMPDIR`), the terminal the daemon's PTY emulates, then only the explicit
-        // environment, then the bare command
+        // Then the target's login shell runs `env -i` with the base set expanded there (`HOME`,
+        // `PATH`, `TMPDIR`, the forwarded agent socket when the target's login holds one), the
+        // terminal the daemon's PTY emulates, then only the explicit environment, then the bare
+        // command
         assert_eq!(
             command,
-            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
+            r#"cd '/home/dev/repo/.worktrees/s1' && mkdir -p .tddy/agents && printf %s "$$" > '.tddy/agents/s1.pid' && exec "${SHELL:-/bin/sh}" -lc 'exec env -i HOME="$HOME" PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" ${SSH_AUTH_SOCK:+SSH_AUTH_SOCK="$SSH_AUTH_SOCK"} TERM='\''xterm-256color'\'' COLORTERM='\''truecolor'\'' ANTHROPIC_MODEL='\''opus'\'' '\''claude'\'' '\''--model'\'' '\''opus'\'''"#
         );
     }
 
