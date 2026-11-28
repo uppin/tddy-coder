@@ -209,7 +209,14 @@ impl ATarget {
         let dir = tempfile::tempdir().expect("a directory standing for the target");
         let root = std::fs::canonicalize(dir.path()).expect("the target's directory resolves");
         std::fs::create_dir_all(root.join("bin")).expect("a directory for the stand-in ssh");
-        write_executable(&root.join("bin/ssh"), &format!("#!/bin/sh\n{ssh_body}"));
+        // A real ssh starts a fresh login on the target, carrying nothing of this host's tmux: the
+        // stand-in runs here, so it drops `TMUX`/`TMUX_PANE` itself. Left set — as when the tests
+        // run inside a tmux pane — every tmux call on the "target" would go to this host's own
+        // server instead of the target's private socket (`TMUX` overrides `TMUX_TMPDIR`).
+        write_executable(
+            &root.join("bin/ssh"),
+            &format!("#!/bin/sh\nunset TMUX TMUX_PANE\n{ssh_body}"),
+        );
         let target = Self { root, _dir: dir };
         std::fs::create_dir_all(target.worktree()).expect("the session's worktree on the target");
         target
