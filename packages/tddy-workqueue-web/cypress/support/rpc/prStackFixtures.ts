@@ -28,6 +28,8 @@ export interface WorkItemFixture {
   /** Labels and keyed badges on the item (`#workqueue` 7/14). */
   labels?: string[];
   badges?: { key: string; text: string; tone: string }[];
+  /** The files the item carries (`#workqueue` work item files). */
+  files?: { basename: string; sizeBytes: number }[];
 }
 
 /** A planned PR node with sensible defaults — override only what a scenario cares about. */
@@ -180,6 +182,9 @@ export function aWorkQueueJson(version: number, nodes: WorkItemFixture[], revisi
       display_order: n.displayOrder ?? null,
       labels: n.labels ?? [],
       badges: n.badges ?? [],
+      ...(n.files === undefined
+        ? {}
+        : { files: n.files.map((file) => ({ basename: file.basename, size_bytes: file.sizeBytes })) }),
     })),
   });
 }

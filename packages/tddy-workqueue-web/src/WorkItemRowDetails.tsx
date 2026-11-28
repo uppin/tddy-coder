@@ -4,6 +4,7 @@ import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import type { BaseSyncView, BehindBaseSyncView } from "./baseSyncStatus";
 import type { WorkItem } from "./workQueue";
 import { WorkItemAnnotationControls } from "./WorkItemAnnotationControls";
+import { WorkItemFilesList } from "./WorkItemFiles";
 import { WorkItemLinkControls } from "./WorkItemLinkControls";
 
 export interface WorkItemRowDetailsProps {
@@ -75,6 +76,7 @@ export function WorkItemRowDetails({
       {node.description && (
         <p className="text-xs text-muted-foreground truncate">{node.description}</p>
       )}
+      <WorkItemFilesList itemId={node.itemId} files={node.files} />
       {node.branch && (
         <p
           data-testid={`work-item-branch-${node.itemId}`}

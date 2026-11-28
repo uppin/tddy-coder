@@ -65,6 +65,7 @@ const SCOPE_LABELS: Readonly<Record<HostDocumentScope, string>> = {
   [HostDocumentScope.SESSION_WORKTREE]: "Worktree file",
   [HostDocumentScope.PROJECT_REPO]: "Project file",
   [HostDocumentScope.STAGED_ATTACHMENT]: "Staged file",
+  [HostDocumentScope.WORK_QUEUE_FILE]: "Work item file",
 };
 
 /** Short human label for a row's source, so an operator can tell an upload from a reference. */
