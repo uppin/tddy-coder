@@ -49,9 +49,18 @@ impl ExtensionLanguage {
         extension_dir: &Path,
         manifest: &ExtensionManifest,
     ) -> Result<Vec<ExtensionLanguage>, ExtensionError> {
+        Self::load_all_on(&tddy_fs::DiskFs, extension_dir, manifest)
+    }
+
+    /// [`ExtensionLanguage::load_all`] through the filesystem port.
+    pub fn load_all_on(
+        fs: &dyn tddy_fs::Fs,
+        extension_dir: &Path,
+        manifest: &ExtensionManifest,
+    ) -> Result<Vec<ExtensionLanguage>, ExtensionError> {
         let mut languages = Vec::new();
-        for relative in language_dirs(extension_dir, manifest)? {
-            languages.push(read_language(extension_dir, &relative, &manifest.id)?);
+        for relative in language_dirs_on(fs, extension_dir, manifest)? {
+            languages.push(read_language_on(fs, extension_dir, &relative, &manifest.id)?);
         }
         languages.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(languages)
@@ -73,7 +82,8 @@ impl ExtensionLanguage {
 
 /// The language directories, relative to the extension root: the manifest's `languages`, else every
 /// directory under `languages/` (none when there is no such directory).
-fn language_dirs(
+fn language_dirs_on(
+    fs: &dyn tddy_fs::Fs,
     extension_dir: &Path,
     manifest: &ExtensionManifest,
 ) -> Result<Vec<PathBuf>, ExtensionError> {
@@ -81,16 +91,22 @@ fn language_dirs(
         return Ok(manifest.languages.clone());
     }
     let languages = extension_dir.join("languages");
-    let entries = match std::fs::read_dir(&languages) {
+    let entries = match fs.read_dir(&languages) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(ExtensionError::io(&languages, error)),
     };
     let mut dirs = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| ExtensionError::io(&languages, error))?;
-        if entry.path().is_dir() {
-            dirs.push(Path::new("languages").join(entry.file_name()));
+    for path in entries {
+        let meta = fs
+            .metadata(&path)
+            .map_err(|error| ExtensionError::io(&languages, error))?;
+        if meta.kind == tddy_fs::FsKind::Dir {
+            let name = path
+                .file_name()
+                .map(|name| name.to_os_string())
+                .unwrap_or_default();
+            dirs.push(Path::new("languages").join(name));
         }
     }
     dirs.sort();
@@ -99,14 +115,15 @@ fn language_dirs(
 
 /// The language the directory `relative` (to `extension_dir`) holds: its `config.toml` and, if it
 /// has one, its `outline.scm`.
-fn read_language(
+fn read_language_on(
+    fs: &dyn tddy_fs::Fs,
     extension_dir: &Path,
     relative: &Path,
     extension: &str,
 ) -> Result<ExtensionLanguage, ExtensionError> {
     let config_file = relative.join("config.toml");
     let config_path = extension_dir.join(&config_file);
-    let text = match std::fs::read_to_string(&config_path) {
+    let text = match fs.read_to_string(&config_path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Err(ExtensionError::LanguageConfigMissing {
@@ -124,7 +141,7 @@ fn read_language(
         })?;
 
     let outline_path = extension_dir.join(relative).join("outline.scm");
-    let outline_query = match std::fs::read_to_string(&outline_path) {
+    let outline_query = match fs.read_to_string(&outline_path) {
         Ok(query) => Some(query),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(ExtensionError::io(&outline_path, error)),

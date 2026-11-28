@@ -5,7 +5,6 @@
 //! and leaves the previous install and the index untouched.
 
 use std::fmt::Display;
-use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -20,7 +19,7 @@ use crate::error::ExtensionError;
 use crate::index::{ExtensionSource, Index, IndexEntry};
 use crate::manifest::ExtensionManifest;
 use crate::registry::Registry;
-use crate::staging::{copy_tree, remove_tree, swap_in, Staging};
+use crate::staging::{copy_tree_on, remove_tree_on, swap_in_on, Staging};
 
 const MANIFEST: &str = "extension.toml";
 const WASM: &str = "extension.wasm";
@@ -95,13 +94,24 @@ pub async fn install_from_registry(
     id: &str,
     version: Option<&str>,
 ) -> Result<InstallOutcome, ExtensionError> {
+    install_from_registry_on(std::sync::Arc::new(tddy_fs::DiskFs), dir, registry, id, version).await
+}
+
+/// [`install_from_registry`] through the filesystem port.
+pub async fn install_from_registry_on(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    dir: &ExtensionsDir,
+    registry: &Registry,
+    id: &str,
+    version: Option<&str>,
+) -> Result<InstallOutcome, ExtensionError> {
     check_id(id)?;
     let url = download_url(registry, id, version)?;
     let body = fetch(id, &url).await?;
-    let staging = Staging::begin(dir, id)?;
-    archive::unpack(GzDecoder::new(&body[..]), staging.path(), id)?;
-    let manifest = validate(staging.path(), id)?;
-    commit(dir, staging, &manifest, ExtensionSource::Registry)
+    let staging = Staging::begin_on(fs.clone(), dir, id)?;
+    archive::unpack_on(&*fs, GzDecoder::new(&body[..]), staging.path(), id)?;
+    let manifest = validate_on(&*fs, staging.path(), id)?;
+    commit_on(&*fs, dir, staging, &manifest, ExtensionSource::Registry)
 }
 
 /// Copies the extension directory at `path` (a dev extension) in, under its manifest's id. Symlinks
@@ -110,36 +120,62 @@ pub fn install_from_path(
     dir: &ExtensionsDir,
     path: &Path,
 ) -> Result<InstallOutcome, ExtensionError> {
-    let source = read_source_manifest(path)?;
+    install_from_path_on(std::sync::Arc::new(tddy_fs::DiskFs), dir, path)
+}
+
+/// [`install_from_path`] through the filesystem port.
+pub fn install_from_path_on(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    dir: &ExtensionsDir,
+    path: &Path,
+) -> Result<InstallOutcome, ExtensionError> {
+    let source = read_source_manifest_on(&*fs, path)?;
     check_id(&source.id)?;
-    let staging = Staging::begin(dir, &source.id)?;
-    copy_tree(path, staging.path())?;
-    let manifest = validate(staging.path(), &source.id)?;
-    commit(dir, staging, &manifest, ExtensionSource::Path)
+    let staging = Staging::begin_on(fs.clone(), dir, &source.id)?;
+    copy_tree_on(&*fs, path, staging.path())?;
+    let manifest = validate_on(&*fs, staging.path(), &source.id)?;
+    commit_on(&*fs, dir, staging, &manifest, ExtensionSource::Path)
 }
 
 /// Every installed extension, sorted by id.
 pub fn list(dir: &ExtensionsDir) -> Result<Vec<InstalledExtension>, ExtensionError> {
-    Index::load(dir)?
+    list_on(&tddy_fs::DiskFs, dir)
+}
+
+/// [`list`] through the filesystem port.
+pub fn list_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &ExtensionsDir,
+) -> Result<Vec<InstalledExtension>, ExtensionError> {
+    Index::load_on(fs, dir)?
         .extensions
         .into_values()
-        .map(|entry| describe(dir, entry))
+        .map(|entry| describe_on(fs, dir, entry))
         .collect()
 }
 
 /// Deletes `installed/<id>` and its index entry, returning the entry removed. An id with no index
 /// entry counts as not installed, even when a directory of that name is left behind.
 pub fn remove(dir: &ExtensionsDir, id: &str) -> Result<IndexEntry, ExtensionError> {
+    remove_on(&tddy_fs::DiskFs, dir, id)
+}
+
+/// [`remove`] through the filesystem port.
+pub fn remove_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &ExtensionsDir,
+    id: &str,
+) -> Result<IndexEntry, ExtensionError> {
     let not_installed = || ExtensionError::NotInstalled {
         extension: id.to_string(),
     };
     if !is_plain_name(id) {
         return Err(not_installed());
     }
-    let mut index = Index::load(dir)?;
+    let mut index = Index::load_on(fs, dir)?;
     let entry = index.extensions.remove(id).ok_or_else(not_installed)?;
-    index.save(dir)?;
-    remove_tree(&dir.extension(id))?;
+    index.save_on(fs, dir)?;
+    remove_tree_on(fs, &dir.extension(id))?;
     Ok(entry)
 }
 
@@ -210,10 +246,13 @@ async fn fetch(id: &str, url: &Url) -> Result<Vec<u8>, ExtensionError> {
 
 /// The manifest at the top of a dev extension directory, read before anything is copied: its id
 /// names the install.
-fn read_source_manifest(path: &Path) -> Result<ExtensionManifest, ExtensionError> {
+fn read_source_manifest_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &Path,
+) -> Result<ExtensionManifest, ExtensionError> {
     let extension = path.display().to_string();
     let file = path.join(MANIFEST);
-    let text = fs::read_to_string(&file).map_err(|e| match e.kind() {
+    let text = fs.read_to_string(&file).map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
             extension: extension.clone(),
             file: PathBuf::from(MANIFEST),
@@ -225,9 +264,15 @@ fn read_source_manifest(path: &Path) -> Result<ExtensionManifest, ExtensionError
 
 /// Checks the staged tree in R3's order and returns its manifest. Each refusal names the extension
 /// and the file, relative to the extension root.
-fn validate(staged: &Path, requested: &str) -> Result<ExtensionManifest, ExtensionError> {
+fn validate_on(
+    fs: &dyn tddy_fs::Fs,
+    staged: &Path,
+    requested: &str,
+) -> Result<ExtensionManifest, ExtensionError> {
     let manifest_file = Path::new(MANIFEST);
-    let text = fs::read_to_string(staged.join(MANIFEST)).map_err(|e| match e.kind() {
+    let text = fs
+        .read_to_string(&staged.join(MANIFEST))
+        .map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
             extension: requested.to_string(),
             file: manifest_file.to_path_buf(),
@@ -246,7 +291,7 @@ fn validate(staged: &Path, requested: &str) -> Result<ExtensionManifest, Extensi
     manifest.check_schema_version(manifest_file)?;
     for grammar in manifest.grammars.keys() {
         let file = Path::new("grammars").join(format!("{grammar}.wasm"));
-        if !archive::is_contained(&file) || !staged.join(&file).is_file() {
+        if !archive::is_contained(&file) || !is_a_file_on(fs, &staged.join(&file)) {
             return Err(ExtensionError::GrammarWasmMissing {
                 extension: requested.to_string(),
                 grammar: grammar.clone(),
@@ -254,52 +299,66 @@ fn validate(staged: &Path, requested: &str) -> Result<ExtensionManifest, Extensi
             });
         }
     }
-    for language in language_dir_names(staged)? {
+    for language in language_dir_names_on(fs, staged)? {
         let file = Path::new("languages").join(&language).join(LANGUAGE_CONFIG);
-        if !staged.join(&file).is_file() {
+        if !is_a_file_on(fs, &staged.join(&file)) {
             return Err(ExtensionError::LanguageConfigMissing {
                 extension: requested.to_string(),
                 file,
             });
         }
         // Parsed here, so `list` never meets an installed config it cannot read.
-        read_language_name(staged, &file, requested)?;
+        read_language_name_on(fs, staged, &file, requested)?;
     }
     Ok(manifest)
 }
 
 /// The names of the directories under `root/languages/`, sorted; none when there is no
 /// `languages/`.
-fn language_dir_names(root: &Path) -> Result<Vec<String>, ExtensionError> {
+fn language_dir_names_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+) -> Result<Vec<String>, ExtensionError> {
     let languages = root.join("languages");
-    let entries = match fs::read_dir(&languages) {
+    // The port's `read_dir` hands back full paths, sorted; a directory that is not there holds
+    // no languages.
+    let entries = match fs.read_dir(&languages) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(ExtensionError::io(&languages, e)),
     };
     let mut names = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| ExtensionError::io(&languages, e))?;
-        let file_type = entry
-            .file_type()
-            .map_err(|e| ExtensionError::io(&entry.path(), e))?;
-        if file_type.is_dir() {
-            names.push(entry.file_name().to_string_lossy().into_owned());
+    for path in entries {
+        let meta = fs
+            .metadata(&path)
+            .map_err(|e| ExtensionError::io(&path, e))?;
+        if meta.kind == tddy_fs::FsKind::Dir {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            names.push(name);
         }
     }
     names.sort();
     Ok(names)
 }
 
+/// Whether `path` is a regular file, through a final symlink, through the port.
+fn is_a_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    matches!(fs.metadata_follow(path), Ok(meta) if meta.kind == tddy_fs::FsKind::File)
+}
+
 /// Decides the staged install against the index (R5), then swaps it in. `installed/` and the index
 /// change only once the staged tree has been accepted.
-fn commit(
+fn commit_on(
+    fs: &dyn tddy_fs::Fs,
     dir: &ExtensionsDir,
     staging: Staging,
     manifest: &ExtensionManifest,
     source: ExtensionSource,
 ) -> Result<InstallOutcome, ExtensionError> {
-    let mut index = Index::load(dir)?;
+    let mut index = Index::load_on(fs, dir)?;
     let previous = index.extensions.get(&manifest.id).cloned();
     if let Some(existing) = previous
         .as_ref()
@@ -320,7 +379,7 @@ fn commit(
             .is_some_and(|previous| previous.wasm_enabled),
     };
     index.extensions.insert(manifest.id.clone(), entry.clone());
-    swap_in(dir, staging, &manifest.id, || index.save(dir))?;
+    swap_in_on(fs, dir, staging, &manifest.id, || index.save_on(fs, dir))?;
     Ok(match previous {
         Some(previous) => InstallOutcome::Replaced {
             previous_version: previous.version,
@@ -331,31 +390,41 @@ fn commit(
 }
 
 /// What an installed extension provides, read from its installed directory.
-fn describe(dir: &ExtensionsDir, entry: IndexEntry) -> Result<InstalledExtension, ExtensionError> {
+fn describe_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &ExtensionsDir,
+    entry: IndexEntry,
+) -> Result<InstalledExtension, ExtensionError> {
     let root = dir.extension(&entry.id);
     let manifest_path = root.join(MANIFEST);
-    let text =
-        fs::read_to_string(&manifest_path).map_err(|e| ExtensionError::io(&manifest_path, e))?;
+    let text = fs
+        .read_to_string(&manifest_path)
+        .map_err(|e| ExtensionError::io(&manifest_path, e))?;
     let manifest = ExtensionManifest::parse(&text)
         .map_err(|e| unparsable(&entry.id, Path::new(MANIFEST), e))?;
     let mut languages = Vec::new();
-    for language in language_dir_names(&root)? {
+    for language in language_dir_names_on(fs, &root)? {
         let file = Path::new("languages").join(&language).join(LANGUAGE_CONFIG);
-        languages.push(read_language_name(&root, &file, &entry.id)?);
+        languages.push(read_language_name_on(fs, &root, &file, &entry.id)?);
     }
     Ok(InstalledExtension {
         languages,
         grammars: manifest.grammars.into_keys().collect(),
         language_servers: manifest.language_servers.into_keys().collect(),
-        has_wasm: root.join(WASM).is_file(),
+        has_wasm: is_a_file_on(fs, &root.join(WASM)),
         entry,
     })
 }
 
 /// The `name` in `root/file`, a `languages/<x>/config.toml`.
-fn read_language_name(root: &Path, file: &Path, extension: &str) -> Result<String, ExtensionError> {
+fn read_language_name_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    file: &Path,
+    extension: &str,
+) -> Result<String, ExtensionError> {
     let path = root.join(file);
-    let text = fs::read_to_string(&path).map_err(|e| ExtensionError::io(&path, e))?;
+    let text = fs.read_to_string(&path).map_err(|e| ExtensionError::io(&path, e))?;
     let config: LanguageConfig =
         toml::from_str(&text).map_err(|e| unparsable(extension, file, e))?;
     Ok(config.name)

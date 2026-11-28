@@ -182,7 +182,8 @@ fn the_process_worktree() -> Result<WasmWorktree, ExtensionError> {
 /// Each of `languages` — an installed extension's, beside its manifest — with what serves it: K22's
 /// choice from the settings ([`crate::server::served`]), then the opted-in extension's WASM for a
 /// server K22 left unconfigured ([`served_by_wasm`]).
-pub(crate) fn served(
+pub(crate) fn served_on(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     dir: &ExtensionsDir,
     languages: Vec<(ExtensionManifest, ExtensionLanguage)>,
 ) -> Result<Vec<Served>, ExtensionError> {
@@ -191,7 +192,7 @@ pub(crate) fn served(
         .map(|(manifest, _)| manifest.clone())
         .collect();
     let served = crate::server::served(dir, languages)?;
-    served_by_wasm(dir, manifests.into_iter().zip(served).collect())
+    served_by_wasm_on(fs, dir, manifests.into_iter().zip(served).collect())
 }
 
 /// [`choose_server`] for each of `languages` — K22's [`Served`] beside its manifest — whose server
@@ -202,7 +203,8 @@ pub(crate) fn served(
 ///
 /// The code-action kinds are kept as K22's step found them: they are the manifest entry's for the
 /// server, and the WASM names only that server's command.
-pub(crate) fn served_by_wasm(
+pub(crate) fn served_by_wasm_on(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     dir: &ExtensionsDir,
     languages: Vec<(ExtensionManifest, Served)>,
 ) -> Result<Vec<Served>, ExtensionError> {
@@ -212,7 +214,7 @@ pub(crate) fn served_by_wasm(
     if !any_unconfigured {
         return Ok(languages.into_iter().map(|(_, served)| served).collect());
     }
-    let mut opted_in = OptedInWasm::load(dir)?;
+    let mut opted_in = OptedInWasm::load(fs, dir)?;
     Ok(languages
         .into_iter()
         .map(|(manifest, (language, choice, kinds))| {
@@ -231,12 +233,16 @@ struct OptedInWasm {
 }
 
 impl OptedInWasm {
-    fn load(dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
+    fn load(
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+        dir: &ExtensionsDir,
+    ) -> Result<Self, ExtensionError> {
         Ok(Self {
-            index: Index::load(dir)?,
+            index: Index::load_on(&*fs, dir)?,
             worktree: the_process_worktree()?,
             loader: WasmLoader {
-                settings: ExtensionSettings::load(dir)?,
+                settings: ExtensionSettings::load_on(&*fs, dir)?,
+                fs: fs.clone(),
                 host: None,
                 loaded: BTreeMap::new(),
             },
@@ -281,6 +287,8 @@ impl OptedInWasm {
 struct WasmLoader {
     /// K22's settings, which every loaded extension's `get-settings` answers from.
     settings: ExtensionSettings,
+    /// The port the host's file reads go through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     host: Option<Result<WasmHost, String>>,
     loaded: BTreeMap<String, Result<Option<WasmExtension>, WasmCommandError>>,
 }
@@ -295,11 +303,14 @@ impl WasmLoader {
     ) -> Result<Option<&mut WasmExtension>, WasmCommandError> {
         let Self {
             settings,
+            fs,
             host,
             loaded,
         } = self;
         let outcome = loaded.entry(entry.id.clone()).or_insert_with(|| {
-            match host.get_or_insert_with(|| WasmHost::new().map_err(|error| error.to_string())) {
+            match host
+                .get_or_insert_with(|| WasmHost::new(fs.clone()).map_err(|error| error.to_string()))
+            {
                 Ok(host) => host.load_opted_in(entry, extension_dir, lib, settings),
                 Err(reason) => Err(WasmCommandError::Load {
                     extension: entry.id.clone(),
@@ -412,7 +423,7 @@ mod tests {
         let language = fixture.language(fixture.unconfigured("downloading-ls"), &["source.fixAll"]);
 
         // When the installed languages are served
-        let served = served_by_wasm(&fixture.dir, vec![language]).expect("served");
+        let served = served_by_wasm_on(std::sync::Arc::new(tddy_fs::DiskFs), &fixture.dir, vec![language]).expect("served");
 
         // Then the run refuses the server with the WASM's refusal, and its kinds ride along
         assert_eq!(
@@ -438,7 +449,7 @@ mod tests {
         let language = fixture.language(unconfigured.clone(), &[]);
 
         // When the installed languages are served
-        let served = served_by_wasm(&fixture.dir, vec![language]).expect("served");
+        let served = served_by_wasm_on(std::sync::Arc::new(tddy_fs::DiskFs), &fixture.dir, vec![language]).expect("served");
 
         // Then K22's refusal stands and the WASM was never read (R1)
         assert_eq!(choices_and_kinds(served), vec![(unconfigured, vec![])]);
@@ -452,7 +463,7 @@ mod tests {
         let language = fixture.language(ServerChoice::Undeclared, &[]);
 
         // When the installed languages are served
-        let served = served_by_wasm(&fixture.dir, vec![language]);
+        let served = served_by_wasm_on(std::sync::Arc::new(tddy_fs::DiskFs), &fixture.dir, vec![language]);
 
         // Then nothing was read: the language keeps its choice
         assert_eq!(

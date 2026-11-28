@@ -6,7 +6,6 @@
 //! contained can still resolve outside. `tar`'s `unpack_in` is not used, because it reports a
 //! different refusal.
 
-use std::fs;
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
@@ -14,7 +13,8 @@ use crate::error::ExtensionError;
 
 /// Writes the tar stream `reader` (already gunzipped) into `staged`, the partial directory of
 /// `extension`. The first refused entry stops the unpack; the caller removes `staged`.
-pub(crate) fn unpack<R: Read>(
+pub(crate) fn unpack_on<R: Read>(
+    fs: &dyn tddy_fs::Fs,
     reader: R,
     staged: &Path,
     extension: &str,
@@ -29,18 +29,19 @@ pub(crate) fn unpack<R: Read>(
             .path()
             .map_err(|e| ExtensionError::io(staged, e))?
             .into_owned();
-        if !is_contained(&name) || crosses_symlink(staged, &name)? {
+        if !is_contained(&name) || crosses_symlink_on(fs, staged, &name)? {
             return Err(unsafe_entry(extension, &name));
         }
-        write_entry(&mut entry, staged, extension, &name)?;
+        write_entry(fs, &mut entry, staged, extension, &name)?;
     }
-    let root = fs::canonicalize(staged).map_err(|e| ExtensionError::io(staged, e))?;
-    check_links_resolve_inside(&root, Path::new(""), extension)
+    let root = fs.canonicalize(staged).map_err(|e| ExtensionError::io(staged, e))?;
+    check_links_resolve_inside_on(fs, &root, Path::new(""), extension)
 }
 
 /// Writes one already-contained entry: a directory, a regular file, or a link whose target stays
 /// inside. Anything else is refused.
 fn write_entry<R: Read>(
+    fs: &dyn tddy_fs::Fs,
     entry: &mut tar::Entry<'_, R>,
     staged: &Path,
     extension: &str,
@@ -49,27 +50,28 @@ fn write_entry<R: Read>(
     let dest = staged.join(name);
     let kind = entry.header().entry_type();
     if kind.is_dir() {
-        fs::create_dir_all(&dest).map_err(|e| ExtensionError::io(&dest, e))?;
+        fs.create_dir_all(&dest).map_err(|e| ExtensionError::io(&dest, e))?;
     } else if kind.is_symlink() {
         let target = link_target(entry, staged, extension, name)?;
         if !link_stays_inside(name, &target, false) {
             return Err(unsafe_entry(extension, name));
         }
-        create_parent(&dest)?;
+        create_parent(fs, &dest)?;
         entry
             .unpack(&dest)
             .map_err(|e| ExtensionError::io(&dest, e))?;
     } else if kind.is_hard_link() {
         let target = link_target(entry, staged, extension, name)?;
-        if !link_stays_inside(name, &target, true) || crosses_symlink(staged, &target)? {
+        if !link_stays_inside(name, &target, true) || crosses_symlink_on(fs, staged, &target)? {
             return Err(unsafe_entry(extension, name));
         }
-        create_parent(&dest)?;
+        create_parent(fs, &dest)?;
         // `Entry::unpack` resolves a hard link's target against the working directory, so the
         // link is made here, against the staged tree.
-        fs::hard_link(staged.join(&target), &dest).map_err(|e| ExtensionError::io(&dest, e))?;
+        fs.hard_link(&staged.join(&target), &dest)
+            .map_err(|e| ExtensionError::io(&dest, e))?;
     } else if kind.is_file() {
-        create_parent(&dest)?;
+        create_parent(fs, &dest)?;
         entry
             .unpack(&dest)
             .map_err(|e| ExtensionError::io(&dest, e))?;
@@ -84,31 +86,28 @@ fn write_entry<R: Read>(
 
 /// Refuses the first symlink under `root.join(rel)` that does not resolve to a path inside `root`;
 /// a dangling link cannot be shown to stay inside, so it is refused too.
-fn check_links_resolve_inside(
+fn check_links_resolve_inside_on(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     rel: &Path,
     extension: &str,
 ) -> Result<(), ExtensionError> {
     let dir = root.join(rel);
-    let mut entries = fs::read_dir(&dir)
-        .and_then(|entries| {
-            entries
-                .map(|entry| entry.map(|e| e.file_name()))
-                .collect::<io::Result<Vec<_>>>()
-        })
-        .map_err(|e| ExtensionError::io(&dir, e))?;
-    entries.sort();
-    for name in entries {
+    // The port's `read_dir` hands back full paths, sorted.
+    for path in fs.read_dir(&dir).map_err(|e| ExtensionError::io(&dir, e))? {
+        let name = path
+            .file_name()
+            .map(|name| name.to_os_string())
+            .unwrap_or_default();
         let entry = rel.join(&name);
-        let path = root.join(&entry);
-        let meta = fs::symlink_metadata(&path).map_err(|e| ExtensionError::io(&path, e))?;
-        if meta.file_type().is_symlink() {
-            match fs::canonicalize(&path) {
+        let meta = fs.metadata(&path).map_err(|e| ExtensionError::io(&path, e))?;
+        if meta.kind == tddy_fs::FsKind::Symlink {
+            match fs.canonicalize(&path) {
                 Ok(resolved) if resolved.starts_with(root) => {}
                 _ => return Err(unsafe_entry(extension, &entry)),
             }
-        } else if meta.is_dir() {
-            check_links_resolve_inside(root, &entry, extension)?;
+        } else if meta.kind == tddy_fs::FsKind::Dir {
+            check_links_resolve_inside_on(fs, root, &entry, extension)?;
         }
     }
     Ok(())
@@ -155,13 +154,17 @@ fn link_stays_inside(link: &Path, target: &Path, hard: bool) -> bool {
 
 /// Whether any component of `rel` that exists under `staged` is a symlink, the last included.
 /// Writing or linking through one could land outside the tree.
-fn crosses_symlink(staged: &Path, rel: &Path) -> Result<bool, ExtensionError> {
+fn crosses_symlink_on(
+    fs: &dyn tddy_fs::Fs,
+    staged: &Path,
+    rel: &Path,
+) -> Result<bool, ExtensionError> {
     let mut walked = staged.to_path_buf();
     for part in rel.components() {
         if let Component::Normal(name) = part {
             walked.push(name);
-            match fs::symlink_metadata(&walked) {
-                Ok(meta) if meta.file_type().is_symlink() => return Ok(true),
+            match fs.metadata(&walked) {
+                Ok(meta) if meta.kind == tddy_fs::FsKind::Symlink => return Ok(true),
                 Ok(_) => {}
                 Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
                 Err(e) => return Err(ExtensionError::io(&walked, e)),
@@ -185,9 +188,9 @@ fn link_target<R: Read>(
     }
 }
 
-fn create_parent(dest: &Path) -> Result<(), ExtensionError> {
+fn create_parent(fs: &dyn tddy_fs::Fs, dest: &Path) -> Result<(), ExtensionError> {
     match dest.parent() {
-        Some(parent) => fs::create_dir_all(parent).map_err(|e| ExtensionError::io(parent, e)),
+        Some(parent) => fs.create_dir_all(parent).map_err(|e| ExtensionError::io(parent, e)),
         None => Ok(()),
     }
 }

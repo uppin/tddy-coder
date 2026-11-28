@@ -1,9 +1,7 @@
 //! `<extensions dir>/index.json`: one entry per installed extension (R1).
 
 use std::collections::BTreeMap;
-use std::fs;
-use std::io::{self, Write};
-use std::path::Path;
+use std::io;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,8 +40,13 @@ pub struct Index {
 impl Index {
     /// Reads `dir.index()`; a directory with no index yet is an empty index.
     pub fn load(dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
+        Self::load_on(&tddy_fs::DiskFs, dir)
+    }
+
+    /// [`Index::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
         let path = dir.index();
-        match fs::read_to_string(&path) {
+        match fs.read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text).map_err(|e| ExtensionError::Io {
                 path,
                 message: format!("does not parse: {e}"),
@@ -53,31 +56,22 @@ impl Index {
         }
     }
 
-    /// Writes `dir.index()` atomically: a temp file beside it, synced, then renamed over it.
+    /// Writes `dir.index()` atomically: a temp file beside it, synced, then renamed over it —
+    /// what [`tddy_fs::Fs::write_atomic`] does, missing parents created.
     pub fn save(&self, dir: &ExtensionsDir) -> Result<(), ExtensionError> {
-        let root = dir.root();
-        fs::create_dir_all(root).map_err(|e| ExtensionError::io(root, e))?;
+        self.save_on(&tddy_fs::DiskFs, dir)
+    }
+
+    /// [`Index::save`] through the filesystem port.
+    pub fn save_on(&self, fs: &dyn tddy_fs::Fs, dir: &ExtensionsDir) -> Result<(), ExtensionError> {
         let path = dir.index();
         let json = serde_json::to_string_pretty(self).map_err(|e| ExtensionError::Io {
             path: path.clone(),
             message: format!("cannot serialise: {e}"),
         })?;
-        let temp = root.join(format!("index.json.{}.tmp", std::process::id()));
-        let result = write_synced(&temp, &json)
-            .and_then(|()| fs::rename(&temp, &path).map_err(|e| ExtensionError::io(&path, e)));
-        if result.is_err() {
-            // Best effort: the failed save is the error the caller sees.
-            let _ = fs::remove_file(&temp);
-        }
-        result
+        fs.write_atomic(&path, json.as_bytes(), None)
+            .map_err(|e| ExtensionError::io(&path, e))
     }
-}
-
-fn write_synced(path: &Path, text: &str) -> Result<(), ExtensionError> {
-    let mut file = fs::File::create(path).map_err(|e| ExtensionError::io(path, e))?;
-    file.write_all(text.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|e| ExtensionError::io(path, e))
 }
 
 /// `extensions enable-wasm <id>` / `disable-wasm <id>` (R1): sets the installed extension `id`'s
@@ -88,7 +82,17 @@ pub fn set_wasm_enabled(
     id: &str,
     enabled: bool,
 ) -> Result<IndexEntry, ExtensionError> {
-    let mut index = Index::load(dir)?;
+    set_wasm_enabled_on(&tddy_fs::DiskFs, dir, id, enabled)
+}
+
+/// [`set_wasm_enabled`] through the filesystem port.
+pub fn set_wasm_enabled_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &ExtensionsDir,
+    id: &str,
+    enabled: bool,
+) -> Result<IndexEntry, ExtensionError> {
+    let mut index = Index::load_on(fs, dir)?;
     let entry = index
         .extensions
         .get_mut(id)
@@ -97,7 +101,7 @@ pub fn set_wasm_enabled(
         })?;
     entry.wasm_enabled = enabled;
     let saved = entry.clone();
-    index.save(dir)?;
+    index.save_on(fs, dir)?;
     Ok(saved)
 }
 

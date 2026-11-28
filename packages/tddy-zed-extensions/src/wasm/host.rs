@@ -8,7 +8,6 @@
 //! a deadline — which tree-sitter's `WasmStore` never does. One wasmtime *version* serves both
 //! (R6); one `Engine` cannot.
 
-use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -67,6 +66,9 @@ impl EpochTicker {
 
 /// One engine and one linker with the host's imports, shared by every extension loaded through it.
 pub struct WasmHost {
+    /// The port the extension's `extension.wasm` is read through and the worktree imports answer
+    /// over.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     engine: Engine,
     linker: Linker<HostState>,
     /// Kept alive by every extension loaded too: without it a call has no deadline.
@@ -78,7 +80,7 @@ pub struct WasmHost {
 impl WasmHost {
     /// A host with the component model and epoch interruption on, every import of
     /// [`super::imports`] in its linker, and a [`CALL_DEADLINE`] deadline.
-    pub fn new() -> wasmtime::Result<Self> {
+    pub fn new(fs: std::sync::Arc<dyn tddy_fs::Fs>) -> wasmtime::Result<Self> {
         let mut config = Config::new();
         config.wasm_component_model(true).epoch_interruption(true);
         let engine = Engine::new(&config)?;
@@ -93,6 +95,7 @@ impl WasmHost {
         )?;
         let ticker = Arc::new(EpochTicker::start(&engine));
         Ok(Self {
+            fs,
             engine,
             linker,
             ticker,
@@ -141,11 +144,16 @@ impl WasmHost {
     ) -> Result<WasmExtension, WasmCommandError> {
         let load_error = |reason: String| load_error(extension, reason);
         let file = extension_dir.join(EXTENSION_WASM);
-        let bytes =
-            fs::read(&file).map_err(|error| load_error(format!("{}: {error}", file.display())))?;
+        let bytes = self
+            .fs
+            .read(&file)
+            .map_err(|error| load_error(format!("{}: {error}", file.display())))?;
         let component = Component::from_binary(&self.engine, &bytes)
             .map_err(|error| load_error(format!("{error:#}")))?;
-        let mut store = Store::new(&self.engine, HostState::new(extension, settings.clone()));
+        let mut store = Store::new(
+            &self.engine,
+            HostState::new(extension, settings.clone(), Arc::clone(&self.fs)),
+        );
         let instance = bindings::Extension::instantiate(&mut store, &component, &self.linker)
             .map_err(|error| load_error(format!("{error:#}")))?;
         Ok(WasmExtension {
@@ -170,7 +178,7 @@ impl WasmHost {
             return Ok(None);
         }
         let file = extension_dir.join(EXTENSION_WASM);
-        match fs::metadata(&file) {
+        match self.fs.metadata_follow(&file) {
             Ok(_) => self.load(&entry.id, extension_dir, lib, settings).map(Some),
             Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
             Err(error) => Err(load_error(
@@ -387,7 +395,7 @@ mod tests {
     #[test]
     fn a_new_host_stops_a_call_after_ten_seconds() {
         // Given a host as production builds it
-        let host = WasmHost::new().expect("a host");
+        let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a host");
 
         // When its deadline is read
         let deadline = host.deadline();

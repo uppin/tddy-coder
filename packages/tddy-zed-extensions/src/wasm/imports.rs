@@ -11,8 +11,6 @@
 //! `set-language-server-installation-status` is accepted and ignored — it reports, it installs
 //! nothing.
 
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use serde_json::json;
@@ -36,6 +34,8 @@ const LANGUAGE_SERVERS_CATEGORY: &str = "language_servers";
 pub struct HostState {
     /// The extension's id, for traps.
     pub(crate) extension: String,
+    /// The port the worktree's file reads and `PATH` lookups go through.
+    pub(crate) fs: std::sync::Arc<dyn tddy_fs::Fs>,
     /// The server whose command, options or configuration is being computed: what a refusing
     /// import names. `None` between calls.
     pub(crate) server: Option<String>,
@@ -46,9 +46,14 @@ pub struct HostState {
 }
 
 impl HostState {
-    pub(crate) fn new(extension: &str, settings: ExtensionSettings) -> Self {
+    pub(crate) fn new(
+        extension: &str,
+        settings: ExtensionSettings,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    ) -> Self {
         Self {
             extension: extension.to_string(),
+            fs,
             server: None,
             settings,
             table: ResourceTable::new(),
@@ -148,7 +153,7 @@ impl bindings::HostWorktree for HostState {
         path: String,
     ) -> wasmtime::Result<Result<String, String>> {
         let root = &self.worktree(&worktree)?.root;
-        Ok(read_inside(root, &path))
+        Ok(read_inside(self.fs.as_ref(), root, &path))
     }
 
     /// Searches the worktree's `shell_env` `PATH`, never this process's.
@@ -170,7 +175,7 @@ impl bindings::HostWorktree for HostState {
         Ok(path.and_then(|path| {
             std::env::split_paths(path)
                 .map(|dir| dir.join(&binary_name))
-                .find(|candidate| is_executable_file(candidate))
+                .find(|candidate| is_executable_file(self.fs.as_ref(), candidate))
                 .map(|found| found.display().to_string())
         }))
     }
@@ -187,22 +192,28 @@ impl bindings::HostWorktree for HostState {
 
 /// The text of `path` under `root`, when it stays inside `root` once symlinks and `..` are
 /// resolved.
-fn read_inside(root: &Path, path: &str) -> Result<String, String> {
-    let root = fs::canonicalize(root).map_err(|error| {
+fn read_inside(fs: &dyn tddy_fs::Fs, root: &Path, path: &str) -> Result<String, String> {
+    let root = fs.canonicalize(root).map_err(|error| {
         format!(
             "the worktree root {} is unreadable: {error}",
             root.display()
         )
     })?;
-    let file = fs::canonicalize(root.join(path)).map_err(|error| format!("{path}: {error}"))?;
+    let file = fs
+        .canonicalize(&root.join(path))
+        .map_err(|error| format!("{path}: {error}"))?;
     if !file.starts_with(&root) {
         return Err(format!("{path} is outside the worktree"));
     }
-    fs::read_to_string(&file).map_err(|error| format!("{path}: {error}"))
+    fs.read_to_string(&file).map_err(|error| format!("{path}: {error}"))
 }
 
-fn is_executable_file(path: &Path) -> bool {
-    fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+fn is_executable_file(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
+    matches!(
+        fs.metadata_follow(path),
+        Ok(meta) if meta.kind == tddy_fs::FsKind::File
+            && meta.mode.is_some_and(|mode| mode & 0o111 != 0)
+    )
 }
 
 /// No export this host calls hands the extension a project; never reached.
@@ -382,6 +393,8 @@ mod tests {
     use bindings::ExtensionImports;
     use bindings::HostWorktree;
     use pretty_assertions::assert_eq;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::fs::symlink;
 
     /// A temp worktree root holding `notes.txt`, a `bin/` with an executable `tool` and a plain
@@ -427,7 +440,11 @@ mod tests {
     }
 
     fn a_host_state() -> HostState {
-        HostState::new("an-extension", ExtensionSettings::default())
+        HostState::new(
+            "an-extension",
+            ExtensionSettings::default(),
+            std::sync::Arc::new(tddy_fs::DiskFs),
+        )
     }
 
     #[test]
@@ -515,7 +532,8 @@ mod tests {
             } }
         }))
         .expect("settings parse");
-        let mut state = HostState::new("an-extension", settings);
+        let mut state =
+        HostState::new("an-extension", settings, std::sync::Arc::new(tddy_fs::DiskFs));
 
         // When the extension asks for elixir-ls, for no key, and for another category
         let mut ask = |category: &str, key: Option<&str>| {
