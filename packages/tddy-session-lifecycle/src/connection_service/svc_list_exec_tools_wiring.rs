@@ -237,7 +237,10 @@ mod tests {
             .map(String::as_str)
             .filter(|name| tddy_tool_engine::work_queue_tools::is_stack_tool(name))
             .collect();
-        assert_eq!(work_queue_tools, vec!["work_queue_status", "work_pr_read"]);
+        assert_eq!(
+            work_queue_tools,
+            vec!["work_queue_status", "work_pr_read", "work_item_list_files"]
+        );
     }
 
     #[test]

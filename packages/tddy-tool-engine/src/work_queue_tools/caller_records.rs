@@ -281,7 +281,8 @@ mod tests {
             WorkQueueAccess::Addressed,
         )));
 
-        // Then the owner has the ten plan tools, the four link tools, then the six git tools, an addressed session two reads
+        // Then the owner has the plan tools, the link tools, the file tools, then the git tools,
+        // and an addressed session the reads plus its item's file list
         let every: Vec<String> = WORK_QUEUE_TOOL_NAMES
             .iter()
             .chain(crate::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES.iter())
@@ -290,11 +291,15 @@ mod tests {
             .chain(crate::work_queue_waves_tools::WORK_QUEUE_WAVES_TOOL_NAMES.iter())
             .chain(crate::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.iter())
             .chain(crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULE_TOOL_NAMES.iter())
+            .chain(crate::work_item_file_tools::WORK_ITEM_FILE_TOOL_NAMES.iter())
             .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
             .map(|name| name.to_string())
             .collect();
         assert_eq!(owner, every);
-        assert_eq!(addressed, vec!["work_queue_status", "work_pr_read"]);
+        assert_eq!(
+            addressed,
+            vec!["work_queue_status", "work_pr_read", "work_item_list_files"]
+        );
     }
 
     #[test]
@@ -319,7 +324,12 @@ mod tests {
         // Then the other tool stays and only the access's work tools remain
         assert_eq!(
             addressed,
-            vec!["ListSessions", "work_queue_status", "work_pr_read"]
+            vec![
+                "ListSessions",
+                "work_queue_status",
+                "work_pr_read",
+                "work_item_list_files"
+            ]
         );
         assert_eq!(none, vec!["ListSessions"]);
     }

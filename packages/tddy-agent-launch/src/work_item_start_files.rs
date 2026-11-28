@@ -90,10 +90,18 @@ impl LaunchSessions {
     /// `req` with the work item's files appended to its attachments — the one seam every spawn
     /// path applies before it materializes anything, so a child of an item carries the item's
     /// files however it was started.
+    ///
+    /// A start that names no work-queue parent or no item is returned untouched **without asking
+    /// the queue anything**: a host that was never given the work-queue RPC families serves every
+    /// ordinary start, and only a start that names an item — which such a host could not serve
+    /// anyway — is refused with the families' `FAILED_PRECONDITION`.
     pub(crate) async fn start_request_with_work_item_files(
         &self,
         req: &tddy_service::proto::session::StartSessionRequest,
     ) -> Result<tddy_service::proto::session::StartSessionRequest, Status> {
+        if req.work_queue_parent.trim().is_empty() || req.work_item_id.trim().is_empty() {
+            return Ok(req.clone());
+        }
         let mut request = req.clone();
         request.attachments.extend(
             work_item_files_for_start(

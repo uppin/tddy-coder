@@ -481,7 +481,7 @@ fn pair(node_id: &str, title: &str) -> (String, String) {
     (node_id.to_string(), title.to_string())
 }
 
-const EVERY_STACK_TOOL: [&str; 26] = [
+const EVERY_STACK_TOOL: [&str; 29] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -508,6 +508,9 @@ const EVERY_STACK_TOOL: [&str; 26] = [
     "work_queue_schedule_wave",
     "work_item_unschedule",
     "work_queue_schedules",
+    "work_item_attach_file",
+    "work_item_detach_file",
+    "work_item_list_files",
 ];
 
 fn names(names: &[&str]) -> Vec<String> {
@@ -805,7 +808,7 @@ async fn a_stack_node_session_is_offered_only_status_and_read_for_its_own_stack(
     // name, and is refused the write as permission denied with nothing written
     assert_eq!(
         a.work_queue_tools_offered_to(&child).await,
-        names(&["work_queue_status", "work_pr_read"])
+        names(&["work_queue_status", "work_pr_read", "work_item_list_files"])
     );
     assert_eq!(
         status_nodes(&status),
@@ -916,7 +919,10 @@ async fn a_stack_node_session_in_a_jail_is_listed_its_two_reads_as_the_daemon_li
     let in_the_jail = a.work_queue_tools_listed_in_the_jail_of(&child).await;
 
     // Then the jail lists the node's two reads — exactly what the daemon lists it
-    assert_eq!(in_the_jail, names(&["work_queue_status", "work_pr_read"]));
+    assert_eq!(
+        in_the_jail,
+        names(&["work_queue_status", "work_pr_read", "work_item_list_files"])
+    );
     assert_eq!(in_the_jail, a.work_queue_tools_offered_to(&child).await);
 }
 
