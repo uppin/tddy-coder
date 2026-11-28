@@ -14,6 +14,9 @@ mod pr_status;
 mod project_stacks;
 mod pull_base_rpc;
 mod repoint_rpc;
+mod warn_gate;
+#[cfg(test)]
+mod warn_gate_unit_tests;
 
 pub use guards::validate_repoint_target;
 /// `#fs-port` seam: [`referencing_sessions_by_stack`](project_stacks::referencing_sessions_by_stack) through the port, for `MemFs` tests.

@@ -10,7 +10,7 @@ The project stack's screens:
   `DirtyWorktreeDialog`), "New stack", reorder and repoint, and the Start-session flow, which opens
   `tddy-session-create-web`'s dialog pre-filled from the node (`startSessionInitialValues`). `StartPassphraseProvider` is the host
   application's to mount (as for `CreateSessionPane`).
-- **Live status** — `useQueryBranch`, `branchQueries`, `baseSyncStatus`, `orderWorkItems`,
+- **Live status** — `useQueryBranch`, `branchQueries`, `queryBranchPacing`, `baseSyncStatus`, `orderWorkItems`,
   `parentTitles`, `boundChildSession`, `nodeChildSession`, `isNodeOrphaned`, `resolveNodeSession`,
   `workItemSessions` (joins children through `StackChildMetadata`, the three fields it reads),
   `startBlockers`, `deriveStackBaseBranch`, `baseBranchChoice`, `prioritiseBaseBranchOptions`,

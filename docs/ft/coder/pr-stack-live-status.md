@@ -613,9 +613,16 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - **A repointed node's plan no longer records its original parents** *(2026-07-26)* — dropping them is
   the persisted effect (D18), so the stack's DAG loses that edge. This is the intended meaning of
   "repoint": the node is no longer stacked on that predecessor.
-- **Polling churn.** The poll interval is fixed (5 s) and shared per screen; only the branches currently
+- **Polling churn.** The poll interval is shared per screen; only the branches currently
   rendered — and their base branches, which are themselves rendered nodes' branches — are queried. Since
-  2026-07-26 that is **one** GitHub lookup per branch per tick, not two.
+  2026-07-26 that is **one** GitHub lookup per branch per tick, not two. *(Amended 2026-11-28 — the
+  interval is no longer fixed at 5 s: a desktop window left open on a three-branch stack polled
+  every 5 s all night, ~2,200 lookups an hour, with nobody at the machine. The view now fingerprints
+  each poll round's answers and backs off while they stay unchanged — 5 s, then 15 s from the third
+  unchanged answer, 30 s from the sixth, never more than 60 s — and returns to 5 s the moment an
+  answer changes. The poll loop also pauses entirely while the page is hidden and polls at once when
+  it is shown again, driven by `createPoller` from `tddy-react-commons/async`. See
+  [QueryBranch polling cadence *(added 2026-11-28)*](#querybranch-polling-cadence-added-2026-11-28).)*
 - **Multi-parent DAG base.** A node with more than one non-merged parent uses the nearest
   ancestor ref (`effective_base_refs`' first entry) as its single base; a true octopus/merge base
   across multiple parents is out of scope for this changeset (documented non-goal).
@@ -627,6 +634,29 @@ ties by most-recently-updated), **worktree** via `tddy_core::worktree::worktree_
 - **Parent's branch recorded only by its child session.** The node's `branch` resolves through
   that session's changeset (`resolve_stack_node_branch`), so the descendant still spawns. A missing
   session directory resolves to no branch, which is a refusal, not a crash.
+
+## QueryBranch polling cadence *(added 2026-11-28)*
+
+`QueryBranch` costs the daemon a session scan, a git comparison on its blocking lane and a GitHub
+PR lookup per branch per poll. A dashboard window left open on a quiet stack paid that cost all
+night: ~2,200 lookups an hour, 29k blocking-lane refusals and an 81 MB daemon log with nobody at
+the machine (investigation #1061). Two bound on the cost, without changing what a row shows:
+
+- **The web backs off while nothing changes.** `nextQueryBranchDelayMs` (`tddy-workqueue-web/src/queryBranchPacing.ts`)
+  maps the count of consecutive unchanged poll rounds — each round fingerprinted so an identical
+  answer is detected exactly — to the next wait: the 5 s base interval below three unchanged rounds,
+  15 s from the third, 30 s from the sixth, capped at 60 s. Any change (including a failed poll,
+  which answers differently from the real one) resets the count, so the view is back at the base
+  interval as soon as something moves.
+- **The poll loop pauses while nobody is looking.** `useQueryBranch` polls through `createPoller`
+  (`tddy-react-commons/async`), which stops the timer while the document is hidden and polls at
+  once when it is shown again — a minimised window polls for nobody.
+- **The daemon de-duplicates the unavailable warning.** A branch whose PR status cannot be looked up
+  used to log the same warning on every poll; `WarnGate` (`tddy-daemon-rpc`) warns once per branch
+  and reason, warns again when the reason changes or the condition clears. The row still renders
+  "PR status unavailable" with its reason tooltip on every poll — only the log line is gated.
+
+Follow-ups that would cut the cost further are recorded in `docs/dev/todo/2026-11-28-pr-stack-querybranch-call-volume-follow-ups.md`.
 
 ## Panel UX: expandable rows, session links, persisted order, base sync *(added 2026-08-01)*
 

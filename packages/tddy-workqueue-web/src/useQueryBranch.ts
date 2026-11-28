@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { WorkQueueService, type BranchResolution, type WorkQueueAddress } from "tddy-client-web/gen/work_queue_pb";
+import { createPoller } from "tddy-react-commons/async";
 import type { BranchQuery } from "./branchQueries";
+import { POLL_INTERVAL_MS, nextQueryBranchDelayMs } from "./queryBranchPacing";
+
+export { POLL_INTERVAL_MS };
 
 type PrStackClient = Client<typeof WorkQueueService>;
 
@@ -9,9 +13,6 @@ type PrStackClient = Client<typeof WorkQueueService>;
 export type QueryBranchTarget =
   | { sessionId: string }
   | { stack: Pick<WorkQueueAddress, "projectId" | "queueId" | "daemonInstanceId"> };
-
-/** Interval (ms) at which the PR-Stack view re-polls `QueryBranch` for each rendered branch. */
-export const POLL_INTERVAL_MS = 5000;
 
 export interface QueryBranchState {
   /** The latest resolution per branch. Keyed by branch alone — the base is an input, not an identity. */
@@ -30,10 +31,12 @@ export interface QueryBranchState {
 }
 
 /**
- * Polls `QueryBranch` for each of `queries` — immediately on mount and then every
- * {@link POLL_INTERVAL_MS} — and returns a `branch → BranchResolution` map. Each resolution carries
- * the in-progress child session, the on-disk worktree, the live GitHub PR status and the branch's
- * standing against the base the query named, resolved server-side in a single call.
+ * Polls `QueryBranch` for each of `queries` — immediately on mount and then on the interval
+ * {@link nextQueryBranchDelayMs} chooses: {@link POLL_INTERVAL_MS} while the answers keep changing,
+ * stretching to a minute once the stack has been quiet — and returns a `branch → BranchResolution`
+ * map. Each resolution carries the in-progress child session, the on-disk worktree, the live GitHub
+ * PR status and the branch's standing against the base the query named, resolved server-side in a
+ * single call.
  *
  * A query names both refs because a branch's standing against its base is a comparison; the result is
  * still keyed by branch alone, since a branch has exactly one base at a time and every reader
@@ -50,7 +53,9 @@ export interface QueryBranchState {
  *   query changes, so the row states nothing until the new comparison answers.
  *
  * A failed call leaves the previous value for that branch untouched (no crash, no fabricated
- * resolution). The poll set follows `queries`, so only currently-rendered nodes are queried.
+ * resolution). The poll set follows `queries`, so only currently-rendered nodes are queried. The
+ * poll loop pauses while the page is hidden — a minimised window polls for nobody — and polls at
+ * once when it is shown again.
  */
 export function useQueryBranch(
   client: PrStackClient | undefined,
@@ -118,33 +123,53 @@ export function useQueryBranch(
 
     let cancelled = false;
 
-    const poll = () => {
-      for (const query of activeQueries) {
-        // Taken before the call is issued, not when it answers: the response describes the refs as
-        // they stood at this moment, so anything written later supersedes it however late it lands.
-        const ticket = takeTicket();
-        client
-          .queryBranch({
-            sessionToken,
-            ...("stack" in target ? { stack: target.stack } : { sessionId: target.sessionId }),
-            branch: query.branch,
-            baseBranch: query.baseBranch,
-          })
-          .then((res) => {
-            if (cancelled || !res.resolution) return;
+    // One poll round is all active branches in parallel, fingerprinted so consecutive rounds that
+    // answer exactly the same can back the interval off. `bigint` fields (protobuf int64) become
+    // strings, which `JSON.stringify` otherwise refuses to make stable.
+    const fingerprint = (answers: Array<BranchResolution | null>): string =>
+      JSON.stringify(answers, (_key, value) => (typeof value === "bigint" ? value.toString() : value));
+
+    let previousFingerprint: string | undefined;
+    let unchangedPolls = 0;
+
+    const poll = async (): Promise<number> => {
+      const answers = await Promise.all(
+        activeQueries.map(async (query) => {
+          // Taken before the call is issued, not when it answers: the response describes the refs as
+          // they stood at this moment, so anything written later supersedes it however late it lands.
+          const ticket = takeTicket();
+          try {
+            const res = await client.queryBranch({
+              sessionToken,
+              ...("stack" in target ? { stack: target.stack } : { sessionId: target.sessionId }),
+              branch: query.branch,
+              baseBranch: query.baseBranch,
+            });
+            if (cancelled || !res.resolution) return null;
             applyResolution(query.branch, res.resolution, ticket);
-          })
-          .catch(() => {
+            return res.resolution;
+          } catch {
             // Leave the previous value in place; a transient failure must not clear the row.
-          });
-      }
+            return null;
+          }
+        }),
+      );
+      const current = fingerprint(answers);
+      unchangedPolls = current === previousFingerprint ? unchangedPolls + 1 : 0;
+      previousFingerprint = current;
+      return unchangedPolls;
     };
 
-    poll();
-    const id = setInterval(poll, POLL_INTERVAL_MS);
+    // The poller drives the loop: it pauses while the document is hidden, polls at once when the
+    // page is shown again, and lets `nextQueryBranchDelayMs` stretch the wait while nothing changes.
+    const poller = createPoller(poll, {
+      intervalMs: POLL_INTERVAL_MS,
+      nextIntervalMs: nextQueryBranchDelayMs,
+    });
+    poller.start();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      poller.teardown();
     };
     // `queriesKey` stands in for `queries`; the array identity changes each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps

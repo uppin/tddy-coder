@@ -2,6 +2,7 @@
 //! operator's own GitHub credential.
 
 use super::branch_legs::{base_sync_through_cache, base_sync_unavailable, base_sync_view};
+use super::warn_gate::WarnGate;
 use super::WorkQueueRpcHandler;
 
 impl WorkQueueRpcHandler {
@@ -56,34 +57,42 @@ impl WorkQueueRpcHandler {
         // A missing checkout leaves the lookup un-performable, so it is *unavailable* with a reason —
         // reporting `exists = false` would claim the branch has no PR when in fact nothing was ever
         // asked (D8).
-        if repo_root.is_none() {
-            return pr_status_unavailable(
+        let view = if repo_root.is_none() {
+            pr_status_unavailable(
                 branch,
                 "no checkout is recorded for this session, so its GitHub repository is unknown"
                     .to_string(),
-            );
-        }
-        // A demo never reaches GitHub, so stub mode answers first whatever the project's account says.
-        let stub_mode = self
-            .config
-            .github
-            .as_ref()
-            .and_then(|g| g.stub)
-            .unwrap_or(false);
-        if stub_mode {
-            return PrStatusView::default();
-        }
-        match site {
-            Ok(site) => {
-                tddy_work_queue::inbox_reads::pr_status_view_through_inbox(
-                    &site.inbox,
-                    &site.repo,
-                    branch,
-                )
-                .await
+            )
+        } else {
+            // A demo never reaches GitHub, so stub mode answers first whatever the project's account
+            // says.
+            let stub_mode = self
+                .config
+                .github
+                .as_ref()
+                .and_then(|g| g.stub)
+                .unwrap_or(false);
+            if stub_mode {
+                PrStatusView::default()
+            } else {
+                match site {
+                    Ok(site) => {
+                        tddy_work_queue::inbox_reads::pr_status_view_through_inbox(
+                            &site.inbox,
+                            &site.repo,
+                            branch,
+                        )
+                        .await
+                    }
+                    Err(reason) => pr_status_unavailable(branch, reason),
+                }
             }
-            Err(reason) => pr_status_unavailable(branch, reason),
+        };
+        // An *available* view means the branch's condition is gone: its next failure warns again.
+        if !view.unavailable {
+            WarnGate::shared().clear(branch);
         }
+        view
     }
 
     /// How the branch stands against the base the caller named, for `QueryBranch`'s fifth leg.
@@ -165,13 +174,16 @@ pub(crate) fn owner_repo_from_repo_root(repo_root: &std::path::Path) -> Option<S
 }
 
 /// A PR status the daemon could not look up: *unavailable* with an operator-facing `reason`, never
-/// `exists = false` (D8). Logged, because a lookup that never happened is otherwise invisible — the
-/// daemon log carried no PR line at all for an orchestrator polled hundreds of times.
+/// `exists = false` (D8). Logged through the process-wide [`WarnGate`] — a branch is polled every few
+/// seconds, so the same line would otherwise repeat ~2,200 times an hour (81 MB of daemon log); a
+/// changed reason warns again, and a lookup that succeeds clears the branch's key.
 fn pr_status_unavailable(
     branch: &str,
     reason: String,
 ) -> tddy_service::proto::work_queue::PrStatusView {
-    log::warn!("PR status unavailable for branch {branch}: {reason}");
+    if WarnGate::shared().should_warn(branch, &reason) {
+        log::warn!("PR status unavailable for branch {branch}: {reason}");
+    }
     tddy_service::proto::work_queue::PrStatusView {
         unavailable: true,
         unavailable_reason: reason,
