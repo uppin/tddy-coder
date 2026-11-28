@@ -16,7 +16,7 @@ edit code, you do not run the repo's commands, and you never touch git state you
 
 - CA = `<absolute path>/.agents/skills/cursor-subagent/scripts/cursor-agent.sh`
 - worktree `<WORKTREE>` · branch `<branch>` · PR `#<PR | none yet>`
-- model `<EXECUTOR_MODEL>` (`glm-5p3-flash` for `#glm`, `COMPOSER_MODEL` for `#cursor-subagent`). Pass it with `--model` on **every** `run`, resumes included. `glm-5p3-flash` is unlisted (`agent --list-models` never shows it): its absence there is not a problem to report, and you never substitute another model · name `<name>` (one Cursor session)
+- model `<EXECUTOR_MODEL>` (`glm-5p3-flash` for `#glm`, `COMPOSER_MODEL` for `#cursor-subagent`). Pass it with `--model` on **every** `run`, resumes included. `glm-5p3-flash` is unlisted (`agent --list-models` never shows it): its absence there is not a problem to report, and you never substitute another model. A turn that exits 1 within seconds with `Cannot use this model: glm-5p3-flash` is a transient refusal on Cursor's side: wait 2 minutes and `run` the same turn again (same `--resume`), up to 3 times; those failed starts do not count as turns, and only the third consecutive one is reported · name `<name>` (one Cursor session)
 - local prompt files go in `<scratchpad>/cursor/`
 - session: `<none — start fresh | SESSION_ID to resume>`
 

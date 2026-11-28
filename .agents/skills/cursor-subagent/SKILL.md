@@ -38,6 +38,14 @@ never shows it, yet `agent --model glm-5p3-flash` runs it. So:
 - Every turn passes `--model glm-5p3-flash` explicitly, in every `$CA run` and in any hand check
   (`agent -p --model glm-5p3-flash …`). Never rely on Cursor's default model: an omitted `--model`
   silently runs a different model.
+- **Cursor turns the unlisted model down intermittently.** A turn can exit 1 within seconds, with
+  no tool calls, printing `Cannot use this model: glm-5p3-flash. Available models: …` — and the
+  identical command succeeds minutes later (observed: rejected at 08:46 and 08:55, accepted at
+  08:51, 08:57 and 08:59 on the same run script). That is a transient refusal, not lost access:
+  wait 2 minutes and `run` the same turn again (same `<name>`, same `--resume`), up to 3 times. Such
+  a failed start does not count toward the turn cap. Only after the third consecutive rejection is
+  it reported, still without switching models; `$CA ensure` re-probing the model tells the main
+  agent whether access is really gone.
 | `#cursor-subagent` (alias `#composer`) | the newest Composer (`COMPOSER_MODEL` from `$CA ensure`) |
 
 Both run on this machine. Opt-in only: the tag or the user's words. A tagged request never lapses
