@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! `ListDerivedHosts` addressing — the RPC, not the sources. What it lists is in
 //! `tests/derived_hosts_acceptance.rs`.
 

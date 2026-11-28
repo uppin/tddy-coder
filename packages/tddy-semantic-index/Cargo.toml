@@ -15,8 +15,7 @@ tddy-task = { path = "../tddy-task" }
 # Vector store: raw SQLite handle (bundled) + the sqlite-vec extension for KNN.
 rusqlite = { version = "0.32", features = ["bundled", "blob"] }
 sqlite-vec = "0.1"
-# Worktree walk in chunk.rs.
-walkdir = "2"
+tddy-fs = { path = "../tddy-fs" }
 
 # Production local embedding model (candle BERT + tokenizers), pulled only with `local-model`.
 candle-core = { version = "0.8", optional = true }
@@ -41,5 +40,7 @@ local-model = [
 ]
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }

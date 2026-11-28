@@ -12,8 +12,13 @@ name = "tddy-session-sync"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-session-sync = { path = "../tddy-session-sync" }
 tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }

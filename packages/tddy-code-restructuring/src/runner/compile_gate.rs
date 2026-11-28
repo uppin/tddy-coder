@@ -47,20 +47,24 @@ use super::{Options, StatePaths};
 /// surface after the apply and be blamed on the plan. A `to` with no manifest adds nothing and
 /// raises nothing here — that is a crate the move creates, and there is nothing to check before it
 /// exists. A manifest that is there but cannot be read, or declares no package, is refused.
-pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>> {
+pub(super) fn baseline_packages(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    plan: &Plan,
+) -> Result<BTreeSet<String>> {
     let named = plan
         .snapshot
         .keys()
         .cloned()
         .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
-    let mut packages = owning_packages(root, named)?;
+    let mut packages = owning_packages(fs, root, named)?;
     let destinations = plan
         .ops
         .iter()
         .filter(|op| op.op.moves_across_crates() || op.op == RefactorKind::MoveTestBinaryToCrate)
         .filter_map(|op| op.to.as_deref());
     for to in destinations {
-        packages.extend(destination_package(root, to)?);
+        packages.extend(destination_package(fs, root, to)?);
     }
     Ok(packages)
 }
@@ -69,10 +73,10 @@ pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<Str
 ///
 /// Only a missing manifest is passed over: one that cannot be read or declares no `[package] name`
 /// is [`Destination::read`]'s refusal, not a destination to leave out of the baseline.
-fn destination_package(root: &Path, to: &str) -> Result<Option<String>> {
-    match std::fs::metadata(root.join(to).join("Cargo.toml")) {
+fn destination_package(fs: &dyn tddy_fs::Fs, root: &Path, to: &str) -> Result<Option<String>> {
+    match fs.metadata_follow(&root.join(to).join("Cargo.toml")) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        _ => Destination::read(root, to).map(|destination| Some(destination.package)),
+        _ => Destination::read_on(fs, root, to).map(|destination| Some(destination.package)),
     }
 }
 
@@ -95,7 +99,7 @@ pub fn refuse_a_broken_baseline(
     if options.dry_run || options.continues_a_journal() {
         return Ok(());
     }
-    let packages = baseline_packages(root, plan)?;
+    let packages = baseline_packages(&*options.fs, root, plan)?;
 
     match failing_check(
         root,
@@ -137,7 +141,7 @@ pub fn refuse_a_broken_result(
         return Ok(());
     }
     let touched = completed_edit_paths(journal);
-    let packages = owning_packages(root, touched.iter().cloned())?;
+    let packages = owning_packages(&*options.fs, root, touched.iter().cloned())?;
 
     let checked = failing_check(
         root,
@@ -222,6 +226,7 @@ fn tidy_a_complete_run(
     }
     let tidying = Tidying {
         root,
+        fs: &*options.fs,
         packages,
         touched,
         progress: &options.progress,
@@ -260,6 +265,7 @@ pub struct AppliedRun<'a> {
 /// just renamed away no longer exists — its directory usually still does, and a manifest above it
 /// certainly does. A file no package owns is compiled by nothing, so it adds nothing to check.
 pub(super) fn owning_packages(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     files: impl Iterator<Item = String>,
 ) -> Result<BTreeSet<String>> {
@@ -268,10 +274,14 @@ pub(super) fn owning_packages(
         let mut directory = root.join(&file);
         while directory.pop() && directory.starts_with(root) {
             let manifest = directory.join("Cargo.toml");
-            if !manifest.is_file() {
+            if fs
+                .metadata_follow(&manifest)
+                .map(|m| m.kind != tddy_fs::FsKind::File)
+                .unwrap_or(true)
+            {
                 continue;
             }
-            if let Some(name) = declared_package_name(&std::fs::read_to_string(&manifest)?) {
+            if let Some(name) = declared_package_name(&fs.read_to_string(&manifest)?) {
                 packages.insert(name.to_string());
                 break;
             }
@@ -508,7 +518,8 @@ mod tests {
         .expect("the plan parses");
 
         // When the baseline's packages are read
-        let packages = baseline_packages(workspace.path(), &plan).expect("the packages are read");
+        let packages = baseline_packages(&tddy_fs::DiskFs, workspace.path(), &plan)
+            .expect("the packages are read");
 
         // Then only the origin is checked
         assert_eq!(packages, BTreeSet::from(["origin".to_string()]));
@@ -535,7 +546,7 @@ mod tests {
         .expect("the plan parses");
 
         // When the baseline's packages are read
-        let refusal = baseline_packages(workspace.path(), &plan)
+        let refusal = baseline_packages(&tddy_fs::DiskFs, workspace.path(), &plan)
             .expect_err("a manifest naming no package is refused");
 
         // Then the refusal says the manifest declares no package

@@ -24,7 +24,7 @@ use super::item_move::preflight::{anchored, does_not_exist, Named};
 use super::retarget_impl::outline::{self, Operation, Run};
 use super::{failure, seam_survey, uri_of, RustBackend};
 use crate::edit::{FileEdit, Range, Resolution, WorkspaceEdit};
-use crate::item_anchor::{module_path_of, span_of, unlowered_item_anchor};
+use crate::item_anchor::{module_path_of_on, span_of, unlowered_item_anchor};
 use crate::plan::{Anchor, RefactorOp};
 use crate::registry::Workspace;
 use crate::Result;
@@ -79,7 +79,7 @@ fn origin_module(op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<Strin
             module.pop();
             Ok(module)
         }
-        None => Ok(module_path_of(workspace.root, op.anchor.file())?.split_off(1)),
+        None => Ok(module_path_of_on(workspace.fs, workspace.root, op.anchor.file())?.split_off(1)),
     }
 }
 

@@ -15,7 +15,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     ) -> anyhow::Result<()> {
         let deps = self.workflow_spawn_deps()?;
         let session_dir = unified_session_dir_path(&self.sessions_base, session_id);
-        let recipe = read_recipe_from_changeset(&session_dir)?;
+        let recipe = read_recipe_from_changeset_on(&*self.fs, &session_dir)?;
         let project = project_for_workflow_spawn(&deps, project_id)?;
         self.merge_chain_child_integration_base(&session_dir, Path::new(&project.main_repo_path))
             .await?;

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::coverage::{load_per_test_meta, PerTestRustFile, RustRegion};
+use crate::coverage::{PerTestRustFile, RustRegion};
 use crate::error::{AnalysisError, Result};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -247,7 +247,26 @@ pub fn analyze_coverage_dir(
     include_test_sources: bool,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<DuplicateAnalysis> {
-    let metas = load_per_test_meta(coverage_dir)?;
+    analyze_coverage_dir_on(
+        &tddy_fs::DiskFs,
+        coverage_dir,
+        min_signature,
+        subset_ratio,
+        include_test_sources,
+        cancelled,
+    )
+}
+
+/// [`analyze_coverage_dir`] through the filesystem port.
+pub fn analyze_coverage_dir_on(
+    fs: &dyn tddy_fs::Fs,
+    coverage_dir: &std::path::Path,
+    min_signature: usize,
+    subset_ratio: f64,
+    include_test_sources: bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<DuplicateAnalysis> {
+    let metas = crate::coverage::load_per_test_meta_on(fs, coverage_dir)?;
     let mut signatures = Vec::new();
     let loading = metas.len();
     for meta in metas {
@@ -261,13 +280,17 @@ pub fn analyze_coverage_dir(
         let path = coverage_dir
             .join("per-test")
             .join(format!("{}.rust.json", meta.id));
-        if !path.is_file() {
+        if fs
+            .metadata_follow(&path)
+            .map(|m| m.kind != tddy_fs::FsKind::File)
+            .unwrap_or(true)
+        {
             return Err(AnalysisError::MissingCoverage {
                 path: path.display().to_string(),
             });
         }
         let per_test: BTreeMap<String, PerTestRustFile> =
-            serde_json::from_str(&std::fs::read_to_string(&path)?)?;
+            serde_json::from_str(&fs.read_to_string(&path)?)?;
         let keys = signature_for_rust_test(&per_test, include_test_sources);
         signatures.push((meta.full_name, keys));
     }

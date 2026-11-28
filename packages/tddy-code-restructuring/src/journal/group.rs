@@ -20,7 +20,12 @@ pub struct PreImage {
 impl PreImage {
     /// The file at `path` under `root` as it stands now, or its absence.
     pub fn capture(root: &Path, path: &str) -> Result<PreImage> {
-        let contents = match std::fs::read_to_string(root.join(path)) {
+        Self::capture_on(&tddy_fs::DiskFs, root, path)
+    }
+
+    /// [`PreImage::capture`] through the filesystem port.
+    pub fn capture_on(fs: &dyn tddy_fs::Fs, root: &Path, path: &str) -> Result<PreImage> {
+        let contents = match fs.read_to_string(&root.join(path)) {
             Ok(contents) => Some(contents),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
@@ -34,16 +39,21 @@ impl PreImage {
     /// Put the file at `path` under `root` back as it was captured: rewritten, or removed when it
     /// did not exist.
     pub fn restore(&self, root: &Path) -> Result<()> {
+        self.restore_on(&tddy_fs::DiskFs, root)
+    }
+
+    /// [`PreImage::restore`] through the filesystem port.
+    pub fn restore_on(&self, fs: &dyn tddy_fs::Fs, root: &Path) -> Result<()> {
         let file = root.join(&self.path);
         match &self.contents {
             Some(contents) => {
                 if let Some(parent) = file.parent() {
-                    std::fs::create_dir_all(parent)?;
+                    fs.create_dir_all(parent)?;
                 }
-                std::fs::write(&file, contents)?;
+                fs.write(&file, contents.as_bytes())?;
             }
-            None => match std::fs::remove_file(&file) {
-                Ok(()) => crate::apply::remove_emptied_directories(root, [self.path.as_str()])?,
+            None => match fs.remove_file(&file) {
+                Ok(()) => crate::apply::remove_emptied_directories(fs, root, [self.path.as_str()])?,
                 // Already absent is the state being restored.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),

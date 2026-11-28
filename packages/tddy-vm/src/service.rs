@@ -297,7 +297,8 @@ async fn read_generated_public_key(
         .login
         .ssh_public_key
         .ok_or_else(|| format!("VM '{name}' was created without recording a public key path"))?;
-    tokio::fs::read_to_string(&path)
+    tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+        .read_to_string(&path)
         .await
         .map(|key| key.trim().to_string())
         .map_err(|e| format!("failed to read public key {path}: {e}"))

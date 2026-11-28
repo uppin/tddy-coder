@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! A crate move whose line carries `name` creates its destination in the same edit: the skeleton,
 //! what the move writes into it, and a later operation finding it through the run's overlay.
 //!
@@ -76,6 +78,7 @@ impl AWorkspace {
         Workspace {
             root: self.directory.path(),
             overlay: &self.overlay,
+            fs: &tddy_fs::DiskFs,
         }
     }
 

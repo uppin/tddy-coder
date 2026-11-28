@@ -78,7 +78,7 @@ impl Activity {
         requested: &str,
     ) -> Result<(Self, PathBuf), Status> {
         let arrived = Instant::now();
-        let root = match WorkspaceIndex::workspace_root_of(requested) {
+        let root = match WorkspaceIndex::workspace_root_of(index.fs(), requested) {
             Ok(root) => root,
             Err(refusal) => {
                 log::info!(

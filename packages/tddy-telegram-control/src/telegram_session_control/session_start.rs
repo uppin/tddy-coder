@@ -45,7 +45,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         let session_id = Uuid::new_v4().to_string();
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
-        std::fs::create_dir_all(&session_dir)?;
+        self.fs.create_dir_all(&session_dir)?;
         self.persist_initial_prompt_to_changeset(&session_dir, &cmd.prompt)
             .await?;
         log::debug!(
@@ -215,7 +215,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         let session_id = Uuid::new_v4().to_string();
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
-        std::fs::create_dir_all(&session_dir)?;
+        self.fs.create_dir_all(&session_dir)?;
 
         // Write initial_prompt, a derived name and the branch intent into the changeset.
         // - name: the first six words of the prompt; the branch an agent that requires one names is
@@ -286,7 +286,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         session_type: &str,
     ) -> anyhow::Result<()> {
         let path = session_dir.join("changeset.yaml");
-        let raw = std::fs::read_to_string(&path).unwrap_or_default();
+        let raw = self.fs.read_to_string(&path).unwrap_or_default();
         let mut root: serde_yaml::Value = if raw.trim().is_empty() {
             serde_yaml::Mapping::new().into()
         } else {
@@ -300,7 +300,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             serde_yaml::Value::String(session_type.to_string()),
         );
         let out = serde_yaml::to_string(&root)?;
-        std::fs::write(&path, out)?;
+        self.fs.write(&path, out.as_bytes())?;
         Ok(())
     }
 }

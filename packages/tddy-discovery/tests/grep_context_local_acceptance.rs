@@ -45,7 +45,7 @@ fn context_triples(result: &serde_json::Value) -> Vec<(u64, String, String)> {
 #[tokio::test]
 async fn the_local_grep_path_returns_the_same_context_shapes() {
     let (_worktree, path) = a_local_worktree();
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .grep_with_context(
             "match_here",
             Some(&path),
@@ -70,7 +70,7 @@ async fn the_local_grep_path_returns_the_same_context_shapes() {
 #[tokio::test]
 async fn the_local_path_clamps_its_context_at_file_edges() {
     let (_worktree, path) = a_local_worktree();
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .grep_with_context(
             "line 1",
             Some(&path),
@@ -92,7 +92,7 @@ async fn the_local_path_clamps_its_context_at_file_edges() {
 #[tokio::test]
 async fn the_local_path_without_context_keeps_its_unchanged_shape() {
     let (_worktree, path) = a_local_worktree();
-    let result = CodebaseAccess::Local
+    let result = CodebaseAccess::local()
         .grep_with_context(
             "match_here",
             Some(&path),

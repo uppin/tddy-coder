@@ -54,7 +54,12 @@ impl Plan {
     ///
     /// Serialised exactly as [`Plan::rehashed_header`] serialises a headed plan, so a second
     /// `snapshot` of the plan this wrote produces the same line and rewrites nothing.
-    pub(crate) fn header_for_anchored_files(&self, root: &Path) -> Result<String> {
+    /// The header line for a plan that has none, through the filesystem port.
+    pub(crate) fn header_for_anchored_files_on(
+        &self,
+        fs: &dyn tddy_fs::Fs,
+        root: &Path,
+    ) -> Result<String> {
         let files = self.anchored_files();
 
         // Decision O1: a plan whose every anchor is an item, or a run of items, gets the v2 header,
@@ -72,7 +77,7 @@ impl Plan {
             for file in &files {
                 hints.insert(
                     (*file).to_string(),
-                    super::hint_of(&anchored_file_path(root, file)?)?,
+                    super::hint_of_on(fs, &anchored_file_path(root, file)?)?,
                 );
             }
             return serde_json::to_string(&super::HintedHeader {

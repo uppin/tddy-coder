@@ -100,7 +100,7 @@ fn spawn_turn(
     done_tx: oneshot::Sender<TurnResult>,
 ) {
     std::thread::spawn(move || {
-        if let Err(e) = std::fs::create_dir_all(&storage_dir) {
+        if let Err(e) = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir) {
             let _ = done_tx.send(Err(format!("create session storage dir: {e}")));
             return;
         }
@@ -273,7 +273,7 @@ pub fn run_acp(
     data_dir: PathBuf,
     _shutdown: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
-    std::fs::create_dir_all(data_dir.join(SESSIONS_SUBDIR))
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &data_dir.join(SESSIONS_SUBDIR))
         .map_err(|e| anyhow::anyhow!("create sessions dir: {e}"))?;
 
     let outgoing = tokio::io::stdout().compat_write();

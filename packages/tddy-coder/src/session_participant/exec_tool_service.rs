@@ -113,7 +113,7 @@ fn read_tool_calls(
     _session_id: &str,
 ) -> Vec<super::connection_service_participant::ToolCallRecord> {
     use super::connection_service_participant::ToolCallRecord;
-    let bytes = match std::fs::read(path) {
+    let bytes = match tddy_fs::Fs::read(&tddy_fs::DiskFs, path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(e) => {

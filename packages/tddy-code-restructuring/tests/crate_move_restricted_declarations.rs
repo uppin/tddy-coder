@@ -81,6 +81,7 @@ fn after_moving(root: &tempfile::TempDir, cluster: &MovingCluster, path: &str) -
     let workspace = Workspace {
         root: root.path(),
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     let edit: WorkspaceEdit =
         crate_move::resolve_cluster(&mut NothingReachesTheModules, &workspace, cluster)

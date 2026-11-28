@@ -11,14 +11,12 @@
 //! wait before `.restructure/` exists — leaves no record on this path. The daemon's own record is
 //! always open, so it has no such gap.
 
-use std::fs::File;
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use tddy_lsp::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
 
-use super::jsonl::{open_for_appending, RecordBook};
+use super::jsonl::RecordBook;
 
 /// The directory a run creates for its own state, and the record written beside it once it exists.
 const STATE_DIRECTORY: &str = ".restructure";
@@ -28,14 +26,15 @@ const RECORD_FILE: &str = "spawns.jsonl";
 /// run's state directory exists.
 pub struct ColdRunSpawnRecord {
     root: PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     state: Mutex<State>,
     book: RecordBook,
 }
 
 #[derive(Default)]
 struct State {
-    /// The open record file, once `.restructure/` existed for it to be opened in.
-    file: Option<File>,
+    /// Whether the record is open for appending, once `.restructure/` existed for it.
+    open: bool,
     /// Lines written before the file could be opened, in the order they were written.
     pending: Vec<String>,
     /// Set once a write failed: recording stops rather than failing the run.
@@ -45,8 +44,14 @@ struct State {
 impl ColdRunSpawnRecord {
     /// A record for a run under `root`, its file created when the run creates `.restructure/`.
     pub fn for_run(root: impl Into<PathBuf>) -> Self {
+        Self::for_run_on(root, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`ColdRunSpawnRecord::for_run`] through the filesystem port.
+    pub fn for_run_on(root: impl Into<PathBuf>, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
         Self {
             root: root.into(),
+            fs,
             state: Mutex::new(State::default()),
             book: RecordBook::new(),
         }
@@ -65,27 +70,32 @@ impl ColdRunSpawnRecord {
         if state.broken {
             return;
         }
-        if state.file.is_none() && !self.open_now(&mut state) {
+        if !state.open && !self.open_now(&mut state) {
             state.pending.push(line.to_string());
             return;
         }
-        let State { file, broken, .. } = &mut *state;
-        append(file.as_mut(), line, broken);
+        append(&*self.fs, &self.path(), line, &mut state.broken);
     }
 
     /// Open the record file, flushing what was held, if the run's state directory now exists.
     ///
     /// Returns whether a file is open to write to.
     fn open_now(&self, state: &mut State) -> bool {
-        if !self.root.join(STATE_DIRECTORY).is_dir() {
+        if self
+            .fs
+            .metadata_follow(&self.root.join(STATE_DIRECTORY))
+            .map(|m| m.kind != tddy_fs::FsKind::Dir)
+            .unwrap_or(true)
+        {
             return false;
         }
-        match open_for_appending(&self.path()) {
-            Ok(mut file) => {
-                for held in state.pending.drain(..) {
-                    append(Some(&mut file), &held, &mut state.broken);
+        match self.fs.append(&self.path(), b"") {
+            Ok(()) => {
+                let held: Vec<String> = state.pending.drain(..).collect();
+                for line in &held {
+                    append(&*self.fs, &self.path(), line, &mut state.broken);
                 }
-                state.file = Some(file);
+                state.open = true;
                 true
             }
             Err(error) => {
@@ -104,7 +114,7 @@ impl Drop for ColdRunSpawnRecord {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        if state.file.is_none() && !state.broken {
+        if !state.open && !state.broken {
             self.open_now(&mut state);
         }
     }
@@ -125,11 +135,8 @@ impl SpawnObserver for ColdRunSpawnRecord {
 }
 
 /// Append one line, marking the state broken when the file will not take it.
-fn append(file: Option<&mut File>, line: &str, broken: &mut bool) {
-    let Some(file) = file else {
-        return;
-    };
-    if let Err(error) = file.write_all(line.as_bytes()) {
+fn append(fs: &dyn tddy_fs::Fs, path: &std::path::Path, line: &str, broken: &mut bool) {
+    if let Err(error) = fs.append(path, line.as_bytes()) {
         log::warn!("the spawn record could not be written; recording stops: {error}");
         *broken = true;
     }

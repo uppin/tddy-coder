@@ -266,7 +266,7 @@ state. The parts that need no host capability live here as free functions, which
 | `spawn_agent_def` | `agent_def_for_spawn` | `agent_def_for_spawn`: the def an agent spawns with, the model registry's assistant winning over a YAML def |
 | `hosted_clone_start` | `start_hosted_agent_clone` | `start_hosted_agent_clone`, after its head (which resolves the workspace session) has run |
 | `agent_records` | `def_tool_names`, `roster_record`, `qualified_agent_id`, `started_agent_id` | already free functions, re-exported by lifecycle's `agent_roster` so `connection_service::{def_tool_names, qualified_agent_id}` resolve |
-| `exec_tool_caller` | `authorize_exec_tool_caller` | lifecycle's `resolve_exec_tool_worktree`, and `tddy-daemon-rpc`'s exec-tool handler through lifecycle's `connection_service` re-export. It authenticates the caller before the hosted-clone branch and names this daemon in both refusals |
+| `exec_tool_caller` | `authorize_exec_tool_caller` | lifecycle's `resolve_exec_tool_worktree`, and `tddy-daemon-rpc`'s exec-tool handler through lifecycle's `connection_service` re-export. It authenticates the caller before the hosted-clone branch and names this daemon in every refusal; a token whose unverified expiry is in the past is refused as expired — how long ago, and the way out (the daemon resumes the session) — instead of the verification hint an unparseable or foreign-signed token keeps |
 
 Where a function reads host fields, it takes `AgentRosterState<'a>` (`agent_roster_state`): the
 fifteen fields the roster, its clones and agent-def resolution read, each borrowed for one call

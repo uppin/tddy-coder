@@ -42,6 +42,8 @@ prost = "0.13"
 libc = "0.2"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # `DEFAULT_LIVEKIT_JWT_TTL_SECS`: pins the bridge token's TTL to the length the rest of the daemon
 # mints under, so the two cannot drift apart. Not a dependency: nothing here mints through it.
 tddy-livekit = { path = "../tddy-livekit" }

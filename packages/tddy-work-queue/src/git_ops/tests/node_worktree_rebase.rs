@@ -1,3 +1,4 @@
+#![cfg(test)]
 use crate::git_ops::rebase_onto;
 
 use super::init_repo_with_commit;

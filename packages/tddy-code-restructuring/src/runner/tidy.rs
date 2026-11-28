@@ -57,6 +57,8 @@ const MAX_ROUNDS: usize = 3;
 /// What to tidy: the packages to check and the files the run wrote.
 pub(super) struct Tidying<'a> {
     pub root: &'a Path,
+    /// The filesystem port the tidy's reads and writes go through.
+    pub fs: &'a dyn tddy_fs::Fs,
     pub packages: &'a BTreeSet<String>,
     pub touched: &'a BTreeSet<String>,
     pub progress: &'a ProgressSink,
@@ -281,19 +283,19 @@ fn tidy_imports(tidying: &Tidying<'_>, report: &mut Report) -> Result<Checked> {
         if unused.fixes.is_empty() || rounds == MAX_ROUNDS {
             return Ok(Checked::Compiles(diagnostics));
         }
-        pending = Some(begin(tidying.root, unused)?);
+        pending = Some(begin(tidying.fs, tidying.root, unused)?);
         rounds += 1;
     }
 }
 
 /// Apply a round's removals, keeping the bytes of every file it edits.
-fn begin(root: &Path, unused: UnusedImports) -> Result<Round> {
+fn begin(fs: &dyn tddy_fs::Fs, root: &Path, unused: UnusedImports) -> Result<Round> {
     let mut before = BTreeMap::new();
     for file in unused.fixes.keys() {
-        before.insert(file.clone(), std::fs::read(root.join(file))?);
+        before.insert(file.clone(), fs.read(&root.join(file))?);
     }
     let reconciled = reconcile(&unused, &before);
-    let applied = apply_fixes(root, &reconciled.fixes)?;
+    let applied = apply_fixes(fs, root, &reconciled.fixes)?;
     Ok(Round {
         before,
         unused,
@@ -326,7 +328,7 @@ fn repair(
     failure: Failure,
     report: &mut Report,
 ) -> Result<Repair> {
-    restore(tidying.root, &round.before)?;
+    restore(tidying.fs, tidying.root, &round.before)?;
     let named = to_gate_in_a_repair(&round.unused, &round.before, &failure.quoted);
     let mut repairs = Repairs {
         attempts: round.repairs.attempts + 1,
@@ -345,7 +347,7 @@ fn repair(
         report.warnings.extend(placement.declined);
         return Ok(Repair::Nothing);
     }
-    let applied = apply_fixes(tidying.root, &placement.fixes)?;
+    let applied = apply_fixes(tidying.fs, tidying.root, &placement.fixes)?;
     Ok(Repair::Retry(Round {
         before: round.before,
         unused: round.unused,
@@ -392,9 +394,9 @@ fn undone(round: &Round, repairs: &Repairs, failure: Failure) -> Failure {
 }
 
 /// Put back the bytes a round started from.
-fn restore(root: &Path, before: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+fn restore(fs: &dyn tddy_fs::Fs, root: &Path, before: &BTreeMap<String, Vec<u8>>) -> Result<()> {
     for (file, bytes) in before {
-        std::fs::write(root.join(file), bytes)?;
+        fs.write(&root.join(file), bytes)?;
     }
     Ok(())
 }
@@ -469,18 +471,22 @@ fn read_by_a_unit(unused: &[&Diagnostic], primaries: &BTreeSet<Span>) -> BTreeSe
 /// (the compilation units word one removal differently, so a statement is edited twice) or an edit
 /// outside the file. Nothing is written for a file until all of its edits are known to apply, so a
 /// dropped fix can never look like a success.
-fn apply_fixes(root: &Path, fixes: &BTreeMap<String, BTreeSet<Fix>>) -> Result<Vec<Fix>> {
+fn apply_fixes(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    fixes: &BTreeMap<String, BTreeSet<Fix>>,
+) -> Result<Vec<Fix>> {
     let mut applied = Vec::new();
     for (file, edits) in fixes {
         let path = root.join(file);
-        let mut bytes = std::fs::read(&path)?;
+        let mut bytes = fs.read(&path)?;
         let ordered: Vec<&Fix> = edits.iter().collect();
         refuse_unappliable(file, &ordered, bytes.len())?;
         for edit in ordered.into_iter().rev() {
             bytes.splice(edit.start..edit.end, edit.replacement.bytes());
             applied.push(edit.clone());
         }
-        std::fs::write(&path, bytes)?;
+        fs.write(&path, &bytes)?;
     }
     Ok(applied)
 }
@@ -516,6 +522,7 @@ fn refuse_unappliable(file: &str, edits: &[&Fix], length: usize) -> Result<()> {
 /// Format the touched files; whether any changed, so the caller knows to check again.
 fn format_touched_files(tidying: &Tidying<'_>) -> Result<bool> {
     let changed = format_touched(
+        tidying.fs,
         tidying.root,
         tidying.touched,
         tidying.progress,
@@ -604,6 +611,7 @@ mod tests {
             let cancel = CancellationToken::new();
             let verdict = tidy(&Tidying {
                 root: self.directory.path(),
+                fs: &tddy_fs::DiskFs,
                 packages: &packages,
                 touched: &touched,
                 progress: &sink,
@@ -1086,6 +1094,7 @@ mod tests {
         // When the tidy runs
         let verdict = tidy(&Tidying {
             root: directory.path(),
+            fs: &tddy_fs::DiskFs,
             packages: &packages,
             touched: &touched,
             progress: &progress,

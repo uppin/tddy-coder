@@ -52,7 +52,9 @@ pub async fn run_sandbox_qemu(args: cli::SandboxQemuArgs) -> anyhow::Result<i32>
 
     let scratch = tempfile::tempdir()?;
     let egress_dir = scratch.path().join("egress");
-    tokio::fs::create_dir_all(&egress_dir).await?;
+    tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+        .create_dir_all(&egress_dir)
+        .await?;
 
     let plan = tddy_sandbox::SandboxBuilder::new(
         std::env::current_dir()?,

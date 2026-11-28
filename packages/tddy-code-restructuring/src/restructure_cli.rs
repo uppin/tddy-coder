@@ -153,7 +153,7 @@ fn installed_launches_of_an_apply(options: &Options) -> Vec<(LanguageId, tddy_ls
     options
         .plan()
         .ok()
-        .and_then(|plan| std::fs::read_to_string(plan).ok())
+        .and_then(|plan| options.fs.read_to_string(&plan).ok())
         .and_then(|text| crate::Plan::parse(&text).ok())
         .map(|plan| crate::runner::installed_launches_for(&plan, &options.installed))
         .unwrap_or_default()

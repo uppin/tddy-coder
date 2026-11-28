@@ -264,7 +264,9 @@ impl RustBackend {
     fn outline_of(&mut self, file: &str) -> Result<Outlined> {
         let root = self.workspace_root()?;
         let absolute = root.join(file);
-        let text = std::fs::read_to_string(&absolute)
+        let text = self
+            .fs
+            .read_to_string(&absolute)
             .map_err(|error| failure(format!("{file} could not be read: {error}")))?;
         let uri = uri_of(&absolute);
 

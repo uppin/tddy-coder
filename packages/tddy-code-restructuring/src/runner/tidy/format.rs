@@ -52,6 +52,7 @@ fn declaration(line: &str) -> Option<Declared> {
 /// rustfmt also formats the child modules a file declares; the plan wrote them or they were
 /// already formatted, so that is accepted.
 pub(super) fn format_touched(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     touched: &BTreeSet<String>,
     progress: &ProgressSink,
@@ -60,13 +61,17 @@ pub(super) fn format_touched(
     let mut changed = 0;
     for file in touched.iter().filter(|file| file.ends_with(".rs")) {
         let path = root.join(file);
-        if !path.is_file() {
+        if fs
+            .metadata_follow(&path)
+            .map(|m| m.kind != tddy_fs::FsKind::File)
+            .unwrap_or(true)
+        {
             continue;
         }
-        let edition = edition_of(root, file)?;
-        let before = std::fs::read(&path)?;
+        let edition = edition_of(fs, root, file)?;
+        let before = fs.read(&path)?;
         run_rustfmt(root, file, &edition, spawns)?;
-        if std::fs::read(&path)? != before {
+        if fs.read(&path)? != before {
             progress(&format!("formatted: {file}"));
             changed += 1;
         }
@@ -91,26 +96,26 @@ fn run_rustfmt(root: &Path, file: &str, edition: &str, spawns: &SpawnRecorder) -
 }
 
 /// The edition of the package owning `file`, refusing when it cannot be determined.
-fn edition_of(root: &Path, file: &str) -> Result<String> {
+fn edition_of(fs: &dyn tddy_fs::Fs, root: &Path, file: &str) -> Result<String> {
     let refusal = |why: &str| RestructureError::FormatFailed {
         file: file.to_string(),
         errors: format!("cannot determine the edition to format with: {why}"),
     };
     let (directory, manifest) =
-        owning_manifest(root, file).ok_or_else(|| refusal("no package manifest owns it"))?;
+        owning_manifest(fs, root, file).ok_or_else(|| refusal("no package manifest owns it"))?;
     match declared_edition(&manifest, "package") {
         Some(Declared::Literal(edition)) => Ok(edition),
-        Some(Declared::Workspace) => workspace_edition(root, &directory)
+        Some(Declared::Workspace) => workspace_edition(fs, root, &directory)
             .ok_or_else(|| refusal("it inherits the workspace's edition and none declares one")),
         None => Err(refusal("its package declares no edition")),
     }
 }
 
 /// The directory and text of the nearest manifest above `file` that declares a `[package]`.
-fn owning_manifest(root: &Path, file: &str) -> Option<(PathBuf, String)> {
+fn owning_manifest(fs: &dyn tddy_fs::Fs, root: &Path, file: &str) -> Option<(PathBuf, String)> {
     let mut directory = root.join(file);
     while directory.pop() && directory.starts_with(root) {
-        let text = std::fs::read_to_string(directory.join("Cargo.toml")).ok();
+        let text = fs.read_to_string(&directory.join("Cargo.toml")).ok();
         if let Some(text) = text.filter(|text| text.contains("[package]")) {
             return Some((directory, text));
         }
@@ -119,10 +124,10 @@ fn owning_manifest(root: &Path, file: &str) -> Option<(PathBuf, String)> {
 }
 
 /// The `[workspace.package] edition` of the nearest manifest above `from` that declares one.
-fn workspace_edition(root: &Path, from: &Path) -> Option<String> {
+fn workspace_edition(fs: &dyn tddy_fs::Fs, root: &Path, from: &Path) -> Option<String> {
     let mut directory = from.to_path_buf();
     while directory.starts_with(root) {
-        let text = std::fs::read_to_string(directory.join("Cargo.toml")).ok();
+        let text = fs.read_to_string(&directory.join("Cargo.toml")).ok();
         if let Some(Declared::Literal(edition)) =
             text.and_then(|text| declared_edition(&text, "workspace.package"))
         {
@@ -169,6 +174,7 @@ mod tests {
             };
             let touched: BTreeSet<String> = ["src/lib.rs".to_string()].into();
             let outcome = format_touched(
+                &tddy_fs::DiskFs,
                 self.directory.path(),
                 &touched,
                 &sink,

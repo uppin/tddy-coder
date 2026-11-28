@@ -44,18 +44,28 @@ pub struct LedgerCheckpoint {
 impl LedgerCheckpoint {
     /// Write the checkpoint, replacing any previous one.
     pub fn write(&self, path: &Path) -> Result<()> {
+        self.write_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`LedgerCheckpoint::write`] through the filesystem port.
+    pub fn write_on(&self, fs: &dyn tddy_fs::Fs, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs.create_dir_all(parent)?;
         }
         let encoded = serde_json::to_vec(self)
             .map_err(|error| crate::RestructureError::MalformedPlan(error.to_string()))?;
-        std::fs::write(path, encoded)?;
+        fs.write(path, &encoded)?;
         Ok(())
     }
 
     /// Read the checkpoint, or `None` when no run has written one yet.
     pub fn load(path: &Path) -> Result<Option<LedgerCheckpoint>> {
-        match std::fs::read(path) {
+        Self::load_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`LedgerCheckpoint::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<Option<LedgerCheckpoint>> {
+        match fs.read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map(Some)
                 .map_err(|error| crate::RestructureError::MalformedPlan(error.to_string())),

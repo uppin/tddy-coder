@@ -6,9 +6,18 @@ use std::path::{Path, PathBuf};
 ///
 /// A workspace manifest declares no package, so it is walked past rather than mistaken for one.
 pub(crate) fn owning_package(root: &Path, file: &str) -> Result<(PathBuf, String)> {
+    owning_package_on(&tddy_fs::DiskFs, root, file)
+}
+
+/// [`owning_package`] through the filesystem port.
+pub(crate) fn owning_package_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    file: &str,
+) -> Result<(PathBuf, String)> {
     let mut directory = Path::new(file).parent();
     while let Some(candidate) = directory {
-        if let Ok(manifest) = std::fs::read_to_string(root.join(candidate).join("Cargo.toml")) {
+        if let Ok(manifest) = fs.read_to_string(&root.join(candidate).join("Cargo.toml")) {
             if let Some(name) = crate::crate_move::declared_package_name(&manifest) {
                 return Ok((candidate.to_path_buf(), name.to_string()));
             }
@@ -27,8 +36,13 @@ pub(crate) fn owning_package(root: &Path, file: &str) -> Result<(PathBuf, String
 /// the path relative to it. The path is never resolved for them (that would be a fallback): the
 /// refusal only says what to write. Empty when no package holds `file`.
 pub(super) fn repo_root_hint(root: &Path, file: &str) -> String {
+    repo_root_hint_on(&tddy_fs::DiskFs, root, file)
+}
+
+/// [`repo_root_hint`] through the filesystem port.
+pub(super) fn repo_root_hint_on(fs: &dyn tddy_fs::Fs, root: &Path, file: &str) -> String {
     let mut candidates = Vec::new();
-    collect_package_files(root, Path::new(""), Path::new(file), &mut candidates);
+    collect_package_files(fs, root, Path::new(""), Path::new(file), &mut candidates);
     candidates.sort();
     match candidates.as_slice() {
         [] => String::new(),
@@ -46,26 +60,38 @@ pub(super) fn repo_root_hint(root: &Path, file: &str) -> String {
 
 /// Every `<package dir>/<file>` that exists below `directory` (relative to `root`), as repo-root paths.
 pub(super) fn collect_package_files(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     directory: &Path,
     file: &Path,
     found: &mut Vec<String>,
 ) {
-    let Ok(entries) = std::fs::read_dir(root.join(directory)) else {
+    let Ok(entries) = fs.read_dir(&root.join(directory)) else {
         return;
     };
-    let is_package = std::fs::read_to_string(root.join(directory).join("Cargo.toml"))
+    let is_package = fs
+        .read_to_string(&root.join(directory).join("Cargo.toml"))
         .is_ok_and(|manifest| crate::crate_move::declared_package_name(&manifest).is_some());
-    if is_package && root.join(directory).join(file).is_file() {
+    if is_package
+        && fs
+            .metadata_follow(&root.join(directory).join(file))
+            .map(|m| m.kind == tddy_fs::FsKind::File)
+            .unwrap_or(false)
+    {
         found.push(directory.join(file).to_string_lossy().replace('\\', "/"));
     }
-    for entry in entries.flatten() {
-        let name = entry.file_name();
+    for entry_path in entries {
+        let name = entry_path.file_name().unwrap_or_default();
         let name_text = name.to_string_lossy();
         let is_build_or_hidden =
             name_text.starts_with('.') || matches!(&*name_text, "target" | "node_modules");
-        if !is_build_or_hidden && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-            collect_package_files(root, &directory.join(&name), file, found);
+        if !is_build_or_hidden
+            && fs
+                .metadata(&entry_path)
+                .map(|m| m.kind == tddy_fs::FsKind::Dir)
+                .unwrap_or(false)
+        {
+            collect_package_files(fs, root, &directory.join(name), file, found);
         }
     }
 }

@@ -546,6 +546,7 @@ async fn resolving_against(
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
 
         backend
@@ -579,6 +580,7 @@ pub async fn resolution_of(
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
 
         backend
@@ -629,6 +631,7 @@ pub async fn resolving_after_a_check_of(
         let workspace = Workspace {
             root: &root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
 
         backend
@@ -3312,6 +3315,7 @@ pub async fn resolving_in_order(
                     &Workspace {
                         root: &root,
                         overlay: &overlay,
+                        fs: &tddy_fs::DiskFs,
                     },
                 )
                 .map_err(|error| error.to_string())?;

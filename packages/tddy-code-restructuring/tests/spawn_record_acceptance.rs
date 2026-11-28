@@ -409,6 +409,7 @@ fn a_language_server_the_backend_starts_itself_is_recorded_with_the_names_of_its
         &Workspace {
             root: workspace.path(),
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         },
     );
     drop(backend);

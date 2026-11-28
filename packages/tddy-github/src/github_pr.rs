@@ -1,7 +1,6 @@
 //! GitHub pull-request helpers and MCP registration surface for agents (GitHub REST).
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::process::Command;
 
 use serde_json::{json, Value};
@@ -304,9 +303,10 @@ fn curl_github_json(
     let dir = tempfile::tempdir().map_err(|e| GithubPrError::Rest(e.to_string()))?;
     let body_path = dir.path().join("body.json");
     let out_path = dir.path().join("out.json");
-    fs::write(
+    tddy_fs::Fs::write(
+        &tddy_fs::DiskFs,
         &body_path,
-        serde_json::to_vec(json_body).map_err(|e| GithubPrError::Rest(e.to_string()))?,
+        &serde_json::to_vec(json_body).map_err(|e| GithubPrError::Rest(e.to_string()))?,
     )
     .map_err(|e| GithubPrError::Rest(e.to_string()))?;
 
@@ -350,7 +350,8 @@ fn curl_github_json(
         ))
     })?;
 
-    let bytes = fs::read(&out_path).map_err(|e| GithubPrError::Rest(e.to_string()))?;
+    let bytes = tddy_fs::Fs::read(&tddy_fs::DiskFs, &out_path)
+        .map_err(|e| GithubPrError::Rest(e.to_string()))?;
     Ok((status, bytes))
 }
 

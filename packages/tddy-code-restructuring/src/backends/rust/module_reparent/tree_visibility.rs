@@ -152,6 +152,7 @@ mod tests {
         let workspace = Workspace {
             root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let request = reading::read(&workspace, &moving_attachments_under_split())?;
         let survey::Reading::Clear(survey) = survey::survey(&workspace, &request)? else {

@@ -16,6 +16,7 @@ name = "fake_lsp"
 path = "../tddy-lsp/tests/bin/fake_lsp.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 # `default_tddy_data_dir`: the debug-build default the daemon resolves the tddy data dir from.
 tddy-session-store = { path = "../tddy-session-store" }
@@ -57,6 +58,8 @@ wasmtime = { version = "36.0.19", default-features = false, features = ["compone
 testkit = []
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 tempfile = "3"
 # `TaskRegistry`, which the `LspRegistry` the language-server suite starts its server through takes.

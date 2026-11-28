@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Integration tests: gRPC client sends intents, receives PresenterView events.
 //! Daemon acceptance tests: GetSession, ListSessions, daemon startup.
 //! Codegen acceptance tests: EchoServiceServer routing, RpcBridge behavior.

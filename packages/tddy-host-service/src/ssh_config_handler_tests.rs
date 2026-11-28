@@ -1,3 +1,4 @@
+#![cfg(test)]
 //! `ListSshConfigHosts` addressing and honesty — the RPC, not the parser.
 
 use std::path::{Path, PathBuf};

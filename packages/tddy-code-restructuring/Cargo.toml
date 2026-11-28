@@ -16,6 +16,8 @@ name = "fake_lsp"
 path = "../tddy-lsp/tests/bin/fake_lsp.rs"
 
 [dependencies]
+# `#fs-port`: the filesystem port every disk read and write goes through.
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 # A record that cannot be written is logged and dropped, never raised: `log` is how a library that
@@ -39,6 +41,8 @@ tddy-task = { path = "../tddy-task" }
 tokio-util = { version = "0.7", features = ["rt"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 # `rt-multi-thread` is what the live-rust-analyzer acceptance suites need and the library does not:
 # the restructure backend is synchronous and reaches the shared LSP client through

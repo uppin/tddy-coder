@@ -163,6 +163,7 @@ fn creating(
     let seeded = Workspace {
         root: workspace.root,
         overlay: &overlay,
+        fs: &tddy_fs::DiskFs,
     };
     // The new root declares nothing yet, so every member lands in the same gap and would keep the
     // order the plan named them in; by name is the order a sorted root has.
@@ -474,6 +475,7 @@ mod tests {
             Workspace {
                 root: self.root.path(),
                 overlay: &self.overlay,
+                fs: &tddy_fs::DiskFs,
             }
         }
     }

@@ -749,6 +749,37 @@ pub enum CloudInitOutcome {
 ///
 /// Deliberately the *same* cleanup [`crate::serial_shell`] applies to the lines it reads
 /// from a live console, rather than a second definition of what console noise is.
+/// The boot log a bake appends its serial lines to, through the filesystem port.
+///
+/// One append per line (the file is opened, written and closed by each), which reads
+/// the same from outside as the held `tokio::fs::File` it replaces: lines in order,
+/// never truncated after creation.
+pub struct BootLog {
+    fs: tddy_fs::AsyncFs,
+    path: std::path::PathBuf,
+}
+
+impl BootLog {
+    /// Create (or truncate) the log at `path` and open it for appending.
+    pub async fn create(fs: &tddy_fs::AsyncFs, path: &Path) -> Result<Self, VmError> {
+        fs.write(path, Vec::new()).await.map_err(|e| {
+            VmError::BuildFailed(format!("failed to create boot log {}: {e}", path.display()))
+        })?;
+        Ok(Self {
+            fs: fs.clone(),
+            path: path.to_path_buf(),
+        })
+    }
+
+    /// Append `bytes` to the log; a failure is the caller's to ignore, as it was.
+    pub async fn append(&mut self, bytes: &[u8]) {
+        let fs = self.fs.sync().clone();
+        let path = self.path.clone();
+        let bytes = bytes.to_vec();
+        let _ = tokio::task::spawn_blocking(move || fs.append(&path, &bytes)).await;
+    }
+}
+
 pub fn boot_log_line(raw: &str) -> String {
     crate::serial_shell::clean_line(raw)
 }
@@ -898,16 +929,18 @@ async fn run_iso_tool(program: &str, args: &[String]) -> Result<(), String> {
 
 /// Generate a fresh ed25519 keypair at `<output_dir>/id_<name>` and return the contents of
 /// the resulting `.pub` file, for the seed's `authorized_keys` to carry.
-async fn generate_ssh_keypair(output_dir: &Path, name: &str) -> Result<String, VmError> {
-    let keys = crate::library::generate_vm_ssh_keypair(output_dir, name)?;
-    tokio::fs::read_to_string(&keys.public_key_path)
-        .await
-        .map_err(|e| {
-            VmError::BuildFailed(format!(
-                "failed to read generated public key {}: {e}",
-                keys.public_key_path.display()
-            ))
-        })
+async fn generate_ssh_keypair(
+    fs: &tddy_fs::AsyncFs,
+    output_dir: &Path,
+    name: &str,
+) -> Result<String, VmError> {
+    let keys = crate::library::generate_vm_ssh_keypair_on(&**fs.sync(), output_dir, name)?;
+    fs.read_to_string(&keys.public_key_path).await.map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to read generated public key {}: {e}",
+            keys.public_key_path.display()
+        ))
+    })
 }
 
 /// Handle one line read from the qemu serial console during [`boot_and_bake`]'s watch
@@ -921,15 +954,13 @@ async fn handle_boot_line(
     line: &str,
     token: &str,
     boot_log_path: &Path,
-    boot_log: &mut tokio::fs::File,
+    boot_log: &mut BootLog,
     child: &mut tokio::process::Child,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Option<Result<(), VmError>> {
-    use tokio::io::AsyncWriteExt;
-
     progress(line);
-    let _ = boot_log.write_all(boot_log_line(line).as_bytes()).await;
-    let _ = boot_log.write_all(b"\n").await;
+    boot_log.append(boot_log_line(line).as_bytes()).await;
+    boot_log.append(b"\n").await;
 
     match classify_serial_line(line, token) {
         CloudInitOutcome::Succeeded => Some(Ok(())),
@@ -963,16 +994,14 @@ const HALT_GRACE: Duration = Duration::from_secs(120);
 async fn handle_boot_timeout(
     monitor_socket: &str,
     boot_log_path: &Path,
-    boot_log: &mut tokio::fs::File,
+    boot_log: &mut BootLog,
     child: &mut tokio::process::Child,
     progress: &(dyn Fn(&str) + Sync),
 ) -> VmError {
-    use tokio::io::AsyncWriteExt;
-
     let msg =
         "Timed out waiting for the cloud-init completion token; attempting graceful shutdown…";
     progress(msg);
-    let _ = boot_log.write_all(format!("-- {msg}\n").as_bytes()).await;
+    boot_log.append(format!("-- {msg}\n").as_bytes()).await;
     let _ = send_monitor_command(monitor_socket, "system_powerdown").await;
     tokio::time::sleep(POWERDOWN_GRACE).await;
     let _ = child.kill().await;
@@ -994,6 +1023,7 @@ async fn handle_boot_timeout(
 /// onto the console between [`GUEST_LOG_BEGIN_MARKER`] and [`GUEST_LOG_END_MARKER`] before
 /// signalling, on the success and the failure path alike.
 async fn boot_and_bake(
+    fs: &tddy_fs::AsyncFs,
     opts: &CloudInitBuildOptions,
     overlay_path: &Path,
     iso_path: &Path,
@@ -1001,7 +1031,7 @@ async fn boot_and_bake(
     boot_log_path: &Path,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<(), VmError> {
-    use tokio::io::{AsyncWriteExt, BufReader};
+    use tokio::io::BufReader;
 
     let boot_config = CloudInitBootConfig {
         overlay_path: overlay_path.display().to_string(),
@@ -1018,12 +1048,7 @@ async fn boot_and_bake(
     let binary = qemu_binary(opts.arch);
     let monitor_socket = QemuVmArgs::monitor_socket_path(opts.ssh_host_port);
 
-    let mut boot_log = tokio::fs::File::create(boot_log_path).await.map_err(|e| {
-        VmError::BuildFailed(format!(
-            "failed to create boot log {}: {e}",
-            boot_log_path.display()
-        ))
-    })?;
+    let mut boot_log = BootLog::create(fs, boot_log_path).await?;
     progress(&format!(
         "Watching serial console (full log: {})…",
         boot_log_path.display()
@@ -1057,8 +1082,8 @@ async fn boot_and_bake(
                         }
                     }
                     Ok(None) => {
-                        let _ = boot_log
-                            .write_all(format!("-- {binary} stdout closed (process exited) --\n").as_bytes())
+                        boot_log
+                            .append(format!("-- {binary} stdout closed (process exited) --\n").as_bytes())
                             .await;
                         break Err(VmError::BootFailed(format!(
                             "{binary} exited before the cloud-init completion token was observed (full log: {})",
@@ -1091,15 +1116,18 @@ async fn boot_and_bake(
 
 /// Resolve the SSH public key for the seed: read `opts.ssh_public_key` if given,
 /// otherwise generate a fresh ed25519 keypair in `opts.output_dir` (step 3).
-async fn resolve_ssh_public_key(opts: &CloudInitBuildOptions) -> Result<String, VmError> {
+async fn resolve_ssh_public_key(
+    fs: &tddy_fs::AsyncFs,
+    opts: &CloudInitBuildOptions,
+) -> Result<String, VmError> {
     match &opts.ssh_public_key {
-        Some(path) => tokio::fs::read_to_string(path).await.map_err(|e| {
+        Some(path) => fs.read_to_string(path).await.map_err(|e| {
             VmError::BuildFailed(format!(
                 "failed to read ssh public key {}: {e}",
                 path.display()
             ))
         }),
-        None => generate_ssh_keypair(&opts.output_dir, &opts.name).await,
+        None => generate_ssh_keypair(fs, &opts.output_dir, &opts.name).await,
     }
 }
 
@@ -1119,34 +1147,33 @@ fn derive_completion_token(opts: &CloudInitBuildOptions) -> Result<String, VmErr
 /// The rendered `user-data` carries every credential the seed injects into the guest — SSH
 /// keys, and whatever the caller's `write_files` hold — so it must not be readable by other
 /// local accounts, not even for the span of the bake.
-async fn write_owner_only(path: &Path, contents: &str) -> Result<(), VmError> {
-    use tokio::io::AsyncWriteExt;
-
-    let mut options = tokio::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+async fn write_owner_only(
+    fs: &tddy_fs::AsyncFs,
+    path: &Path,
+    contents: &str,
+) -> Result<(), VmError> {
+    // The port's atomic write carries the owner-only mode from creation (and onto a
+    // file an earlier attempt left more permissive, which the hand-rolled version
+    // needed a second `set_owner_only_file` pass for).
     #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options
-        .open(path)
+    let mode = Some(0o600);
+    #[cfg(not(unix))]
+    let mode = None;
+    fs.write_atomic(path, contents.as_bytes().to_vec(), mode)
         .await
-        .map_err(|e| VmError::BuildFailed(format!("failed to create {}: {e}", path.display())))?;
-    file.write_all(contents.as_bytes())
-        .await
-        .map_err(|e| VmError::BuildFailed(format!("failed to write {}: {e}", path.display())))?;
-    // `mode` above only applies when the file is created; an earlier attempt may have left
-    // a more permissive one behind.
-    crate::library::set_owner_only_file(path)
+        .map_err(|e| VmError::BuildFailed(format!("failed to write {}: {e}", path.display())))
 }
 
 /// Render and write the NoCloud `user-data`/`meta-data` seed into `<output_dir>/seed/
 /// nocloud/` (step 5). Returns the seed directory path.
 async fn write_nocloud_seed(
+    fs: &tddy_fs::AsyncFs,
     opts: &CloudInitBuildOptions,
     ssh_public_key: &str,
     token: &str,
 ) -> Result<PathBuf, VmError> {
     let nocloud_dir = opts.output_dir.join("seed").join("nocloud");
-    tokio::fs::create_dir_all(&nocloud_dir).await.map_err(|e| {
+    fs.create_dir_all(&nocloud_dir).await.map_err(|e| {
         VmError::BuildFailed(format!(
             "failed to create seed dir {}: {e}",
             nocloud_dir.display()
@@ -1154,15 +1181,18 @@ async fn write_nocloud_seed(
     })?;
 
     let user_data_rendered = render_user_data(&opts.user_data, ssh_public_key.trim(), token);
-    write_owner_only(&nocloud_dir.join("user-data"), &user_data_rendered).await?;
+    write_owner_only(fs, &nocloud_dir.join("user-data"), &user_data_rendered).await?;
 
     let meta_data_rendered = render_meta_data(
         &format!("cloud-init-{}", opts.name),
         opts.user_data.hostname.as_deref().unwrap_or(&opts.name),
     );
-    tokio::fs::write(nocloud_dir.join("meta-data"), meta_data_rendered)
-        .await
-        .map_err(|e| VmError::BuildFailed(format!("failed to write meta-data: {e}")))?;
+    fs.write(
+        nocloud_dir.join("meta-data"),
+        meta_data_rendered.into_bytes(),
+    )
+    .await
+    .map_err(|e| VmError::BuildFailed(format!("failed to write meta-data: {e}")))?;
 
     Ok(nocloud_dir)
 }
@@ -1206,6 +1236,22 @@ pub async fn create_chained_overlay(
     base_image_src: &Path,
     disk_size: &str,
 ) -> Result<PathBuf, VmError> {
+    create_chained_overlay_on(
+        &tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        overlay_output,
+        base_image_src,
+        disk_size,
+    )
+    .await
+}
+
+/// [`create_chained_overlay`] through the filesystem port.
+pub async fn create_chained_overlay_on(
+    fs: &tddy_fs::AsyncFs,
+    overlay_output: &Path,
+    base_image_src: &Path,
+    disk_size: &str,
+) -> Result<PathBuf, VmError> {
     let overlay_dir = match overlay_output.parent() {
         // A bare filename names the working directory, which `create_dir_all("")` cannot.
         Some(dir) if dir.as_os_str().is_empty() => Path::new("."),
@@ -1223,7 +1269,7 @@ pub async fn create_chained_overlay(
             overlay_output.display()
         ))
     })?;
-    tokio::fs::create_dir_all(overlay_dir).await.map_err(|e| {
+    fs.create_dir_all(overlay_dir).await.map_err(|e| {
         VmError::BuildFailed(format!(
             "failed to create overlay dir {}: {e}",
             overlay_dir.display()
@@ -1232,11 +1278,11 @@ pub async fn create_chained_overlay(
 
     // The directory now exists and the parent image must already; the overlay itself does
     // not yet, so it is named from its canonical directory rather than canonicalized.
-    let overlay_dir = canonical(overlay_dir).await?;
-    let base_image_src = canonical(base_image_src).await?;
+    let overlay_dir = canonical(fs, overlay_dir).await?;
+    let base_image_src = canonical(fs, base_image_src).await?;
     let overlay_path = overlay_dir.join(file_name);
 
-    unseal_existing_overlay(&overlay_path).await?;
+    unseal_existing_overlay(fs, &overlay_path).await?;
 
     let backing = relative_backing_path(&overlay_dir, &base_image_src)?;
     run_qemu_img(
@@ -1249,9 +1295,9 @@ pub async fn create_chained_overlay(
 }
 
 /// Resolve `path` — which must already exist — to an absolute, symlink-free path.
-async fn canonical(path: &Path) -> Result<PathBuf, VmError> {
-    tokio::fs::canonicalize(path)
-        .await
+async fn canonical(fs: &tddy_fs::AsyncFs, path: &Path) -> Result<PathBuf, VmError> {
+    fs.sync()
+        .canonicalize(path)
         .map_err(|e| VmError::BuildFailed(format!("failed to resolve {}: {e}", path.display())))
 }
 
@@ -1260,8 +1306,11 @@ async fn canonical(path: &Path) -> Result<PathBuf, VmError> {
 /// Removed rather than chmod'ed back: the bytes of the previous layer are not the bytes of
 /// the new one, and a truncate-in-place would leave a file that is neither until the create
 /// finishes.
-async fn unseal_existing_overlay(overlay_path: &Path) -> Result<(), VmError> {
-    match tokio::fs::remove_file(overlay_path).await {
+async fn unseal_existing_overlay(
+    fs: &tddy_fs::AsyncFs,
+    overlay_path: &Path,
+) -> Result<(), VmError> {
+    match fs.remove_file(overlay_path).await {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(VmError::BuildFailed(format!(
@@ -1274,12 +1323,18 @@ async fn unseal_existing_overlay(overlay_path: &Path) -> Result<(), VmError> {
 /// [`create_chained_overlay`] for a bake, reporting a failure through `progress` on the way
 /// out — the bake's only channel to whoever is watching it.
 async fn create_overlay(
+    fs: &tddy_fs::AsyncFs,
     opts: &CloudInitBuildOptions,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<PathBuf, VmError> {
-    create_chained_overlay(&opts.overlay_output, &opts.base_image_src, &opts.disk_size)
-        .await
-        .inspect_err(|e| progress(&e.to_string()))
+    create_chained_overlay_on(
+        fs,
+        &opts.overlay_output,
+        &opts.base_image_src,
+        &opts.disk_size,
+    )
+    .await
+    .inspect_err(|e| progress(&e.to_string()))
 }
 
 /// Remove the overlay a failed bake left behind, reporting through `progress` if it cannot
@@ -1289,8 +1344,12 @@ async fn create_overlay(
 /// it nowhere else to be — so a bake that dies mid-provisioning leaves a file that looks
 /// exactly like a finished layer to the next run's existence check. Callers cache on
 /// "the output is there", and only a finished layer may answer to that.
-async fn discard_unbaked_overlay(overlay_path: &Path, progress: &(dyn Fn(&str) + Sync)) {
-    if let Err(e) = tokio::fs::remove_file(overlay_path).await {
+async fn discard_unbaked_overlay(
+    fs: &tddy_fs::AsyncFs,
+    overlay_path: &Path,
+    progress: &(dyn Fn(&str) + Sync),
+) {
+    if let Err(e) = fs.remove_file(overlay_path).await {
         progress(&format!(
             "failed to remove the unfinished overlay {}: {e} — remove it before retrying, \
              or the next build will mistake it for a finished image",
@@ -1325,21 +1384,33 @@ pub async fn build_cloud_init_image(
     opts: &CloudInitBuildOptions,
     progress: &(dyn Fn(&str) + Sync),
 ) -> Result<PathBuf, VmError> {
-    tokio::fs::create_dir_all(&opts.output_dir)
-        .await
-        .map_err(|e| {
-            VmError::BuildFailed(format!(
-                "failed to create output dir {}: {e}",
-                opts.output_dir.display()
-            ))
-        })?;
+    build_cloud_init_image_on(
+        &tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        opts,
+        progress,
+    )
+    .await
+}
+
+/// [`build_cloud_init_image`] through the filesystem port.
+pub async fn build_cloud_init_image_on(
+    fs: &tddy_fs::AsyncFs,
+    opts: &CloudInitBuildOptions,
+    progress: &(dyn Fn(&str) + Sync),
+) -> Result<PathBuf, VmError> {
+    fs.create_dir_all(&opts.output_dir).await.map_err(|e| {
+        VmError::BuildFailed(format!(
+            "failed to create output dir {}: {e}",
+            opts.output_dir.display()
+        ))
+    })?;
 
     progress("Resolving SSH public key…");
-    let ssh_public_key = resolve_ssh_public_key(opts).await?;
+    let ssh_public_key = resolve_ssh_public_key(fs, opts).await?;
     let token = derive_completion_token(opts)?;
 
     progress("Rendering cloud-init NoCloud seed…");
-    let nocloud_dir = write_nocloud_seed(opts, &ssh_public_key, &token).await?;
+    let nocloud_dir = write_nocloud_seed(fs, opts, &ssh_public_key, &token).await?;
 
     progress("Building cloud-init seed ISO…");
     let iso_path = build_seed_iso(opts, &nocloud_dir, progress).await?;
@@ -1348,11 +1419,12 @@ pub async fn build_cloud_init_image(
         "Creating a delta overlay chained onto {}…",
         opts.base_image_src.display()
     ));
-    let overlay_path = create_overlay(opts, progress).await?;
+    let overlay_path = create_overlay(fs, opts, progress).await?;
 
     progress("Booting QEMU to bake cloud-init provisioning into the overlay…");
     let boot_log_path = opts.output_dir.join(format!("{}-boot.log", opts.name));
     let baked = boot_and_bake(
+        fs,
         opts,
         &overlay_path,
         &iso_path,
@@ -1362,7 +1434,7 @@ pub async fn build_cloud_init_image(
     )
     .await;
     if let Err(e) = baked {
-        discard_unbaked_overlay(&overlay_path, progress).await;
+        discard_unbaked_overlay(fs, &overlay_path, progress).await;
         return Err(e);
     }
 
@@ -1423,7 +1495,27 @@ pub async fn write_vm_login_seed_iso(
     username: &str,
     ssh_public_key: &str,
 ) -> Result<PathBuf, VmError> {
-    tokio::fs::create_dir_all(seed_dir).await.map_err(|e| {
+    write_vm_login_seed_iso_on(
+        &tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs)),
+        seed_dir,
+        iso_output,
+        vm_name,
+        username,
+        ssh_public_key,
+    )
+    .await
+}
+
+/// [`write_vm_login_seed_iso`] through the filesystem port.
+pub async fn write_vm_login_seed_iso_on(
+    fs: &tddy_fs::AsyncFs,
+    seed_dir: &Path,
+    iso_output: &Path,
+    vm_name: &str,
+    username: &str,
+    ssh_public_key: &str,
+) -> Result<PathBuf, VmError> {
+    fs.create_dir_all(seed_dir).await.map_err(|e| {
         VmError::BuildFailed(format!(
             "failed to create seed dir {}: {e}",
             seed_dir.display()
@@ -1432,10 +1524,10 @@ pub async fn write_vm_login_seed_iso(
 
     let user_data =
         render_user_data_without_completion(&vm_login_user_data(username), ssh_public_key.trim());
-    write_owner_only(&seed_dir.join("user-data"), &user_data).await?;
+    write_owner_only(fs, &seed_dir.join("user-data"), &user_data).await?;
 
     let meta_data = render_meta_data(&vm_instance_id(vm_name), vm_name);
-    tokio::fs::write(seed_dir.join("meta-data"), meta_data)
+    fs.write(seed_dir.join("meta-data"), meta_data.into_bytes())
         .await
         .map_err(|e| VmError::BuildFailed(format!("failed to write meta-data: {e}")))?;
 

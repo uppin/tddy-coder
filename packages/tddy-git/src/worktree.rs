@@ -20,6 +20,17 @@ pub fn create_worktree(
     branch: &str,
     start_point: Option<&str>,
 ) -> Result<PathBuf, String> {
+    create_worktree_on(&tddy_fs::DiskFs, repo_root, name, branch, start_point)
+}
+
+/// [`create_worktree`] through the filesystem port.
+pub fn create_worktree_on(
+    fs: &dyn tddy_fs::Fs,
+    repo_root: &Path,
+    name: &str,
+    branch: &str,
+    start_point: Option<&str>,
+) -> Result<PathBuf, String> {
     log::debug!(
         "create_worktree: repo={} name={} branch={} start_point={:?}",
         repo_root.display(),
@@ -28,10 +39,11 @@ pub fn create_worktree(
         start_point
     );
     let worktrees = worktree_dir(repo_root);
-    std::fs::create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
+    fs.create_dir_all(&worktrees)
+        .map_err(|e| format!("create worktrees dir: {}", e))?;
 
     let worktree_path = worktrees.join(name);
-    if worktree_path.exists() {
+    if fs.exists(&worktree_path) {
         return Err(format!(
             "worktree path already exists at {} — reuse the existing worktree or confirm before proceeding",
             worktree_path.display()
@@ -253,6 +265,16 @@ pub fn add_worktree_for_existing_branch(
     name: &str,
     branch: &str,
 ) -> Result<PathBuf, String> {
+    add_worktree_for_existing_branch_on(&tddy_fs::DiskFs, repo_root, name, branch)
+}
+
+/// [`add_worktree_for_existing_branch`] through the filesystem port.
+pub fn add_worktree_for_existing_branch_on(
+    fs: &dyn tddy_fs::Fs,
+    repo_root: &Path,
+    name: &str,
+    branch: &str,
+) -> Result<PathBuf, String> {
     log::info!(
         "add_worktree_for_existing_branch: repo={} worktree_name={} branch={}",
         repo_root.display(),
@@ -260,9 +282,10 @@ pub fn add_worktree_for_existing_branch(
         branch
     );
     let worktrees = worktree_dir(repo_root);
-    std::fs::create_dir_all(&worktrees).map_err(|e| format!("create worktrees dir: {}", e))?;
+    fs.create_dir_all(&worktrees)
+        .map_err(|e| format!("create worktrees dir: {}", e))?;
     let worktree_path = worktrees.join(name);
-    if worktree_path.exists() {
+    if fs.exists(&worktree_path) {
         match try_reuse_linked_worktree_at_path(repo_root, &worktree_path, branch) {
             Ok(Some(p)) => {
                 log::info!(
@@ -388,6 +411,15 @@ pub fn create_worktree_with_retry(
 
 /// Remove an existing worktree. Uses `git worktree remove --force`.
 pub fn remove_worktree(repo_root: &Path, worktree_path: &Path) -> Result<(), String> {
+    remove_worktree_on(&tddy_fs::DiskFs, repo_root, worktree_path)
+}
+
+/// [`remove_worktree`] through the filesystem port.
+pub fn remove_worktree_on(
+    fs: &dyn tddy_fs::Fs,
+    repo_root: &Path,
+    worktree_path: &Path,
+) -> Result<(), String> {
     let output = Command::new("git")
         .args([
             "worktree",
@@ -406,8 +438,8 @@ pub fn remove_worktree(repo_root: &Path, worktree_path: &Path) -> Result<(), Str
             "git worktree remove failed ({}), removing directory directly",
             stderr.trim()
         );
-        if worktree_path.exists() {
-            std::fs::remove_dir_all(worktree_path)
+        if fs.exists(worktree_path) {
+            fs.remove_dir_all(worktree_path)
                 .map_err(|e| format!("remove worktree dir: {}", e))?;
         }
     }

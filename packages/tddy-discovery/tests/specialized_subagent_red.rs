@@ -68,7 +68,7 @@ fn a_def(name: &str, base_url: &str) -> SpecializedAgentDef {
 }
 
 fn empty_access_config() -> SubagentConfig {
-    SubagentConfig::new(CodebaseAccess::Local)
+    SubagentConfig::new(CodebaseAccess::local())
 }
 
 /// `SubagentRegistry::from_defs` resolves a session for each registered def by name, sending

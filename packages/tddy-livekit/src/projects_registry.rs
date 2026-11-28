@@ -36,8 +36,16 @@ fn projects_file_path(projects_dir: &Path) -> std::path::PathBuf {
 
 /// Row count for `projects_dir/projects.yaml`, same semantics as `tddy_daemon::project_storage::read_projects().len()`.
 pub(crate) fn owned_project_row_count(projects_dir: &Path) -> anyhow::Result<u64> {
+    owned_project_row_count_on(&tddy_fs::DiskFs, projects_dir)
+}
+
+/// [`owned_project_row_count`] through the filesystem port.
+pub(crate) fn owned_project_row_count_on(
+    fs: &dyn tddy_fs::Fs,
+    projects_dir: &Path,
+) -> anyhow::Result<u64> {
     let path = projects_file_path(projects_dir);
-    if !path.exists() {
+    if !fs.exists(&path) {
         log::debug!(
             target: "tddy_livekit::projects_registry",
             "projects.yaml missing at {}; count=0",
@@ -45,7 +53,8 @@ pub(crate) fn owned_project_row_count(projects_dir: &Path) -> anyhow::Result<u64
         );
         return Ok(0);
     }
-    let contents = std::fs::read_to_string(&path)
+    let contents = fs
+        .read_to_string(&path)
         .map_err(|e| anyhow::anyhow!("read {}: {}", path.display(), e))?;
     let file: ProjectsFile = serde_yaml::from_str(&contents)
         .map_err(|e| anyhow::anyhow!("parse {}: {}", path.display(), e))?;

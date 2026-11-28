@@ -5,6 +5,7 @@ edition = "2021"
 description = "General-purpose VM build and lifecycle management (QEMU)"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs", features = ["tokio"] }
 async-trait = "0.1"
 bytes = "1"
 libc = "0.2"
@@ -25,6 +26,8 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }
 serial_test = "3"
 pretty_assertions = { workspace = true }

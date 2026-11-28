@@ -11,6 +11,8 @@ description = "The daemon's RPC-family handlers, above the session lifecycle the
 # without closing the cycles a move into each family's domain crate would.
 
 [dependencies]
+# The reserved token-renewal call name an agent's `tddy-tools --mcp` sends (`exec_tool/agent_token_renewal.rs`).
+tddy-session-tool-client = { path = "../tddy-session-tool-client" }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 # `AccountsServiceImpl` is the `ProviderAccountsPort` `DescribeSessionStartOptions` reads
 # (`#start-parity` 5/9); already reached through `tddy-session-lifecycle`, so no new direction.

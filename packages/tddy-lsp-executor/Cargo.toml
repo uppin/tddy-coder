@@ -16,6 +16,7 @@ name = "fake_lsp"
 path = "../tddy-lsp/tests/bin/fake_lsp.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 # `index_backed::IndexChannel` is an async port (the daemon's registry dials asynchronously).
 async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }
@@ -33,6 +34,8 @@ tokio = { version = "1", features = ["rt", "sync", "time"] }
 tonic = "0.12"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 # A fake `code_index` server over an AF_UNIX socket, dialled the way the daemon dials the real one.
 hyper-util = { version = "0.1", features = ["tokio"] }
 pretty_assertions = { workspace = true }

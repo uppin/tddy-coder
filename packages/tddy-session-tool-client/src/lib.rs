@@ -21,6 +21,7 @@ pub mod daemon_http_rpc;
 mod exec_catalog;
 mod room_transport;
 mod rpc_transports;
+pub mod session_token;
 
 pub use approval::{
     request_approval, request_approval_via_rpc_transport, request_approval_within,
@@ -271,7 +272,7 @@ pub fn detect_session_tool_transport() -> Option<SessionToolTransport> {
             token,
             server_identity,
             session_id,
-            session_token: std::env::var("TDDY_REMOTE_SESSION_TOKEN").unwrap_or_default(),
+            session_token: crate::session_token::current_session_token(),
             daemon_instance_id: std::env::var("TDDY_REMOTE_DAEMON_INSTANCE_ID").unwrap_or_default(),
         });
     }
@@ -291,7 +292,7 @@ pub fn detect_session_tool_transport() -> Option<SessionToolTransport> {
         return Some(SessionToolTransport::DaemonUds {
             socket_path: PathBuf::from(socket_path),
             session_id,
-            session_token: std::env::var("TDDY_REMOTE_SESSION_TOKEN").unwrap_or_default(),
+            session_token: crate::session_token::current_session_token(),
             daemon_instance_id: std::env::var("TDDY_REMOTE_DAEMON_INSTANCE_ID").unwrap_or_default(),
         });
     }
@@ -306,7 +307,7 @@ pub fn detect_session_tool_transport() -> Option<SessionToolTransport> {
         return Some(SessionToolTransport::DaemonHttp {
             session_id,
             daemon_url,
-            session_token: std::env::var("TDDY_REMOTE_SESSION_TOKEN").unwrap_or_default(),
+            session_token: crate::session_token::current_session_token(),
             daemon_instance_id: std::env::var("TDDY_REMOTE_DAEMON_INSTANCE_ID").unwrap_or_default(),
         });
     }

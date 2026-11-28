@@ -161,6 +161,7 @@ impl AWorkspace {
         Workspace {
             root: self.root.path(),
             overlay: &self.overlay,
+            fs: &tddy_fs::DiskFs,
         }
     }
 }

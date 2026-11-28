@@ -55,36 +55,42 @@ impl TreeSnapshot {
     /// A file or directory that vanishes while it is read is simply absent: the next snapshot says
     /// what it became. Any other failure to read the tree is returned, because a server told nothing
     /// about a directory this could not read would be served a tree nobody can vouch for.
-    pub(crate) fn read(root: &Path) -> io::Result<Self> {
+    /// Read every source file under `root`, through the filesystem port.
+    pub(crate) fn read_on(fs: &dyn tddy_fs::Fs, root: &Path) -> io::Result<Self> {
         let mut files = BTreeMap::new();
         let mut pending = vec![root.to_path_buf()];
         while let Some(directory) = pending.pop() {
-            let entries = match std::fs::read_dir(&directory) {
+            let entries = match fs.read_dir(&directory) {
                 Ok(entries) => entries,
                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
                 Err(error) => return Err(error),
             };
-            for entry in entries {
-                let entry = entry?;
-                let kind = entry.file_type()?;
-                let name = entry.file_name();
+            for path in entries {
+                let kind = fs.metadata(&path)?.kind;
+                let name = path.file_name().unwrap_or_default();
                 let name = name.to_string_lossy();
-                if kind.is_dir() {
+                if kind == tddy_fs::FsKind::Dir {
                     if !is_skipped_directory(&name) {
-                        pending.push(entry.path());
+                        pending.push(path);
                     }
                     continue;
                 }
-                if !kind.is_file() || !is_source_file(&name) {
+                if kind != tddy_fs::FsKind::File || !is_source_file(&name) {
                     continue;
                 }
-                match entry.metadata() {
+                match fs.metadata_follow(&path) {
                     Ok(metadata) => {
+                        let modified = metadata.modified.ok_or_else(|| {
+                            io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "filesystem port reports no modification time",
+                            )
+                        })?;
                         files.insert(
-                            entry.path(),
+                            path,
                             Stamp {
-                                modified: metadata.modified()?,
-                                len: metadata.len(),
+                                modified,
+                                len: metadata.len,
                             },
                         );
                     }
@@ -167,13 +173,13 @@ mod tests {
         // Given a tree, and then one file written, one rewritten and one removed
         let (_directory, root) = a_tree();
         write(&root, "src/gone.rs", "fn gone() {}\n");
-        let earlier = TreeSnapshot::read(&root).expect("the tree reads");
+        let earlier = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root).expect("the tree reads");
         write(&root, "src/a.rs", "pub fn a() {}\n");
         write(&root, "src/lib.rs", "pub mod a;\npub mod b;\n");
         std::fs::remove_file(root.join("src/gone.rs")).expect("removed");
 
         // When the tree is read again and compared
-        let changes = TreeSnapshot::read(&root)
+        let changes = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root)
             .expect("the tree reads")
             .changes_since(&earlier);
 
@@ -192,7 +198,7 @@ mod tests {
     fn reads_no_change_in_a_build_directory_a_hidden_one_or_a_file_that_is_not_source() {
         // Given a tree, and then files written where no server reads source
         let (_directory, root) = a_tree();
-        let earlier = TreeSnapshot::read(&root).expect("the tree reads");
+        let earlier = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root).expect("the tree reads");
         write(&root, "target/debug/build/out/generated.rs", "fn g() {}\n");
         write(&root, ".restructure/journal.rs", "fn j() {}\n");
         write(&root, ".worktrees/other/src/lib.rs", "fn o() {}\n");
@@ -200,7 +206,7 @@ mod tests {
         write(&root, "README.md", "# a crate\n");
 
         // When the tree is read again and compared
-        let changes = TreeSnapshot::read(&root)
+        let changes = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root)
             .expect("the tree reads")
             .changes_since(&earlier);
 
@@ -212,12 +218,12 @@ mod tests {
     fn reads_a_changed_manifest_and_lock_file() {
         // Given a tree, and then its manifest rewritten and a lock file written
         let (_directory, root) = a_tree();
-        let earlier = TreeSnapshot::read(&root).expect("the tree reads");
+        let earlier = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root).expect("the tree reads");
         write(&root, "Cargo.toml", "[package]\nname = \"a\"\n");
         write(&root, "Cargo.lock", "version = 4\n");
 
         // When the tree is read again and compared
-        let changes = TreeSnapshot::read(&root)
+        let changes = TreeSnapshot::read_on(&tddy_fs::DiskFs, &root)
             .expect("the tree reads")
             .changes_since(&earlier);
 

@@ -40,7 +40,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
         let session_id = Uuid::new_v4().to_string();
         let session_dir = unified_session_dir_path(&self.sessions_base, &session_id);
-        std::fs::create_dir_all(&session_dir)?;
+        self.fs.create_dir_all(&session_dir)?;
         self.persist_initial_prompt_to_changeset(&session_dir, &cmd.prompt)
             .await?;
         log::debug!(

@@ -27,9 +27,9 @@ pub(super) fn without_unused_mut(tidying: &Tidying<'_>, checked: Checked) -> Res
     }
     let mut before = BTreeMap::new();
     for file in fixes.keys() {
-        before.insert(file.clone(), std::fs::read(tidying.root.join(file))?);
+        before.insert(file.clone(), tidying.fs.read(&tidying.root.join(file))?);
     }
-    apply_fixes(tidying.root, &fixes)?;
+    apply_fixes(tidying.fs, tidying.root, &fixes)?;
 
     let rechecked = check(tidying)?;
     match &rechecked {
@@ -41,7 +41,7 @@ pub(super) fn without_unused_mut(tidying: &Tidying<'_>, checked: Checked) -> Res
                 ));
             }
         }
-        Checked::Broken(_) => restore(tidying.root, &before)?,
+        Checked::Broken(_) => restore(tidying.fs, tidying.root, &before)?,
     }
     Ok(rechecked)
 }

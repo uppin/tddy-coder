@@ -281,7 +281,7 @@ fn resolve_specialized_agent_defs(
         // than on argv (`/proc/<pid>/cmdline` is world-readable). A parse failure names the path
         // and never the file's contents, for the same reason the JSON no longer appears on argv:
         // this message reaches logs, and the contents are a secret.
-        let json = std::fs::read_to_string(path)
+        let json = tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, path)
             .with_context(|| format!("--agent-def-path could not be read: {}", path.display()))?;
         let def: tddy_discovery::agent_def::SpecializedAgentDef = serde_json::from_str(&json)
             .with_context(|| {
@@ -430,7 +430,7 @@ pub fn run_main(mut args: Args, host: ParticipantHost) {
     tddy_core::init_tddy_logger(log_config);
     if let Some(session_dir) = session_artifact_dir_for_args(&args) {
         let logs = session_dir.join("logs");
-        let _ = std::fs::create_dir_all(&logs);
+        let _ = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &logs);
         if !has_file_output {
             tddy_core::redirect_debug_output(&logs.join("debug.log"));
         }
@@ -1662,7 +1662,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
 
     let tddy_data_dir = resolve_tddy_data_dir(args);
     let sessions_root = tddy_data_dir.join(tddy_core::output::SESSIONS_SUBDIR);
-    std::fs::create_dir_all(&sessions_root).context("create sessions base dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &sessions_root)
+        .context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
     // When spawned with `--stdio` (grill-me tool sessions), the daemon hosts a reverse
@@ -1722,9 +1723,9 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
             args.resume_from.as_deref(),
             args.session_id.as_deref(),
         );
-        let _ = std::fs::create_dir_all(&session_artifact_dir);
+        let _ = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &session_artifact_dir);
         let logs = session_artifact_dir.join("logs");
-        let _ = std::fs::create_dir_all(&logs);
+        let _ = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &logs);
         tddy_core::toolcall::set_toolcall_log_dir(&logs);
         crate::build_executor::register();
         tddy_bsp::register_catalog_provider();
@@ -2587,7 +2588,8 @@ mod agent_def_handover_tests {
     /// A def hand-over file holding `json`, as the daemon writes one.
     fn a_handed_over_def_file(dir: &std::path::Path, json: &str) -> std::path::PathBuf {
         let path = dir.join("agent-def.json");
-        std::fs::write(&path, json).expect("write the handed-over def");
+        tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, json.as_bytes())
+            .expect("write the handed-over def");
         path
     }
 
@@ -2745,13 +2747,12 @@ mod agent_def_handover_tests {
 
     impl AHostWithStubAgentTools {
         fn new() -> Self {
-            use std::os::unix::fs::PermissionsExt;
             let bin = tempfile::tempdir().expect("stub bin dir");
             for name in ["claude", "tddy-tools"] {
                 let path = bin.path().join(name);
-                std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("stub binary");
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-                    .expect("stub binary mode");
+                tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, b"#!/bin/sh\nexit 0\n")
+                    .expect("stub binary");
+                tddy_fs::Fs::set_mode(&tddy_fs::DiskFs, &path, 0o755).expect("stub binary mode");
             }
             Self { bin }
         }
@@ -2843,7 +2844,7 @@ fn build_goal_context(
     if let Some(p) = session_dir {
         ctx.insert("session_dir".to_string(), serde_json::to_value(p).unwrap());
         let codex_tid_path = p.join(tddy_core::CODEX_THREAD_ID_FILENAME);
-        if let Ok(s) = std::fs::read_to_string(&codex_tid_path) {
+        if let Ok(s) = tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, &codex_tid_path) {
             let trimmed = s.trim().to_string();
             if !trimmed.is_empty() {
                 ctx.insert("codex_thread_id".to_string(), serde_json::json!(trimmed));
@@ -2879,7 +2880,8 @@ fn run_goal_plain(
         .and_then(|v| serde_json::from_value::<PathBuf>(v.clone()).ok())
         .map(|p| tddy_core::workflow::session::workflow_engine_storage_dir(&p))
         .unwrap_or_else(|| std::env::temp_dir().join("tddy-flowrunner-session"));
-    std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir)
+        .context("create session storage dir")?;
     let recipe = recipe_arc_for_args(args)?;
     let hooks = recipe.create_hooks(None);
     let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
@@ -3554,7 +3556,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
             .read_primary_session_document_utf8(&session_dir)
             .is_none()
     {
-        std::fs::create_dir_all(&session_dir).context("create session dir")?;
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &session_dir)
+            .context("create session dir")?;
         run_plan_bootstrap_in_session_dir(
             args,
             session_dir.as_path(),
@@ -3610,7 +3613,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let start_is_full = start_goal == recipe.start_goal();
 
     let storage_dir = tddy_core::workflow::session::workflow_engine_storage_dir(&session_dir);
-    std::fs::create_dir_all(&storage_dir).context("create session storage dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir)
+        .context("create session storage dir")?;
     let hooks = recipe.create_hooks(None);
     let backend_for_refine = backend.clone();
     let engine = WorkflowEngine::new(recipe.clone(), backend, storage_dir, Some(hooks));
@@ -3667,9 +3671,10 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                     .unwrap_or(session_dir.clone());
                 if let Some(ref out) = output {
                     if let Ok(refactor_out) = parse_refactor_response(out) {
-                        if let Ok(eval_content) =
-                            std::fs::read_to_string(session_dir_final.join("evaluation-report.md"))
-                        {
+                        if let Ok(eval_content) = tddy_fs::Fs::read_to_string(
+                            &tddy_fs::DiskFs,
+                            &session_dir_final.join("evaluation-report.md"),
+                        ) {
                             if let Ok(eval_out) = parse_evaluate_response(&eval_content) {
                                 println!("Evaluation: {}", eval_out.summary);
                             }
@@ -3873,7 +3878,8 @@ fn run_plan_refinement(
         .and_then(|c| get_session_for_tag(&c, refine_tag));
     // output_dir from build_goal_context (repo_path in changeset); session_dir.parent() wrong when under ~/.tddy/sessions/
     let refine_storage = tddy_core::workflow::session::workflow_engine_storage_dir(session_dir);
-    std::fs::create_dir_all(&refine_storage).context("create refine session dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &refine_storage)
+        .context("create refine session dir")?;
     let refine_hooks = recipe.create_hooks(None);
     let refine_engine = WorkflowEngine::new(
         recipe.clone(),
@@ -3973,11 +3979,15 @@ pub fn run_remote(args: &Args) -> anyhow::Result<()> {
     // Parse the port from the URL and write a temporary daemon.json.
     let tmp_relay_dir =
         std::env::temp_dir().join(format!("tddy-remote-relay-{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&tmp_relay_dir);
+    let _ = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &tmp_relay_dir);
     let port = parse_port_from_url(&daemon_url)?;
     let discovery = serde_json::json!({ "port": port, "pid": 0, "started_at": 0 });
-    std::fs::write(tmp_relay_dir.join("daemon.json"), discovery.to_string())
-        .map_err(|e| anyhow::anyhow!("failed to write relay discovery file: {}", e))?;
+    tddy_fs::Fs::write(
+        &tddy_fs::DiskFs,
+        &tmp_relay_dir.join("daemon.json"),
+        discovery.to_string().as_bytes(),
+    )
+    .map_err(|e| anyhow::anyhow!("failed to write relay discovery file: {}", e))?;
     cmd.args(["--base-dir", tmp_relay_dir.to_str().unwrap_or("")]);
 
     if let Some(token) = &args.remote_session_token {
@@ -3992,7 +4002,7 @@ pub fn run_remote(args: &Args) -> anyhow::Result<()> {
         )
     })?;
 
-    let _ = std::fs::remove_dir_all(&tmp_relay_dir);
+    let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp_relay_dir);
 
     if !status.success() {
         anyhow::bail!(
@@ -4050,15 +4060,16 @@ mod resume_session_config_tests {
     fn resume_from_merges_coder_config_from_session_dir() {
         let tmp =
             std::env::temp_dir().join(format!("tddy-resume-config-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).expect("create temp sessions base");
+        let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp);
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &tmp).expect("create temp sessions base");
 
         let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
         let session_dir = tmp.join("sessions").join(sid);
-        std::fs::create_dir_all(&session_dir).expect("create session dir");
-        std::fs::write(
-            session_dir.join(crate::config::SESSION_CODER_CONFIG_FILE),
-            "agent: cursor\ncursor_agent_path: /persisted/cursor-agent\n",
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &session_dir).expect("create session dir");
+        tddy_fs::Fs::write(
+            &tddy_fs::DiskFs,
+            &session_dir.join(crate::config::SESSION_CODER_CONFIG_FILE),
+            b"agent: cursor\ncursor_agent_path: /persisted/cursor-agent\n",
         )
         .expect("write coder-config.yaml");
 
@@ -4124,7 +4135,7 @@ mod resume_session_config_tests {
             Some(std::path::Path::new("/persisted/cursor-agent"))
         );
 
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp);
     }
 }
 
@@ -4205,8 +4216,8 @@ mod session_dir_sync_tests {
     fn session_dir_derived_from_session_id_when_unset() {
         let tmp =
             std::env::temp_dir().join(format!("tddy-plan-dir-session-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).expect("create temp sessions base");
+        let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp);
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &tmp).expect("create temp sessions base");
 
         let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
         let expected = tmp.join("sessions").join(sid);
@@ -4269,7 +4280,7 @@ mod session_dir_sync_tests {
 
         assert_eq!(args.session_dir, Some(expected));
 
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp);
     }
 }
 
@@ -4288,7 +4299,7 @@ mod changeset_agent_resume_tests {
         let session_dir =
             std::env::temp_dir().join(format!("tddy-changeset-agent-tests-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&session_dir);
-        std::fs::create_dir_all(&session_dir).expect("plan dir");
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &session_dir).expect("plan dir");
 
         let mut cs = Changeset::default();
         append_session_and_update_state(
@@ -4471,8 +4482,8 @@ mod post_tui_workflow_exit_tests {
     #[test]
     fn workflow_error_after_tui_includes_session_hint_on_stderr() {
         let tmp = std::env::temp_dir().join(format!("tddy-post-tui-exit-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp);
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &tmp).unwrap();
 
         let sid = "019d105b-ac0f-78d3-9a89-409731145a36";
         let mut args = minimal_args(sid);
@@ -4491,7 +4502,7 @@ mod post_tui_workflow_exit_tests {
         )
         .unwrap();
 
-        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = tddy_fs::Fs::remove_dir_all(&tddy_fs::DiskFs, &tmp);
 
         let err_s = String::from_utf8(err).expect("utf8 stderr");
         assert!(

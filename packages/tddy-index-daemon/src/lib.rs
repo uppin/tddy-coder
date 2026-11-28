@@ -113,6 +113,15 @@ fn holds_a_file_a_server_serves(
     root: &std::path::Path,
     supports: &tddy_code_restructuring::SupportRegistry,
 ) -> bool {
+    holds_a_file_a_server_serves_on(&tddy_fs::DiskFs, root, supports)
+}
+
+/// [`holds_a_file_a_server_serves`] through the filesystem port.
+fn holds_a_file_a_server_serves_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &std::path::Path,
+    supports: &tddy_code_restructuring::SupportRegistry,
+) -> bool {
     let served = |path: &std::path::Path| {
         supports.support_of(path).is_some_and(|support| {
             support.id() != &tddy_lsp::LanguageId::RUST && support.launch().is_some()
@@ -121,19 +130,22 @@ fn holds_a_file_a_server_serves(
     let mut pending = vec![root.to_path_buf()];
     while let Some(dir) = pending.pop() {
         // A directory that cannot be read holds nothing this walk can see.
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+        let Ok(entries) = fs.read_dir(&dir) else {
             continue;
         };
-        for entry in entries.flatten() {
-            let Ok(kind) = entry.file_type() else {
+        for path in entries {
+            let Ok(metadata) = fs.metadata(&path) else {
                 continue;
             };
-            let path = entry.path();
-            if kind.is_dir() {
-                if !NOT_WALKED.iter().any(|name| entry.file_name() == *name) {
+            let kind = metadata.kind;
+            if kind == tddy_fs::FsKind::Dir {
+                if !NOT_WALKED
+                    .iter()
+                    .any(|name| path.file_name() == Some(std::ffi::OsStr::new(name)))
+                {
                     pending.push(path);
                 }
-            } else if kind.is_file() && served(&path) {
+            } else if kind == tddy_fs::FsKind::File && served(&path) {
                 return true;
             }
         }

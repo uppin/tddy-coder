@@ -303,6 +303,7 @@ fn apply_held_plan(
         root,
         paths: &paths,
         cancel,
+        fs: &*options.fs,
     };
     // Any failure inside the loop ends the group it is in, whole: see
     // [`GroupRun::roll_back_on_failure`].
@@ -327,6 +328,7 @@ fn apply_held_plan(
                     &Workspace {
                         root,
                         overlay: &held.overlay,
+                        fs: &tddy_fs::DiskFs,
                     },
                 )?;
             // Refused before anything of the operation is written or journalled; a dry run's
@@ -369,6 +371,7 @@ fn apply_held_plan(
                 &mut journal,
             )?;
             commit_operation(
+                &*options.fs,
                 index,
                 id,
                 &resolved,

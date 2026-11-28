@@ -12,7 +12,7 @@ use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
 
 use crate::action_convert::build_action_to_spec;
 use crate::action_sandbox::ActionSandbox;
-use crate::cache::{compute_run_cache_key, lookup_cache, persist_cache, sanitize, CacheMode};
+use crate::cache::{compute_run_cache_key, lookup_cache_on, persist_cache_on, sanitize, CacheMode};
 use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::executor::tool_run::run_hermetic;
@@ -38,6 +38,8 @@ pub struct ExecuteOptions {
     /// --hermetic`). Needs a [`BuildTools`] with an [`ActionSandbox`]; without one the run is
     /// refused, never silently unconfined.
     pub hermetic: bool,
+    /// The filesystem port the run's cache, tool links and fingerprints go through.
+    pub fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl Default for ExecuteOptions {
@@ -47,6 +49,7 @@ impl Default for ExecuteOptions {
             dry_run: false,
             cache_mode: CacheMode::ReadWrite,
             hermetic: false,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
     }
 }
@@ -187,12 +190,16 @@ pub async fn execute_target_with_tools(
 
 /// Expose each tool of `closure` by its command in `links`: one symlink per command, to its binary.
 /// A link an earlier run left is replaced, so a re-resolved binary is never reached by a stale name.
-fn link_tools(links: &Path, closure: &[ResolvedTool]) -> Result<(), BuildError> {
-    std::fs::create_dir_all(links).map_err(|e| io_error(links, e))?;
+fn link_tools(
+    fs: &dyn tddy_fs::Fs,
+    links: &Path,
+    closure: &[ResolvedTool],
+) -> Result<(), BuildError> {
+    fs.create_dir_all(links).map_err(|e| io_error(links, e))?;
     for tool in closure {
         let link = links.join(&tool.command);
         // A link that is absent is the normal case; anything else is reported by `symlink_file`.
-        let _ = std::fs::remove_file(&link);
+        let _ = fs.remove_file(&link);
         symlink_file(&tool.binary, &link).map_err(|e| io_error(&link, e))?;
     }
     Ok(())
@@ -200,7 +207,15 @@ fn link_tools(links: &Path, closure: &[ResolvedTool]) -> Result<(), BuildError> 
 
 #[cfg(unix)]
 fn symlink_file(target: &Path, link: &Path) -> std::io::Result<()> {
-    std::os::unix::fs::symlink(target, link)
+    // A link creation is a link act, on `libc` like the port's other descriptor acts:
+    // the port has no link operation.
+    use std::os::unix::ffi::OsStrExt;
+    let c_target = std::ffi::CString::new(target.as_os_str().as_bytes())?;
+    let c_link = std::ffi::CString::new(link.as_os_str().as_bytes())?;
+    if unsafe { libc::symlink(c_target.as_ptr(), c_link.as_ptr()) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -229,17 +244,16 @@ fn path_with(links: &Path) -> String {
 }
 
 /// The fingerprint of one tool binary, as an input's is: its path, size and mtime.
-fn file_fingerprint(path: &Path) -> Result<FileFingerprint, BuildError> {
-    let metadata = std::fs::metadata(path).map_err(|e| io_error(path, e))?;
+fn file_fingerprint(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<FileFingerprint, BuildError> {
+    let metadata = fs.metadata_follow(path).map_err(|e| io_error(path, e))?;
     let mtime_ms = metadata
-        .modified()
-        .ok()
+        .modified
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
     Ok(FileFingerprint {
         path: path.to_string_lossy().into_owned(),
-        size: metadata.len(),
+        size: metadata.len,
         mtime_ms,
     })
 }
@@ -250,10 +264,10 @@ fn io_error(path: &Path, error: std::io::Error) -> BuildError {
 
 /// Create the parent directory of each declared output. Many tools (e.g. compilers, `docker build
 /// --iidfile`) do not create the directory for a declared output.
-fn prepare_outputs(repo_root: &Path, action: &BuildAction) {
+fn prepare_outputs(fs: &dyn tddy_fs::Fs, repo_root: &Path, action: &BuildAction) {
     for output in &action.outputs {
         if let Some(parent) = repo_root.join(&output.path).parent() {
-            let _ = std::fs::create_dir_all(parent);
+            let _ = fs.create_dir_all(parent);
         }
     }
 }
@@ -302,16 +316,18 @@ async fn run_one(
     }
 
     let use_cache = !opts.no_cache;
-    let fingerprints = fingerprint_inputs(run.repo_root, action);
+    let fingerprints = fingerprint_inputs(&*opts.fs, run.repo_root, action);
     let closure = run.closure(action)?;
     let tool_fingerprints = closure
         .iter()
-        .map(|tool| file_fingerprint(&tool.binary))
+        .map(|tool| file_fingerprint(&*opts.fs, &tool.binary))
         .collect::<Result<Vec<_>, _>>()?;
     let hermetic = opts.hermetic || action.sandbox;
     let cache_key = compute_run_cache_key(action, &fingerprints, &tool_fingerprints, hermetic);
 
-    if use_cache && lookup_cache(run.repo_root, target_id, &action.id, &cache_key).is_some() {
+    if use_cache
+        && lookup_cache_on(&*opts.fs, run.repo_root, target_id, &action.id, &cache_key).is_some()
+    {
         log::debug!("cache hit for action {} (target {})", action.id, target_id);
         return Ok(ActionOutcome {
             action_id: action.id.clone(),
@@ -325,11 +341,11 @@ async fn run_one(
     log::debug!("cache miss for action {} (target {})", action.id, target_id);
     log::debug!("running action {}: {:?}", action.id, action.command);
 
-    prepare_outputs(run.repo_root, action);
+    prepare_outputs(&*opts.fs, run.repo_root, action);
     let outcome = if hermetic {
         run_hermetic(run, action, &closure).await?
     } else {
-        run_action(run.repo_root, target_id, action, &closure).await?
+        run_action(&*opts.fs, run.repo_root, target_id, action, &closure).await?
     };
 
     if outcome.exit_code == 0 && use_cache && opts.cache_mode.writes() {
@@ -342,7 +358,7 @@ async fn run_one(
             action_id: action.id.clone(),
             target_id: target_id.to_string(),
         };
-        persist_cache(run.repo_root, target_id, &entry)?;
+        persist_cache_on(&*opts.fs, run.repo_root, target_id, &entry)?;
         log::debug!(
             "persisted cache entry for action {} (target {})",
             action.id,
@@ -354,6 +370,7 @@ async fn run_one(
 }
 
 async fn run_action(
+    fs: &dyn tddy_fs::Fs,
     repo_root: &Path,
     target_id: &str,
     action: &BuildAction,
@@ -373,7 +390,7 @@ async fn run_action(
     }
     if !closure.is_empty() {
         let links = tool_link_dir(repo_root, target_id, &action.id);
-        link_tools(&links, closure)?;
+        link_tools(fs, &links, closure)?;
         spec.env.insert("PATH".to_string(), path_with(&links));
     }
 
@@ -420,7 +437,11 @@ async fn wait_task_terminal(handle: &TaskHandle) {
     }
 }
 
-fn fingerprint_inputs(repo_root: &Path, action: &BuildAction) -> Vec<FileFingerprint> {
+fn fingerprint_inputs(
+    fs: &dyn tddy_fs::Fs,
+    repo_root: &Path,
+    action: &BuildAction,
+) -> Vec<FileFingerprint> {
     let mut fingerprints: Vec<FileFingerprint> = Vec::new();
     for file_set in &action.inputs {
         let base = if file_set.root.is_empty() {
@@ -430,30 +451,44 @@ fn fingerprint_inputs(repo_root: &Path, action: &BuildAction) -> Vec<FileFingerp
         };
         for include in &file_set.include {
             let pattern = base.join(include);
-            let Ok(paths) = glob::glob(&pattern.to_string_lossy()) else {
+            let Ok(matcher) = glob::Pattern::new(&pattern.to_string_lossy()) else {
                 continue;
             };
-            for path in paths.flatten() {
-                let Ok(metadata) = std::fs::metadata(&path) else {
+            // The include pattern is matched against the port's walk of `base`
+            // rather than `glob`'s own disk walk.
+            let mut pending = vec![base.clone()];
+            let mut paths: Vec<std::path::PathBuf> = Vec::new();
+            while let Some(dir) = pending.pop() {
+                for entry in fs.read_dir(&dir).unwrap_or_default() {
+                    match fs.metadata(&entry).map(|m| m.kind) {
+                        Ok(tddy_fs::FsKind::Dir) => pending.push(entry),
+                        Ok(tddy_fs::FsKind::File) => {
+                            if matcher.matches_path(&entry) {
+                                paths.push(entry);
+                            }
+                        }
+                        _ => continue,
+                    }
+                }
+            }
+            paths.sort();
+            for path in paths {
+                let Ok(metadata) = fs.metadata_follow(&path) else {
                     continue;
                 };
-                if !metadata.is_file() {
-                    continue;
-                }
                 let relative = path
                     .strip_prefix(repo_root)
                     .unwrap_or(&path)
                     .to_string_lossy()
                     .into_owned();
                 let mtime_ms = metadata
-                    .modified()
-                    .ok()
+                    .modified
                     .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0);
                 fingerprints.push(FileFingerprint {
                     path: relative,
-                    size: metadata.len(),
+                    size: metadata.len,
                     mtime_ms,
                 });
             }

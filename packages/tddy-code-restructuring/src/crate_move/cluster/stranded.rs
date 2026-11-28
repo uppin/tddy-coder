@@ -252,6 +252,7 @@ fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<
             let workspace = &Workspace {
                 root: workspace.root,
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             };
             let earlier = super::super::moved_by_earlier_operations(workspace, ops, index, anchor);
             super::super::move_preconditions(
@@ -296,7 +297,7 @@ fn sources_of(workspace: &Workspace<'_>, crate_dir: &str) -> Result<Vec<CrateSou
     let src = format!("{crate_dir}/src");
     let mut sources = Vec::new();
 
-    for path in rust_files_under(workspace.root, &src) {
+    for path in rust_files_under(workspace.fs, workspace.root, &src) {
         let home = module_path_of(
             path.strip_prefix(&format!("{src}/"))
                 .unwrap_or(path.as_str()),
@@ -443,19 +444,27 @@ fn segments_at(text: &str) -> Vec<String> {
 /// A directory that cannot be read contributes nothing: the scan is over a crate's own `src/`, and
 /// a crate whose sources are unreadable is refused by the move itself with the file it could not
 /// read named, which is a better report than this one could give.
-fn rust_files_under(root: &Path, relative: &str) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(root.join(relative)) else {
+fn rust_files_under(fs: &dyn tddy_fs::Fs, root: &Path, relative: &str) -> Vec<String> {
+    let Ok(entries) = fs.read_dir(&root.join(relative)) else {
         return Vec::new();
     };
 
     let mut files = Vec::new();
-    for entry in entries.flatten() {
-        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+    for entry_path in entries {
+        let Some(name) = entry_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+        else {
             continue;
         };
         let path = format!("{relative}/{name}");
-        if entry.path().is_dir() {
-            files.extend(rust_files_under(root, &path));
+        if fs
+            .metadata(&entry_path)
+            .map(|m| m.kind == tddy_fs::FsKind::Dir)
+            .unwrap_or(false)
+        {
+            files.extend(rust_files_under(fs, root, &path));
         } else if name.ends_with(".rs") {
             files.push(path);
         }

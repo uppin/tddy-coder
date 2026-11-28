@@ -377,7 +377,7 @@ impl PermissionServer {
         [session_dir, repo_dir]
             .into_iter()
             .flatten()
-            .filter_map(|p| std::fs::canonicalize(&p).ok())
+            .filter_map(|p| tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, &p).ok())
             .collect()
     }
 

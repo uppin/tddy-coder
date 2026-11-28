@@ -70,11 +70,22 @@ impl VmAccel {
 
 /// Whether this process can open `/dev/kvm` for the read/write access QEMU needs.
 fn kvm_is_usable() -> bool {
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/kvm")
-        .is_ok()
+    // A device probe, not a filesystem read: opening /dev/kvm read/write is the act
+    // itself, so it stays on `libc` like the port's other descriptor acts.
+    #[cfg(unix)]
+    {
+        let path = std::ffi::CString::new("/dev/kvm").expect("a static path");
+        let fd = unsafe { libc::open(path.as_ptr(), libc::O_RDWR | libc::O_CLOEXEC) };
+        if fd < 0 {
+            return false;
+        }
+        unsafe { libc::close(fd) };
+        true
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 /// The UEFI firmware pair a guest boots through: read-only code plus writable variables.

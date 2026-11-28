@@ -91,7 +91,7 @@ pub(super) fn with_local_windows(
             continue;
         };
         let lines = files.entry(path).or_insert_with_key(|path| {
-            std::fs::read_to_string(path)
+            tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, std::path::Path::new(path))
                 .unwrap_or_default()
                 .lines()
                 .map(str::to_owned)

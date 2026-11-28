@@ -122,11 +122,19 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// the daemon's managers holds nothing. `main` injects the daemon's own with
     /// [`Self::with_held_sessions`].
     held_sessions: Arc<dyn tddy_daemon_kernel::live_sessions::HeldSessions>,
+    /// The filesystem port session-directory and changeset-marker I/O runs through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     pub fn new(allowed_chat_ids: Vec<i64>, sessions_base: PathBuf, sender: Arc<S>) -> Self {
         Self::with_workflow_spawn(allowed_chat_ids, sessions_base, sender, None, None)
+    }
+
+    /// The same harness, running its file I/O through `fs` instead of the disk.
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     /// Same as [`Self::new`], but workflow start checks [`TelegramGithubMappingStore`] at `path`
@@ -224,6 +232,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             coding_agents: Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
             session_starter: Arc::new(tddy_daemon_extensions::NoSessionStarter),
             held_sessions: Arc::new(tddy_daemon_kernel::live_sessions::NoHeldSessions),
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
     }
 
@@ -416,13 +425,21 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 pub fn read_changeset_routing_snapshot(
     session_dir: &Path,
 ) -> anyhow::Result<ChangesetRoutingSnapshot> {
+    read_changeset_routing_snapshot_on(&tddy_fs::DiskFs, session_dir)
+}
+
+/// [`read_changeset_routing_snapshot`] through the filesystem port.
+pub fn read_changeset_routing_snapshot_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> anyhow::Result<ChangesetRoutingSnapshot> {
     log::debug!(
         target: "tddy_daemon::telegram_session_control",
         "read_changeset_routing_snapshot: {}",
         session_dir.display()
     );
     let path = session_dir.join("changeset.yaml");
-    let raw = std::fs::read_to_string(&path)?;
+    let raw = fs.read_to_string(&path)?;
     let snap: ChangesetRoutingSnapshot = serde_yaml::from_str(&raw)?;
     Ok(snap)
 }

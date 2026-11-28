@@ -108,6 +108,7 @@ pub(in crate::backends::rust) mod on_disk {
             let workspace = Workspace {
                 root: self.directory.path(),
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             };
             read(&workspace)
         }

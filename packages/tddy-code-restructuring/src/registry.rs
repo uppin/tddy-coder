@@ -21,12 +21,15 @@ use tddy_lsp::LanguageId;
 pub struct Workspace<'a> {
     pub root: &'a Path,
     pub overlay: &'a Overlay,
+    /// The filesystem port reads that reach the tree run through.
+    pub fs: &'a dyn tddy_fs::Fs,
 }
 
 impl<'a> Workspace<'a> {
     /// The current contents of a path the plan named, relative to the root.
     pub fn read(&self, relative: &str) -> Result<String> {
-        self.overlay.read(self.root, Path::new(relative))
+        self.overlay
+            .read_on(self.fs, self.root, Path::new(relative))
     }
 }
 
@@ -342,6 +345,7 @@ mod tests {
                 &Workspace {
                     root: &root,
                     overlay: &overlay,
+                    fs: &tddy_fs::DiskFs,
                 },
             )
             .unwrap();

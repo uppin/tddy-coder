@@ -289,14 +289,20 @@ type ManagedDispatchFn = Arc<
 
 /// How a subagent's internal READ/GLOB/GREP tool calls reach the codebase.
 pub enum CodebaseAccess {
-    /// Direct host filesystem access (a co-located subagent).
-    Local,
+    /// Direct host filesystem access (a co-located subagent), through the filesystem port.
+    Local(std::sync::Arc<dyn tddy_fs::Fs>),
     /// Proxied through an injected dispatch function, keeping `tddy-discovery` free of any
     /// dependency on `tddy-tools`/`tddy-rpc`/`tddy-stdio`.
     Managed(ManagedDispatchFn),
 }
 
 impl CodebaseAccess {
+    /// Direct host filesystem access through the disk port — the composition root's
+    /// spelling of the `Local` case.
+    pub fn local() -> Self {
+        Self::Local(std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
     /// Build a [`CodebaseAccess::Managed`] from an async dispatch closure.
     pub fn managed<F>(dispatch: F) -> Self
     where
@@ -347,8 +353,9 @@ impl CodebaseAccess {
         limit: Option<u64>,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => {
-                let content = std::fs::read_to_string(path)
+            CodebaseAccess::Local(fs) => {
+                let content = fs
+                    .read_to_string(std::path::Path::new(path))
                     .map_err(|e| SubagentError(format!("READ {path}: {e}")))?;
                 Ok(window_content(&content, offset, limit))
             }
@@ -398,14 +405,34 @@ impl CodebaseAccess {
         limit: Option<u64>,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => {
+            CodebaseAccess::Local(fs) => {
+                // Matched against the walk of the pattern's static prefix, as
+                // `ToolExecutor::glob` does: `glob::glob` would walk the disk itself.
+                let matcher = glob::Pattern::new(pattern)
+                    .map_err(|e| SubagentError(format!("GLOB pattern error: {e}")))?;
                 let mut paths: Vec<serde_json::Value> = Vec::new();
-                for entry in glob::glob(pattern)
-                    .map_err(|e| SubagentError(format!("GLOB pattern error: {e}")))?
-                    .flatten()
-                {
-                    if let Some(s) = entry.to_str() {
-                        paths.push(serde_json::Value::String(s.to_string()));
+                let mut pending = vec![static_prefix(pattern)];
+                while let Some(dir) = pending.pop() {
+                    if matcher.matches_path(&dir) {
+                        if let Some(s) = dir.to_str() {
+                            paths.push(serde_json::Value::String(s.to_string()));
+                        }
+                    }
+                    let Ok(entries) = fs.read_dir(&dir) else {
+                        continue;
+                    };
+                    for entry in entries {
+                        match fs.metadata(&entry).map(|m| m.kind) {
+                            Ok(tddy_fs::FsKind::Dir) => pending.push(entry),
+                            Ok(_) => {
+                                if matcher.matches_path(&entry) {
+                                    if let Some(s) = entry.to_str() {
+                                        paths.push(serde_json::Value::String(s.to_string()));
+                                    }
+                                }
+                            }
+                            Err(_) => continue,
+                        }
                     }
                 }
                 Ok(capped_results(
@@ -450,10 +477,10 @@ impl CodebaseAccess {
         limit: Option<u64>,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => {
+            CodebaseAccess::Local(fs) => {
                 let re = Regex::new(pattern)
                     .map_err(|e| SubagentError(format!("GREP invalid regex {pattern:?}: {e}")))?;
-                let matches = scan_local(&re, path);
+                let matches = scan_local(&**fs, &re, path);
                 Ok(capped_results(
                     matches,
                     limit,
@@ -490,10 +517,11 @@ impl CodebaseAccess {
         context: grep_context::GrepContext,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => {
+            CodebaseAccess::Local(fs) => {
                 let re = Regex::new(pattern)
                     .map_err(|e| SubagentError(format!("GREP invalid regex {pattern:?}: {e}")))?;
-                let matches = grep_context::with_local_windows(scan_local(&re, path), context);
+                let matches =
+                    grep_context::with_local_windows(scan_local(&**fs, &re, path), context);
                 Ok(capped_results(
                     matches,
                     limit,
@@ -537,7 +565,7 @@ impl CodebaseAccess {
         contents: &str,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_mutation("WRITE")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_mutation("WRITE")),
             CodebaseAccess::Managed(dispatch) => {
                 let args = serde_json::json!({ "path": path, "contents": contents });
                 let result = dispatch("Write".to_string(), args).await;
@@ -554,7 +582,7 @@ impl CodebaseAccess {
         new_string: &str,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_mutation("STR_REPLACE")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_mutation("STR_REPLACE")),
             CodebaseAccess::Managed(dispatch) => {
                 let args = serde_json::json!({
                     "path": path,
@@ -570,7 +598,7 @@ impl CodebaseAccess {
     /// Delete the file at `path` (Managed-only).
     pub async fn delete(&self, path: &str) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_mutation("DELETE")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_mutation("DELETE")),
             CodebaseAccess::Managed(dispatch) => {
                 let args = serde_json::json!({ "path": path });
                 let result = dispatch("Delete".to_string(), args).await;
@@ -587,7 +615,7 @@ impl CodebaseAccess {
         block_until_ms: Option<u64>,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_mutation("SHELL")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_mutation("SHELL")),
             CodebaseAccess::Managed(dispatch) => {
                 let mut args = serde_json::json!({ "command": command });
                 if let Some(ms) = block_until_ms {
@@ -616,7 +644,7 @@ impl CodebaseAccess {
         args: serde_json::Value,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_engine_tool("AWAIT")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_engine_tool("AWAIT")),
             CodebaseAccess::Managed(dispatch) => {
                 let result = dispatch("Await".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
@@ -627,7 +655,7 @@ impl CodebaseAccess {
     /// Read linting diagnostics for the workspace (Managed-only).
     pub async fn read_lints(&self, path: Option<&str>) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_engine_tool("READ_LINTS")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_engine_tool("READ_LINTS")),
             CodebaseAccess::Managed(dispatch) => {
                 let mut args = serde_json::json!({});
                 if let Some(p) = path {
@@ -646,7 +674,7 @@ impl CodebaseAccess {
         path: Option<&str>,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
-            CodebaseAccess::Local => Err(Self::reject_local_engine_tool("SEMANTIC_SEARCH")),
+            CodebaseAccess::Local(_) => Err(Self::reject_local_engine_tool("SEMANTIC_SEARCH")),
             CodebaseAccess::Managed(dispatch) => {
                 let mut args = serde_json::json!({ "query": query });
                 if let Some(p) = path {
@@ -735,22 +763,40 @@ fn window_content(content: &str, offset: Option<u64>, limit: Option<u64>) -> ser
 /// was named — for `re`, as the raw rg-shaped match events [`grep_file`] pushes. The same scan
 /// `grep_limited`'s Local arm runs; [`grep_context::with_local_windows`] decorates its
 /// output when the call asked for context.
-fn scan_local(re: &Regex, path: Option<&str>) -> Vec<serde_json::Value> {
+/// The longest leading run of `pattern`'s components that names a place rather than a
+/// pattern: where a port-driven glob walk starts.
+fn static_prefix(pattern: &str) -> std::path::PathBuf {
+    let mut prefix = std::path::PathBuf::new();
+    for component in std::path::Path::new(pattern).components() {
+        let text = component.as_os_str().to_string_lossy();
+        if text.contains(['*', '?', '[', ']', '{', '}']) {
+            break;
+        }
+        prefix.push(component.as_os_str());
+    }
+    if prefix.as_os_str().is_empty() {
+        prefix.push(".");
+    }
+    prefix
+}
+
+fn scan_local(fs: &dyn tddy_fs::Fs, re: &Regex, path: Option<&str>) -> Vec<serde_json::Value> {
     let mut matches: Vec<serde_json::Value> = Vec::new();
     let search_path = path.unwrap_or(".");
-    let is_file = std::fs::metadata(search_path)
-        .map(|m| m.is_file())
+    let is_file = fs
+        .metadata_follow(std::path::Path::new(search_path))
+        .map(|m| m.kind == tddy_fs::FsKind::File)
         .unwrap_or(false);
     if is_file {
-        grep_file(re, search_path, &mut matches);
+        grep_file(fs, re, search_path, &mut matches);
     } else {
-        grep_dir(re, search_path, &mut matches);
+        grep_dir(fs, re, search_path, &mut matches);
     }
     matches
 }
 
-fn grep_file(re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
-    let Ok(content) = std::fs::read_to_string(path) else {
+fn grep_file(fs: &dyn tddy_fs::Fs, re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
+    let Ok(content) = fs.read_to_string(std::path::Path::new(path)) else {
         return;
     };
     for (i, line) in content.lines().enumerate() {
@@ -767,19 +813,18 @@ fn grep_file(re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
     }
 }
 
-fn grep_dir(re: &Regex, dir: &str, matches: &mut Vec<serde_json::Value>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn grep_dir(fs: &dyn tddy_fs::Fs, re: &Regex, dir: &str, matches: &mut Vec<serde_json::Value>) {
+    let Ok(entries) = fs.read_dir(std::path::Path::new(dir)) else {
         return;
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for path in entries {
         let Some(path_str) = path.to_str() else {
             continue;
         };
-        if path.is_file() {
-            grep_file(re, path_str, matches);
-        } else if path.is_dir() {
-            grep_dir(re, path_str, matches);
+        match fs.metadata(&path).map(|m| m.kind) {
+            Ok(tddy_fs::FsKind::File) => grep_file(fs, re, path_str, matches),
+            Ok(tddy_fs::FsKind::Dir) => grep_dir(fs, re, path_str, matches),
+            _ => continue,
         }
     }
 }

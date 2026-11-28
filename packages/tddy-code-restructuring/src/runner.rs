@@ -38,7 +38,7 @@ pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{FileLines, Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
 use crate::apply::{
-    apply_workspace_edit, ensure_git_worktree, hash_touched_files, untracked_move_sources,
+    apply_workspace_edit_on, ensure_git_worktree, hash_touched_files_on, untracked_move_sources,
 };
 use crate::journal::{Journal, JournalRecord, ResumeDecision};
 use crate::spawn_record::SpawnRecorder;
@@ -70,6 +70,7 @@ use std::path::{Path, PathBuf};
 // would name the same set, and a caller that drives the loop owns each one separately.
 #[allow(clippy::too_many_arguments)]
 pub fn commit_operation(
+    fs: &dyn tddy_fs::Fs,
     index: usize,
     id: Option<&OpId>,
     resolved: &crate::Resolution,
@@ -79,16 +80,18 @@ pub fn commit_operation(
     ledger: &mut PositionLedger,
     spawns: &SpawnRecorder,
 ) -> Result<()> {
-    let pre = hash_touched_files(root, &resolved.edit)?;
-    journal.append(
+    let pre = hash_touched_files_on(fs, root, &resolved.edit)?;
+    journal.append_on(
+        fs,
         &paths.journal,
         JournalRecord::in_flight(index, id.cloned(), pre.clone()),
     )?;
 
-    apply_workspace_edit(root, &resolved.edit, &spawns.for_operation(index, id))?;
+    apply_workspace_edit_on(fs, root, &resolved.edit, &spawns.for_operation(index, id))?;
 
-    let post = hash_touched_files(root, &resolved.edit)?;
-    journal.append(
+    let post = hash_touched_files_on(fs, root, &resolved.edit)?;
+    journal.append_on(
+        fs,
         &paths.journal,
         JournalRecord::completed(
             index,
@@ -106,7 +109,7 @@ pub fn commit_operation(
         op: index,
         ledger: journal.fold_through(index),
     }
-    .write(&paths.ledger)
+    .write_on(fs, &paths.ledger)
 }
 
 /// Refuse operation `index` when its resolved edit moves a file git does not track.
@@ -202,7 +205,10 @@ pub(crate) fn open_run_gated<T>(
     // A continuing run may adopt a repository-scoped journal, which moves it into the directory.
     if !continuing {
         refuse_repo_scoped_state(root, paths)?;
-        if !Journal::load(&paths.journal)?.records.is_empty() {
+        if !Journal::load_on(&*options.fs, &paths.journal)?
+            .records
+            .is_empty()
+        {
             return Err(RestructureError::JournalExists);
         }
         plan.verify_snapshot(root)?;
@@ -210,12 +216,18 @@ pub(crate) fn open_run_gated<T>(
     }
     let gated = before_writing()?;
 
-    paths.ensure_self_ignoring()?;
+    paths.ensure_self_ignoring_on(&*options.fs)?;
     if continuing {
-        adopt_or_refuse_repo_scoped_state(root, paths, continuing, &options.progress)?;
+        adopt_or_refuse_repo_scoped_state(
+            &*options.fs,
+            root,
+            paths,
+            continuing,
+            &options.progress,
+        )?;
     }
 
-    let journal = Journal::load(&paths.journal)?;
+    let journal = Journal::load_on(&*options.fs, &paths.journal)?;
     if let Some(ResumeDecision::Abort(op)) = journal.resume_decision(root)? {
         return Err(RestructureError::IndeterminateJournal { op });
     }
@@ -369,20 +381,21 @@ fn readable(stem: &str) -> String {
 /// Otherwise it is refused, naming the file, because leaving it in place would make a later
 /// `--resume` reach for it again.
 fn adopt_or_refuse_repo_scoped_state(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     paths: &StatePaths,
     continuing: bool,
     progress: &crate::backends::rust::ProgressSink,
 ) -> Result<()> {
-    let Some(legacy) = repo_scoped_journal(root, paths)? else {
+    let Some(legacy) = repo_scoped_journal(fs, root, paths)? else {
         return Ok(());
     };
 
-    if continuing && Journal::load(&paths.journal)?.records.is_empty() {
-        std::fs::rename(&legacy, &paths.journal)?;
+    if continuing && Journal::load_on(fs, &paths.journal)?.records.is_empty() {
+        fs.rename(&legacy, &paths.journal)?;
         let ledger = root.join(STATE_DIRECTORY).join(LEDGER_FILE);
-        if ledger.exists() {
-            std::fs::rename(&ledger, &paths.ledger)?;
+        if fs.exists(&ledger) {
+            fs.rename(&ledger, &paths.ledger)?;
         }
         progress(&format!(
             "adopted the repository-scoped journal {} as this plan's own, at {}",
@@ -403,12 +416,16 @@ fn adopt_or_refuse_repo_scoped_state(
 /// Loaded rather than merely looked for: a journal whose records cannot be read is a refusal of its
 /// own, and reporting it as state belonging to an unknown plan would hide what is actually wrong
 /// with it.
-fn repo_scoped_journal(root: &Path, paths: &StatePaths) -> Result<Option<PathBuf>> {
+fn repo_scoped_journal(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    paths: &StatePaths,
+) -> Result<Option<PathBuf>> {
     let legacy = root.join(STATE_DIRECTORY).join(JOURNAL_FILE);
-    if legacy == paths.journal || !legacy.exists() {
+    if legacy == paths.journal || !fs.exists(&legacy) {
         return Ok(None);
     }
-    if Journal::load(&legacy)?.records.is_empty() {
+    if Journal::load_on(fs, &legacy)?.records.is_empty() {
         return Ok(None);
     }
     Ok(Some(legacy))
@@ -422,7 +439,16 @@ fn repo_scoped_journal(root: &Path, paths: &StatePaths) -> Result<Option<PathBuf
 /// over, which is the same decision [`adopt_or_refuse_repo_scoped_state`] makes for a run that
 /// writes.
 pub(super) fn refuse_repo_scoped_state(root: &Path, paths: &StatePaths) -> Result<()> {
-    match repo_scoped_journal(root, paths)? {
+    refuse_repo_scoped_state_on(&tddy_fs::DiskFs, root, paths)
+}
+
+/// [`refuse_repo_scoped_state`] through the filesystem port.
+pub(super) fn refuse_repo_scoped_state_on(
+    fs: &dyn tddy_fs::Fs,
+    root: &Path,
+    paths: &StatePaths,
+) -> Result<()> {
+    match repo_scoped_journal(fs, root, paths)? {
         None => Ok(()),
         Some(legacy) => Err(RestructureError::RepoScopedJournal {
             path: legacy.display().to_string(),
@@ -455,20 +481,20 @@ impl StatePaths {
         }
     }
 
-    fn ensure_self_ignoring(&self) -> Result<()> {
+    fn ensure_self_ignoring_on(&self, fs: &dyn tddy_fs::Fs) -> Result<()> {
         let dir = self
             .journal
             .parent()
             .expect("state paths live in a directory");
-        std::fs::create_dir_all(dir)?;
-        std::fs::write(dir.join(".gitignore"), "*\n")?;
+        fs.create_dir_all(dir)?;
+        fs.write(&dir.join(".gitignore"), b"*\n")?;
         // A plan's own directory sits inside `.restructure/`, and a `.gitignore` in it says
         // nothing about the directory holding it.
         if let Some(above) = dir
             .parent()
             .filter(|above| above.ends_with(STATE_DIRECTORY))
         {
-            std::fs::write(above.join(".gitignore"), "*\n")?;
+            fs.write(&above.join(".gitignore"), b"*\n")?;
         }
         Ok(())
     }

@@ -50,7 +50,11 @@ impl Move {
         })?;
 
         Ok(Move {
-            origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
+            origin: destination::Destination::read_on(
+                workspace.fs,
+                workspace.root,
+                &home.crate_dir,
+            )?,
             destination: new_crate::destination_of(workspace, op, destination)?,
             reexport: op.reexport.unwrap_or(Reexport::None),
             creates: NewCrate::named_by(op),
@@ -76,7 +80,11 @@ impl Move {
         })?;
 
         Ok(Move {
-            origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
+            origin: destination::Destination::read_on(
+                workspace.fs,
+                workspace.root,
+                &home.crate_dir,
+            )?,
             destination: destination.clone(),
             reexport,
             // A member is one module of a set; what the set creates is the cluster's to carry.

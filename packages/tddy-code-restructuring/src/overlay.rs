@@ -43,9 +43,14 @@ impl Overlay {
 
     /// The contents of `relative` as this run last resolved it, or as it stands on disk.
     pub fn read(&self, root: &Path, relative: &Path) -> Result<String> {
+        self.read_on(&tddy_fs::DiskFs, root, relative)
+    }
+
+    /// [`Overlay::read`] through the filesystem port.
+    pub fn read_on(&self, fs: &dyn tddy_fs::Fs, root: &Path, relative: &Path) -> Result<String> {
         match self.files.get(relative) {
             Some(contents) => Ok(contents.clone()),
-            None => Ok(std::fs::read_to_string(root.join(relative))?),
+            None => Ok(fs.read_to_string(&root.join(relative))?),
         }
     }
 
