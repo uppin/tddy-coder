@@ -4,6 +4,9 @@ mod blocking_lane;
 #[cfg(test)]
 mod blocking_lane_unit_tests;
 mod branch_legs;
+mod warn_gate;
+#[cfg(test)]
+mod warn_gate_unit_tests;
 mod branch_reads;
 pub(crate) mod chain_health;
 mod guards;
