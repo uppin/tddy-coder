@@ -9,6 +9,7 @@ name = "tddy_model_registry"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 futures-util = "0.3"
 log = "0.4"
@@ -36,6 +37,8 @@ tddy-task = { path = "../tddy-task" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

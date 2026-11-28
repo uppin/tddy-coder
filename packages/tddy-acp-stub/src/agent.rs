@@ -67,10 +67,12 @@ impl StubAgent {
         })?;
         for file in files {
             let path = cwd.join(&file.path);
-            let written = path
-                .parent()
-                .map_or(Ok(()), std::fs::create_dir_all)
-                .and_then(|()| std::fs::write(&path, &file.content));
+            let written = path.parent().map_or(Ok(()), |parent| {
+                tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, parent)
+            });
+            let written = written.and_then(|()| {
+                tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, file.content.as_bytes())
+            });
             if let Err(error) = written {
                 eprintln!("tddy-acp-stub: write_file {}: {error}", path.display());
                 return Err(acp::Error::internal_error());

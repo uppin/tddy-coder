@@ -123,7 +123,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     ) -> anyhow::Result<()> {
         if started_id != pending_id {
             let pending_dir = unified_session_dir_path(&self.sessions_base, pending_id);
-            if let Err(e) = std::fs::remove_dir_all(&pending_dir) {
+            if let Err(e) = self.fs.remove_dir_all(&pending_dir) {
                 log::warn!(
                     target: "tddy_daemon::telegram_session_control",
                     "could not remove the draft session {pending_id} after starting {started_id}: {e}"

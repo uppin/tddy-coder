@@ -5,6 +5,7 @@ edition = "2021"
 description = "The tool-call relay between an agent's tddy-tools process and its session host"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 log = "0.4"
@@ -21,5 +22,7 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }

@@ -13,6 +13,7 @@ name = "tddy_livekit_screen_capture"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
@@ -31,6 +32,8 @@ xcap = "0.9"
 objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"

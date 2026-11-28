@@ -16,6 +16,7 @@ name = "tddy-coder"
 path = "src/main.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
@@ -26,6 +27,8 @@ tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 anyhow = "1"
 assert_cmd = "2"
 env_logger = "0.11"

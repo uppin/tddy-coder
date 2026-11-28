@@ -61,7 +61,8 @@ pub fn spawn_plan_with(
 
     // 1. Create the ephemeral copy-on-write overlay so the base image is never written to.
     if let Some(parent) = opts.overlay_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| SandboxError::Io(e.to_string()))?;
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, parent)
+            .map_err(|e| SandboxError::Io(e.to_string()))?;
     }
     let overlay_output = Command::new("qemu-img")
         .args(overlay_create_argv(&opts.image_path, &opts.overlay_path))
@@ -77,10 +78,12 @@ pub fn spawn_plan_with(
     // 2. Write the guest plan config (mounts/env/cwd/command) to the host directory that
     //    will be 9p-mounted into the guest under `argv::PLAN_MOUNT_TAG`.
     let plan_dir = plan_config_dir(&opts);
-    std::fs::create_dir_all(&plan_dir).map_err(|e| SandboxError::Io(e.to_string()))?;
-    std::fs::write(
-        plan_dir.join("plan.json"),
-        argv::guest_plan_json(&plan, &opts),
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &plan_dir)
+        .map_err(|e| SandboxError::Io(e.to_string()))?;
+    tddy_fs::Fs::write(
+        &tddy_fs::DiskFs,
+        &plan_dir.join("plan.json"),
+        argv::guest_plan_json(&plan, &opts).as_bytes(),
     )
     .map_err(|e| SandboxError::Io(e.to_string()))?;
 
@@ -119,8 +122,9 @@ pub fn spawn_plan_with(
                 .await
                 .is_ok()
             {
-                if let Err(e) =
-                    tokio::fs::write(&ready_marker_writer, control_port.to_string()).await
+                if let Err(e) = tddy_fs::AsyncFs::new(std::sync::Arc::new(tddy_fs::DiskFs))
+                    .write(&ready_marker_writer, control_port.to_string().into_bytes())
+                    .await
                 {
                     log::error!(
                         target: "tddy_sandbox_qemu::spawn",

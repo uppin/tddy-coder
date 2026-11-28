@@ -50,6 +50,8 @@ pub struct Presenter {
     backend: BackendSelection,
     /// Tddy data directory root — passed to workflow runner to avoid global state.
     tddy_data_dir: PathBuf,
+    /// The filesystem port the presenter's file I/O runs through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 /// Milliseconds since the Unix epoch, for agent-activity timestamps.

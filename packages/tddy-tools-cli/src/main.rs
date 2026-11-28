@@ -137,16 +137,37 @@ enum Subcommand {
 /// `--mcp` server's logs (including specialized-subagent HTTP activity) are persisted where the
 /// host can read them, instead of vanishing into the parent process's captured stderr. Otherwise
 /// logs go to stderr as before. Never panics: a file that can't be opened falls back to stderr.
+/// The `TDDY_TOOLS_LOG_FILE` sink: appends each record through the filesystem
+/// port (one append per record, as the recorder in `tddy-acp-stub` writes), so the
+/// held-open descriptor the pipe target used to keep is gone.
+struct LogFile(std::path::PathBuf);
+
+impl LogFile {
+    fn open(path: &std::ffi::OsStr) -> std::io::Result<Self> {
+        let path = std::path::PathBuf::from(path);
+        // Opening is what proves the file can be appended to.
+        tddy_fs::Fs::append(&tddy_fs::DiskFs, &path, b"")?;
+        Ok(Self(path))
+    }
+}
+
+impl std::io::Write for LogFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        tddy_fs::Fs::append(&tddy_fs::DiskFs, &self.0, buf)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn init_logging() {
     let mut builder =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"));
     if let Some(path) = std::env::var_os("TDDY_TOOLS_LOG_FILE") {
         if !path.is_empty() {
-            match std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-            {
+            match LogFile::open(&path) {
                 Ok(file) => {
                     builder.target(env_logger::Target::Pipe(Box::new(file)));
                 }

@@ -1,3 +1,4 @@
+#![cfg(test)]
 use super::*;
 
 /// A checkout with an identity and a first commit, plus whatever else a test asks it for.

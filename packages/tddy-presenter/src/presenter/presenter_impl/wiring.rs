@@ -46,7 +46,14 @@ impl Presenter {
             views: ViewChannels::default(),
             backend: BackendSelection::new(workflow_recipe),
             tddy_data_dir,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
+    }
+
+    /// The same presenter, running its file I/O through `fs` instead of the disk.
+    pub fn with_fs(mut self, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Self {
+        self.fs = fs;
+        self
     }
 
     /// Set where the agent's own tool calls are persisted (`agent-activity.jsonl` under

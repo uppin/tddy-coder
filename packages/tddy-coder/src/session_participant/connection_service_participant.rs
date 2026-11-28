@@ -147,20 +147,21 @@ impl SessionConnectionService {
 
 /// Append one tool-call record to the session's `tool-calls.jsonl` (a full file path).
 fn append_tool_call(path: &std::path::Path, record: &ToolCallRecord) -> anyhow::Result<()> {
+    append_tool_call_on(&tddy_fs::DiskFs, path, record)
+}
+
+fn append_tool_call_on(
+    fs: &dyn tddy_fs::Fs,
+    path: &std::path::Path,
+    record: &ToolCallRecord,
+) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        fs.create_dir_all(parent)
             .map_err(|e| anyhow::anyhow!("create {}: {}", parent.display(), e))?;
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|e| anyhow::anyhow!("open {}: {}", path.display(), e))?;
     let line = serde_json::to_string(record)
         .map_err(|e| anyhow::anyhow!("serialize ToolCallRecord: {}", e))?;
-    use std::io::Write;
-    file.write_all(line.as_bytes())
-        .and_then(|_| file.write_all(b"\n"))
+    fs.append(path, (line + "\n").as_bytes())
         .map_err(|e| anyhow::anyhow!("write {}: {}", path.display(), e))
 }
 

@@ -9,6 +9,8 @@ name = "tddy_build"
 path = "src/lib.rs"
 
 [dependencies]
+libc = "0.2"
+tddy-fs = { path = "../tddy-fs" }
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
@@ -26,6 +28,8 @@ tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }

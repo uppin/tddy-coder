@@ -57,7 +57,13 @@ pub struct ResolvedStreamConfig {
 }
 
 pub fn load_config_file(path: &Path) -> Result<FileConfig> {
-    let raw = std::fs::read_to_string(path)
+    load_config_file_on(&tddy_fs::DiskFs, path)
+}
+
+/// [`load_config_file`] through the filesystem port.
+pub fn load_config_file_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<FileConfig> {
+    let raw = fs
+        .read_to_string(path)
         .with_context(|| format!("failed to read config file {}", path.display()))?;
     let cfg: FileConfig = serde_yaml::from_str(&raw).context("invalid YAML config")?;
     Ok(cfg)

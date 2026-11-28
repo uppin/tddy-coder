@@ -15,7 +15,6 @@ use crate::toolcall::conversation_wire::ConversationStartRequestWire;
 use crate::toolcall::conversation_wire::SpawnConversationRequestWire;
 use crate::toolcall::conversation_wire::StartConversationRequestWire;
 use async_trait::async_trait;
-use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
@@ -99,18 +98,12 @@ fn toolcall_log(msg: &str) {
     };
     let now = chrono::Local::now().format("%H:%M:%S%.3f");
     let line = format!("{} {}\n", now, msg);
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        let _ = f.write_all(line.as_bytes());
-    }
+    let _ = tddy_fs::Fs::append(&tddy_fs::DiskFs, &path, line.as_bytes());
 }
 
 /// Set the log file path for toolcall debug logging.
 pub fn set_toolcall_log_dir(log_dir: &std::path::Path) {
-    let _ = std::fs::create_dir_all(log_dir);
+    let _ = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, log_dir);
     let path = log_dir.join("toolcall.log");
     if let Ok(mut guard) = TOOLCALL_LOG_PATH.lock() {
         *guard = Some(path);
@@ -195,7 +188,7 @@ pub fn start_toolcall_listener_with_handlers(
 > {
     let dir = std::env::temp_dir();
     let socket_path = dir.join(format!("tddy-toolcall-{}.sock", std::process::id()));
-    let _ = std::fs::remove_file(&socket_path);
+    let _ = tddy_fs::Fs::remove_file(&tddy_fs::DiskFs, &socket_path);
 
     let (tx, rx) = std::sync::mpsc::sync_channel(32);
     let (path_tx, path_rx) = std::sync::mpsc::sync_channel(1);
@@ -220,7 +213,7 @@ pub fn start_toolcall_listener_with_handlers(
             )
             .await;
         });
-        let _ = std::fs::remove_file(&socket_path_cleanup);
+        let _ = tddy_fs::Fs::remove_file(&tddy_fs::DiskFs, &socket_path_cleanup);
     });
 
     let socket_path = path_rx
@@ -622,7 +615,8 @@ impl ToolcallRpcService {
         let result = tokio::task::spawn_blocking(move || {
             // Compute the per-repo store root (if we have a repo root).
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
-                let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
+                let canon =
+                    tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
                 repo_actions_root(&dd, &key)
             });
@@ -676,7 +670,8 @@ impl ToolcallRpcService {
 
         let result = tokio::task::spawn_blocking(move || {
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
-                let canon = std::fs::canonicalize(r).unwrap_or_else(|_| r.clone());
+                let canon =
+                    tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
                 repo_actions_root(&dd, &key)
             });

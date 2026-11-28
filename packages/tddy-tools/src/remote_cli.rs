@@ -175,7 +175,7 @@ fn resolve_base_url(base_dir: Option<PathBuf>) -> anyhow::Result<String> {
         );
     }
 
-    let content = std::fs::read_to_string(&discovery_path).map_err(|e| {
+    let content = tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, &discovery_path).map_err(|e| {
         anyhow::anyhow!(
             "could not read relay discovery file {}: {}",
             discovery_path.display(),
@@ -361,7 +361,7 @@ async fn run_sync_context(args: SyncContextArgs) -> Result<()> {
     let dest = args
         .dest
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    if let Err(e) = std::fs::create_dir_all(&dest) {
+    if let Err(e) = tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &dest) {
         eprintln!(
             "error: could not create dest directory {}: {}",
             dest.display(),
@@ -377,7 +377,7 @@ async fn run_sync_context(args: SyncContextArgs) -> Result<()> {
         .and_then(|v| v.as_str())
         .unwrap_or(fallback.as_str());
     let out_path = dest.join("CLAUDE.md");
-    if let Err(e) = std::fs::write(&out_path, content) {
+    if let Err(e) = tddy_fs::Fs::write(&tddy_fs::DiskFs, &out_path, content.as_bytes()) {
         eprintln!("error: could not write {}: {}", out_path.display(), e);
         std::process::exit(1);
     }

@@ -31,6 +31,7 @@ fn debug_log_written_to_session_dir_when_plan_fails() {
     tddy_core::init_tddy_logger_legacy(false, None, None);
 
     run_workflow(
+        &tddy_fs::DiskFs,
         Arc::new(TddRecipe) as Arc<dyn WorkflowRecipe>,
         SharedBackend::from_arc(backend),
         event_tx,

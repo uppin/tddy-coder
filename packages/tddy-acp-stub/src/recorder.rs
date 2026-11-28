@@ -5,7 +5,6 @@
 //! line, after a first `started` line carrying the stub's pid. Without the variable nothing is
 //! written. A JSONL file outlives the child, so a test can read it after the client dropped it.
 
-use std::io::Write as _;
 use std::path::PathBuf;
 
 /// Appends JSON lines to the record file named by `TDDY_ACP_STUB_RECORD`.
@@ -26,11 +25,8 @@ impl Recorder {
 
     pub fn record(&self, line: serde_json::Value) {
         let Some(path) = &self.path else { return };
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
+        // Recorded through the port's append, one line per record.
+        tddy_fs::Fs::append(&tddy_fs::DiskFs, path, format!("{line}\n").as_bytes())
             .unwrap_or_else(|e| panic!("TDDY_ACP_STUB_RECORD {}: {e}", path.display()));
-        writeln!(file, "{line}").unwrap_or_else(|e| panic!("record {}: {e}", path.display()));
     }
 }

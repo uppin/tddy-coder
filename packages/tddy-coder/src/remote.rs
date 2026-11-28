@@ -63,23 +63,28 @@ pub struct RemoteContextDir {
 impl RemoteContextDir {
     /// Creates a read-only temp context dir by copying files from `source_dir`.
     pub fn create(source_dir: &Path) -> anyhow::Result<Self> {
+        Self::create_on(&tddy_fs::DiskFs, source_dir)
+    }
+
+    /// [`RemoteContextDir::create`] through the filesystem port.
+    pub fn create_on(fs: &dyn tddy_fs::Fs, source_dir: &Path) -> anyhow::Result<Self> {
         let dir = tempfile::tempdir()?;
 
         // Copy all files from source_dir recursively.
-        copy_dir_recursive(source_dir, dir.path())?;
+        copy_dir_recursive(fs, source_dir, dir.path())?;
 
         // Append REMOTE_APPENDIX to CLAUDE.md and AGENTS.md if they exist.
         for filename in &["CLAUDE.md", "AGENTS.md"] {
             let dest = dir.path().join(filename);
-            if dest.exists() {
-                let mut content = std::fs::read_to_string(&dest)?;
+            if fs.exists(&dest) {
+                let mut content = fs.read_to_string(&dest)?;
                 content.push_str(REMOTE_APPENDIX);
-                std::fs::write(&dest, &content)?;
+                fs.write(&dest, content.as_bytes())?;
             }
         }
 
         // Make all files read-only.
-        make_readonly_recursive(dir.path())?;
+        make_readonly_recursive(fs, dir.path())?;
 
         Ok(Self { dir })
     }
@@ -90,42 +95,36 @@ impl RemoteContextDir {
     }
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let dest_path = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            std::fs::create_dir_all(&dest_path)?;
-            copy_dir_recursive(&entry.path(), &dest_path)?;
+fn copy_dir_recursive(fs: &dyn tddy_fs::Fs, src: &Path, dst: &Path) -> anyhow::Result<()> {
+    for entry_path in fs.read_dir(src)? {
+        let file_name = entry_path
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("read_dir entry without a file name"))?;
+        let dest_path = dst.join(file_name);
+        if fs.metadata(&entry_path)?.kind == tddy_fs::FsKind::Dir {
+            fs.create_dir_all(&dest_path)?;
+            copy_dir_recursive(fs, &entry_path, &dest_path)?;
         } else {
-            std::fs::copy(entry.path(), &dest_path)?;
+            fs.copy(&entry_path, &dest_path)?;
         }
     }
     Ok(())
 }
 
-#[cfg(unix)]
-fn make_readonly_recursive(dir: &Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    for entry in walkdir::WalkDir::new(dir) {
-        let entry = entry?;
-        if entry.file_type().is_file() {
-            let mut perms = std::fs::metadata(entry.path())?.permissions();
-            perms.set_mode(0o444);
-            std::fs::set_permissions(entry.path(), perms)?;
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn make_readonly_recursive(dir: &Path) -> anyhow::Result<()> {
-    for entry in walkdir::WalkDir::new(dir) {
-        let entry = entry?;
-        if entry.file_type().is_file() {
-            let mut perms = std::fs::metadata(entry.path())?.permissions();
-            perms.set_readonly(true);
-            std::fs::set_permissions(entry.path(), perms)?;
+fn make_readonly_recursive(fs: &dyn tddy_fs::Fs, dir: &Path) -> anyhow::Result<()> {
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(current) = pending.pop() {
+        for entry_path in fs.read_dir(&current)? {
+            match fs.metadata(&entry_path)?.kind {
+                tddy_fs::FsKind::Dir => pending.push(entry_path),
+                tddy_fs::FsKind::File => {
+                    // The port's mode: unix carries 0o444 through `set_mode`;
+                    // elsewhere the same mode bits are the read-only promise the
+                    // metadata reports.
+                    fs.set_mode(&entry_path, 0o444)?;
+                }
+                _ => continue,
+            }
         }
     }
     Ok(())

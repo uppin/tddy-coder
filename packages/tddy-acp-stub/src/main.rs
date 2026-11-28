@@ -3,7 +3,6 @@
 //! Communicates over stdio using the Agent Client Protocol. Reads scenario from
 //! `--scenario <path>` or `TDDY_ACP_SCENARIO` env var. Default: echo prompt back as text.
 
-use std::fs;
 use std::path::PathBuf;
 
 use agent_client_protocol::{self as acp, Client};
@@ -27,7 +26,7 @@ fn main() -> std::io::Result<()> {
 
     let scenario = scenario_path
         .as_ref()
-        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|p| tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, p).ok())
         .and_then(|s| serde_json::from_str::<Scenario>(&s).ok())
         .unwrap_or_default();
 

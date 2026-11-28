@@ -406,7 +406,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             anyhow::bail!("empty recipe name");
         }
         let path = session_dir.join("changeset.yaml");
-        let raw = std::fs::read_to_string(&path).unwrap_or_default();
+        let raw = self.fs.read_to_string(&path).unwrap_or_default();
         let mut root: serde_yaml::Value = if raw.trim().is_empty() {
             serde_yaml::Mapping::new().into()
         } else {
@@ -427,7 +427,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         }
 
         let out = serde_yaml::to_string(&root)?;
-        std::fs::write(&path, out)?;
+        self.fs.write(&path, out.as_bytes())?;
         Ok(())
     }
 
