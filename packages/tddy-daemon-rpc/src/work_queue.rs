@@ -7,6 +7,7 @@ mod branch_legs;
 mod branch_reads;
 pub(crate) mod chain_health;
 mod guards;
+mod item_files;
 mod item_writes;
 pub(crate) mod move_activity;
 mod ports;
@@ -60,6 +61,9 @@ pub struct WorkQueueRpcHandler {
     /// The bounded, coalescing lanes `QueryBranch`'s blocking legs run in, so its polling cannot
     /// fill the blocking pool the rest of the daemon needs.
     query_branch_lanes: blocking_lane::QueryBranchLanes,
+    /// Where this host stages pre-session uploads — the staged arm of an attach fetches from the
+    /// root the uploader wrote to.
+    staging_base_dir: std::path::PathBuf,
 }
 
 impl WorkQueueRpcHandler {
@@ -79,6 +83,7 @@ impl WorkQueueRpcHandler {
             session_token_signer: host.session_token_signer(),
             notification_bus: host.session_notification_bus(),
             query_branch_lanes: blocking_lane::QueryBranchLanes::new(),
+            staging_base_dir: host.staging_base_dir(),
         }
     }
 }

@@ -55,6 +55,9 @@ pub struct ExecToolRpcHandler {
     config: DaemonConfig,
     user_resolver: SessionUserResolver,
     tddy_data_dir: PathBuf,
+    /// Where this host stages pre-session uploads — a work item file tool's host-document
+    /// resolution reads the staged arm from it.
+    staging_base_dir: PathBuf,
     peer_routing: PeerRouting,
     rpc_activity: RpcActivity,
     local_exec_tools: LocalExecTools,
@@ -150,6 +153,7 @@ impl ExecToolRpcHandler {
             config: host.config().clone(),
             user_resolver: host.user_resolver(),
             tddy_data_dir: host.tddy_data_dir().to_path_buf(),
+            staging_base_dir: host.staging_base_dir(),
             peer_routing: host.peer_routing(),
             rpc_activity: host.rpc_activity(),
             local_exec_tools: host.local_exec_tools(),

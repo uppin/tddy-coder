@@ -58,6 +58,13 @@ impl DaemonSessionHost {
         &self.tddy_data_dir
     }
 
+    /// Where this host stages pre-session uploads — the root `UploadStagedAttachmentChunk`
+    /// writes into, and a work item's attach fetches a staged file from.
+    #[must_use]
+    pub fn staging_base_dir(&self) -> std::path::PathBuf {
+        self.staging_base_dir.clone()
+    }
+
     /// The peer daemons this one may route a request to, and their project rows.
     #[must_use]
     pub fn eligible_daemon_source(&self) -> Arc<dyn EligibleDaemonSource> {

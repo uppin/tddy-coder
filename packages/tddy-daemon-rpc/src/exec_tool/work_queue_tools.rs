@@ -203,6 +203,9 @@ impl ExecToolRpcHandler {
                 }
                 _ => crate::work_queue::schedule_watch::Armer::Caller(req.session_token.clone()),
             },
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            staging_base_dir: self.staging_base_dir.clone(),
+            max_attachment_bytes: self.config.max_attachment_bytes,
         }
     }
 }
@@ -246,8 +249,14 @@ pub(super) struct DaemonStackTools {
     armer: crate::work_queue::schedule_watch::Armer,
     vaults: Option<Arc<tddy_credentials::SessionVaults>>,
     user_resolver: tddy_daemon_kernel::SessionUserResolver,
+    /// The daemon's data root and staging base — where a work item file's sources are resolved.
+    tddy_data_dir: PathBuf,
+    staging_base_dir: PathBuf,
+    /// The host's policy cap a work item file may not exceed.
+    max_attachment_bytes: u64,
 }
 
+mod item_file_ops;
 mod queue_legs;
 
 #[async_trait]
@@ -302,6 +311,18 @@ impl WorkQueueToolPort for DaemonStackTools {
         | WorkQueueOp::Schedules = &op
         {
             return self.schedules_through_inbox(env, github, op).await;
+        }
+        if let WorkQueueOp::AttachFile { .. }
+        | WorkQueueOp::DetachFile { .. }
+        | WorkQueueOp::ListFiles { .. } = &op
+        {
+            let files = item_file_ops::FileEnv {
+                os_user: self.os_user.clone(),
+                tddy_data_dir: self.tddy_data_dir.clone(),
+                staging_base_dir: self.staging_base_dir.clone(),
+                max_attachment_bytes: self.max_attachment_bytes,
+            };
+            return item_file_ops::run(&env, &files, op).await;
         }
         // The store's locks, git and GitHub are all blocking.
         tokio::task::spawn_blocking(move || ops::run(&env, &github, op))

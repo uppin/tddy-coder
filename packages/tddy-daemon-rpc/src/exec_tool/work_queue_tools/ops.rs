@@ -23,6 +23,8 @@ use tddy_work_queue::pr_insight::{self, PrSearchInput};
 use super::github::GithubSource;
 use super::shape::{work_pr_comments_json, work_pr_read_json, work_pr_search_json};
 
+#[cfg(test)]
+mod delete_cleanup_unit_tests;
 mod lineage_ops;
 mod waves_ops;
 pub(super) use lineage_ops::graph_json;
@@ -48,7 +50,7 @@ impl OpEnv {
             .ok_or_else(|| "the call names no stack".to_string())
     }
 
-    fn home(&self) -> Result<StoredWorkQueue<'_>, String> {
+    pub(super) fn home(&self) -> Result<StoredWorkQueue<'_>, String> {
         Ok(StoredWorkQueue {
             store: &self.store,
             project_id: &self.project_id,
@@ -159,6 +161,18 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         ),
         WorkQueueOp::DeletePlanned { node_id } => {
             let deleted = delete_work_item(&env.home()?, &node_id)?;
+            // The deleted item's files go with it: an item gone while its bytes remain is the leak
+            // the staged path taught us to avoid. The queue id is the owner session's, whose
+            // directory holds the files.
+            if let Some(queue_id) = &env.queue_id {
+                if let Err(e) = tddy_core::session_work_queue_files::SessionWorkQueueFiles::new(
+                    env.sessions_base.join("sessions"),
+                )
+                .remove_item(queue_id, &node_id)
+                {
+                    return Err(format!("remove the deleted item's files: {e}"));
+                }
+            }
             Ok(json!({
                 "deleted": deleted.node.node_id,
                 "reparented_children": deleted.reparented_children,
@@ -265,6 +279,12 @@ pub(super) fn run(env: &OpEnv, github: &GithubSource, op: WorkQueueOp) -> Result
         WorkQueueOp::Graph => {
             Err("work_queue_graph is served through the GitHub inbox".to_string())
         }
+        WorkQueueOp::AttachFile { .. }
+        | WorkQueueOp::DetachFile { .. }
+        | WorkQueueOp::ListFiles { .. } => Err(
+            "the work item file tools are served on their own arm, not this blocking dispatcher"
+                .to_string(),
+        ),
     }
 }
 

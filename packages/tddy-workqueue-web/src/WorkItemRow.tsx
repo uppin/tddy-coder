@@ -6,6 +6,7 @@ import type { BranchResolution } from "tddy-client-web/gen/work_queue_pb";
 import { baseSyncView, canPullFromBase } from "./baseSyncStatus";
 import { isNodeOrphaned } from "./isNodeOrphaned";
 import type { StackChildSession } from "./workItemSessions";
+import { WorkItemFilesBadge } from "./WorkItemFiles";
 import { WorkItemBehindBadge } from "./WorkItemChainHealth";
 import { WorkItemCommitCounts } from "./workItemCommitCounts";
 import { WorkItemPrBadge } from "./WorkItemPrBadge";
@@ -268,6 +269,7 @@ export function WorkItemRow({
         </button>
         {/* Everything the row states about its branch without the operator having to expand it —
             a sibling of the toggle above, never a child of it. */}
+        <WorkItemFilesBadge itemId={node.itemId} files={node.files} />
         <WorkItemRowBadges
           node={node}
           inProgress={inProgressEffective}

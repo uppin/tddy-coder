@@ -49,6 +49,14 @@ export interface WorkItem {
   labels: string[];
   /** Keyed markers with a short text and a tone (`#workqueue` 7/14). */
   badges: WorkItemBadge[];
+  /** The files this item carries (`#workqueue` work item files); every session spawned for the item receives them. */
+  files: WorkItemFile[];
+}
+
+/** One file a work item carries: its store name and the size the store recorded. */
+export interface WorkItemFile {
+  basename: string;
+  sizeBytes: number;
 }
 
 export type BadgeTone = "info" | "success" | "warning" | "danger";
@@ -93,6 +101,7 @@ interface WireStackNode {
   linked_sessions?: { session_id: string; daemon_instance_id?: string }[];
   labels?: string[];
   badges?: WorkItemBadge[];
+  files?: { basename: string; size_bytes: number }[];
 }
 
 interface WireStack {
@@ -131,6 +140,10 @@ export function parseWorkQueue(workQueueJson: string | undefined | null): Stack 
     })),
     labels: n.labels ?? [],
     badges: n.badges ?? [],
+    files: (n.files ?? []).map((file) => ({
+      basename: file.basename,
+      sizeBytes: file.size_bytes,
+    })),
   }));
   return { version: parsed.version ?? 0, nodes };
 }

@@ -203,9 +203,14 @@ pub(super) fn compile_unbundled_families_5() -> Result<(), Box<dyn std::error::E
                 format!(".{package}"),
                 format!("crate::proto::{}", rust_module(package)),
             );
-        // `catalog` reaches `types.AgentKind` through `SubagentInfo`, `work_queue` its own shared types.
+        // `catalog` reaches `types.AgentKind` through `SubagentInfo`, `work_queue` its own shared
+        // types — and, since work item files, a `session.StagedAttachmentRef` in
+        // `WorkQueueFileSource`.
         if package == "work_queue" || package == "catalog" {
             tonic = tonic.extern_path(".types", "crate::proto::types");
+        }
+        if package == "work_queue" {
+            tonic = tonic.extern_path(".session", "crate::proto::session");
         }
         tonic.compile_protos(&[proto], &["proto"])?;
     }

@@ -102,6 +102,7 @@ pub mod tool_session_spawn;
 pub mod tool_spawn_plan;
 pub mod transcript_follower;
 pub mod usage_context;
+pub mod work_item_start_files;
 pub mod work_queue_parent;
 pub mod workspace_branch_start;
 pub mod worktree_source;

@@ -84,6 +84,7 @@ export function aStackNode(overrides: Partial<WorkItem> = {}): WorkItem {
     linkedSessions: [],
     labels: [],
     badges: [],
+    files: [],
     ...overrides,
   };
 }

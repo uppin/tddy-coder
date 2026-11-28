@@ -31,8 +31,9 @@ fn is_a_git_tool(name: &str) -> bool {
     )
 }
 
-/// The ten work tools, `#workqueue` 6/14's four link tools, then 7/14's three annotation tools, then 9/14's two lineage tools.
-const EVERY_PLAN_TOOL: [&str; 26] = [
+/// The plan and read tools, `#workqueue` 6/14's four link tools, then 7/14's three annotation tools,
+/// then 9/14's two lineage tools, then the work item file tools.
+const EVERY_PLAN_TOOL: [&str; 29] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -59,6 +60,9 @@ const EVERY_PLAN_TOOL: [&str; 26] = [
     "work_queue_schedule_wave",
     "work_item_unschedule",
     "work_queue_schedules",
+    "work_item_attach_file",
+    "work_item_detach_file",
+    "work_item_list_files",
 ];
 
 #[test]
@@ -70,12 +74,17 @@ fn each_access_is_offered_its_work_tool_set() {
         offered_to(None),
     ];
 
-    // Then the owner every tool, an addressed session the two reads, and no access nothing
+    // Then the owner every tool, an addressed session the reads plus its item's file list, and no
+    // access nothing
     assert_eq!(
         offered,
         [
             EVERY_PLAN_TOOL.map(String::from).to_vec(),
-            vec!["work_queue_status".to_string(), "work_pr_read".to_string()],
+            vec![
+                "work_queue_status".to_string(),
+                "work_pr_read".to_string(),
+                "work_item_list_files".to_string(),
+            ],
             Vec::<String>::new(),
         ]
     );

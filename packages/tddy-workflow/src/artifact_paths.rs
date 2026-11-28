@@ -42,6 +42,18 @@ pub fn session_attachments_root(session_dir: &Path) -> PathBuf {
     root
 }
 
+/// Subdirectory of the session directory holding a work queue's items' files — beside
+/// `work-queue.yaml`, not under `artifacts/`: item files are the queue's own bytes, not session
+/// artifacts, and must not surface in `context_docs` scans.
+pub const WORK_QUEUE_FILES_SUBDIR: &str = "work-queue-files";
+
+/// Where a session's work queue stores its items' files:
+/// `session_dir/work-queue-files/`.
+#[inline]
+pub fn work_queue_files_root(session_dir: &Path) -> PathBuf {
+    session_dir.join(WORK_QUEUE_FILES_SUBDIR)
+}
+
 /// Canonical path for a new attachment write: `session_dir/artifacts/attachments/<basename>`.
 #[inline]
 pub fn canonical_attachment_write_path(session_dir: &Path, basename: &str) -> PathBuf {

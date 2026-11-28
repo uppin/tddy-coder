@@ -4,9 +4,10 @@ use std::sync::Arc;
 use super::WORK_QUEUE_SERVICE;
 
 use tddy_service::proto::work_queue::{
-    LandWorkQueueResponse, PullBaseIntoBranchRequest, PullBaseIntoBranchResponse,
-    QueryBranchRequest, QueryBranchResponse, ReorderWorkItemRequest, ReorderWorkItemResponse,
-    RepointWorkItemRequest, RepointWorkItemResponse,
+    AttachWorkItemFileRequest, DetachWorkItemFileRequest, LandWorkQueueResponse,
+    PullBaseIntoBranchRequest, PullBaseIntoBranchResponse, QueryBranchRequest, QueryBranchResponse,
+    ReorderWorkItemRequest, ReorderWorkItemResponse, RepointWorkItemRequest,
+    RepointWorkItemResponse,
 };
 
 use tddy_service::proto::work_queue::LandWorkQueueRequest;
@@ -249,6 +250,20 @@ impl<H: WorkQueueHandler + 'static> WorkQueueService for WorkQueueServiceImpl<H>
         request: Request<ClearWorkItemBadgeRequest>,
     ) -> Result<Response<WorkItemLinksResponse>, Status> {
         self.host.clear_work_item_badge(request).await
+    }
+
+    async fn attach_work_item_file(
+        &self,
+        request: Request<AttachWorkItemFileRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.attach_work_item_file(request).await
+    }
+
+    async fn detach_work_item_file(
+        &self,
+        request: Request<DetachWorkItemFileRequest>,
+    ) -> Result<Response<WorkItemLinksResponse>, Status> {
+        self.host.detach_work_item_file(request).await
     }
 
     async fn set_work_queue_dependencies(

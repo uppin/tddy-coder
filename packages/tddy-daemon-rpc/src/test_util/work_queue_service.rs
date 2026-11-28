@@ -230,6 +230,26 @@ impl WorkQueueService for TestDaemon {
             .await
     }
 
+    async fn attach_work_item_file(
+        &self,
+        request: Request<tddy_service::proto::work_queue::AttachWorkItemFileRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .attach_work_item_file(request)
+            .await
+    }
+
+    async fn detach_work_item_file(
+        &self,
+        request: Request<tddy_service::proto::work_queue::DetachWorkItemFileRequest>,
+    ) -> Result<Response<tddy_service::proto::work_queue::WorkItemLinksResponse>, Status> {
+        self.handlers
+            .work_queue_service()
+            .detach_work_item_file(request)
+            .await
+    }
+
     async fn set_work_queue_dependencies(
         &self,
         request: Request<tddy_service::proto::work_queue::SetWorkQueueDependenciesRequest>,

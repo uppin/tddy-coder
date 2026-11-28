@@ -115,6 +115,20 @@ pub struct WorkItem {
     /// the agent or the user and acyclic. Not `parents` (git: where to cut and rebase).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub needs: Vec<String>,
+    /// The files this item carries (`#workqueue` work item files). The list is queue data — the
+    /// bytes live in the session directory's `work-queue-files/<node_id>/` tree, and a spawned
+    /// session receives every entry as a start attachment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<WorkItemFile>,
+}
+
+/// One file a work item carries. The basename is the item's store name — one flat level per item,
+/// so no client-supplied value ever becomes more than one path segment — and the size is what the
+/// store wrote, recorded so every queue reader sizes the row without a stat.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WorkItemFile {
+    pub basename: String,
+    pub size_bytes: u64,
 }
 
 /// How a badge is shown.

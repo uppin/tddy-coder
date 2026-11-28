@@ -5,6 +5,7 @@
 use pretty_assertions::assert_eq;
 use tddy_core::changeset::{WorkItem, WorkQueue};
 use tddy_tool_engine::work_item_annotation_tools::WORK_ITEM_ANNOTATION_TOOL_NAMES;
+use tddy_tool_engine::work_item_file_tools::WORK_ITEM_FILE_TOOL_NAMES;
 use tddy_tool_engine::work_item_git_tools::WORK_ITEM_GIT_TOOL_NAMES;
 use tddy_tool_engine::work_item_link_tools::WORK_ITEM_LINK_TOOL_NAMES;
 use tddy_tool_engine::work_queue_access::{
@@ -86,6 +87,7 @@ fn the_owner_is_offered_every_work_tool_except_creation() {
             tddy_tool_engine::work_item_commit_flow_tools::WORK_ITEM_COMMIT_FLOW_TOOL_NAMES.iter(),
         )
         .chain(tddy_tool_engine::work_queue_schedule_tools::WORK_QUEUE_SCHEDULE_TOOL_NAMES.iter())
+        .chain(WORK_ITEM_FILE_TOOL_NAMES.iter())
         .chain(WORK_ITEM_GIT_TOOL_NAMES.iter())
         .map(|name| name.to_string())
         .collect();
@@ -97,7 +99,11 @@ fn an_addressed_session_is_offered_the_reads_and_nobody_else_anything() {
     assert_eq!(
         (names(Some(WorkQueueAccess::Addressed)), names(None)),
         (
-            vec![PR_STACK_STATUS.to_string(), PR_READ.to_string()],
+            vec![
+                PR_STACK_STATUS.to_string(),
+                PR_READ.to_string(),
+                "work_item_list_files".to_string(),
+            ],
             Vec::<String>::new()
         )
     );

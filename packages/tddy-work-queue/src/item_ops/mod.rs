@@ -12,6 +12,7 @@ use tddy_core::WorkflowError;
 
 mod adopt;
 pub mod item_annotations;
+pub mod item_files;
 pub mod item_links;
 mod nodes;
 mod order;

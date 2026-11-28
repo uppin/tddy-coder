@@ -2,7 +2,7 @@
 
 **Type**: Technical Product (Developer Tool)
 **Status**: Active
-**Updated**: 2026-11-05
+**Updated**: 2026-11-28
 
 ## Summary
 
@@ -54,6 +54,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 |---------|-------------|
 | [Session actions](session-actions.md) | Declarative **`actions/*.yaml`** beside **`changeset.yaml`**; **`tddy-tools list-actions`** / **`invoke-action`**; JSON Schema inputs; optional cargo-style summaries; path sandbox aligned with **`repo_path`** |
 | [Workflow JSON Schemas](workflow-json-schemas.md) | JSON Schema contracts per goal; `goals.json` registry; `tddy-tools` `get-schema`, `list-schemas`, `submit` validation |
+| [Work item files](work-item-files.md) | Files a work-queue item carries: attach/detach/list tools and RPCs, an attachment icon on queue rows, and delivery into every session spawned for the item as start attachments |
 | [Post-workflow GitHub PR and worktree elicitation](post-workflow-github-pr-elicitation.md) | Durable **`changeset.workflow`** post-workflow fields; **`persist-changeset-workflow`**; **`merge_persisted_workflow_into_context`**; **`post_workflow`** helpers for ordering, resume gating, and operator-facing PR status strings |
 | [GitHub pull request tools (MCP)](github-pr-tools-mcp.md) | **`github_create_pull_request`** / **`github_update_pull_request`** on **`tddy-tools --mcp`**; shared REST constants; merge-pr and **tdd-small** prompt gating |
 | [Workflow recipes](workflow-recipes.md) | Pluggable **`WorkflowRecipe`**; shipped recipes include **`TddRecipe`**, **`TddSmallRecipe`**, **`BugfixRecipe`**, **`FreePromptingRecipe`**, **`GrillMeRecipe`**, **`ReviewRecipe`**, and **`MergePrRecipe`**. **New sessions** default to **`free-prompting`** when no recipe is specified. **`recipe_resolve`** in **`tddy-workflow-recipes`**; string **`GoalId`** / states; **FeatureInput** **`/start-<recipe>`** and slash menu rows. **Bugfix** graph: **`interview` → `analyze` → `reproduce` → `end`** with relay **`.workflow/bugfix_interview_handoff.txt`**. **Grill me** **Create plan** brief: session **`artifacts/grill-me-brief.md`**; repo persistence per [AGENTS.md](../../../AGENTS.md) (**`plans/`** or a feature-doc path). |

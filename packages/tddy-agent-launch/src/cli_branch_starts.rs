@@ -119,6 +119,9 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<Response<StartSessionResponse>, Status> {
+        // The work item's files ride every start that names the item — resolved before anything is
+        // created, so a refused fetch leaves no worktree behind.
+        let req = &self.start_request_with_work_item_files(req).await?;
         refuse_a_target_combination(req)?;
         // Settled first, with nothing of the start created: the managed-codebase refusal reads the
         // agent's spec, and a target without the agent fails the start before any worktree is cut.

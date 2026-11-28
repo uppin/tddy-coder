@@ -50,6 +50,9 @@ pub(crate) struct StackToolArgs {
     pub(crate) note: Option<String>,
     pub(crate) wave: Option<u32>,
     pub(crate) skip_review: bool,
+    pub(crate) basename: Option<String>,
+    pub(crate) artifact_relative_path: Option<String>,
+    pub(crate) repo_file_path: Option<String>,
 }
 
 /// The state a `work_pr_search` that expressed no preference is run with: the PRs still in play.
@@ -176,6 +179,36 @@ pub(crate) fn work_queue_op_of(
             item_id: required(tool_name, args.item_id, "item_id")?,
         },
         crate::work_queue_schedule_tools::WORK_QUEUE_SCHEDULES => WorkQueueOp::Schedules,
+        crate::work_item_file_tools::WORK_ITEM_ATTACH_FILE => {
+            let sources = [
+                args.artifact_relative_path.is_some(),
+                args.repo_file_path.is_some(),
+            ];
+            let named = sources.into_iter().filter(|named| *named).count();
+            if named != 1 {
+                return Err(format!(
+                    "{tool_name}: name exactly one of artifact_relative_path and repo_file_path"
+                ));
+            }
+            WorkQueueOp::AttachFile {
+                item_id: required(tool_name, args.item_id, "item_id")?,
+                basename: required(tool_name, args.basename, "basename")?,
+                source: if let Some(path) = args.artifact_relative_path {
+                    super::FileSource::ArtifactRelativePath(path)
+                } else {
+                    super::FileSource::RepoFilePath(
+                        args.repo_file_path.expect("exactly one source is named"),
+                    )
+                },
+            }
+        }
+        crate::work_item_file_tools::WORK_ITEM_DETACH_FILE => WorkQueueOp::DetachFile {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+            basename: required(tool_name, args.basename, "basename")?,
+        },
+        crate::work_item_file_tools::WORK_ITEM_LIST_FILES => WorkQueueOp::ListFiles {
+            item_id: required(tool_name, args.item_id, "item_id")?,
+        },
         other => return Err(format!("unknown stack tool: {other}")),
     })
 }
