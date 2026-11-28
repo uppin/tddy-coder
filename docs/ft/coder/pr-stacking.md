@@ -603,6 +603,7 @@ Only one nesting level is rendered for v1; the grouping utility is written to su
 
 ## Related
 
+- [Work item files](work-item-files.md) — files a work item carries, attached and detached on the queue, delivered into every session spawned for the item
 - [PR-stack documents](pr-stack-docs.md) — the per-PR PRD and changeset, and how a child session is started holding them
 - [PR-Stack live status & repoint](pr-stack-live-status.md) — the branch as the durable link key; branch→session/PR resolution and live PR status in the web view; the Repoint control; and the sequence-respecting spawn base (`Stack::base_ref_for_spawn`).
 - [Session drawer](../web/session-drawer.md) — session drawer screen layout, create session, recipe field, grouping, and the [Per-Workflow Session Views](../web/session-drawer.md#per-workflow-session-views).
