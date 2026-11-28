@@ -469,6 +469,7 @@ mod tests {
             &Workspace {
                 root: Path::new("/workspace"),
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             },
         );
 
@@ -532,6 +533,7 @@ mod tests {
             &Workspace {
                 root: Path::new("/workspace"),
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             },
         );
 

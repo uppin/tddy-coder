@@ -9,6 +9,7 @@ name = "tddy_code_analysis"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-fs = { path = "../tddy-fs" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 md5 = "0.7"
@@ -21,6 +22,8 @@ walkdir = "2"
 which = "6"
 
 [dev-dependencies]
+# `#fs-port`: the direct-disk-io guard and `MemFs` for this crate's tests.
+tddy-fs = { path = "../tddy-fs", features = ["testing"] }
 pretty_assertions = { workspace = true }
 rstest = { workspace = true }
 tempfile = "3"

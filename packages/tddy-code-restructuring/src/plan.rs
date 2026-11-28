@@ -1432,7 +1432,7 @@ mod tests {
         .unwrap();
 
         // When its header is written
-        let refused = plan.header_for_anchored_files(workspace.path());
+        let refused = plan.header_for_anchored_files_on(&tddy_fs::DiskFs, workspace.path());
 
         // Then it is refused naming the file: `hint_of` hashing a missing file as empty never
         // reaches a header the author is writing for the first time

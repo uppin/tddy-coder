@@ -259,6 +259,7 @@ mod tests {
         let workspace = Workspace {
             root: directory.path(),
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let origin = Destination::read(directory.path(), "origin").expect("the origin's manifest");
 

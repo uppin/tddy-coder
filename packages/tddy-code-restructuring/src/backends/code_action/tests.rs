@@ -168,6 +168,7 @@ fn resolved_against(
         &Workspace {
             root: Path::new("/workspace"),
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         },
     )
 }

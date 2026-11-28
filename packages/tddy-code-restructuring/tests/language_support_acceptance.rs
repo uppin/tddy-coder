@@ -147,6 +147,7 @@ async fn a_document_opens_with_its_supports_language_id() {
                 &Workspace {
                     root: &root,
                     overlay: &overlay,
+                    fs: &tddy_fs::DiskFs,
                 },
             );
     })

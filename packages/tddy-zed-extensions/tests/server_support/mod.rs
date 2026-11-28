@@ -127,6 +127,7 @@ pub async fn resolved_and_applied(
             &Workspace {
                 root: &root,
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             },
         )?;
         tddy_code_restructuring::apply::apply_workspace_edit(

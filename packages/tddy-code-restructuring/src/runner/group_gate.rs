@@ -46,6 +46,7 @@ impl GroupRun {
     /// Begin the group the operation at `index` belongs to, journalling `group_started` naming the
     /// members from `index` on. `None` for an ungrouped operation.
     pub fn begin(
+        fs: &dyn tddy_fs::Fs,
         plan: &Plan,
         index: usize,
         paths: &StatePaths,
@@ -65,7 +66,8 @@ impl GroupRun {
         let last = *members
             .last()
             .expect("a group holds at least the operation that opens it");
-        journal.append(
+        journal.append_on(
+            fs,
             &paths.journal,
             JournalRecord::group_started(index, group.clone(), members.clone()),
         )?;
@@ -85,8 +87,12 @@ impl GroupRun {
     /// Journal the bytes of every file member `index`'s edit touches that no earlier member of the
     /// group has — before the member's `in_flight` record, so a crash anywhere inside the group
     /// leaves what a rollback restores from.
+    // The member's coordinates, the tree, the state files and the journal — the same
+    // handle set `commit_operation` threads.
+    #[allow(clippy::too_many_arguments)]
     pub fn pre_image(
         &mut self,
+        fs: &dyn tddy_fs::Fs,
         index: usize,
         id: Option<&OpId>,
         resolved: &Resolution,
@@ -97,13 +103,14 @@ impl GroupRun {
         let mut images = Vec::new();
         for path in touched_paths(&resolved.edit) {
             if self.captured.insert(path.clone()) {
-                images.push(PreImage::capture(root, &path)?);
+                images.push(PreImage::capture_on(fs, root, &path)?);
             }
         }
         if images.is_empty() {
             return Ok(());
         }
-        journal.append(
+        journal.append_on(
+            fs,
             &paths.journal,
             JournalRecord::pre_imaged(index, id.cloned(), self.group.clone(), images),
         )
@@ -131,15 +138,17 @@ impl GroupRun {
     /// group stays open in the journal, which a resume rolls back before it runs anything.
     pub fn finish(
         self,
+        fs: &dyn tddy_fs::Fs,
         root: &Path,
         paths: &StatePaths,
         journal: &mut Journal,
         cancel: &CancellationToken,
         spawns: &SpawnRecorder,
     ) -> Result<Vec<(usize, Resolution)>> {
-        match gate_group(root, &self.group, journal, cancel, spawns) {
+        match gate_group(fs, root, &self.group, journal, cancel, spawns) {
             Ok(()) => {
-                journal.append(
+                journal.append_on(
+                    fs,
                     &paths.journal,
                     JournalRecord::group_completed(self.last, self.group),
                 )?;
@@ -147,7 +156,7 @@ impl GroupRun {
             }
             Err(RestructureError::CallerStopped) => Err(RestructureError::CallerStopped),
             Err(failure) => {
-                roll_back_group(root, &self.group, paths, journal)?;
+                roll_back_group(fs, root, &self.group, paths, journal)?;
                 Err(failure)
             }
         }
@@ -172,7 +181,7 @@ impl GroupRun {
         match outcome {
             Err(failure) if !matches!(failure, RestructureError::CallerStopped) => {
                 if let Some(open) = slot.take() {
-                    roll_back_group(gate.root, open.name(), gate.paths, journal)?;
+                    roll_back_group(gate.fs, gate.root, open.name(), gate.paths, journal)?;
                 }
                 Err(failure)
             }
@@ -186,6 +195,8 @@ pub struct GroupGate<'a> {
     pub root: &'a Path,
     pub paths: &'a StatePaths,
     pub cancel: &'a CancellationToken,
+    /// The filesystem port the group's journalling, pre-images and rollback go through.
+    pub fs: &'a dyn tddy_fs::Fs,
 }
 
 /// What committing one operation left for the plan store to refresh.
@@ -211,10 +222,12 @@ impl GroupRun {
         journal: &mut Journal,
     ) -> Result<()> {
         if slot.is_none() {
-            *slot = GroupRun::begin(plan, index, gate.paths, journal)?;
+            *slot = GroupRun::begin(gate.fs, plan, index, gate.paths, journal)?;
         }
         match slot.as_mut() {
-            Some(open) => open.pre_image(index, id, resolved, gate.root, gate.paths, journal),
+            Some(open) => {
+                open.pre_image(gate.fs, index, id, resolved, gate.root, gate.paths, journal)
+            }
             None => Ok(()),
         }
     }
@@ -245,8 +258,15 @@ impl GroupRun {
         }
         on_check(open.name());
         let spawns = spawns.for_group(open.name());
-        open.finish(gate.root, gate.paths, journal, gate.cancel, &spawns)
-            .map(Settled::Ready)
+        open.finish(
+            gate.fs,
+            gate.root,
+            gate.paths,
+            journal,
+            gate.cancel,
+            &spawns,
+        )
+        .map(Settled::Ready)
     }
 }
 
@@ -259,6 +279,7 @@ impl GroupRun {
 /// [`crate::RestructureError::GroupDoesNotCompile`] naming the group and the compiler's errors. The
 /// caller rolls the group back ([`roll_back_group`]) before returning it.
 pub fn gate_group(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     group: &str,
     journal: &Journal,
@@ -272,7 +293,7 @@ pub fn gate_group(
         .filter_map(|record| record.edit.as_ref())
         .flat_map(touched_paths)
         .collect();
-    let packages = owning_packages(root, touched.into_iter())?;
+    let packages = owning_packages(fs, root, touched.into_iter())?;
     // The group gate has no progress sink in scope: it is reached from the apply loop through
     // `GroupRun::finish`, which carries only the root, the paths and the token. Its check is
     // therefore run silently.
@@ -298,6 +319,7 @@ pub fn gate_group(
 /// is journalled: a checkpoint behind the journal is the lag a resume accepts, one ahead of it is a
 /// divergence it refuses.
 pub fn roll_back_group(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     group: &str,
     paths: &StatePaths,
@@ -314,7 +336,7 @@ pub fn roll_back_group(
     let reached = reached.op;
 
     for image in journal.group_pre_images(group).iter().rev() {
-        image.restore(root)?;
+        image.restore_on(fs, root)?;
     }
 
     let before_group = journal
@@ -327,15 +349,16 @@ pub fn roll_back_group(
             op,
             ledger: journal.fold_through(op),
         }
-        .write(&paths.ledger)?,
-        None => match std::fs::remove_file(&paths.ledger) {
+        .write_on(fs, &paths.ledger)?,
+        None => match fs.remove_file(&paths.ledger) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
         },
     }
 
-    journal.append(
+    journal.append_on(
+        fs,
         &paths.journal,
         JournalRecord::group_rolled_back(reached, group.to_string()),
     )
@@ -347,6 +370,7 @@ pub fn roll_back_group(
 /// What a run continuing a journal does before it reads a single anchor: the group's end gate must
 /// judge members one run applied, so a partial group is undone and applied again whole.
 pub fn roll_back_an_open_group(
+    fs: &dyn tddy_fs::Fs,
     root: &Path,
     paths: &StatePaths,
     journal: &mut Journal,
@@ -359,7 +383,7 @@ pub fn roll_back_an_open_group(
         "group `{}` was interrupted before it finished; rolling it back",
         open.group
     ));
-    roll_back_group(root, &open.group, paths, journal)
+    roll_back_group(fs, root, &open.group, paths, journal)
 }
 
 #[cfg(test)]
@@ -392,7 +416,8 @@ mod tests {
             let plan = Plan::parse(THE_MEMBER).unwrap();
             let paths = StatePaths::under(root.path());
             let mut journal = Journal::default();
-            let mut slot = GroupRun::begin(&plan, 0, &paths, &mut journal).unwrap();
+            let mut slot =
+                GroupRun::begin(&tddy_fs::DiskFs, &plan, 0, &paths, &mut journal).unwrap();
             let edit = WorkspaceEdit {
                 changes: vec![FileEdit::Change {
                     path: "pkg/src/lib.rs".to_string(),
@@ -408,7 +433,15 @@ mod tests {
             let resolved = Resolution::of(edit.clone());
             slot.as_mut()
                 .unwrap()
-                .pre_image(0, None, &resolved, root.path(), &paths, &mut journal)
+                .pre_image(
+                    &tddy_fs::DiskFs,
+                    0,
+                    None,
+                    &resolved,
+                    root.path(),
+                    &paths,
+                    &mut journal,
+                )
                 .unwrap();
             std::fs::write(root.path().join("pkg/src/lib.rs"), "after\n").unwrap();
             journal
@@ -457,6 +490,7 @@ mod tests {
             root: root.path(),
             paths: &paths,
             cancel: &cancel,
+            fs: &tddy_fs::DiskFs,
         };
 
         // When the next member fails to resolve
@@ -498,6 +532,7 @@ mod tests {
             root: root.path(),
             paths: &paths,
             cancel: &cancel,
+            fs: &tddy_fs::DiskFs,
         };
 
         // When the caller stops waiting
@@ -540,6 +575,7 @@ mod tests {
 
         // When the group is judged at its end
         let outcome = open.finish(
+            &tddy_fs::DiskFs,
             root.path(),
             &paths,
             &mut journal,

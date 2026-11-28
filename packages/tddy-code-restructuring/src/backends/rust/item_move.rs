@@ -39,7 +39,7 @@ use serde_json::Value;
 use super::{lsp_edits, relative_to, seam_survey, server_defect, uri_of, LspPoint, RustBackend};
 use crate::crate_move::source_scan::items_of_module;
 use crate::edit::{FileEdit, Range, Resolution, WorkspaceEdit};
-use crate::item_anchor::{module_path_of, span_of, unlowered_item_anchor};
+use crate::item_anchor::{module_path_of_on, span_of, unlowered_item_anchor};
 use crate::plan::{Anchor, Reexport, RefactorOp};
 use crate::registry::Workspace;
 use crate::Result;
@@ -203,7 +203,7 @@ impl RustBackend {
             ));
         }
         let file = relative_to(uri, workspace.root)?;
-        let source = module_path_of(workspace.root, &file)?;
+        let source = module_path_of_on(workspace.fs, workspace.root, &file)?;
         let survey = MemberSurvey {
             uri,
             file: &file,
@@ -231,7 +231,8 @@ impl RustBackend {
     ) -> Result<Vec<ReachedMember>> {
         let region = text::line_start(survey.source_text, survey.run.first_line)
             ..text::line_end(survey.source_text, survey.run.last_line);
-        let crate_name = module_path_of(workspace.root, survey.file)?.swap_remove(0);
+        let crate_name =
+            module_path_of_on(workspace.fs, workspace.root, survey.file)?.swap_remove(0);
         let mut reached = Vec::new();
         for member in members {
             let named = [(member.name.as_str(), &member.position)];
@@ -373,6 +374,6 @@ fn written_in(
         return Err(unlowered_item_anchor(&op.anchor, "`move_item`"));
     };
     let region = text::line_start(source_text, start.line)..text::line_end(source_text, end.line);
-    let module = module_path_of(workspace.root, file)?.split_off(1);
+    let module = module_path_of_on(workspace.fs, workspace.root, file)?.split_off(1);
     Ok((module, items_of_module(&source_text[region]).defined))
 }

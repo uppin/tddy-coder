@@ -142,6 +142,10 @@ pub struct Options {
     /// built-ins, which is what a run knew before extensions existed. An `anchors` or a static
     /// `check` whose files are all claimed by a support with no server starts no language server
     /// (`#reshape` extension-outline, R5–R7).
+    /// The filesystem port this run's file I/O goes through. Disk at the front ends;
+    /// a test (or an embedding host) may run a whole restructure against another
+    /// implementation. A collaborator like [`Self::installed`].
+    pub fs: Arc<dyn tddy_fs::Fs>,
     pub installed: Arc<SupportRegistry>,
     /// The clients of the servers the front end started for languages of [`Self::installed`],
     /// by language — one per language [`super::installed_launches_for`] names for the plan.
@@ -179,6 +183,7 @@ impl Default for Options {
             repoints: Vec::new(),
             rebinds: Vec::new(),
             detaches: Vec::new(),
+            fs: Arc::new(tddy_fs::DiskFs),
             progress: discard(),
             account: discard(),
             trace: untraced,
@@ -309,7 +314,7 @@ impl Options {
     pub fn plan_item_anchors_need_a_server(&self) -> bool {
         self.plan()
             .ok()
-            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|path| self.fs.read_to_string(&path).ok())
             .and_then(|text| crate::Plan::parse(&text).ok())
             .is_some_and(|plan| {
                 plan.ops.iter().flat_map(|op| op.anchors()).any(|anchor| {

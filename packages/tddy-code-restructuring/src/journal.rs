@@ -235,7 +235,12 @@ pub struct Journal {
 impl Journal {
     /// Load a journal from disk, or an empty one when no journal exists.
     pub fn load(path: &Path) -> Result<Journal> {
-        let contents = match std::fs::read_to_string(path) {
+        Self::load_on(&tddy_fs::DiskFs, path)
+    }
+
+    /// [`Journal::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<Journal> {
+        let contents = match fs.read_to_string(path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Journal::default())
@@ -259,26 +264,33 @@ impl Journal {
     ///
     /// Sequence numbers are assigned here, so callers never have to track them.
     pub fn append(&mut self, path: &Path, record: JournalRecord) -> Result<()> {
-        use std::io::Write;
+        self.append_on(&tddy_fs::DiskFs, path, record)
+    }
 
+    /// [`Journal::append`] through the filesystem port.
+    ///
+    /// The append is one `Fs::append` of the encoded line. The hand-rolled append this
+    /// replaces also `sync_all`ed before returning; the port has no durable-append op, so
+    /// that fsync is a recorded gap (see the node changeset) rather than silently dropped:
+    /// a crash can now lose the last record the way it can lose any unsynced write.
+    pub fn append_on(
+        &mut self,
+        fs: &dyn tddy_fs::Fs,
+        path: &Path,
+        record: JournalRecord,
+    ) -> Result<()> {
         let record = JournalRecord {
             seq: self.records.len(),
             ..record
         };
 
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs.create_dir_all(parent)?;
         }
         let encoded = serde_json::to_string(&record)
             .map_err(|error| crate::RestructureError::MalformedPlan(error.to_string()))?;
 
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)?;
-        writeln!(file, "{encoded}")?;
-        file.flush()?;
-        file.sync_all()?;
+        fs.append(path, format!("{encoded}\n").as_bytes())?;
 
         self.records.push(record);
         Ok(())

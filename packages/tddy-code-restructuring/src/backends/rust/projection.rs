@@ -198,6 +198,7 @@ mod tests {
         let workspace = Workspace {
             root: directory.path(),
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let mut backend = RustBackend::new("rust-analyzer", "/cargo", "/rustup");
 
@@ -230,6 +231,7 @@ mod tests {
         let workspace = Workspace {
             root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let mut backend = RustBackend::new("rust-analyzer", "/cargo", "/rustup");
         backend.projection.record(&an_edit_of(vec![

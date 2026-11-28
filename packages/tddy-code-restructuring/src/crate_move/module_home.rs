@@ -437,6 +437,7 @@ mod tests {
             let workspace = Workspace {
                 root: self.directory.path(),
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             };
             let origin = destination::Destination::read(self.directory.path(), "packages/daemon")
                 .expect("the crate has a manifest");

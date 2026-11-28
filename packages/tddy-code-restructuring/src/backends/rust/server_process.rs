@@ -80,8 +80,12 @@ pub(crate) fn describe_server_environment(
     )
 }
 
-pub(crate) fn default_toolchain_name(rustup_home: &Path) -> Option<String> {
-    std::fs::read_to_string(rustup_home.join("settings.toml"))
+/// The rustup home's default toolchain, through the filesystem port.
+pub(crate) fn default_toolchain_name_on(
+    fs: &dyn tddy_fs::Fs,
+    rustup_home: &Path,
+) -> Option<String> {
+    fs.read_to_string(&rustup_home.join("settings.toml"))
         .ok()
         .and_then(|contents| {
             contents.lines().find_map(|line| {

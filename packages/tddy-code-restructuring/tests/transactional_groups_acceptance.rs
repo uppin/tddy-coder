@@ -230,6 +230,7 @@ fn a_crash_after_the_first_member_of(fixture: &AFixtureWorkspace, plan: &Path) {
         )
         .expect("the pre-image is journalled");
     runner::commit_operation(
+        &tddy_fs::DiskFs,
         0,
         Some(&first),
         &Resolution::of(the_rename_of_level_to_tier()),

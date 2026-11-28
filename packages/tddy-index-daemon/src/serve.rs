@@ -136,7 +136,7 @@ async fn over_unix_socket(
     }
     let listener = tokio::net::UnixListener::bind(path)
         .with_context(|| format!("bind the code_index gRPC listener on {}", path.display()))?;
-    let _bound = BoundSocket(path.to_path_buf());
+    let _bound = BoundSocket::new(path.to_path_buf());
     log::info!(target: crate::MAIN, "listening on {}", path.display());
 
     tonic::transport::Server::builder()
@@ -157,14 +157,26 @@ async fn over_unix_socket(
 /// future is dropped where it is awaiting, so anything written after that await would never run.
 /// Dropping the future drops this, which is the one cleanup hook an aborted task still has — and it
 /// has to run, because the next start refuses a path it finds occupied.
-struct BoundSocket(std::path::PathBuf);
+struct BoundSocket {
+    path: std::path::PathBuf,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+}
+
+impl BoundSocket {
+    fn new(path: std::path::PathBuf) -> Self {
+        Self {
+            path,
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
+        }
+    }
+}
 
 impl Drop for BoundSocket {
     fn drop(&mut self) {
-        if let Err(failure) = std::fs::remove_file(&self.0) {
+        if let Err(failure) = self.fs.remove_file(&self.path) {
             log::warn!(
                 target: crate::MAIN,
-                "could not remove {}: {failure}", self.0.display()
+                "could not remove {}: {failure}", self.path.display()
             );
         }
     }

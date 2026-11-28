@@ -98,6 +98,7 @@ impl AWorkspace {
         let workspace = Workspace {
             root: self.root(),
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         unrunnable_moves(&workspace, &plan.ops).expect("the preconditions read the workspace")
     }

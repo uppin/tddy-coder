@@ -85,7 +85,7 @@ impl Walk<'_, '_> {
         let target = if *head == krate.extern_name {
             krate.clone()
         } else {
-            match krate.path_dependency(self.workspace.root, head)? {
+            match krate.path_dependency(self.workspace.fs, self.workspace.root, head)? {
                 Some(dependency) => dependency,
                 None => return Ok(None),
             }
@@ -310,6 +310,7 @@ mod tests {
             let workspace = Workspace {
                 root: self.directory.path(),
                 overlay: &overlay,
+                fs: &tddy_fs::DiskFs,
             };
             let origin = Destination::read(self.directory.path(), "origin")
                 .expect("the origin has a manifest");

@@ -153,8 +153,8 @@ fn holds(workspace: &Workspace<'_>, path: &str) -> Result<bool> {
 
 /// Whether `dir` is absent or holds nothing, so creating a crate in it writes over no file.
 fn is_empty_or_missing(workspace: &Workspace<'_>, dir: &str) -> Result<bool> {
-    match std::fs::read_dir(workspace.root.join(dir)) {
-        Ok(mut entries) => Ok(entries.next().is_none()),
+    match workspace.fs.read_dir(&workspace.root.join(dir)) {
+        Ok(entries) => Ok(entries.is_empty()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
         Err(error) => Err(error.into()),
     }
@@ -247,6 +247,7 @@ pub(crate) fn created_by_earlier_operations(
         let seeded = Workspace {
             root: workspace.root,
             overlay: &overlay,
+            fs: &tddy_fs::DiskFs,
         };
         let home = super::preconditions::home_of_anchor(&seeded, &op.anchor)?;
         let origin = Destination::read_in(&seeded, &home.crate_dir)?;

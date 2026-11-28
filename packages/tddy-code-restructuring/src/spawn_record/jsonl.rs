@@ -2,9 +2,8 @@
 //! process exists and an `end` line when it was waited on, never truncated.
 
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
-use std::path::Path;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -15,10 +14,18 @@ use tddy_lsp::{OperationContext, ProcessOutcome, ProcessStart, ProcessToken, Spa
 use super::purpose;
 use super::redact::redacted;
 
+/// How long an append may take before the record gives up on its sink: a line lands on a local
+/// file in milliseconds. A thread still stuck in a refused append past the deadline is left to
+/// the process's exit to collect.
+const A_LINE_LANDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// A [`SpawnObserver`] that appends what it is told to a file, applying the redaction policy
 /// before a byte is written.
 pub struct JsonlSpawnRecord {
-    file: Mutex<File>,
+    /// Where the lines go and through what port: re-appended per line (the file is opened,
+    /// written and closed by each append) rather than held open, which reads the same from
+    /// outside — lines in order, never truncated.
+    sink: Mutex<(std::sync::Arc<dyn tddy_fs::Fs>, PathBuf)>,
     /// Cleared once a write has failed, so a record that cannot be written stops being attempted
     /// rather than failing the run it is observing.
     recording: AtomicBool,
@@ -29,24 +36,79 @@ impl JsonlSpawnRecord {
     /// Open `path` for appending, creating it when it is absent. Existing lines are never
     /// touched, so a second run appends after the first.
     pub fn open(path: &Path) -> io::Result<Self> {
+        Self::open_on(path, std::sync::Arc::new(tddy_fs::DiskFs))
+    }
+
+    /// [`JsonlSpawnRecord::open`] through the filesystem port.
+    ///
+    /// The proving append runs on its own thread under a deadline: a record path whose write end
+    /// blocks — a pipe whose reader has not come, say — must be refused rather than hold the
+    /// caller forever, so past the deadline the open reports [`io::ErrorKind::WouldBlock`].
+    pub fn open_on(path: &Path, fs: std::sync::Arc<dyn tddy_fs::Fs>) -> io::Result<Self> {
+        // Opening is what proves the file can be appended to, so the failure a caller sees
+        // is the open's rather than the first line's.
+        let (done, completed) = std::sync::mpsc::channel();
+        let opening = {
+            let fs = fs.clone();
+            let path = path.to_path_buf();
+            move || {
+                let _ = done.send(fs.append(&path, b""));
+            }
+        };
+        let _ = std::thread::spawn(opening);
+        match completed.recv_timeout(A_LINE_LANDS_WITHIN) {
+            Ok(result) => result?,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    format!(
+                        "the record at {} did not open within {A_LINE_LANDS_WITHIN:?}",
+                        path.display()
+                    ),
+                ));
+            }
+        }
         Ok(Self {
-            file: Mutex::new(open_for_appending(path)?),
+            sink: Mutex::new((fs, path.to_path_buf())),
             recording: AtomicBool::new(true),
             book: RecordBook::new(),
         })
     }
 
     /// Append one line, and stop recording for good if the file will not take it.
+    ///
+    /// The append runs on its own thread under a deadline. A line lands on a local file in
+    /// milliseconds; an append that does not come back — a record path whose write end blocks,
+    /// such as a pipe whose only reader has gone — would otherwise hold the run it is observing
+    /// forever, so past the deadline the recording stops and the run carries on without it. The
+    /// mutex is held across the attempt, so lines still land in order while the record is healthy.
     pub(super) fn write_line(&self, line: &str) {
         if !self.recording.load(Ordering::Relaxed) {
             return;
         }
-        let Ok(mut file) = self.file.lock() else {
+        let Ok(sink) = self.sink.lock() else {
             return;
         };
-        if let Err(error) = file.write_all(line.as_bytes()) {
-            log::warn!("the spawn record could not be written; recording stops: {error}");
-            self.recording.store(false, Ordering::Relaxed);
+        let (fs, path) = (sink.0.clone(), sink.1.clone());
+        drop(sink);
+        let (done, completed) = std::sync::mpsc::channel();
+        let line = line.to_string();
+        std::thread::spawn(move || {
+            let _ = done.send(fs.append(&path, line.as_bytes()));
+        });
+        match completed.recv_timeout(A_LINE_LANDS_WITHIN) {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                log::warn!("the spawn record could not be written; recording stops: {error}");
+                self.recording.store(false, Ordering::Relaxed);
+            }
+            Err(_) => {
+                log::warn!(
+                    "the spawn record did not take a line within {A_LINE_LANDS_WITHIN:?}; \
+                     recording stops"
+                );
+                self.recording.store(false, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -63,11 +125,6 @@ impl SpawnObserver for JsonlSpawnRecord {
             self.write_line(&line);
         }
     }
-}
-
-/// Open `path` with `O_APPEND` and `O_CREAT`, so a line is added and existing lines are kept.
-pub(super) fn open_for_appending(path: &Path) -> io::Result<File> {
-    OpenOptions::new().create(true).append(true).open(path)
 }
 
 /// The `end` line's `outcome` object, matching the outcome the process ended with.

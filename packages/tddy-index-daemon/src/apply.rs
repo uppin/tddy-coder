@@ -194,6 +194,7 @@ fn apply_held_plan(
         root,
         paths: &paths,
         cancel,
+        fs: &*options.fs,
     };
     // Any failure inside the loop ends the group it is in, whole: see
     // [`GroupRun::roll_back_on_failure`].
@@ -209,7 +210,13 @@ fn apply_held_plan(
                 );
                 // A group is never left half applied: nobody is left to judge it, so it is undone.
                 if let Some(open) = group.take() {
-                    group_gate::roll_back_group(root, open.name(), &paths, &mut journal)?;
+                    group_gate::roll_back_group(
+                        &*options.fs,
+                        root,
+                        open.name(),
+                        &paths,
+                        &mut journal,
+                    )?;
                 }
                 break;
             }
@@ -233,6 +240,7 @@ fn apply_held_plan(
                     &Workspace {
                         root,
                         overlay: &overlay,
+                        fs: &*options.fs,
                     },
                 )?;
             let id = op.id.as_ref().filter(|_| !legacy);
@@ -245,6 +253,7 @@ fn apply_held_plan(
             } else {
                 GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
                 runner::commit_operation(
+                    &*options.fs,
                     index,
                     id,
                     &resolved,
