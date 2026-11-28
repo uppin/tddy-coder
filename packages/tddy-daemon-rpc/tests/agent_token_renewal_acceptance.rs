@@ -41,7 +41,7 @@ async fn an_agent_renews_its_token_and_the_renewed_token_is_accepted_in_turn() {
     let (daemon, credentials, _sessions) = a_signing_daemon();
     let exec_tools = daemon.handlers().exec_tool_service();
 
-    // When the agent renews its token
+    // When the agent renews its token with the reserved call
     let first = exec_tools
         .execute_tool(a_renewal(&credentials.agent_token_for(SESSION)))
         .await
@@ -60,8 +60,10 @@ async fn an_agent_renews_its_token_and_the_renewed_token_is_accepted_in_turn() {
 
 #[tokio::test]
 async fn the_operators_own_token_cannot_be_renewed_into_an_agent_token() {
+    // Given the operator's own access token
     let (daemon, credentials, _sessions) = a_signing_daemon();
 
+    // When it is presented to the reserved renewal call
     let refusal = daemon
         .handlers()
         .exec_tool_service()
@@ -69,6 +71,7 @@ async fn the_operators_own_token_cannot_be_renewed_into_an_agent_token() {
         .await
         .expect_err("a user's token is refused");
 
+    // Then the daemon refuses: a user's token buys no agent token
     assert_eq!(refusal.code, Code::Unauthenticated);
     assert!(
         refusal.message.contains("not an agent's access token"),

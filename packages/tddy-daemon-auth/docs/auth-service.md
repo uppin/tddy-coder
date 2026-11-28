@@ -16,6 +16,7 @@ boundary in fact and not only in name.
 | `auth::entry_parts` | the pieces `build_auth_entries_admitting` assembles: `provider_auth_entry` (the `auth.AuthService` entry for the provider `github_provider_kind` chose), `probed_credential_vaults` (the `auth_storage` probe, the looser-than-`0700` warning and the vaults), `session_user_resolver` and `livekit_token_service_entry`. `build_auth_entries_admitting` takes the web address as one `(host, port)` value, the redirect fallback both providers derive their callback from |
 | `first_login_admission` | `FirstLoginEnrolment` — a desktop's first-login enrolment, the `LoginAdmission` an embedded host is built with |
 | `signing_key` | `DaemonSigningKey`, `load_signing_key` / `signing_key_path`, the `KeyDirectory` port and `StandaloneKeyDirectory`, `DirectorySessionTokenVerifier`, `SessionTokens`, `auth_storage_looser_than_owner_only` |
+| `agent_token_renewal` | `SessionTokens::renew_agent` — re-minting a session agent's still-valid own token for a fresh `tddy_github::AGENT_TOKEN_TTL`, and `AgentTokenRenewalRefusal`, the four ways a renewal is refused (below) |
 | `vault_lifetimes` | `credential_vaults_in` — the credential vaults over `auth_storage`, holding a pending sign-in for `github.pending_login_ttl_seconds` and an unused open vault for `github.open_vault_idle_ttl_seconds`; `spawn_credential_sweep` and `sweep_period` |
 | `account_linking_provider` | `github_account_linking_provider` — the device-flow-only `GitHubOAuthProvider` an account link runs on, built from the login `client_id` (a public-client provider; the secret is never sent), or `None` for a stub or a `github:` block that serves no sign-in. It has no notion of a session, so nothing built on it can mint one. Used by `tddy-daemon`'s `account_linking` — [account-linking.md](../../tddy-accounts/docs/account-linking.md) |
 | `github_pr_credentials` | `PrLookup` / `pr_lookup_for_caller`, the three outcomes a PR list reads by, and `retained_github_token`, the caller's GitHub token read from their open credential vault |
@@ -307,6 +308,19 @@ that would be an identity no peer was told about. `build_auth_entries(config, �
 daemon with no signing identity (no `github:` block), and answers it with `user_resolver: None`, so
 the wiring layer registers no session services — a refusal, not a permissive default.
 
+**`SessionTokens::renew_agent(current, session_id)`** re-mints a session agent's own token: the
+agent's `tddy-tools --mcp` calls it through the reserved `tddy.token.RenewAgentSession` exec-tool
+name (`tddy-daemon-rpc`'s `exec_tool/agent_token_renewal.rs`) before the 24 h token runs out, so an
+agent that outlives one minting keeps its tools. Renewal is deliberately narrow — it accepts only a
+still-valid agent access token signed by **this** daemon (`claims.kid` must be the local key id) for
+the session the renewal names, and answers a token with the same identity, principal and session,
+valid for another `AGENT_TOKEN_TTL`. An expired token is never revived — renewal extends a
+credential, it never replaces one; a token that expired anyway is re-minted when the daemon resumes
+the session. The refusals (`AgentTokenRenewalRefusal`): `NotVerified` (expired, forged, malformed or
+signed by an unknown key), `NotSignedHere` (another daemon's key), `NotAnAgentToken` (a user's, a
+relay's or a refresh token — a user's token cannot buy an agent token), `WrongSession` (the token
+was minted for another session).
+
 **The LiveKit crate never reaches this one.** Room JWTs cross the boundary through the
 `SessionTokenMinter` port, and peers' keys cross it as opaque strings `tddy-daemon` decodes;
 `tests/dependency_boundary_unit.rs` on the LiveKit side pins `tddy-daemon-auth` off its dependency
@@ -381,6 +395,7 @@ cargo test -p tddy-daemon-auth
 | `tests/token_service_acceptance.rs` | `MintLiveKitToken` and `token.TokenService` minting room JWTs against `config.livekit.api_secret` (its only job), each verified with `livekit_api::access_token::TokenVerifier` — and a server holding a *different* secret refusing the same JWT, without which the positive cases assert nothing |
 | `tests/cross_crate_session_token_acceptance.rs` | a token signed here authenticating a call to a service in another crate. The far side is `tddy-service` deliberately: this crate cannot reach the daemon's own services, which is exactly the property below |
 | `tests/per_daemon_signing_identity_acceptance.rs` | daemon A's token verifying on daemon B once B's directory holds A's key — B's directory is asked for exactly A's key id — and an unseen key id refused with no fallback |
+| `agent_token_renewal.rs` (inline) | an agent token near expiry renewed past its old expiry with the same identity, principal and session; an expired token refused, never revived; a user's token refused; a renewal for another session refused; another daemon's token refused with the unknown-key-id error |
 | `tests/auth_without_livekit_acceptance.rs` | a daemon with no `livekit:` block completing a sign-in through the served `ExchangeCode`, and the token it returns resolving to that login |
 | `tests/auth_storage_posture_warning_acceptance.rs` | exactly one startup warning for a `0755` `auth_storage`, none for `0700` |
 | `signing_key.rs` (inline) | generate once at `0600` and reuse byte-identically across a restart; a group-readable key refused and left unrepaired; the key's location from `auth_storage` or `tddy_data_dir`, and a refusal with neither; a directory lookup that cannot answer on the first poll refused without waiting. The first-boot hard-link race has no dedicated test |

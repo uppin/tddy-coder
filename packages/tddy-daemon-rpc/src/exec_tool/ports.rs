@@ -36,9 +36,7 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         request: Request<ExecuteToolRequest>,
     ) -> Result<Response<ExecuteToolResponse>, Status> {
         // An agent renewing its own token is answered here, never routed (`agent_token_renewal`).
-        if request.get_ref().tool_name
-            == tddy_session_tool_client::session_token::RENEW_AGENT_SESSION_TOKEN_TOOL
-        {
+        if super::agent_token_renewal::is_reserved_renewal_call(&request.get_ref().tool_name) {
             return self.renew_agent_session_token(request).map(Response::new);
         }
         // The relay's internal names are never tools (n5): see `serve_relay_call`.

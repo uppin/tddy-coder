@@ -43,6 +43,7 @@ fn an_agent_token_that_expired_an_hour_ago() -> String {
 
 #[test]
 fn an_expired_token_is_refused_as_expired_with_the_way_out() {
+    // Given a call carrying an agent token that expired an hour ago
     let refusal = authorize_exec_tool_caller(
         &DaemonConfig::default(),
         &a_resolver_that_accepts_nothing(),
@@ -50,6 +51,7 @@ fn an_expired_token_is_refused_as_expired_with_the_way_out() {
     )
     .expect_err("an expired token is refused");
 
+    // Then the refusal names the expiry and the way out, not a split-session misconfiguration
     assert_eq!(refusal.code, Code::Unauthenticated);
     assert!(refusal.message.contains("expired"), "{}", refusal.message);
     assert!(refusal.message.contains("resum"), "{}", refusal.message);
@@ -62,6 +64,7 @@ fn an_expired_token_is_refused_as_expired_with_the_way_out() {
 
 #[test]
 fn a_token_that_does_not_parse_keeps_the_verification_hint() {
+    // Given a call carrying something that is not a session token at all
     let refusal = authorize_exec_tool_caller(
         &DaemonConfig::default(),
         &a_resolver_that_accepts_nothing(),
@@ -69,6 +72,7 @@ fn a_token_that_does_not_parse_keeps_the_verification_hint() {
     )
     .expect_err("an unreadable token is refused");
 
+    // Then the refusal is the token-verification one
     assert_eq!(refusal.code, Code::Unauthenticated);
     assert!(
         refusal.message.contains("could not verify"),

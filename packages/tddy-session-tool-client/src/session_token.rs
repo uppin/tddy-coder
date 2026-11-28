@@ -57,22 +57,15 @@ fn now_unix() -> u64 {
         .unwrap_or_default()
 }
 
-/// Renew the token when `expires_at_unix` is less than `margin` away, or unknown.
-pub async fn renew_session_token_if_due(
-    expires_at_unix: Option<u64>,
-    margin: Duration,
-) -> Result<RenewalOutcome, String> {
-    if let Some(expiry) = expires_at_unix {
-        if expiry > now_unix() + margin.as_secs() {
-            return Ok(RenewalOutcome::NotDue);
-        }
-    }
+/// Dispatch the reserved renewal call over the route this process reaches its own daemon by,
+/// carrying `args`. `Ok(None)` when no route here renews: a sandbox socket (authenticated by the
+/// connection) or a room transport.
+async fn ask_own_daemon_to_renew(args: &serde_json::Value) -> Result<Option<String>, String> {
     let envelope_for = |session_id: String, session_token: String| SessionToolEnvelope {
         session_id,
         session_token,
         daemon_instance_id: String::new(),
     };
-    let args = serde_json::json!({});
     let answer = match detect_session_tool_transport() {
         Some(SessionToolTransport::DaemonUds {
             socket_path,
@@ -84,7 +77,7 @@ pub async fn renew_session_token_if_due(
                 &socket_path,
                 &envelope_for(session_id, session_token),
                 RENEW_AGENT_SESSION_TOKEN_TOOL,
-                &args,
+                args,
             )
             .await
         }
@@ -100,13 +93,18 @@ pub async fn renew_session_token_if_due(
                 &session_token,
                 "",
                 RENEW_AGENT_SESSION_TOKEN_TOOL,
-                &args,
+                args,
             )
             .await
         }
-        _ => return Ok(RenewalOutcome::NotRenewable),
+        _ => return Ok(None),
     };
-    let body: serde_json::Value = serde_json::from_str(&answer)
+    Ok(Some(answer))
+}
+
+/// The renewed token and its expiry, from the daemon's answer; the error names why it refused.
+fn renewed_token_from(answer: &str) -> Result<(String, u64), String> {
+    let body: serde_json::Value = serde_json::from_str(answer)
         .map_err(|e| format!("token renewal answered something that is not JSON: {e}"))?;
     let (Some(token), Some(expires_at_unix)) = (
         body.get("session_token").and_then(|v| v.as_str()),
@@ -114,9 +112,26 @@ pub async fn renew_session_token_if_due(
     ) else {
         return Err(format!("token renewal refused: {answer}"));
     };
+    Ok((token.to_string(), expires_at_unix))
+}
+
+/// Renew the token when `expires_at_unix` is less than `margin` away, or unknown.
+pub async fn renew_session_token_if_due(
+    expires_at_unix: Option<u64>,
+    margin: Duration,
+) -> Result<RenewalOutcome, String> {
+    if let Some(expiry) = expires_at_unix {
+        if expiry > now_unix() + margin.as_secs() {
+            return Ok(RenewalOutcome::NotDue);
+        }
+    }
+    let Some(answer) = ask_own_daemon_to_renew(&serde_json::json!({})).await? else {
+        return Ok(RenewalOutcome::NotRenewable);
+    };
+    let (token, expires_at_unix) = renewed_token_from(&answer)?;
     *RENEWED_TOKEN
         .write()
-        .map_err(|_| "the renewed-token slot is poisoned".to_string())? = Some(token.to_string());
+        .map_err(|_| "the renewed-token slot is poisoned".to_string())? = Some(token);
     Ok(RenewalOutcome::Renewed { expires_at_unix })
 }
 

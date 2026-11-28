@@ -123,6 +123,7 @@ use this crate.
 ## Documentation
 
 ### Technical implementation (how)
+- [Session-token renewal](./docs/session-token-renewal.md) — the token `tddy-tools --mcp` keeps alive while the agent runs
 - [Changesets](./docs/changesets/) — applied changeset history
 - [`tddy-tools`](../tddy-tools/README.md) — the binary that advertises the tools this dispatches
 

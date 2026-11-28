@@ -11,6 +11,12 @@ use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 
 use super::ExecToolRpcHandler;
 
+/// Whether `tool_name` is the reserved token-renewal call this module answers before anything
+/// routes it (`ports.rs`).
+pub(super) fn is_reserved_renewal_call(tool_name: &str) -> bool {
+    tool_name == tddy_session_tool_client::session_token::RENEW_AGENT_SESSION_TOKEN_TOOL
+}
+
 impl ExecToolRpcHandler {
     pub(super) fn renew_agent_session_token(
         &self,

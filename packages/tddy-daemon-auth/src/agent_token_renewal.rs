@@ -155,6 +155,7 @@ mod tests {
 
     #[test]
     fn an_expired_agent_token_is_not_revived() {
+        // Given an agent token issued a day and an hour ago, so already expired
         let (daemon, _home) = a_daemon();
         let expired = daemon.signer().mint_agent_with_issued_at(
             &an_operator(),
@@ -163,8 +164,12 @@ mod tests {
             SESSION,
         );
 
+        // When its tddy-tools asks the daemon to renew it
+        let renewed = daemon.renew_agent(&expired, SESSION);
+
+        // Then the daemon refuses: renewal extends a credential, it never revives one
         assert_eq!(
-            daemon.renew_agent(&expired, SESSION),
+            renewed,
             Err(AgentTokenRenewalRefusal::NotVerified(
                 SessionTokenError::Expired
             ))
@@ -173,32 +178,37 @@ mod tests {
 
     #[test]
     fn a_users_token_cannot_buy_an_agent_token() {
+        // Given the operator's own access token
         let (daemon, _home) = a_daemon();
         let user = daemon
             .signer()
             .mint(&an_operator(), Duration::from_secs(600));
 
-        assert_eq!(
-            daemon.renew_agent(&user, SESSION),
-            Err(AgentTokenRenewalRefusal::NotAnAgentToken)
-        );
+        // When it is presented as an agent token to renew
+        let renewed = daemon.renew_agent(&user, SESSION);
+
+        // Then the daemon refuses: renewal mints no agent token for a user's token
+        assert_eq!(renewed, Err(AgentTokenRenewalRefusal::NotAnAgentToken));
     }
 
     #[test]
     fn an_agent_token_renews_only_for_its_own_session() {
+        // Given an agent token minted for this session
         let (daemon, _home) = a_daemon();
         let token = daemon
             .signer()
             .mint_agent(&an_operator(), Duration::from_secs(600), SESSION);
 
-        assert_eq!(
-            daemon.renew_agent(&token, "another-session"),
-            Err(AgentTokenRenewalRefusal::WrongSession)
-        );
+        // When the renewal names another session
+        let renewed = daemon.renew_agent(&token, "another-session");
+
+        // Then the daemon refuses: a session's token is renewed only for that session
+        assert_eq!(renewed, Err(AgentTokenRenewalRefusal::WrongSession));
     }
 
     #[test]
     fn another_daemons_agent_token_is_not_renewed_here() {
+        // Given an agent token the agent's own daemon signed
         let (signer_daemon, _a) = a_daemon();
         let (other_daemon, _b) = a_daemon();
         let token =
@@ -206,15 +216,16 @@ mod tests {
                 .signer()
                 .mint_agent(&an_operator(), Duration::from_secs(600), SESSION);
 
-        let refusal = other_daemon
-            .renew_agent(&token, SESSION)
-            .expect_err("a foreign token is refused");
+        // When a different daemon is asked to renew it
+        let renewed = other_daemon.renew_agent(&token, SESSION);
 
-        // The standalone directory knows no peer key, so the token fails verification first.
-        assert!(matches!(
-            refusal,
-            AgentTokenRenewalRefusal::NotVerified(SessionTokenError::UnknownKeyId(_))
-                | AgentTokenRenewalRefusal::NotSignedHere
-        ));
+        // Then the daemon refuses with the unknown-key-id error: the standalone directory knows
+        // no peer key, so the token fails verification before the signer check
+        assert_eq!(
+            renewed,
+            Err(AgentTokenRenewalRefusal::NotVerified(
+                SessionTokenError::UnknownKeyId(signer_daemon.signer().key_id().clone())
+            ))
+        );
     }
 }
