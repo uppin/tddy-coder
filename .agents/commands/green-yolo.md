@@ -91,6 +91,9 @@ PR=$(gh pr view --json number --jq .number 2>/dev/null || true)   # empty = no P
   through the `muse-subagent` skill — run its *Make the host ready* now, then brief one driver per
   phase (`G`, then `W`, then `F` resuming `W`'s session). This command's consent and stops are what
   every stage prompt carries; Phase 0, Phase D and the report stay here.
+- **`#glm`** or **`#cursor-subagent`** (alias `#composer`): the same, with the Cursor agent CLI doing
+  each phase through the `cursor-subagent` skill (`#glm` on `glm-5p3-flash`, `#cursor-subagent` on
+  the newest Composer).
 - Print the **Progress Tracking** checklist below and keep it updated after every phase. The run is
   long. After a context reset, re-derive the phase from git and PR state (green commits present? PR
   ready? head SHA's checks terminal?) rather than starting over.
@@ -380,6 +383,6 @@ they reached GitHub, so the report is where the developer reviews them.
 `/pr-stack-rebase`, `/yolo-streak` (the whole-streak version — stacks plus standalone PRs — that
 reuses this consent table)
 **Skills**: `tdd`, `code-restructuring`, `analyze-code-issues`, `deferred-work`, `pr-stack`,
-`muse-subagent` (`#muse`), `behaviour-modifiers`
+`muse-subagent` (`#muse`), `cursor-subagent` (`#glm`, `#cursor-subagent`), `behaviour-modifiers`
 (all under `.agents/skills/`)
 **Script**: `scripts/ci-status.sh`

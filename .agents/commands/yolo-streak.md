@@ -537,6 +537,18 @@ Record per row in the ledger: the run name, the Muse `SESSION_ID`, `MUSE_MODEL` 
 driver's `RUN_EXIT=16` (machine stop or reboot) is resumed by the driver itself and never counts
 against the round cap. A `🔴 stopped` node keeps its worktree.
 
+**`#glm` / `#cursor-subagent`** (alias `#composer`) run this same mode through the
+**`cursor-subagent` skill** instead (`.agents/skills/cursor-subagent/SKILL.md`): the Cursor agent CLI
+(`agent -p`, one session per stage name continued with `--resume`) does every `[G]`, `[W]` and `[F]`,
+on `glm-5p3-flash` for `#glm` or `COMPOSER_MODEL` for `#cursor-subagent`, every stage, every node.
+Read the table above with `cursor-agent.sh` for `muse-agent.sh`, `~/.composer-runs/` for
+`~/.muse-runs/`, and the tag's model for `MUSE_MODEL`; the Effort row does not apply (the Cursor
+agent takes no effort flag). Announce each start as:
+
+```
+▶ n3 #702 [G] /green → glm-5p3-flash via cursor agent -p, driven by sonnet · low — complexity 4/5; #glm
+```
+
 ### 3 — Free the per-node worktree
 
 The per-node worktree is freed once `[W]` reports done and its head is pushed, and **always** before
@@ -768,8 +780,8 @@ that is not ✅ is stated plainly — no pipeline is "mostly done".
 - **Model and effort by the changeset's complexity score, always both.** On Claude Code `[G]` runs
   Haiku (low → xhigh) up to Sonnet · medium, `[W]` Sonnet · low up to Opus · medium, and the serial
   `[F]` fixer is sized once by the highest `[W]` row it will walk; on Cursor every stage uses its
-  default model; under `#muse` every stage is done by Muse Code, driven by a Sonnet · low subagent
-  (§ *Muse mode*). **Announce one line to the user at each subagent start** (node, stage, model ·
+  default model; under `#muse` every stage is done by Muse Code, and under `#glm` / `#cursor-subagent` by the
+  Cursor agent, driven by a Sonnet · low subagent (§ *Muse mode*). **Announce one line to the user at each subagent start** (node, stage, model ·
   effort, why) and record it in the ledger.
 - **Resume reads evidence, not memory.** A streak that is partly done restarts each node at its first
   unfinished stage; nothing done is redone, nothing unseen is trusted, and the status table shows the
@@ -804,6 +816,6 @@ version whose consent table this reuses), `/pr-stack-rebase`, `/add-to-pr-stack`
 `/merge-pr-stack`
 **Skills**: `orchestrate-work` (the general queue model — stack, siblings or DAG — this command
 applies), `code-restructuring`, `analyze-code-issues`, `muse-subagent` (Muse mode),
-`behaviour-modifiers` (`#muse`), `deferred-work` (record formats, the bar for deferring), `pr-stack`
+`cursor-subagent` (`#glm`, `#cursor-subagent`), `behaviour-modifiers` (`#muse`, `#glm`), `deferred-work` (record formats, the bar for deferring), `pr-stack`
 (`.agents/skills/pr-stack/SKILL.md` — the model for each stack in the streak) — § *`## Green wave`*,
 § *The backlog delta a stack leaves*
