@@ -339,13 +339,13 @@ pub async fn provision_with_interrupt(
     // session, and keeping it there is what makes a finished session's directory the whole story.
     let build_home_dir = params.repo_build_home;
     crate::app_fs()
-        .create_dir_all(sandbox_root.join(".work").join("tmp"))
+        .create_dir_all(&sandbox_root.join(".work").join("tmp"))
         .context("mkdir sandbox scratch tmp")?;
     crate::app_fs()
         .create_dir_all(&build_home_dir)
         .with_context(|| format!("mkdir build home {}", build_home_dir.display()))?;
     crate::app_fs()
-        .create_dir_all(sandbox_root.join("context"))
+        .create_dir_all(&sandbox_root.join("context"))
         .context("mkdir sandbox context")?;
     crate::app_fs()
         .create_dir_all(&egress_dir)

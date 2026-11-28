@@ -24,7 +24,8 @@ pub(crate) fn swap_in_on(
     remove_tree_on(fs, &previous)?;
     let had_previous = fs.metadata(&target).is_ok();
     if had_previous {
-        fs.rename(&target, &previous).map_err(|e| ExtensionError::io(&target, e))?;
+        fs.rename(&target, &previous)
+            .map_err(|e| ExtensionError::io(&target, e))?;
     }
     let restore = |error: ExtensionError| {
         // Best effort: the failure that caused the restore is the error the caller sees.
@@ -61,10 +62,12 @@ pub(crate) fn copy_tree_on(
             .metadata_follow(&source)
             .map_err(|e| ExtensionError::io(&source, e))?;
         if kind.kind == tddy_fs::FsKind::Dir {
-            fs.create_dir_all(&target).map_err(|e| ExtensionError::io(&target, e))?;
+            fs.create_dir_all(&target)
+                .map_err(|e| ExtensionError::io(&target, e))?;
             copy_tree_on(fs, &source, &target)?;
         } else if kind.kind == tddy_fs::FsKind::File {
-            fs.copy(&source, &target).map_err(|e| ExtensionError::io(&source, e))?;
+            fs.copy(&source, &target)
+                .map_err(|e| ExtensionError::io(&source, e))?;
         } else {
             return Err(ExtensionError::io(
                 &source,
@@ -96,10 +99,12 @@ impl Staging {
         id: &str,
     ) -> Result<Self, ExtensionError> {
         let installed = dir.installed();
-        fs.create_dir_all(&installed).map_err(|e| ExtensionError::io(&installed, e))?;
+        fs.create_dir_all(&installed)
+            .map_err(|e| ExtensionError::io(&installed, e))?;
         let path = installed.join(format!(".{id}.partial"));
         remove_tree_on(&*fs, &path)?;
-        fs.create_dir_all(&path).map_err(|e| ExtensionError::io(&path, e))?;
+        fs.create_dir_all(&path)
+            .map_err(|e| ExtensionError::io(&path, e))?;
         Ok(Self {
             path,
             promoted: false,
@@ -112,7 +117,8 @@ impl Staging {
     }
 
     fn promote(&mut self, fs: &dyn tddy_fs::Fs, target: &Path) -> Result<(), ExtensionError> {
-        fs.rename(&self.path, target).map_err(|e| ExtensionError::io(target, e))?;
+        fs.rename(&self.path, target)
+            .map_err(|e| ExtensionError::io(target, e))?;
         self.promoted = true;
         Ok(())
     }
@@ -128,10 +134,7 @@ impl Drop for Staging {
 }
 
 /// Removes `path` if it is there: a directory with its contents, or a single file or link.
-pub(crate) fn remove_tree_on(
-    fs: &dyn tddy_fs::Fs,
-    path: &Path,
-) -> Result<(), ExtensionError> {
+pub(crate) fn remove_tree_on(fs: &dyn tddy_fs::Fs, path: &Path) -> Result<(), ExtensionError> {
     let removed = match fs.metadata(path) {
         Ok(meta) if meta.kind == tddy_fs::FsKind::Dir => fs.remove_dir_all(path),
         Ok(_) => fs.remove_file(path),

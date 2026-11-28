@@ -34,7 +34,9 @@ pub(crate) fn unpack_on<R: Read>(
         }
         write_entry(fs, &mut entry, staged, extension, &name)?;
     }
-    let root = fs.canonicalize(staged).map_err(|e| ExtensionError::io(staged, e))?;
+    let root = fs
+        .canonicalize(staged)
+        .map_err(|e| ExtensionError::io(staged, e))?;
     check_links_resolve_inside_on(fs, &root, Path::new(""), extension)
 }
 
@@ -50,7 +52,8 @@ fn write_entry<R: Read>(
     let dest = staged.join(name);
     let kind = entry.header().entry_type();
     if kind.is_dir() {
-        fs.create_dir_all(&dest).map_err(|e| ExtensionError::io(&dest, e))?;
+        fs.create_dir_all(&dest)
+            .map_err(|e| ExtensionError::io(&dest, e))?;
     } else if kind.is_symlink() {
         let target = link_target(entry, staged, extension, name)?;
         if !link_stays_inside(name, &target, false) {
@@ -100,7 +103,9 @@ fn check_links_resolve_inside_on(
             .map(|name| name.to_os_string())
             .unwrap_or_default();
         let entry = rel.join(&name);
-        let meta = fs.metadata(&path).map_err(|e| ExtensionError::io(&path, e))?;
+        let meta = fs
+            .metadata(&path)
+            .map_err(|e| ExtensionError::io(&path, e))?;
         if meta.kind == tddy_fs::FsKind::Symlink {
             match fs.canonicalize(&path) {
                 Ok(resolved) if resolved.starts_with(root) => {}
@@ -190,7 +195,9 @@ fn link_target<R: Read>(
 
 fn create_parent(fs: &dyn tddy_fs::Fs, dest: &Path) -> Result<(), ExtensionError> {
     match dest.parent() {
-        Some(parent) => fs.create_dir_all(parent).map_err(|e| ExtensionError::io(parent, e)),
+        Some(parent) => fs
+            .create_dir_all(parent)
+            .map_err(|e| ExtensionError::io(parent, e)),
         None => Ok(()),
     }
 }

@@ -94,7 +94,14 @@ pub async fn install_from_registry(
     id: &str,
     version: Option<&str>,
 ) -> Result<InstallOutcome, ExtensionError> {
-    install_from_registry_on(std::sync::Arc::new(tddy_fs::DiskFs), dir, registry, id, version).await
+    install_from_registry_on(
+        std::sync::Arc::new(tddy_fs::DiskFs),
+        dir,
+        registry,
+        id,
+        version,
+    )
+    .await
 }
 
 /// [`install_from_registry`] through the filesystem port.
@@ -273,12 +280,12 @@ fn validate_on(
     let text = fs
         .read_to_string(&staged.join(MANIFEST))
         .map_err(|e| match e.kind() {
-        io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
-            extension: requested.to_string(),
-            file: manifest_file.to_path_buf(),
-        },
-        _ => ExtensionError::io(&staged.join(MANIFEST), e),
-    })?;
+            io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
+                extension: requested.to_string(),
+                file: manifest_file.to_path_buf(),
+            },
+            _ => ExtensionError::io(&staged.join(MANIFEST), e),
+        })?;
     let manifest =
         ExtensionManifest::parse(&text).map_err(|e| unparsable(requested, manifest_file, e))?;
     if manifest.id != requested {
@@ -315,10 +322,7 @@ fn validate_on(
 
 /// The names of the directories under `root/languages/`, sorted; none when there is no
 /// `languages/`.
-fn language_dir_names_on(
-    fs: &dyn tddy_fs::Fs,
-    root: &Path,
-) -> Result<Vec<String>, ExtensionError> {
+fn language_dir_names_on(fs: &dyn tddy_fs::Fs, root: &Path) -> Result<Vec<String>, ExtensionError> {
     let languages = root.join("languages");
     // The port's `read_dir` hands back full paths, sorted; a directory that is not there holds
     // no languages.
@@ -424,7 +428,9 @@ fn read_language_name_on(
     extension: &str,
 ) -> Result<String, ExtensionError> {
     let path = root.join(file);
-    let text = fs.read_to_string(&path).map_err(|e| ExtensionError::io(&path, e))?;
+    let text = fs
+        .read_to_string(&path)
+        .map_err(|e| ExtensionError::io(&path, e))?;
     let config: LanguageConfig =
         toml::from_str(&text).map_err(|e| unparsable(extension, file, e))?;
     Ok(config.name)

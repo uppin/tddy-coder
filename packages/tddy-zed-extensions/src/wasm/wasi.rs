@@ -184,7 +184,9 @@ impl terminal_stderr::Host for HostState {
 
 impl preopens::Host for HostState {
     /// One directory, [`PWD`], which holds nothing: an extension reaches no file of this machine's.
-    fn get_directories(&mut self) -> wasmtime::Result<Vec<(Resource<wasi_fs::Descriptor>, String)>> {
+    fn get_directories(
+        &mut self,
+    ) -> wasmtime::Result<Vec<(Resource<wasi_fs::Descriptor>, String)>> {
         Ok(vec![(Resource::new_own(0), PWD.to_string())])
     }
 }
@@ -269,7 +271,8 @@ impl wasi_fs::HostDescriptor for HostState {
 }
 
 /// What identifies the directory: there is only one.
-const THE_DIRECTORY_HASH: wasi_fs::MetadataHashValue = wasi_fs::MetadataHashValue { lower: 0, upper: 0 };
+const THE_DIRECTORY_HASH: wasi_fs::MetadataHashValue =
+    wasi_fs::MetadataHashValue { lower: 0, upper: 0 };
 
 fn the_directory() -> wasi_fs::DescriptorStat {
     wasi_fs::DescriptorStat {

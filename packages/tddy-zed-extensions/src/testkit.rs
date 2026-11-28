@@ -51,10 +51,13 @@ pub fn declare_in_demo_toml(data: &Path, table: &str) {
 /// [`declare_in_demo_toml`] through the filesystem port.
 pub fn declare_in_demo_toml_on(fs: &dyn tddy_fs::Fs, data: &Path, table: &str) {
     let manifest = data.join(DEMO_TOML).join("extension.toml");
-    let mut text = fs.read_to_string(&manifest).expect("read the installed manifest");
+    let mut text = fs
+        .read_to_string(&manifest)
+        .expect("read the installed manifest");
     text.push('\n');
     text.push_str(table);
-    fs.write(&manifest, text.as_bytes()).expect("write the installed manifest");
+    fs.write(&manifest, text.as_bytes())
+        .expect("write the installed manifest");
 }
 
 /// Write `files` — paths relative to `workspace` and their text — and commit them as the baseline
@@ -69,9 +72,11 @@ pub fn commit_baseline_on(fs: &dyn tddy_fs::Fs, workspace: &Path, files: &[(&str
     for (path, text) in files {
         let file = workspace.join(path);
         if let Some(parent) = file.parent() {
-            fs.create_dir_all(parent).expect("create the file's directory");
+            fs.create_dir_all(parent)
+                .expect("create the file's directory");
         }
-        fs.write(&file, text.as_bytes()).expect("write a baseline file");
+        fs.write(&file, text.as_bytes())
+            .expect("write a baseline file");
     }
     for args in [
         &["init", "--quiet"][..],
@@ -108,7 +113,8 @@ fn copy_tree(fs: &dyn tddy_fs::Fs, from: &Path, to: &Path) {
                 .map(|name| name.to_os_string())
                 .unwrap_or_default(),
         );
-        let is_dir = matches!(fs.metadata_follow(&source), Ok(meta) if meta.kind == tddy_fs::FsKind::Dir);
+        let is_dir =
+            matches!(fs.metadata_follow(&source), Ok(meta) if meta.kind == tddy_fs::FsKind::Dir);
         if is_dir {
             copy_tree(fs, &source, &target);
         } else {

@@ -214,7 +214,7 @@ pub fn build_host_agent_argv(args: HostAgentArgs) -> Result<Vec<String>> {
                 .with_context(|| format!("create MCP config dir {}", dir.display()))?;
         }
         crate::app_fs()
-            .write_atomic(path, contents.as_bytes(), None)
+            .write_atomic(path, contents, None)
             .with_context(|| format!("write MCP config: {}", path.display()))?;
     }
     slot_args.extend(rendered.argv_extra);

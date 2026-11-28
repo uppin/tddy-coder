@@ -423,7 +423,12 @@ mod tests {
         let language = fixture.language(fixture.unconfigured("downloading-ls"), &["source.fixAll"]);
 
         // When the installed languages are served
-        let served = served_by_wasm_on(std::sync::Arc::new(tddy_fs::DiskFs), &fixture.dir, vec![language]).expect("served");
+        let served = served_by_wasm_on(
+            std::sync::Arc::new(tddy_fs::DiskFs),
+            &fixture.dir,
+            vec![language],
+        )
+        .expect("served");
 
         // Then the run refuses the server with the WASM's refusal, and its kinds ride along
         assert_eq!(
@@ -449,7 +454,12 @@ mod tests {
         let language = fixture.language(unconfigured.clone(), &[]);
 
         // When the installed languages are served
-        let served = served_by_wasm_on(std::sync::Arc::new(tddy_fs::DiskFs), &fixture.dir, vec![language]).expect("served");
+        let served = served_by_wasm_on(
+            std::sync::Arc::new(tddy_fs::DiskFs),
+            &fixture.dir,
+            vec![language],
+        )
+        .expect("served");
 
         // Then K22's refusal stands and the WASM was never read (R1)
         assert_eq!(choices_and_kinds(served), vec![(unconfigured, vec![])]);
@@ -463,7 +473,11 @@ mod tests {
         let language = fixture.language(ServerChoice::Undeclared, &[]);
 
         // When the installed languages are served
-        let served = served_by_wasm_on(std::sync::Arc::new(tddy_fs::DiskFs), &fixture.dir, vec![language]);
+        let served = served_by_wasm_on(
+            std::sync::Arc::new(tddy_fs::DiskFs),
+            &fixture.dir,
+            vec![language],
+        );
 
         // Then nothing was read: the language keeps its choice
         assert_eq!(

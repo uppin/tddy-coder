@@ -205,7 +205,8 @@ fn read_inside(fs: &dyn tddy_fs::Fs, root: &Path, path: &str) -> Result<String, 
     if !file.starts_with(&root) {
         return Err(format!("{path} is outside the worktree"));
     }
-    fs.read_to_string(&file).map_err(|error| format!("{path}: {error}"))
+    fs.read_to_string(&file)
+        .map_err(|error| format!("{path}: {error}"))
 }
 
 fn is_executable_file(fs: &dyn tddy_fs::Fs, path: &Path) -> bool {
@@ -394,8 +395,8 @@ mod tests {
     use bindings::HostWorktree;
     use pretty_assertions::assert_eq;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::fs::symlink;
+    use std::os::unix::fs::PermissionsExt;
 
     /// A temp worktree root holding `notes.txt`, a `bin/` with an executable `tool` and a plain
     /// `data`, and a file outside the root reachable through a symlink `escape`.
@@ -532,8 +533,11 @@ mod tests {
             } }
         }))
         .expect("settings parse");
-        let mut state =
-        HostState::new("an-extension", settings, std::sync::Arc::new(tddy_fs::DiskFs));
+        let mut state = HostState::new(
+            "an-extension",
+            settings,
+            std::sync::Arc::new(tddy_fs::DiskFs),
+        );
 
         // When the extension asks for elixir-ls, for no key, and for another category
         let mut ask = |category: &str, key: Option<&str>| {

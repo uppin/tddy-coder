@@ -71,8 +71,10 @@ pub fn load_installed_on(
         });
     }
     let languages = crate::wasm::served_on(Arc::clone(&fs), dir, languages)?;
-    let store = GrammarStore::new(Arc::clone(&fs)).map_err(|error| ExtensionError::GrammarEngineUnavailable {
-        message: error.message,
+    let store = GrammarStore::new(Arc::clone(&fs)).map_err(|error| {
+        ExtensionError::GrammarEngineUnavailable {
+            message: error.message,
+        }
     })?;
     Ok(supports_of(languages, fs, Arc::new(Mutex::new(store))))
 }
@@ -88,13 +90,15 @@ fn read_installed_manifest_on(
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_default();
-    let text = fs.read_to_string(&manifest_file).map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
-            extension: id.clone(),
-            file: PathBuf::from("extension.toml"),
-        },
-        _ => ExtensionError::io(&manifest_file, error),
-    })?;
+    let text = fs
+        .read_to_string(&manifest_file)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
+                extension: id.clone(),
+                file: PathBuf::from("extension.toml"),
+            },
+            _ => ExtensionError::io(&manifest_file, error),
+        })?;
     ExtensionManifest::parse(&text).map_err(|error| ExtensionError::ManifestUnparsable {
         extension: id,
         file: PathBuf::from("extension.toml"),

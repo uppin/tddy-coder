@@ -60,7 +60,12 @@ impl ExtensionLanguage {
     ) -> Result<Vec<ExtensionLanguage>, ExtensionError> {
         let mut languages = Vec::new();
         for relative in language_dirs_on(fs, extension_dir, manifest)? {
-            languages.push(read_language_on(fs, extension_dir, &relative, &manifest.id)?);
+            languages.push(read_language_on(
+                fs,
+                extension_dir,
+                &relative,
+                &manifest.id,
+            )?);
         }
         languages.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(languages)
