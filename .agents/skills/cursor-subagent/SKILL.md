@@ -65,7 +65,7 @@ node's worktree, whose branch can predate the script.
 
 | Command | Who | What |
 |---|---|---|
-| `ensure local` | main | `jq`; the Cursor agent CLI; its login; prints `COMPOSER_MODEL`, `GLM_MODEL`, `READY=yes` |
+| `ensure local` | main | `jq`; the Cursor agent CLI; its login; prints `COMPOSER_MODEL`, `GLM_MODEL`, `READY=yes`. `glm-5p3-flash` is **unlisted** (`agent --list-models` never shows it), so `GLM_MODEL` comes from a one-line probe turn on it |
 | `run --host local --name --dir --prompt-file --model [--resume <sid>]` | driver | start a turn detached and **return at once** (`TURN=<n>`, `WATCH=…`) |
 | `wait local <name> [secs=170]` | driver | block until the turn ends (`WAIT=turn-ended`, `RUN_EXIT=`) or `secs` pass (`WAIT=still-running`) |
 | `progress local <name> [n]` | driver | the current turn's last n tool calls and messages |

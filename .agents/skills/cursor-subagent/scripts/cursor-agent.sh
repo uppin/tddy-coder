@@ -49,10 +49,14 @@ cmd_ensure() {
   # --list-models needs a logged-in agent.
   models="$(agent --list-models 2>/dev/null | strip || true)"
   composer="$(grep -oE '^composer-[0-9][0-9.]*' <<<"$models" | sort -V | tail -1 || true)"
-  glm="$(grep -oE '^glm-5p3-flash' <<<"$models" | head -1 || true)"
+  # glm-5p3-flash is unlisted: --list-models never shows it, so probe it with a one-line turn instead.
+  glm=""
+  if agent -p --model glm-5p3-flash --output-format text "Reply with exactly: ok" 2>/dev/null | grep -q ok; then
+    glm="glm-5p3-flash"
+  fi
   echo "COMPOSER_MODEL=$composer"
   echo "GLM_MODEL=$glm"
-  [[ -n "$composer" || -n "$glm" ]] || die $EXIT_NO_MODEL "no composer or glm-5p3-flash model in 'agent --list-models'"
+  [[ -n "$composer" || -n "$glm" ]] || die $EXIT_NO_MODEL "no composer model in 'agent --list-models', and glm-5p3-flash did not answer a probe"
   echo "READY=yes"
 }
 
