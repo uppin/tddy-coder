@@ -143,13 +143,15 @@ async fn token_from_gh(hostname: &str, gh_program: Option<&Path>) -> Result<Stri
 
 /// The first executable file named `program` in a `PATH` directory.
 fn find_on_path(program: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt as _;
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|dir| dir.join(program))
         .find(|candidate| {
-            std::fs::metadata(candidate)
-                .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                .unwrap_or(false)
+            // `metadata_follow`, as a PATH lookup must: the target's file bits, not the link's.
+            matches!(
+                tddy_fs::Fs::metadata_follow(&tddy_fs::DiskFs, candidate),
+                Ok(m) if m.kind == tddy_fs::FsKind::File
+                    && m.mode.is_some_and(|mode| mode & 0o111 != 0)
+            )
         })
 }
 

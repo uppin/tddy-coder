@@ -28,7 +28,8 @@ fn codex_oauth_browser_hook_early_exit() {
     if out.trim().is_empty() {
         return;
     }
-    if let Err(e) = tddy_fs::Fs::write(&tddy_fs::DiskFs, std::path::Path::new(&out), url.as_bytes()) {
+    if let Err(e) = tddy_fs::Fs::write(&tddy_fs::DiskFs, std::path::Path::new(&out), url.as_bytes())
+    {
         eprintln!(
             "tddy-coder: codex oauth hook could not write {}: {}",
             out, e

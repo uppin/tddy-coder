@@ -53,7 +53,8 @@ pub(crate) fn owned_project_row_count_on(
         );
         return Ok(0);
     }
-    let contents = fs.read_to_string(&path)
+    let contents = fs
+        .read_to_string(&path)
         .map_err(|e| anyhow::anyhow!("read {}: {}", path.display(), e))?;
     let file: ProjectsFile = serde_yaml::from_str(&contents)
         .map_err(|e| anyhow::anyhow!("parse {}: {}", path.display(), e))?;

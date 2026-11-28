@@ -152,7 +152,13 @@ pub fn lookup_cache(
     action_id: &str,
     expected_key: &str,
 ) -> Option<ActionCacheEntry> {
-    lookup_cache_on(&tddy_fs::DiskFs, repo_root, target_id, action_id, expected_key)
+    lookup_cache_on(
+        &tddy_fs::DiskFs,
+        repo_root,
+        target_id,
+        action_id,
+        expected_key,
+    )
 }
 
 /// [`lookup_cache`] through the filesystem port.
@@ -197,7 +203,8 @@ pub fn persist_cache_on(
 ) -> Result<(), BuildError> {
     let path = cache_entry_path(repo_root, target_id, &entry.action_id);
     if let Some(parent) = path.parent() {
-        fs.create_dir_all(parent).map_err(|e| BuildError::Io(e.to_string()))?;
+        fs.create_dir_all(parent)
+            .map_err(|e| BuildError::Io(e.to_string()))?;
     }
 
     let serialized =

@@ -415,6 +415,8 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
 /// Host-scoped start and stop, against a stand-in bridge binary.
 ///
 /// `unix`, like the daemon's own stop path: the stub is a `/bin/sh` script and "the bridge was
+/// released" is proven by the pid dying on `SIGTERM`. Both are POSIX, and neither has a meaning to
+/// assert on a platform without them.
 #[cfg(all(test, unix))]
 #[path = "screen_sharing_service_tests.rs"]
 mod tests;

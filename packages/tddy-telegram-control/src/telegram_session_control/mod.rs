@@ -232,7 +232,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             coding_agents: Arc::new(tddy_coding_agent_specs::CodingAgentRegistry::empty()),
             session_starter: Arc::new(tddy_daemon_extensions::NoSessionStarter),
             held_sessions: Arc::new(tddy_daemon_kernel::live_sessions::NoHeldSessions),
-        fs: std::sync::Arc::new(tddy_fs::DiskFs),
+            fs: std::sync::Arc::new(tddy_fs::DiskFs),
         }
     }
 

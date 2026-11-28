@@ -98,18 +98,19 @@ async fn main() {
     // The process environment first, then the repo-root `.env` for whatever it left unset. Read
     // from the working directory because that is where a developer running this from a checkout
     // keeps it; an absent file simply contributes nothing.
-    let env_file = match tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, std::path::Path::new(ENV_FILENAME)) {
-        Ok(contents) => Some(contents),
-        // An absent `.env` is the normal case — it is gitignored and per-developer.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        // Anything else is reported rather than treated as absent. A `.env` that exists but cannot
-        // be read would otherwise contribute nothing and the run would fail complaining about a
-        // missing credential, sending the user to look for the wrong problem.
-        Err(e) => {
-            eprintln!("tddy-session-sync: cannot read {ENV_FILENAME}: {e}");
-            std::process::exit(2);
-        }
-    };
+    let env_file =
+        match tddy_fs::Fs::read_to_string(&tddy_fs::DiskFs, std::path::Path::new(ENV_FILENAME)) {
+            Ok(contents) => Some(contents),
+            // An absent `.env` is the normal case — it is gitignored and per-developer.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            // Anything else is reported rather than treated as absent. A `.env` that exists but cannot
+            // be read would otherwise contribute nothing and the run would fail complaining about a
+            // missing credential, sending the user to look for the wrong problem.
+            Err(e) => {
+                eprintln!("tddy-session-sync: cannot read {ENV_FILENAME}: {e}");
+                std::process::exit(2);
+            }
+        };
     let env = layered_environment(std::env::vars().collect(), env_file.as_deref());
     let credentials = match resolve_credentials(&args, &env) {
         Ok(credentials) => credentials,

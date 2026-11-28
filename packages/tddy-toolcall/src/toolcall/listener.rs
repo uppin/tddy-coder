@@ -15,7 +15,6 @@ use crate::toolcall::conversation_wire::ConversationStartRequestWire;
 use crate::toolcall::conversation_wire::SpawnConversationRequestWire;
 use crate::toolcall::conversation_wire::StartConversationRequestWire;
 use async_trait::async_trait;
-use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tddy_rpc::{RpcMessage, RpcResult, RpcService, Status};
@@ -616,8 +615,8 @@ impl ToolcallRpcService {
         let result = tokio::task::spawn_blocking(move || {
             // Compute the per-repo store root (if we have a repo root).
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
-                let canon = tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, r)
-                    .unwrap_or_else(|_| r.clone());
+                let canon =
+                    tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
                 repo_actions_root(&dd, &key)
             });
@@ -671,8 +670,8 @@ impl ToolcallRpcService {
 
         let result = tokio::task::spawn_blocking(move || {
             let store_root: Option<PathBuf> = rr.as_ref().map(|r| {
-                let canon = tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, r)
-                    .unwrap_or_else(|_| r.clone());
+                let canon =
+                    tddy_fs::Fs::canonicalize(&tddy_fs::DiskFs, r).unwrap_or_else(|_| r.clone());
                 let key = derive_repo_key(&canon);
                 repo_actions_root(&dd, &key)
             });

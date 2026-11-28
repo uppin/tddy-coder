@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, Sqlite, SqlitePool, Transaction};
-use tddy_discovery::agent_def::{load_agent_defs, SpecializedAgentDef, SubagentTool};
+use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_service::proto::models::{AssistantEntry, ModelEntry, ProviderEntry, ProviderKind};
 
 use crate::error::{truncate_provider_detail, ModelRegistryError};

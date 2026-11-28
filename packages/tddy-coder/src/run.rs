@@ -1662,7 +1662,8 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>, host: ParticipantHost) -> 
 
     let tddy_data_dir = resolve_tddy_data_dir(args);
     let sessions_root = tddy_data_dir.join(tddy_core::output::SESSIONS_SUBDIR);
-    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &sessions_root).context("create sessions base dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &sessions_root)
+        .context("create sessions base dir")?;
 
     let port = args.grpc.unwrap_or(50051);
     // When spawned with `--stdio` (grill-me tool sessions), the daemon hosts a reverse
@@ -2587,7 +2588,8 @@ mod agent_def_handover_tests {
     /// A def hand-over file holding `json`, as the daemon writes one.
     fn a_handed_over_def_file(dir: &std::path::Path, json: &str) -> std::path::PathBuf {
         let path = dir.join("agent-def.json");
-        tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, json.as_bytes()).expect("write the handed-over def");
+        tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, json.as_bytes())
+            .expect("write the handed-over def");
         path
     }
 
@@ -2745,13 +2747,12 @@ mod agent_def_handover_tests {
 
     impl AHostWithStubAgentTools {
         fn new() -> Self {
-            use std::os::unix::fs::PermissionsExt;
             let bin = tempfile::tempdir().expect("stub bin dir");
             for name in ["claude", "tddy-tools"] {
                 let path = bin.path().join(name);
-                tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, b"#!/bin/sh\nexit 0\n").expect("stub binary");
-                tddy_fs::Fs::set_mode(&tddy_fs::DiskFs, &path, 0o755)
-                    .expect("stub binary mode");
+                tddy_fs::Fs::write(&tddy_fs::DiskFs, &path, b"#!/bin/sh\nexit 0\n")
+                    .expect("stub binary");
+                tddy_fs::Fs::set_mode(&tddy_fs::DiskFs, &path, 0o755).expect("stub binary mode");
             }
             Self { bin }
         }
@@ -2879,7 +2880,8 @@ fn run_goal_plain(
         .and_then(|v| serde_json::from_value::<PathBuf>(v.clone()).ok())
         .map(|p| tddy_core::workflow::session::workflow_engine_storage_dir(&p))
         .unwrap_or_else(|| std::env::temp_dir().join("tddy-flowrunner-session"));
-    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir).context("create session storage dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir)
+        .context("create session storage dir")?;
     let recipe = recipe_arc_for_args(args)?;
     let hooks = recipe.create_hooks(None);
     let engine = WorkflowEngine::new(recipe.clone(), backend.clone(), storage_dir, Some(hooks));
@@ -3554,7 +3556,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
             .read_primary_session_document_utf8(&session_dir)
             .is_none()
     {
-        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &session_dir).context("create session dir")?;
+        tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &session_dir)
+            .context("create session dir")?;
         run_plan_bootstrap_in_session_dir(
             args,
             session_dir.as_path(),
@@ -3610,7 +3613,8 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
     let start_is_full = start_goal == recipe.start_goal();
 
     let storage_dir = tddy_core::workflow::session::workflow_engine_storage_dir(&session_dir);
-    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir).context("create session storage dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &storage_dir)
+        .context("create session storage dir")?;
     let hooks = recipe.create_hooks(None);
     let backend_for_refine = backend.clone();
     let engine = WorkflowEngine::new(recipe.clone(), backend, storage_dir, Some(hooks));
@@ -3670,8 +3674,7 @@ fn run_full_workflow_plain(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Re
                         if let Ok(eval_content) = tddy_fs::Fs::read_to_string(
                             &tddy_fs::DiskFs,
                             &session_dir_final.join("evaluation-report.md"),
-                        )
-                        {
+                        ) {
                             if let Ok(eval_out) = parse_evaluate_response(&eval_content) {
                                 println!("Evaluation: {}", eval_out.summary);
                             }
@@ -3875,7 +3878,8 @@ fn run_plan_refinement(
         .and_then(|c| get_session_for_tag(&c, refine_tag));
     // output_dir from build_goal_context (repo_path in changeset); session_dir.parent() wrong when under ~/.tddy/sessions/
     let refine_storage = tddy_core::workflow::session::workflow_engine_storage_dir(session_dir);
-    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &refine_storage).context("create refine session dir")?;
+    tddy_fs::Fs::create_dir_all(&tddy_fs::DiskFs, &refine_storage)
+        .context("create refine session dir")?;
     let refine_hooks = recipe.create_hooks(None);
     let refine_engine = WorkflowEngine::new(
         recipe.clone(),

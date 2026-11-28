@@ -53,11 +53,7 @@ impl RpcTrafficCollector {
     /// Wrap an existing logger, adding RPC traffic file output.
     /// Creates `rpc-traffic.log` inside `log_dir`.
     pub fn wrap(log_dir: impl AsRef<Path>, inner: Box<dyn log::Log>) -> std::io::Result<Self> {
-        Self::wrap_on(
-            log_dir,
-            inner,
-            std::sync::Arc::new(tddy_fs::DiskFs),
-        )
+        Self::wrap_on(log_dir, inner, std::sync::Arc::new(tddy_fs::DiskFs))
     }
 
     /// [`RpcTrafficCollector::wrap`] with the filesystem port the traffic log runs through.

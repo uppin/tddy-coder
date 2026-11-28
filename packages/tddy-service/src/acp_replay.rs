@@ -17,7 +17,6 @@
 //!   tool call, the enriched title + `raw_input` + `kind`.
 
 use std::io;
-use std::io::Write as _;
 use std::path::Path;
 
 use prost::Message as _;

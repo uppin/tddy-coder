@@ -12,10 +12,7 @@ use tddy_task::{TaskHandle, TaskRegistry, TaskStatus};
 
 use crate::action_convert::build_action_to_spec;
 use crate::action_sandbox::ActionSandbox;
-use crate::cache::{
-    compute_run_cache_key, lookup_cache, lookup_cache_on, persist_cache, persist_cache_on,
-    sanitize, CacheMode,
-};
+use crate::cache::{compute_run_cache_key, lookup_cache_on, persist_cache_on, sanitize, CacheMode};
 use crate::capabilities::BuildMode;
 use crate::error::BuildError;
 use crate::executor::tool_run::run_hermetic;
@@ -193,7 +190,11 @@ pub async fn execute_target_with_tools(
 
 /// Expose each tool of `closure` by its command in `links`: one symlink per command, to its binary.
 /// A link an earlier run left is replaced, so a re-resolved binary is never reached by a stale name.
-fn link_tools(fs: &dyn tddy_fs::Fs, links: &Path, closure: &[ResolvedTool]) -> Result<(), BuildError> {
+fn link_tools(
+    fs: &dyn tddy_fs::Fs,
+    links: &Path,
+    closure: &[ResolvedTool],
+) -> Result<(), BuildError> {
     fs.create_dir_all(links).map_err(|e| io_error(links, e))?;
     for tool in closure {
         let link = links.join(&tool.command);
@@ -324,7 +325,9 @@ async fn run_one(
     let hermetic = opts.hermetic || action.sandbox;
     let cache_key = compute_run_cache_key(action, &fingerprints, &tool_fingerprints, hermetic);
 
-    if use_cache && lookup_cache_on(&*opts.fs, run.repo_root, target_id, &action.id, &cache_key).is_some() {
+    if use_cache
+        && lookup_cache_on(&*opts.fs, run.repo_root, target_id, &action.id, &cache_key).is_some()
+    {
         log::debug!("cache hit for action {} (target {})", action.id, target_id);
         return Ok(ActionOutcome {
             action_id: action.id.clone(),

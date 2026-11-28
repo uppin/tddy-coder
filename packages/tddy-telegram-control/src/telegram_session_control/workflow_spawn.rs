@@ -117,12 +117,18 @@ pub(super) fn sorted_projects_for_workflow_spawn(
     Ok(projects)
 }
 
-pub(super) fn read_recipe_from_changeset(session_dir: &Path) -> anyhow::Result<Option<String>> {
+/// [`read_recipe_from_changeset`] through the filesystem port.
+pub(super) fn read_recipe_from_changeset_on(
+    fs: &dyn tddy_fs::Fs,
+    session_dir: &Path,
+) -> anyhow::Result<Option<String>> {
     let path = session_dir.join("changeset.yaml");
-    if !path.is_file() {
+    // `is_file` as `Path::is_file` answers it: through a final symlink.
+    let is_file = matches!(fs.metadata_follow(&path), Ok(m) if m.kind == tddy_fs::FsKind::File);
+    if !is_file {
         return Ok(None);
     }
-    let raw = std::fs::read_to_string(&path)?;
+    let raw = fs.read_to_string(&path)?;
     let snap: ChangesetRoutingSnapshot = serde_yaml::from_str(&raw)?;
     Ok(snap.recipe)
 }

@@ -5,7 +5,6 @@
 //! line, after a first `started` line carrying the stub's pid. Without the variable nothing is
 //! written. A JSONL file outlives the child, so a test can read it after the client dropped it.
 
-use std::io::Write as _;
 use std::path::PathBuf;
 
 /// Appends JSON lines to the record file named by `TDDY_ACP_STUB_RECORD`.
