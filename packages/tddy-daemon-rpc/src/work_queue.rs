@@ -4,9 +4,6 @@ mod blocking_lane;
 #[cfg(test)]
 mod blocking_lane_unit_tests;
 mod branch_legs;
-mod warn_gate;
-#[cfg(test)]
-mod warn_gate_unit_tests;
 mod branch_reads;
 pub(crate) mod chain_health;
 mod guards;
@@ -17,6 +14,9 @@ mod pr_status;
 mod project_stacks;
 mod pull_base_rpc;
 mod repoint_rpc;
+mod warn_gate;
+#[cfg(test)]
+mod warn_gate_unit_tests;
 
 pub use guards::validate_repoint_target;
 /// `#fs-port` seam: [`referencing_sessions_by_stack`](project_stacks::referencing_sessions_by_stack) through the port, for `MemFs` tests.
