@@ -470,14 +470,21 @@ impl RemoteShell for CoderShell {
         })
     }
 
-    /// `coder ssh --disable-autostart <workspace> -- <command>` (no `-t`: v2.33.5 refuses it, and
-    /// the CLI gives the command the caller's PTY), the two variables in the command's `env`.
+    /// `coder ssh --disable-autostart --forward-agent <workspace> -- <command>` (no `-t`:
+    /// v2.33.5 refuses it, and the CLI gives the command the caller's PTY), the two variables in
+    /// the command's `env`. `--forward-agent` exposes the caller's ssh agent (the transport client
+    /// is given the daemon's `SSH_AUTH_SOCK`, see tddy-agent-launch remote_agent_launch.rs
+    /// transport_client) as `SSH_AUTH_SOCK` on the workspace so the agent's git over SSH
+    /// authenticates with the operator's keys; a `tmux new-session` made by this command takes the
+    /// variable from it via tmux's update-environment, while panes of a session that already lives
+    /// keep theirs.
     fn interactive(&self, command: &str) -> InteractiveCommand {
         InteractiveCommand {
             argv: vec![
                 self.coder.as_os_str().to_os_string(),
                 "ssh".into(),
                 "--disable-autostart".into(),
+                "--forward-agent".into(),
                 self.workspace.to_string().into(),
                 "--".into(),
                 command.into(),
