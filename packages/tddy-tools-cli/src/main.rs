@@ -321,6 +321,10 @@ async fn run_mcp_server() -> Result<()> {
     let announces = announcer.clone();
     tddy_tools::session_agents::follow_session_agent_roster(move || announces.announce()).await;
     announcer.serving_starts();
+    // Keep the agent's session token alive while this server runs: it lives 24 h and the agent has
+    // no other way to get a new one (orchestrator 01a20f10 lost every tool when it expired).
+    let _token_renewal =
+        tddy_tools::session_tool_client::session_token::spawn_session_token_renewal();
     let service = PermissionServer::new();
     let server = service.serve(rmcp::transport::stdio()).await?;
     announcer.attach(server.peer().clone());

@@ -1,5 +1,6 @@
 //! Family L — `exec_tools.ExecToolService`.
 
+mod agent_token_renewal;
 mod base_freshness;
 pub mod home_terminal_leases;
 mod lsp_roots;

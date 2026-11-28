@@ -135,7 +135,7 @@ fn prepare(
     }
     // Take it back first: while it is the user's they could be racing the steps below.
     change_owner(&handle, euid, egid)?;
-    if unsafe { libc::fchmod(handle.as_raw_fd(), DIRECTORY_MODE) } != 0 {
+    if unsafe { libc::fchmod(handle.as_raw_fd(), DIRECTORY_MODE as libc::mode_t) } != 0 {
         return Err(anyhow::Error::new(std::io::Error::last_os_error())
             .context("restrict the directory to its owner"));
     }

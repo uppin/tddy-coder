@@ -54,11 +54,13 @@ The same SPKI DER (`session_token_v2::spki_der`) is what a daemon publishes as i
 `SessionTokenSigner::new(signing_key)` takes the daemon's `ed25519_dalek::SigningKey` and derives the
 `KeyId` from its public half, so a signer can never stamp an id that is not its own. `mint_access` and
 `mint_refresh` mint the two credentials with their fixed lifetimes; `mint_kind_with_issued_at` is the
-general seam, with a clock argument so a test can mint an already-expired token without sleeping.
+general seam, with a clock argument so a test can mint an already-expired token without sleeping, and
+`mint_agent_with_issued_at` is the same seam for `mint_agent`.
 
 | Credential | Lifetime | Used for |
 |---|---|---|
 | access (`SESSION_TOKEN_TTL`) | 5 minutes | Every RPC |
+| agent access (`AGENT_TOKEN_TTL`) | 24 hours | A session agent's own credential |
 | refresh (`REFRESH_TOKEN_TTL`) | 7 days, slid forward on each refresh | `RefreshSession` only |
 
 `mint_agent(user, ttl, session_id)` mints an access token for `user` that carries `principal: "agent"` and the `session_id` the agent runs for. Every
@@ -67,6 +69,16 @@ local coding agent's tool server, the split agent, the sandboxed-codebase and pr
 the local CLI's `MintLocalToken` and the room poller's token stay user tokens. A daemon reads the
 principal off a token its own keys verify, and only then treats the caller as the agent — an agent
 token no trusted key signed is unauthenticated.
+
+**An agent's token outlives one minting through renewal, not re-issue.** An agent holds no refresh
+token, so the agent process's `tddy-tools --mcp` renews its own token over the daemon route while it
+is still valid (`tddy-session-tool-client`'s `session_token` module, every 15 min once less than 6 h
+of the 24 h is left). Only the daemon that signed the token renews it —
+`tddy_daemon_auth::SessionTokens::renew_agent` accepts a still-valid agent access token signed by
+**this** daemon for the session the renewal names, and mints a fresh `AGENT_TOKEN_TTL` token with the
+same identity, principal and session. An expired token is never revived: renewal extends a
+credential, it does not replace one — a token that expired anyway is re-minted when the daemon
+resumes the session.
 
 The `kind` is enforced in both directions by the callers: a refresh token never authenticates an RPC,
 and an access token never mints.

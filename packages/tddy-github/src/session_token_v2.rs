@@ -32,6 +32,7 @@ use crate::provider::GitHubUser;
 
 /// The public-key type this module's verifier is written in, so a dependent can name it without
 /// depending on `ed25519-dalek` itself.
+pub use ed25519_dalek::SigningKey as Ed25519SigningKey;
 pub use ed25519_dalek::VerifyingKey as Ed25519VerifyingKey;
 
 /// Version prefix / first token segment. A `v1` token presented to a `v2` verifier is
@@ -43,6 +44,12 @@ pub const TOKEN_VERSION: &str = "v2";
 /// before expiry (see [`crate::auth_service`]/`RefreshSession`), and a leaked token is only
 /// valid for this window.
 pub const SESSION_TOKEN_TTL: Duration = Duration::from_secs(5 * 60);
+
+/// Lifetime of a session agent's own token ([`SessionTokenSigner::mint_agent`]), at spawn and at
+/// every renewal. An agent holds no refresh token: its `tddy-tools --mcp` renews this one over the
+/// daemon socket before it runs out (`tddy_daemon_auth::SessionTokens::renew_agent`), so a session
+/// that outlives one TTL keeps its tools.
+pub const AGENT_TOKEN_TTL: Duration = Duration::from_secs(86_400);
 
 /// Lifetime of a freshly minted refresh token. Long by design and slid forward on every refresh:
 /// an actively-used session never has to re-login, while a device untouched for this long does.
@@ -294,7 +301,19 @@ impl SessionTokenSigner {
     /// Mint an access token for a session's agent acting for `user`, valid for `ttl` from now: it
     /// names `user`, carries [`TokenPrincipal::Agent`] and the `session_id` it was minted for.
     pub fn mint_agent(&self, user: &GitHubUser, ttl: Duration, session_id: &str) -> String {
-        let iat = unix_seconds(SystemTime::now());
+        self.mint_agent_with_issued_at(user, SystemTime::now(), ttl, session_id)
+    }
+
+    /// [`Self::mint_agent`] issued at `issued_at` (expiry = `issued_at + ttl`): the clock seam that
+    /// lets tests produce an already-expired agent token without sleeping.
+    pub fn mint_agent_with_issued_at(
+        &self,
+        user: &GitHubUser,
+        issued_at: SystemTime,
+        ttl: Duration,
+        session_id: &str,
+    ) -> String {
+        let iat = unix_seconds(issued_at);
         self.sign(SessionClaims {
             principal: Some(TokenPrincipal::Agent),
             session_id: Some(session_id.to_string()),
@@ -384,6 +403,16 @@ impl SessionTokenVerifier {
     /// trusted after [`SessionTokenVerifier::verify`] returns for that key.
     pub fn key_id_of(token: &str) -> Result<KeyId, SessionTokenError> {
         Ok(ParsedToken::parse(token)?.claims.kid)
+    }
+
+    /// The expiry (unix seconds) a token claims, read **without** verifying anything.
+    ///
+    /// For diagnostics only — telling a caller its refused token had expired — never for a decision
+    /// to trust it.
+    pub fn unverified_expiry(token: &str) -> Option<u64> {
+        ParsedToken::parse(token)
+            .ok()
+            .map(|parsed| parsed.claims.exp)
     }
 
     /// Check `token`'s signature under `verifying_key` and its expiry against `now`.

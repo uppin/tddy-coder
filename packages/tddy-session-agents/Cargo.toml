@@ -9,6 +9,8 @@ name = "tddy_session_agents"
 path = "src/lib.rs"
 
 [dependencies]
+# `SessionTokenVerifier::unverified_expiry` — a refused token that had expired is reported as expired.
+tddy-github = { path = "../tddy-github" }
 # The client room-transport port the hosted clone joins its session room through.
 tddy-room-client = { path = "../tddy-room-client" }
 # The room ports the roster broadcasts and admits through.

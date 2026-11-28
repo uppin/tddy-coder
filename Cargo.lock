@@ -14207,6 +14207,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-discovery",
  "tddy-fs",
+ "tddy-github",
  "tddy-host-service",
  "tddy-model-registry",
  "tddy-projects",

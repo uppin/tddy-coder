@@ -29,6 +29,7 @@
 //! here signs and verifies; what left with node 1 unlocks and loads.**
 
 pub mod account_linking_provider;
+pub mod agent_token_renewal;
 pub mod auth;
 pub mod codex_oauth_relay;
 pub mod dev_vault;
@@ -40,6 +41,7 @@ pub mod token_provider;
 pub mod vault_lifetimes;
 
 pub use account_linking_provider::github_account_linking_provider;
+pub use agent_token_renewal::{AgentTokenRenewalRefusal, RenewedAgentToken};
 /// The crate's own surface, at the crate root, so a caller writes `tddy_daemon_auth::…` for the
 /// four things the daemon's wiring layer needs and reaches into a module for nothing else.
 ///

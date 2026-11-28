@@ -21,6 +21,7 @@
 | 2026-10-23 | 80 | 4 | — | — | touched by #700 (`#project-home` 5/7): the local call became `self.run_locally(..).await?` (the project-home tools are answered there), one line shorter. 81 → 80 by structural scan, fn line to closing brace on `origin/feature/project-home/home-session` (08cfc2a28) and HEAD; no coverage run |
 | 2026-10-24 | 80 | — | — | — | **Not touched** by `fix-main-agent-harness-se-e79c8de0` (`c1df8e142..4348f160a`): 80 at both, fn line to closing brace (`exec_tool/ports.rs:100`). `/analyze-code-issues` re-run on `tddy-daemon-rpc` (287 tests across 85 files, join 66.8%): entered, CRAP < 6 |
 | 2026-10-25 | 86 | 5 | — | — | **Regressed** by `#start-parity` 1/9 (#750): the local arm became a `match` on `serve_project_home_for_caller_held_elsewhere` (a caller another host holds), one level deeper. fn line to closing brace (`exec_tool/ports.rs:112`–`197`), structural scan. Fix deferred by developer instruction for this stack |
+| 2026-11-28 | 87 | — | — | — | **Unchanged** — file `exec_tool/ports.rs` touched by #1064 (agent-token renewal), but only `execute_tool` grew (the reserved-name intercept, 4 lines); this function's body untouched, 87-line span at base and head |
 
 ## What the tool found
 
