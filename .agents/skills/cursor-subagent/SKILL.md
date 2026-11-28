@@ -28,6 +28,24 @@ Cursor session until the stage's done condition holds.
 | Tag | Executor model |
 |---|---|
 | `#glm` | `glm-5p3-flash` (`GLM_MODEL` from `$CA ensure`; `agent --model glm-5p3-flash`) |
+
+**`glm-5p3-flash` is an unlisted model: it must always be set explicitly.** `agent --list-models`
+never shows it, yet `agent --model glm-5p3-flash` runs it. So:
+
+- Never conclude from `--list-models` (or from the model's absence in Cursor's picker) that `#glm`
+  is unavailable, and never swap to a listed GLM model (`glm-5.2-*`) because the flash one "is not
+  there". `$CA ensure` probes it with a one-line turn; only a failed probe means it is unavailable.
+- Every turn passes `--model glm-5p3-flash` explicitly, in every `$CA run` and in any hand check
+  (`agent -p --model glm-5p3-flash …`). Never rely on Cursor's default model: an omitted `--model`
+  silently runs a different model.
+- **Cursor turns the unlisted model down intermittently.** A turn can exit 1 within seconds, with
+  no tool calls, printing `Cannot use this model: glm-5p3-flash. Available models: …` — and the
+  identical command succeeds minutes later (observed: rejected at 08:46 and 08:55, accepted at
+  08:51, 08:57 and 08:59 on the same run script). That is a transient refusal, not lost access:
+  wait 2 minutes and `run` the same turn again (same `<name>`, same `--resume`), up to 3 times. Such
+  a failed start does not count toward the turn cap. Only after the third consecutive rejection is
+  it reported, still without switching models; `$CA ensure` re-probing the model tells the main
+  agent whether access is really gone.
 | `#cursor-subagent` (alias `#composer`) | the newest Composer (`COMPOSER_MODEL` from `$CA ensure`) |
 
 Both run on this machine. Opt-in only: the tag or the user's words. A tagged request never lapses
@@ -65,7 +83,7 @@ node's worktree, whose branch can predate the script.
 
 | Command | Who | What |
 |---|---|---|
-| `ensure local` | main | `jq`; the Cursor agent CLI; its login; prints `COMPOSER_MODEL`, `GLM_MODEL`, `READY=yes` |
+| `ensure local` | main | `jq`; the Cursor agent CLI; its login; prints `COMPOSER_MODEL`, `GLM_MODEL`, `READY=yes`. `glm-5p3-flash` is **unlisted** (`agent --list-models` never shows it), so `GLM_MODEL` comes from a one-line probe turn on it |
 | `run --host local --name --dir --prompt-file --model [--resume <sid>]` | driver | start a turn detached and **return at once** (`TURN=<n>`, `WATCH=…`) |
 | `wait local <name> [secs=170]` | driver | block until the turn ends (`WAIT=turn-ended`, `RUN_EXIT=`) or `secs` pass (`WAIT=still-running`) |
 | `progress local <name> [n]` | driver | the current turn's last n tool calls and messages |
@@ -100,7 +118,7 @@ machine and their account. Suggest the `!` prefix so the output lands in the con
 | **20** no `jq` | *"Run `! brew install jq`."* |
 | **12** no Composer or GLM model | the account cannot use either. Report it; do not pick another model unasked |
 
-**Which model for every turn** (from `$CA ensure`, passed to `$CA run --model …`): `#glm` →
+**Which model for every turn** (from `$CA ensure`, always passed explicitly to `$CA run --model …` — never omitted): `#glm` →
 `GLM_MODEL` (`glm-5p3-flash`); `#cursor-subagent` / `#composer` → `COMPOSER_MODEL`. An empty value
 for the tag's model is exit 12 for that tag. **Under `/yolo-streak` and `/green-yolo` the chosen
 model is mandatory** for the whole run.
