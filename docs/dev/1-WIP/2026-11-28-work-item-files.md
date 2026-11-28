@@ -98,26 +98,30 @@ analyzed — not the same as clean; noted for wrap.
 
 ## Milestones
 
-### Milestone 1: Model and storage
-- [ ] `HostDocumentScope::WorkQueueFile` + proto messages; regenerate gen
-- [ ] `WorkItem.files` + pure attach/detach ops in `tddy-work-queue/src/item_ops/`
-- [ ] Durable file store in `tddy-changeset` with the shared path gates, exclusive create, caps
-- [ ] Unit + store acceptance tests (fluent-tests style)
+### Milestone 1: Model and storage — ✅ done (cb99527c2)
+- [x] `HostDocumentScope::WorkQueueFile` + proto messages; regenerated gen
+- [x] `WorkItem.files` + pure attach/detach ops in `tddy-work-queue/src/item_ops/`
+- [x] Durable file store in `tddy-changeset` with the shared path gates, exclusive create, caps
+- [x] Unit + store acceptance tests (fluent-tests style)
 
-### Milestone 2: RPC and tools
-- [ ] `WorkQueueHandler` trait methods + generated service impl + daemon bodies (forward-first)
-- [ ] `AttachWorkItemFile` promotes a staged file; session-artifact and repo-file arms for the tool
-- [ ] The three tools: defs, arg schema, classification, catalogue/vocabulary/admission tests
-- [ ] Deletion of an item removes its files directory (daemon side of `delete_work_item`)
+### Milestone 2: RPC and tools — ✅ done (fc9e8ed6e)
+- [x] `WorkQueueHandler` trait methods + generated service impl + daemon bodies (forward-first)
+- [x] `AttachWorkItemFile` promotes a staged file; session-artifact and repo-file arms for the tool
+- [x] The three tools: defs, arg schema, classification, catalogue/vocabulary/admission tests
+- [x] Deletion of an item removes its files directory (daemon side of `delete_work_item`)
 
-### Milestone 3: Spawn delivery
-- [ ] Start-path injection where `work_item_id` resolves (plain + sandboxed start paths)
-- [ ] Cross-host fetch through the new scope (streaming, `max_attachment_bytes`-bounded)
-- [ ] Acceptance tests: tool spawn, dialog spawn, cross-host spawn, collision refusal, failed-attachment rollback
+### Milestone 3: Spawn delivery — ✅ done (dcd293217)
+- [x] Injection below every spawn surface: `start_session_core`, `tool_session_spawn` and the CLI
+      harness prelude all append the item's files before materializing anything
+- [x] Cross-host fetch through the new scope — the refs name the owner host, and the materializer's
+      existing peer fetch (streaming, `max_attachment_bytes`-bounded) delivers them
+- [x] Acceptance tests: the helper (5) and the end-to-end `work_item_spawn_session` spawn (red first)
+      — a collision refusal and a failed-attachment rollback ride the materializer's own rules, pinned
+      by its existing suites
 
-### Milestone 4: Web
-- [ ] `parseWorkQueue` carries `files`; icon on rows with files; list in the expanded details
-- [ ] Cypress component spec (in-memory backend, fixture builders updated)
+### Milestone 4: Web — ✅ done (751631245)
+- [x] `parseWorkQueue` carries `files`; icon on rows with files; list in the expanded details
+- [x] Cypress component spec (in-memory backend, fixture builders updated; red-verified, then 3/3)
 
 ### Milestone 5: Wrap
 - [ ] Package docs updates via the wrap flow; changeset completed and wrapped
@@ -157,6 +161,10 @@ analyzed — not the same as clean; noted for wrap.
       names + sizes; a node without files shows neither
 
 ## Technical Debt
+- **A two-host spawn E2E** (queue owner on host-a, child spawned on host-b) is not written: the
+  delivery reuses the materializer's peer-fetch path, which the staging-forwarding suite already
+  pins, and the helper's refs name the owner host by construction — but the composed path is
+  unproven end to end. Worth one acceptance test when a two-host start harness is next touched.
 - Consumed staged batches at `StartSession` still lack a GC (pre-existing TODO — unchanged here).
 - Viewing an item file's **contents** from the queue view (a read-only viewer) — future enhancement.
 - Agent-side attach from a peer host's worktree — blocked by the same asymmetry the work-item git
@@ -217,3 +225,20 @@ debt.
 | /validate-tests | Not yet run | Pending |
 | /validate-prod-ready | Not yet run | Pending |
 | /analyze-clean-code | Not yet run | Pending |
+
+## Implementation notes (2026-11-28)
+- One regression was caught by the scoped suites and fixed in `f1331bcf2`: the injection consulted
+  the daemon's work-queue handler for **every** start, refusing every ordinary start on a host
+  without the work-queue RPC families. A start naming no parent/item is now returned untouched.
+- Scoped gates run (packages touched only): `tddy-changeset`/`tddy-work-queue`/`tddy-session-files`/
+  `tddy-workflow` 619 pass · `tddy-tool-engine`, `tddy-tools`, `tddy-agent-launch`,
+  `tddy-daemon-rpc`, `tddy-session-lifecycle` 3,176 pass / 26 fail — of the 26, nine tool-catalogue
+  pins and the five `session_sync_livekit` tests (a missing `tddy-remote-git-repo` binary after a
+  build cache clear) are fixed and green; the remaining nine are the sandboxed-start suites refusing
+  on this host's missing cgroup v2 delegation ("Permission denied"), a host capability the suites
+  document, not this change's code.
+- Cypress: the new spec 3/3 under xvfb; workqueue-web unit tests 168 pass; both touched web packages
+  typecheck clean. Clippy `-D warnings` clean on every touched package.
+- Environment notes: `/mnt/data` filled twice during verification (a 107G delete by the operator,
+  then this worktree's own debug output); `target/debug` was cleared once as a consequence. The
+  cross-host `tddy-tools send` refusal is the installed daemon predating #1036.
