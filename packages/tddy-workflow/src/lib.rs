@@ -19,7 +19,8 @@ pub use artifact_paths::{
     read_session_artifact_utf8, read_session_artifact_utf8_on,
     read_session_artifact_utf8_or_placeholder, resolve_existing_session_artifact,
     resolve_existing_session_artifact_on, session_artifacts_root, session_attachments_root,
-    SessionAttachmentFile, SESSION_ARTIFACT_READ_PLACEHOLDER, SESSION_ATTACHMENTS_SUBDIR,
+    work_queue_files_root, SessionAttachmentFile, SESSION_ARTIFACT_READ_PLACEHOLDER,
+    SESSION_ATTACHMENTS_SUBDIR, WORK_QUEUE_FILES_SUBDIR,
 };
 
 pub use events::{WorkflowCompletePayload, WorkflowEvent};

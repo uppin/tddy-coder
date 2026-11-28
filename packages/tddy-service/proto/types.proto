@@ -33,6 +33,11 @@ enum HostDocumentScope {
   // staged file whose upload never completed (no final chunk) is refused with
   // FAILED_PRECONDITION, so a fetch never hands back truncated bytes.
   HOST_DOCUMENT_SCOPE_STAGED_ATTACHMENT = 5;
+  // A work item's file, on the queue-owning host — the root
+  // `tddy_changeset::session_work_queue_files` writes into:
+  // `{owning session_dir}/work-queue-files/`. `relative_path` is
+  // "<item_id>/<file_name>", the same two-segment shape as an upload or a staged attachment.
+  HOST_DOCUMENT_SCOPE_WORK_QUEUE_FILE = 6;
 }
 
 // Added by `#unbundle` node 7. `ListSessions` — family C, which stays — reaches both of these

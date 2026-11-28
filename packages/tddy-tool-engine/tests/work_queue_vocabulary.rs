@@ -8,7 +8,7 @@ use std::path::Path;
 
 use tddy_tool_engine::project_home_tools::project_home_offered_catalog;
 
-const EVERY_WORK_QUEUE_TOOL: [&str; 16] = [
+const EVERY_WORK_QUEUE_TOOL: [&str; 19] = [
     "work_queue_list",
     "work_queue_status",
     "work_pr_read",
@@ -25,6 +25,9 @@ const EVERY_WORK_QUEUE_TOOL: [&str; 16] = [
     "work_item_set_parents",
     "work_item_resolve_conflicts",
     "work_item_spawn_session",
+    "work_item_attach_file",
+    "work_item_detach_file",
+    "work_item_list_files",
 ];
 
 fn offered_tool_names() -> Vec<String> {

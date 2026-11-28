@@ -113,6 +113,9 @@ pub fn validate_relative_path(scope: HostDocumentScope, relative_path: &str) -> 
         HostDocumentScope::StagedAttachment => {
             validate_staged_attachment_relative_path(relative_path)
         }
+        HostDocumentScope::WorkQueueFile => {
+            validate_two_segment_relative_path(relative_path, "work queue file", "item_id")
+        }
         HostDocumentScope::SessionWorktree => Ok(()),
         HostDocumentScope::SessionArtifact | HostDocumentScope::ProjectRepo => {
             let basename = Path::new(relative_path)
@@ -284,6 +287,13 @@ fn resolve_scope_root(
         HostDocumentScope::StagedAttachment => Ok(
             crate::session_attachment_staging::staging_root_for(os_user, staging_base_dir),
         ),
+        HostDocumentScope::WorkQueueFile => {
+            validate_session_id_segment(session_id)
+                .map_err(|e| Status::invalid_argument(e.message()))?;
+            Ok(tddy_workflow::work_queue_files_root(
+                &unified_session_dir_path(&sessions_base, session_id),
+            ))
+        }
         HostDocumentScope::Unspecified => Err(Status::invalid_argument(UNSPECIFIED_SCOPE_ERR)),
     }
 }
