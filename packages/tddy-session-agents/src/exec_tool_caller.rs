@@ -31,6 +31,17 @@ pub fn authorize_exec_tool_caller(
 ) -> Result<String, Status> {
     let local_instance_id = local_instance_id_for_config(config);
     let Some(github_user) = (user_resolver)(&req.session_token) else {
+        if let Some(expired_secs_ago) = seconds_since_expiry(&req.session_token) {
+            log::warn!(
+                "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token expired {expired_secs_ago}s ago",
+                tool = req.tool_name,
+                session = req.session_id
+            );
+            return Err(Status::unauthenticated(format!(
+                "daemon {local_instance_id} refused the session token: it expired {} ago. An agent's tddy-tools renews its token while it runs; a token that expired anyway is replaced when the daemon resumes the session, so ask the operator to resume it",
+                human_duration(expired_secs_ago)
+            )));
+        }
         log::warn!(
             "exec tool {tool:?} for session {session} refused on daemon {local_instance_id}: the session token could not be verified here (a split session's agent presents a token its agent daemon signed with its own key, so this daemon must have seen that daemon's signing key advertised in the common room)",
             tool = req.tool_name,
@@ -52,3 +63,26 @@ pub fn authorize_exec_tool_caller(
     };
     Ok(os_user)
 }
+
+/// How long ago `token` expired, when it claims an expiry in the past. The claim is read without
+/// verifying the token: it only picks the message, never whether the call is allowed.
+fn seconds_since_expiry(token: &str) -> Option<u64> {
+    let expiry = tddy_github::SessionTokenVerifier::unverified_expiry(token)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    (now > expiry).then(|| now - expiry)
+}
+
+fn human_duration(secs: u64) -> String {
+    match secs {
+        s if s < 120 => format!("{s}s"),
+        s if s < 2 * 3600 => format!("{}m", s / 60),
+        s => format!("{}h {}m", s / 3600, (s % 3600) / 60),
+    }
+}
+
+#[cfg(test)]
+#[path = "exec_tool_caller_tests.rs"]
+mod exec_tool_caller_tests;

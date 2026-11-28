@@ -18,9 +18,10 @@ use tddy_rpc::Status;
 ///
 /// Matches the per-session PTY bridge's token (`LiveKitTerminalExposure`): long
 /// enough that a working day of tool calls never re-authenticates, short enough that a leaked token
-/// expires. A resumed session mints a fresh one rather than reusing what was persisted, so this is a
-/// ceiling on one agent process's life, not on the session's.
-pub const SPLIT_AGENT_TOKEN_TTL: Duration = Duration::from_secs(86_400);
+/// expires. It is the lifetime of each token, not of the agent's access: the agent's `tddy-tools
+/// --mcp` renews its token before it runs out (`tddy_daemon_auth::SessionTokens::renew_agent`), and
+/// a resumed session mints a fresh one.
+pub const SPLIT_AGENT_TOKEN_TTL: Duration = tddy_github::AGENT_TOKEN_TTL;
 
 /// Claude's own filesystem and shell tools, hard-disabled for a split session.
 ///
