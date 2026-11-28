@@ -66,7 +66,7 @@ async fn an_opted_in_extension_starts_the_server_its_wasm_names() {
     // worktree whose PATH holds fake-ls
     let installed = AnInstalledWasmExtension::built_from_its_source();
     let worktree = AWorktree::with_fake_ls_on_its_path();
-    let host = WasmHost::new().expect("a host");
+    let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a host");
 
     // When the language's server is chosen
     let chosen = the_choice_through_the_wasm(
@@ -104,7 +104,7 @@ async fn an_opted_in_extension_starts_the_server_its_wasm_names() {
 fn an_extension_not_opted_in_never_loads_its_wasm() {
     // Given the fixture installed with an extension.wasm no compiler would accept
     let installed = AnInstalledWasmExtension::with_an_unloadable_wasm();
-    let host = WasmHost::new().expect("a host");
+    let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a host");
     let load_with = |wasm_enabled: bool| {
         host.load_opted_in(
             &the_index_entry(wasm_enabled),
@@ -129,7 +129,7 @@ fn a_configured_binary_path_wins_over_the_wasm() {
     // binary path
     let installed = AnInstalledWasmExtension::built_from_its_source();
     let worktree = AWorktree::with_fake_ls_on_its_path();
-    let host = WasmHost::new()
+    let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs))
         .expect("a host")
         .with_deadline(A_SHORT_DEADLINE);
     let configured = ServerChoice::Configured {
@@ -150,7 +150,7 @@ fn a_download_call_refuses_the_run_with_the_install_hint() {
     // with no binary path
     let installed = AnInstalledWasmExtension::built_from_its_source();
     let worktree = AWorktree::with_fake_ls_on_its_path();
-    let host = WasmHost::new().expect("a host");
+    let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a host");
 
     // When the language's server is chosen
     let refused = the_choice_through_the_wasm(
@@ -174,7 +174,7 @@ fn a_download_call_refuses_the_run_with_the_install_hint() {
 fn an_unsupported_api_version_is_refused_with_the_range() {
     // Given the fixture's manifest claiming zed_extension_api 0.5.0, and no extension.wasm at all
     let installed = AnInstalledWasmExtension::without_its_wasm();
-    let host = WasmHost::new().expect("a host");
+    let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a host");
 
     // When it is loaded
     let refused = host
@@ -201,7 +201,7 @@ fn a_looping_call_is_stopped_after_the_deadline() {
     // path, and a host with a short deadline
     let installed = AnInstalledWasmExtension::built_from_its_source();
     let worktree = AWorktree::with_fake_ls_on_its_path();
-    let host = WasmHost::new()
+    let host = WasmHost::new(std::sync::Arc::new(tddy_fs::DiskFs))
         .expect("a host")
         .with_deadline(A_SHORT_DEADLINE);
     let mut wasm = a_loaded_fixture_wasm(&host, &installed);

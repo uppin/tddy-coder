@@ -33,7 +33,7 @@ use bindings::wasi::cli::{
     terminal_stdin, terminal_stdout,
 };
 use bindings::wasi::clocks::wall_clock;
-use bindings::wasi::filesystem::{preopens, types as fs};
+use bindings::wasi::filesystem::{preopens, types as wasi_fs};
 use bindings::wasi::io::{error as io_error, poll, streams};
 
 /// The working directory an extension is told it has.
@@ -48,7 +48,7 @@ impl streams::Host for HostState {}
 impl terminal_input::Host for HostState {}
 impl terminal_output::Host for HostState {}
 impl wall_clock::Host for HostState {}
-impl fs::Host for HostState {}
+impl wasi_fs::Host for HostState {}
 
 impl poll::HostPollable for HostState {
     /// Every stream here is always ready.
@@ -184,7 +184,9 @@ impl terminal_stderr::Host for HostState {
 
 impl preopens::Host for HostState {
     /// One directory, [`PWD`], which holds nothing: an extension reaches no file of this machine's.
-    fn get_directories(&mut self) -> wasmtime::Result<Vec<(Resource<fs::Descriptor>, String)>> {
+    fn get_directories(
+        &mut self,
+    ) -> wasmtime::Result<Vec<(Resource<wasi_fs::Descriptor>, String)>> {
         Ok(vec![(Resource::new_own(0), PWD.to_string())])
     }
 }
@@ -192,88 +194,89 @@ impl preopens::Host for HostState {
 /// The one directory [`preopens::Host::get_directories`] hands out: empty and read-only. It can be
 /// told apart from nothing — `chdir` into it works — and holds no file, so every path below it is
 /// absent and nothing can be opened, read or written.
-impl fs::HostDescriptor for HostState {
+impl wasi_fs::HostDescriptor for HostState {
     fn read_via_stream(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-        _offset: fs::Filesize,
-    ) -> wasmtime::Result<Result<Resource<streams::InputStream>, fs::ErrorCode>> {
-        Ok(Err(fs::ErrorCode::IsDirectory))
+        _descriptor: Resource<wasi_fs::Descriptor>,
+        _offset: wasi_fs::Filesize,
+    ) -> wasmtime::Result<Result<Resource<streams::InputStream>, wasi_fs::ErrorCode>> {
+        Ok(Err(wasi_fs::ErrorCode::IsDirectory))
     }
 
     fn write_via_stream(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-        _offset: fs::Filesize,
-    ) -> wasmtime::Result<Result<Resource<streams::OutputStream>, fs::ErrorCode>> {
-        Ok(Err(fs::ErrorCode::ReadOnly))
+        _descriptor: Resource<wasi_fs::Descriptor>,
+        _offset: wasi_fs::Filesize,
+    ) -> wasmtime::Result<Result<Resource<streams::OutputStream>, wasi_fs::ErrorCode>> {
+        Ok(Err(wasi_fs::ErrorCode::ReadOnly))
     }
 
     fn append_via_stream(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-    ) -> wasmtime::Result<Result<Resource<streams::OutputStream>, fs::ErrorCode>> {
-        Ok(Err(fs::ErrorCode::ReadOnly))
+        _descriptor: Resource<wasi_fs::Descriptor>,
+    ) -> wasmtime::Result<Result<Resource<streams::OutputStream>, wasi_fs::ErrorCode>> {
+        Ok(Err(wasi_fs::ErrorCode::ReadOnly))
     }
 
     fn get_flags(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-    ) -> wasmtime::Result<Result<fs::DescriptorFlags, fs::ErrorCode>> {
-        Ok(Ok(fs::DescriptorFlags::READ))
+        _descriptor: Resource<wasi_fs::Descriptor>,
+    ) -> wasmtime::Result<Result<wasi_fs::DescriptorFlags, wasi_fs::ErrorCode>> {
+        Ok(Ok(wasi_fs::DescriptorFlags::READ))
     }
 
     fn stat(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-    ) -> wasmtime::Result<Result<fs::DescriptorStat, fs::ErrorCode>> {
+        _descriptor: Resource<wasi_fs::Descriptor>,
+    ) -> wasmtime::Result<Result<wasi_fs::DescriptorStat, wasi_fs::ErrorCode>> {
         Ok(Ok(the_directory()))
     }
 
     fn stat_at(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-        _path_flags: fs::PathFlags,
+        _descriptor: Resource<wasi_fs::Descriptor>,
+        _path_flags: wasi_fs::PathFlags,
         path: String,
-    ) -> wasmtime::Result<Result<fs::DescriptorStat, fs::ErrorCode>> {
+    ) -> wasmtime::Result<Result<wasi_fs::DescriptorStat, wasi_fs::ErrorCode>> {
         Ok(if is_the_directory(&path) {
             Ok(the_directory())
         } else {
-            Err(fs::ErrorCode::NoEntry)
+            Err(wasi_fs::ErrorCode::NoEntry)
         })
     }
 
     fn metadata_hash(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-    ) -> wasmtime::Result<Result<fs::MetadataHashValue, fs::ErrorCode>> {
+        _descriptor: Resource<wasi_fs::Descriptor>,
+    ) -> wasmtime::Result<Result<wasi_fs::MetadataHashValue, wasi_fs::ErrorCode>> {
         Ok(Ok(THE_DIRECTORY_HASH))
     }
 
     fn metadata_hash_at(
         &mut self,
-        _descriptor: Resource<fs::Descriptor>,
-        _path_flags: fs::PathFlags,
+        _descriptor: Resource<wasi_fs::Descriptor>,
+        _path_flags: wasi_fs::PathFlags,
         path: String,
-    ) -> wasmtime::Result<Result<fs::MetadataHashValue, fs::ErrorCode>> {
+    ) -> wasmtime::Result<Result<wasi_fs::MetadataHashValue, wasi_fs::ErrorCode>> {
         Ok(if is_the_directory(&path) {
             Ok(THE_DIRECTORY_HASH)
         } else {
-            Err(fs::ErrorCode::NoEntry)
+            Err(wasi_fs::ErrorCode::NoEntry)
         })
     }
 
-    fn drop(&mut self, _descriptor: Resource<fs::Descriptor>) -> wasmtime::Result<()> {
+    fn drop(&mut self, _descriptor: Resource<wasi_fs::Descriptor>) -> wasmtime::Result<()> {
         Ok(())
     }
 }
 
 /// What identifies the directory: there is only one.
-const THE_DIRECTORY_HASH: fs::MetadataHashValue = fs::MetadataHashValue { lower: 0, upper: 0 };
+const THE_DIRECTORY_HASH: wasi_fs::MetadataHashValue =
+    wasi_fs::MetadataHashValue { lower: 0, upper: 0 };
 
-fn the_directory() -> fs::DescriptorStat {
-    fs::DescriptorStat {
-        type_: fs::DescriptorType::Directory,
+fn the_directory() -> wasi_fs::DescriptorStat {
+    wasi_fs::DescriptorStat {
+        type_: wasi_fs::DescriptorType::Directory,
         link_count: 1,
         size: 0,
         data_access_timestamp: None,

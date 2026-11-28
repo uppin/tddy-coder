@@ -46,10 +46,19 @@ pub struct InstalledLanguages {
 /// never fails the other extensions (R8). An extension whose manifest or language config cannot
 /// be read is that [`ExtensionError`].
 pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, ExtensionError> {
+    load_installed_on(std::sync::Arc::new(tddy_fs::DiskFs), dir)
+}
+
+/// [`load_installed`] through the filesystem port. The port is held by the grammar store the
+/// loaded supports share, so it arrives owned.
+pub fn load_installed_on(
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
+    dir: &ExtensionsDir,
+) -> Result<InstalledLanguages, ExtensionError> {
     let mut languages = Vec::new();
-    for extension_dir in installed_extension_dirs(dir)? {
-        let manifest = read_installed_manifest(&extension_dir)?;
-        for language in ExtensionLanguage::load_all(&extension_dir, &manifest)? {
+    for extension_dir in installed_extension_dirs_on(&*fs, dir)? {
+        let manifest = read_installed_manifest_on(&*fs, &extension_dir)?;
+        for language in ExtensionLanguage::load_all_on(&*fs, &extension_dir, &manifest)? {
             languages.push((manifest.clone(), language));
         }
     }
@@ -61,28 +70,35 @@ pub fn load_installed(dir: &ExtensionsDir) -> Result<InstalledLanguages, Extensi
             failures: Vec::new(),
         });
     }
-    let languages = crate::wasm::served(dir, languages)?;
-    let store = GrammarStore::new().map_err(|error| ExtensionError::GrammarEngineUnavailable {
-        message: error.message,
+    let languages = crate::wasm::served_on(Arc::clone(&fs), dir, languages)?;
+    let store = GrammarStore::new(Arc::clone(&fs)).map_err(|error| {
+        ExtensionError::GrammarEngineUnavailable {
+            message: error.message,
+        }
     })?;
-    Ok(supports_of(languages, Arc::new(Mutex::new(store))))
+    Ok(supports_of(languages, fs, Arc::new(Mutex::new(store))))
 }
 
 /// The `extension.toml` of the extension installed at `extension_dir`, named in every refusal by
 /// its directory — the id it was installed under.
-fn read_installed_manifest(extension_dir: &Path) -> Result<ExtensionManifest, ExtensionError> {
+fn read_installed_manifest_on(
+    fs: &dyn tddy_fs::Fs,
+    extension_dir: &Path,
+) -> Result<ExtensionManifest, ExtensionError> {
     let manifest_file = extension_dir.join("extension.toml");
     let id = extension_dir
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_default();
-    let text = std::fs::read_to_string(&manifest_file).map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
-            extension: id.clone(),
-            file: PathBuf::from("extension.toml"),
-        },
-        _ => ExtensionError::io(&manifest_file, error),
-    })?;
+    let text = fs
+        .read_to_string(&manifest_file)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => ExtensionError::ManifestMissing {
+                extension: id.clone(),
+                file: PathBuf::from("extension.toml"),
+            },
+            _ => ExtensionError::io(&manifest_file, error),
+        })?;
     ExtensionManifest::parse(&text).map_err(|error| ExtensionError::ManifestUnparsable {
         extension: id,
         file: PathBuf::from("extension.toml"),
@@ -98,6 +114,7 @@ fn read_installed_manifest(extension_dir: &Path) -> Result<ExtensionManifest, Ex
 /// language alone: a sibling on the same grammar still loads.
 fn supports_of(
     languages: Vec<crate::server::Served>,
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     store: Arc<Mutex<GrammarStore>>,
 ) -> InstalledLanguages {
     let mut supports = Vec::new();
@@ -117,7 +134,7 @@ fn supports_of(
                 &language.grammar,
             );
         let support = match loaded {
-            Ok(_) => ExtensionSupport::new(language, Arc::clone(&store))
+            Ok(_) => ExtensionSupport::new(language, Arc::clone(&store), Arc::clone(&fs))
                 .map(|support| support.with_server(server).with_code_action_kinds(kinds)),
             Err(failure) => {
                 failed_grammars.insert(grammar);
@@ -136,19 +153,29 @@ fn supports_of(
 
 /// `installed/<id>/` for every extension, sorted by id, without the dot-directories a failed
 /// install leaves. No `installed/` is no extensions.
-fn installed_extension_dirs(dir: &ExtensionsDir) -> Result<Vec<PathBuf>, ExtensionError> {
+fn installed_extension_dirs_on(
+    fs: &dyn tddy_fs::Fs,
+    dir: &ExtensionsDir,
+) -> Result<Vec<PathBuf>, ExtensionError> {
     let installed = dir.installed();
-    let entries = match std::fs::read_dir(&installed) {
+    // The port's `read_dir` hands back full paths, sorted.
+    let entries = match fs.read_dir(&installed) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(ExtensionError::io(&installed, error)),
     };
     let mut dirs = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|error| ExtensionError::io(&installed, error))?;
-        let hidden = entry.file_name().to_string_lossy().starts_with('.');
-        if !hidden && entry.path().is_dir() {
-            dirs.push(entry.path());
+    for path in entries {
+        let hidden = path
+            .file_name()
+            .map(|name| name.to_string_lossy().starts_with('.'))
+            .unwrap_or(false);
+        let is_dir = matches!(
+            fs.metadata_follow(&path),
+            Ok(meta) if meta.kind == tddy_fs::FsKind::Dir
+        );
+        if !hidden && is_dir {
+            dirs.push(path);
         }
     }
     dirs.sort();
@@ -202,6 +229,8 @@ pub struct ExtensionSupport {
     outline: Option<Arc<Query>>,
     /// The process's one store, shared by every extension language.
     store: Arc<Mutex<GrammarStore>>,
+    /// The port the outline's files are read through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     /// What serves the language (`#reshape` extension-language-server, R1–R3):
     /// [`ServerChoice::Undeclared`] until [`ExtensionSupport::with_server`] says otherwise.
     server: ServerChoice,
@@ -216,6 +245,7 @@ impl ExtensionSupport {
     pub fn new(
         language: ExtensionLanguage,
         store: Arc<Mutex<GrammarStore>>,
+        fs: std::sync::Arc<dyn tddy_fs::Fs>,
     ) -> Result<Self, GrammarLoadError> {
         let failed = |reason: String| GrammarLoadError {
             extension: language.extension.clone(),
@@ -248,6 +278,7 @@ impl ExtensionSupport {
             grammar,
             outline,
             store,
+            fs,
             server: ServerChoice::Undeclared,
             code_action_kinds: Vec::new(),
         })
@@ -288,6 +319,7 @@ impl ExtensionSupport {
     /// anchors' files are relative to.
     pub fn outline_backend(&self, root: &Path) -> OutlineBackend {
         OutlineBackend {
+            fs: Arc::clone(&self.fs),
             id: self.id.clone(),
             path_suffixes: self.language.path_suffixes.clone(),
             grammar: self.grammar.clone(),
@@ -373,6 +405,8 @@ pub struct OutlineBackend {
     grammar: Language,
     outline: Option<Arc<Query>>,
     store: Arc<Mutex<GrammarStore>>,
+    /// The port the anchored files' text is read through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
     /// The tree item anchors' files are relative to, given by
     /// [`LanguageSupport::backend`] — never the process directory.
     root: PathBuf,
@@ -482,7 +516,15 @@ impl ItemAtResolver for OutlineBackend {
 impl OutlineBackend {
     /// The text of `file` under the root this backend was built over, and its outline.
     fn read_outline(&self, file: &str) -> tddy_code_restructuring::Result<(String, Outline)> {
-        let text = std::fs::read_to_string(self.root.join(file))?;
+        let text = self
+            .fs
+            .read_to_string(&self.root.join(file))
+            .map_err(|error| {
+                tddy_code_restructuring::RestructureError::ServerDefect(format!(
+                    "{}: {error}",
+                    self.root.join(file).display()
+                ))
+            })?;
         let outline = outline_of_text(&self.store, &self.grammar, self.outline.as_deref(), &text)
             .ok_or_else(|| {
             RestructureError::ServerDefect(format!(

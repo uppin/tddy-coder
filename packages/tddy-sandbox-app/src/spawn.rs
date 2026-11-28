@@ -245,7 +245,7 @@ pub struct SpawnedSandbox {
 pub(crate) fn canonicalize_exec_path(path: &str) -> String {
     if path.contains('/') {
         crate::app_fs()
-            .canonicalize(path)
+            .canonicalize(std::path::Path::new(path))
             .map(|c| c.to_string_lossy().into_owned())
             .unwrap_or_else(|_| path.to_string())
     } else {
@@ -304,10 +304,10 @@ pub async fn spawn_claude_sandbox(params: SpawnParams) -> Result<SpawnedSandbox>
     let sandbox_root = session_dir.join("sandbox");
     let egress_dir = session_dir.join("egress");
     crate::app_fs()
-        .create_dir_all(sandbox_root.join(".work").join("tmp"))
+        .create_dir_all(&sandbox_root.join(".work").join("tmp"))
         .context("mkdir sandbox scratch tmp")?;
     crate::app_fs()
-        .create_dir_all(sandbox_root.join("context"))
+        .create_dir_all(&sandbox_root.join("context"))
         .context("mkdir sandbox context")?;
     crate::app_fs()
         .create_dir_all(&egress_dir)

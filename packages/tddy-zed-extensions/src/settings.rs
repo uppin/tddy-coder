@@ -95,8 +95,13 @@ impl ExtensionSettings {
     /// unconfigured; a file that cannot be read or does not parse is [`ExtensionError::Io`] naming
     /// it, never silently empty.
     pub fn load(dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
+        Self::load_on(&tddy_fs::DiskFs, dir)
+    }
+
+    /// [`ExtensionSettings::load`] through the filesystem port.
+    pub fn load_on(fs: &dyn tddy_fs::Fs, dir: &ExtensionsDir) -> Result<Self, ExtensionError> {
         let file = Self::file(dir);
-        let text = match std::fs::read_to_string(&file) {
+        let text = match fs.read_to_string(&file) {
             Ok(text) => text,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Ok(Self::default())

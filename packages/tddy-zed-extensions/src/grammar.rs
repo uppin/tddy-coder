@@ -25,12 +25,14 @@ pub struct GrammarStore {
     parser: Parser,
     /// Grammars already loaded, by `(extension dir, grammar name)`.
     loaded: BTreeMap<(PathBuf, String), Language>,
+    /// The port a grammar's `grammars/<name>.wasm` is read through.
+    fs: std::sync::Arc<dyn tddy_fs::Fs>,
 }
 
 impl GrammarStore {
     /// A store with no grammar loaded: a fresh wasmtime engine and the `WasmStore` over it, set on
     /// the parser this store parses with.
-    pub fn new() -> Result<Self, tree_sitter::WasmError> {
+    pub fn new(fs: std::sync::Arc<dyn tddy_fs::Fs>) -> Result<Self, tree_sitter::WasmError> {
         let engine = tree_sitter::wasmtime::Engine::default();
         let store = WasmStore::new(&engine)?;
         let mut parser = Parser::new();
@@ -41,6 +43,7 @@ impl GrammarStore {
         Ok(Self {
             parser,
             loaded: BTreeMap::new(),
+            fs,
         })
     }
 
@@ -64,8 +67,10 @@ impl GrammarStore {
         let file = extension_dir
             .join("grammars")
             .join(format!("{grammar}.wasm"));
-        let bytes =
-            std::fs::read(&file).map_err(|error| failed(format!("{}: {error}", file.display())))?;
+        let bytes = self
+            .fs
+            .read(&file)
+            .map_err(|error| failed(format!("{}: {error}", file.display())))?;
 
         // The parser owns the store; it is taken out to load into and put back whatever came of it.
         let mut store = self
@@ -112,7 +117,7 @@ mod tests {
     fn the_vendored_grammar_loads_and_parses() {
         // Given a store and an extension dir shipping the TOML grammar
         let dir = an_extension_dir_with_the_toml_grammar();
-        let mut store = GrammarStore::new().expect("a store");
+        let mut store = GrammarStore::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a store");
 
         // When the grammar is loaded and a table parsed with it
         let language = store
@@ -133,7 +138,7 @@ mod tests {
     fn a_grammar_is_loaded_once_per_store() {
         // Given a store that has loaded the TOML grammar
         let dir = an_extension_dir_with_the_toml_grammar();
-        let mut store = GrammarStore::new().expect("a store");
+        let mut store = GrammarStore::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a store");
         let first = store
             .load("demo-toml", dir.path(), "toml")
             .expect("it loads");
@@ -153,7 +158,7 @@ mod tests {
     fn a_missing_grammar_file_names_its_extension_and_grammar() {
         // Given an extension dir with no `grammars/absent.wasm`
         let dir = tempfile::TempDir::new().expect("temp extension dir");
-        let mut store = GrammarStore::new().expect("a store");
+        let mut store = GrammarStore::new(std::sync::Arc::new(tddy_fs::DiskFs)).expect("a store");
 
         // When that grammar is loaded
         let refused = store.load("an-extension", dir.path(), "absent");
