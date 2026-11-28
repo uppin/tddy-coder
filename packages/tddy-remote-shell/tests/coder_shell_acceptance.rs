@@ -176,11 +176,14 @@ fn the_interactive_command_opens_a_terminal_on_the_workspace() {
 
     // Then it is coder's ssh, the workspace never started, and the command as one argument after
     // `--` — an argv a local PTY can run, given the deployment and the token. No `-t`: coder
-    // v2.33.5 has no such flag, and gives the command a terminal of its own when its stdin is one
+    // v2.33.5 has no such flag, and gives the command a terminal of its own when its stdin is one.
+    // The daemon's ssh agent is forwarded, so the agent's git reaches GitHub over SSH with the
+    // operator's keys (`SSH_AUTH_SOCK` is set on the workspace)
     let argv: Vec<OsString> = [
         "coder",
         "ssh",
         "--disable-autostart",
+        "--forward-agent",
         "ada/devbox.main",
         "--",
         "cd '/home/dev/repo' && exec claude --resume",
