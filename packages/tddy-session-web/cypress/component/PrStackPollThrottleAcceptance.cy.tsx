@@ -11,7 +11,7 @@
  *   answers in a row, 30 s after six, 60 s after twelve. A changed answer goes back to 5 s.
  */
 
-import { WorkQueueService } from "tddy-client-web/gen/work_queue_pb";
+import { WorkQueueService, type QueryBranchResponse } from "tddy-client-web/gen/work_queue_pb";
 import { aSessionsDrawerBackend } from "../support/rpc/vncBackend";
 import { openProjectStackView } from "../support/rpc/openProjectStackView";
 import { prStackScreenPage } from "../support/pages/prStackScreenPage";
@@ -32,9 +32,11 @@ const plan = aWorkQueueJson(1, [
 /** Opens the stack view; every `QueryBranch` is counted and answered by `answer`. */
 function openStackViewCounting(answer: (poll: number) => BranchResolutionFixture) {
   const calls = { count: 0 };
+  // The fixture builds the response's shape without the protobuf envelope; the in-memory router
+  // answers from the plain object, so the cast states what the wire would carry.
   const backend = aSessionsDrawerBackend([]).onUnary(WorkQueueService.method.queryBranch, () => {
     calls.count += 1;
-    return aBranchResolutionResponse(answer(calls.count));
+    return aBranchResolutionResponse(answer(calls.count)) as unknown as QueryBranchResponse;
   });
   openProjectStackView(backend, plan, ORCHESTRATOR_SESSION_ID);
   return calls;
