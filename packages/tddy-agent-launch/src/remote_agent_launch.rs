@@ -778,6 +778,41 @@ mod tests {
         );
     }
 
+    /// What `printf` prints for `SSH_AUTH_SOCK` inside an agent started by [`target_login_exec`],
+    /// run by a real POSIX shell whose own environment carries `ssh_auth_sock` (or not).
+    fn the_agents_ssh_auth_sock_given(ssh_auth_sock: Option<&str>) -> String {
+        let argv = strings(&["sh", "-c", "printf '[%s]' \"${SSH_AUTH_SOCK-unset}\""]);
+        let command = target_login_exec(&argv, &[]);
+        let mut shell = std::process::Command::new("/bin/sh");
+        shell.arg("-c").arg(&command).env("SHELL", "/bin/sh");
+        match ssh_auth_sock {
+            Some(socket) => shell.env("SSH_AUTH_SOCK", socket),
+            None => shell.env_remove("SSH_AUTH_SOCK"),
+        };
+        let output = shell.output().expect("/bin/sh runs");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[test]
+    fn the_agent_on_a_target_keeps_the_forwarded_ssh_agent_socket() {
+        // Given a target login whose ssh agent was forwarded (`coder ssh --forward-agent`)
+        // When the agent is started there under `env -i`
+        let seen = the_agents_ssh_auth_sock_given(Some("/tmp/auth-agent1/listener.sock"));
+
+        // Then it still sees the socket, so its git over SSH authenticates with the operator's keys
+        assert_eq!(seen, "[/tmp/auth-agent1/listener.sock]");
+    }
+
+    #[test]
+    fn the_agent_on_a_target_without_an_ssh_agent_has_no_ssh_auth_sock_at_all() {
+        // Given a target login with no ssh agent
+        // When the agent is started there
+        let seen = the_agents_ssh_auth_sock_given(None);
+
+        // Then the variable is unset, not set empty — an empty one is a different (broken) socket
+        assert_eq!(seen, "[unset]");
+    }
+
     #[test]
     fn the_remote_command_enters_the_worktree_records_the_pid_and_execs_the_agent_under_its_environment(
     ) {
