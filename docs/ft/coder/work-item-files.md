@@ -102,8 +102,8 @@ No new external dependency is introduced.
 Deleting a work item deletes its files directory on the owner host alongside the queue mutation —
 an item gone while its files remain is exactly the leak the staged path taught us to avoid. The
 owning session's directory (and with it the files) is removed when the session is deleted, so no
-new session-lifetime rule is needed. Whether a merely *closed* (merged) item should drop its files
-is an open decision — see the changeset's open questions.
+new session-lifetime rule is needed. A merely closed (merged) item keeps its files (decision
+recorded in the changeset).
 
 ## Acceptance criteria
 

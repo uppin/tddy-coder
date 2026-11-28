@@ -1,7 +1,7 @@
 # Changeset: Work item files — attachments a work-queue item carries into its sessions
 
 **Created:** 2026-11-28
-**Status:** Created
+**Status:** In Progress
 **Type:** Feature
 **PRD:** docs/ft/coder/work-item-files.md
 
@@ -179,12 +179,22 @@ analyzed — not the same as clean; noted for wrap.
   earlier ones' behaviour, so the split would be sequential without independent reviewability gains
   the seam cannot justify. The orchestrator may redirect to `/plan-streak` before implementation.
 
-## Open questions (answered at approval, before implementation)
-1. **Close vs delete:** should a merely closed (merged) item also drop its files, or only a deleted
-   item? Plan assumes delete-only (merged items may still be referenced); the PRD flags it.
-2. **Caps:** files-per-item cap of 20 and per-file cap = `max_attachment_bytes` — confirm.
-3. **Agent attach sources:** caller's own session artifacts + project-repo files only (no raw host
-   paths) — confirm.
+## Open questions — answered at approval (2026-11-28, operator)
+1. **Close vs delete:** **Delete-only** — a merely closed (merged) item keeps its files; only a
+   deleted item drops them.
+2. **Caps:** **As planned** — 20 files per item; per-file cap = the daemon's `max_attachment_bytes`.
+3. **Agent attach sources:** **As planned** — the caller's own session artifacts + project-repo
+   files only; staged refs stay the web's arm.
+4. **Single changeset:** **Approved** — `/plan-ft-dev`, one PR (draft #1067), five milestones.
+
+## Reporting channel note
+`tddy-tools send` to the orchestrator (`01a20f10-4a30-7df1-8c63-d12aec760d68`, host
+`LT-R1VXTH2V6H`) was refused by the local daemon (`mantas-udoo-ros`) with *not a session you may
+message*. The repo's HEAD routes an orchestrator on another host
+(`packages/tddy-daemon-rpc/src/exec_tool/session_messages/remote_recipient.rs`, #1036, 2026-11-25);
+the installed `/usr/local/bin/tddy-daemon` (built 2026-11-25 07:34) predates that merge. The plan
+was reported through the operator instead; this is environment staleness, not recorded as product
+debt.
 
 ## Refactoring Needed
 ### From /ft-dev (acceptance test creation)
