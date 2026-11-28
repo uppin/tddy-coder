@@ -33,11 +33,11 @@ pub fn install_demo_toml(data: &Path) {
 pub fn install_demo_toml_on(fs: &dyn tddy_fs::Fs, data: &Path) {
     let installed = data.join(DEMO_TOML);
     copy_tree(fs, &the_fixtures().join("demo-toml"), &installed);
-    fs.create_dir_all(installed.join("grammars"))
+    fs.create_dir_all(&installed.join("grammars"))
         .expect("create the grammars dir");
     fs.copy(
-        the_fixtures().join("grammars/tree-sitter-toml/toml.wasm"),
-        installed.join("grammars/toml.wasm"),
+        &the_fixtures().join("grammars/tree-sitter-toml/toml.wasm"),
+        &installed.join("grammars/toml.wasm"),
     )
     .expect("copy the vendored grammar");
 }
